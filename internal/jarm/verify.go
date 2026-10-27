@@ -147,24 +147,33 @@ func (r Response) Verify(pub crypto.PublicKey, policy VerifyPolicy) (VerifiedRes
 		return VerifiedResponse{}, ErrNotYetValid
 	}
 
-	// A validly signed, correctly-audienced JWT from the expected issuer
-	// isn't necessarily a JARM response — an AS-signed ID token for the
-	// same client would also pass every check above. Requiring at least
-	// one recognised authorization-response parameter distinguishes a
-	// genuine JARM response without depending on "typ", which the spec
-	// doesn't mandate. An ID token's own claims are no authorization
-	// response parameter, so a JWT carrying one is refused even when it
-	// also carries a "code" — an ID token an issuer added one to.
-	if _, hasCode := c.Parameters["code"]; !hasCode {
-		if _, hasErr := c.Parameters["error"]; !hasErr {
-			return VerifiedResponse{}, ErrNotAuthorizationResponse
-		}
-	}
-	for _, name := range idTokenClaims {
-		if _, ok := c.Parameters[name]; ok {
-			return VerifiedResponse{}, fmt.Errorf("%w: %q", ErrIDTokenClaims, name)
-		}
+	if err := checkAuthorizationResponseShape(c.Parameters); err != nil {
+		return VerifiedResponse{}, err
 	}
 
 	return VerifiedResponse{Issuer: c.Issuer, Parameters: c.Parameters, ExpiresAt: c.ExpiresAt}, nil
+}
+
+// checkAuthorizationResponseShape refuses parameters that aren't an
+// authorization response's. A validly signed, correctly-audienced JWT
+// from the expected issuer isn't necessarily a JARM response — an
+// AS-signed ID token for the same client would also pass every other
+// check Verify makes. Requiring at least one recognised
+// authorization-response parameter distinguishes a genuine JARM
+// response without depending on "typ", which the spec doesn't mandate.
+// An ID token's own claims are no authorization response parameter, so
+// a JWT carrying one is refused even when it also carries a "code" — an
+// ID token an issuer added one to.
+func checkAuthorizationResponseShape(params map[string]json.RawMessage) error {
+	_, hasCode := params["code"]
+	_, hasErr := params["error"]
+	if !hasCode && !hasErr {
+		return ErrNotAuthorizationResponse
+	}
+	for _, name := range idTokenClaims {
+		if _, ok := params[name]; ok {
+			return fmt.Errorf("%w: %q", ErrIDTokenClaims, name)
+		}
+	}
+	return nil
 }

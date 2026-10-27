@@ -333,30 +333,44 @@ func TestClientAttestationStatusReceivesVerifiedAttestation(t *testing.T) {
 			t.Fatalf("AuthenticateAttestedClient %d: %v", n, err)
 		}
 		got := checker.last(t)
-		if got.Client.ID() != testClientID {
-			t.Errorf("Client = %q, want %q", got.Client.ID(), testClientID)
-		}
-		requireClaim(t, got.Claims, "status", status)
-		requireClaim(t, got.Claims, "iss", `"`+testAttesterIssuer+`"`)
-		requireClaim(t, got.Claims, "sub", `"`+testClientID.String()+`"`)
-		if _, ok := got.Claims["cnf"]; !ok {
-			t.Errorf("Claims lacks cnf")
-		}
-		if want := time.Unix(h.now.Unix(), 0); !got.IssuedAt.Equal(want) {
-			t.Errorf("IssuedAt = %v, want %v", got.IssuedAt, want)
-		}
-		if want := time.Unix(h.now.Add(time.Hour).Unix(), 0); !got.ExpiresAt.Equal(want) {
-			t.Errorf("ExpiresAt = %v, want %v", got.ExpiresAt, want)
-		}
-		if want := instanceThumbprint(t, instanceKey); got.InstanceKey != want {
-			t.Errorf("InstanceKey = %q, want %q", got.InstanceKey, want)
-		}
-		if signer, ok := got.SignerKey.(*ecdsa.PublicKey); !ok || !signer.Equal(&attesterKey.PublicKey) {
-			t.Errorf("SignerKey = %v, want the attester's key", got.SignerKey)
-		}
-		if got.SignerCertificates != nil {
-			t.Errorf("SignerCertificates = %v, want nil under RegisteredAttesterKeys", got.SignerCertificates)
-		}
+		requireStatusClaims(t, got, status)
+		requireStatusKeysAndTimes(t, got, h.now, instanceKey, attesterKey)
+	}
+}
+
+// requireStatusClaims checks the client and claims
+// TestClientAttestationStatusReceivesVerifiedAttestation's checker got.
+func requireStatusClaims(t *testing.T, got server.VerifiedClientAttestation, status string) {
+	t.Helper()
+	if got.Client.ID() != testClientID {
+		t.Errorf("Client = %q, want %q", got.Client.ID(), testClientID)
+	}
+	requireClaim(t, got.Claims, "status", status)
+	requireClaim(t, got.Claims, "iss", `"`+testAttesterIssuer+`"`)
+	requireClaim(t, got.Claims, "sub", `"`+testClientID.String()+`"`)
+	if _, ok := got.Claims["cnf"]; !ok {
+		t.Errorf("Claims lacks cnf")
+	}
+}
+
+// requireStatusKeysAndTimes checks the times and keys
+// TestClientAttestationStatusReceivesVerifiedAttestation's checker got.
+func requireStatusKeysAndTimes(t *testing.T, got server.VerifiedClientAttestation, now time.Time, instanceKey, attesterKey *ecdsa.PrivateKey) {
+	t.Helper()
+	if want := time.Unix(now.Unix(), 0); !got.IssuedAt.Equal(want) {
+		t.Errorf("IssuedAt = %v, want %v", got.IssuedAt, want)
+	}
+	if want := time.Unix(now.Add(time.Hour).Unix(), 0); !got.ExpiresAt.Equal(want) {
+		t.Errorf("ExpiresAt = %v, want %v", got.ExpiresAt, want)
+	}
+	if want := instanceThumbprint(t, instanceKey); got.InstanceKey != want {
+		t.Errorf("InstanceKey = %q, want %q", got.InstanceKey, want)
+	}
+	if signer, ok := got.SignerKey.(*ecdsa.PublicKey); !ok || !signer.Equal(&attesterKey.PublicKey) {
+		t.Errorf("SignerKey = %v, want the attester's key", got.SignerKey)
+	}
+	if got.SignerCertificates != nil {
+		t.Errorf("SignerCertificates = %v, want nil under RegisteredAttesterKeys", got.SignerCertificates)
 	}
 }
 

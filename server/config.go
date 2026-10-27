@@ -514,7 +514,11 @@ type Config struct {
 	// which decides how the attesting key is trusted: by the
 	// attestation's "x5c" certificate chain to trust anchors (HAIP 1.0
 	// §4.4.1 — X5CAttesterChain) or by keys registered for each
-	// attester (RegisteredAttesterKeys).
+	// attester (RegisteredAttesterKeys). Dependencies.ClientAttestationStatus
+	// decides whether a verified attestation has since been withdrawn by
+	// its attester (a Wallet Attestation's status list) — required under
+	// AssuranceProduction, where NoClientAttestationStatusCheck{}
+	// declines explicitly.
 	//
 	// Attestation-based client authentication is not a FAPI 2.0 client
 	// authentication method: FAPI 2.0 Security Profile §5.3.2.1 allows

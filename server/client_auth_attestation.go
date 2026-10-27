@@ -39,7 +39,9 @@ func resolveAttestationHeaders(attestations, pops []string) (attestation, pop st
 // draft-07's shape) and resolves the registered client the Client
 // Attestation's sub claim names. formClientID is the request's own
 // client_id parameter, if any: it must name that same client (§7.1 rule
-// 7, §7.5), as a client_assertion's must.
+// 7, §7.5), as a client_assertion's must. Once the attestation and its
+// PoP have verified, checkAttestationStillValid asks whether the
+// attester has withdrawn either since.
 func (s *Server) authenticateClientViaAttestation(ctx context.Context, formClientID, attestation, pop string) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
 	if !s.cfg.AttestationBasedClientAuthentication {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
@@ -70,7 +72,7 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, formClien
 			newError(ErrorInvalidClient, 401, "client is not registered for attestation-based client authentication", nil)
 	}
 
-	verifiedAttestation, attErr := s.verifyClientAttestation(ctx, client, parsedAttestation)
+	verifiedAttestation, signer, attErr := s.verifyClientAttestation(ctx, client, parsedAttestation)
 	if attErr != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{}, attErr
 	}
@@ -92,11 +94,15 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, formClien
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "client attestation pop verification failed", err)
 	}
+	instanceKey := verifiedPoP.InstanceKey.String()
+	if stillErr := s.checkAttestationStillValid(ctx, client, verifiedAttestation, signer, instanceKey); stillErr != nil {
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{}, stillErr
+	}
 
 	return client, clientassertion.VerifiedAssertion{
 		ClientID:    verifiedPoP.ClientID,
 		ExpiresAt:   verifiedAttestation.ExpiresAt,
-		InstanceKey: verifiedPoP.InstanceKey.String(),
+		InstanceKey: instanceKey,
 	}, nil
 }
 
@@ -105,14 +111,15 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, formClien
 // registered attester. An attestation whose signature verifies but that
 // has expired is ErrorUseFreshAttestation (draft-12 §7.4: it "MUST be
 // used when the Client Attestation JWT is deemed to be not fresh
-// enough"); every other failure is invalid_client.
-func (s *Server) verifyClientAttestation(ctx context.Context, client storage.RegisteredClient, attestation clientattestation.Attestation) (clientattestation.VerifiedAttestation, *Error) {
+// enough"); every other failure is invalid_client. It also returns
+// what established the attester's key, for checkAttestationStillValid.
+func (s *Server) verifyClientAttestation(ctx context.Context, client storage.RegisteredClient, attestation clientattestation.Attestation) (clientattestation.VerifiedAttestation, attesterSigner, *Error) {
 	if !s.cfg.Algorithms.ClientAttestation.Contains(client.ClientAttestationAlgorithm()) {
-		return clientattestation.VerifiedAttestation{}, newError(ErrorInvalidClient, 401, "client attestation algorithm is not permitted", nil)
+		return clientattestation.VerifiedAttestation{}, attesterSigner{}, newError(ErrorInvalidClient, 401, "client attestation algorithm is not permitted", nil)
 	}
 	signer, err := s.deps.AttesterTrust.attesterKey(ctx, s, client, attestation)
 	if err != nil {
-		return clientattestation.VerifiedAttestation{}, newError(ErrorInvalidClient, 401, "no matching attester key", err)
+		return clientattestation.VerifiedAttestation{}, attesterSigner{}, newError(ErrorInvalidClient, 401, "no matching attester key", err)
 	}
 	verified, err := attestation.Verify(signer.key, clientattestation.VerifyPolicy{
 		ExpectedIssuer:  client.ExpectedAttesterIssuer(),
@@ -124,9 +131,9 @@ func (s *Server) verifyClientAttestation(ctx context.Context, client storage.Reg
 	})
 	switch {
 	case errors.Is(err, clientattestation.ErrExpired):
-		return clientattestation.VerifiedAttestation{}, newError(ErrorUseFreshAttestation, 400, "client attestation has expired", err)
+		return clientattestation.VerifiedAttestation{}, attesterSigner{}, newError(ErrorUseFreshAttestation, 400, "client attestation has expired", err)
 	case err != nil:
-		return clientattestation.VerifiedAttestation{}, newError(ErrorInvalidClient, 401, "client attestation verification failed", err)
+		return clientattestation.VerifiedAttestation{}, attesterSigner{}, newError(ErrorInvalidClient, 401, "client attestation verification failed", err)
 	}
-	return verified, nil
+	return verified, signer, nil
 }

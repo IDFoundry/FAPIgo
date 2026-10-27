@@ -78,6 +78,10 @@ const (
 	// OutboundHardened (backchannelhttp.Notifier and
 	// NoBackchannelNotifications do), since it sends to client-supplied
 	// notification endpoints.
+	// With Config.AttestationBasedClientAuthentication set,
+	// Dependencies.ClientAttestationStatus is required: a checker of the
+	// attestations' status, or NoClientAttestationStatusCheck{} to
+	// explicitly decline.
 	// Config.Limits must keep to the FAPI 2.0 Security Profile's fixed
 	// numbers (RecommendedLimits does): AuthorizationCodeLifetime at
 	// most 60 seconds, PushedRequestLifetime under 600 seconds,

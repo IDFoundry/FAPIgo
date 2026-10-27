@@ -52,10 +52,13 @@ type AttesterTrust interface {
 // attestation: the key to verify its signature with and, under
 // X5CAttesterChain, the verified certificate chain that key comes from
 // — leaf first, ending at the trust anchor, so chain[i+1] issued
-// chain[i]. chain is nil under RegisteredAttesterKeys.
+// chain[i] — and the ClientCertificateRevocation to check it with once
+// the attestation's PoP has verified. chain and revocation are nil under
+// RegisteredAttesterKeys.
 type attesterSigner struct {
-	key   crypto.PublicKey
-	chain []*x509.Certificate
+	key        crypto.PublicKey
+	chain      []*x509.Certificate
+	revocation ClientCertificateRevocation
 }
 
 // RegisteredAttesterKeys verifies a client's attestation with a key
@@ -122,9 +125,13 @@ func (r RegisteredAttesterKeys) validate() error {
 //     algorithm needs.
 //
 // Extended key usage isn't constrained: no standard value exists for
-// attestation signing. Revocation isn't checked — an
-// AttesterTrustAnchors that tracks a trust list can stop returning an
-// anchor that has been withdrawn.
+// attestation signing. Revocation asks whether a certificate in the
+// verified chain below its anchor has been revoked, once the
+// attestation's PoP has verified; an anchor itself is withdrawn by an
+// AttesterTrustAnchors (or AttesterAnchorSource) that tracks a trust
+// list and stops returning it. Whether the attestation itself has been
+// withdrawn — a single wallet instance revoked through a status list —
+// is Dependencies.ClientAttestationStatus's to decide.
 //
 // A valid chain proves only that some attester certified under an
 // anchor signed the attestation, not which one. The attestation's "iss"
@@ -156,6 +163,19 @@ type X5CAttesterChain struct {
 	// client's registered attester. Required, with no default — see
 	// AttesterIssuerBinding.
 	IssuerBinding AttesterIssuerBinding
+
+	// Revocation is required, with no default, as for TrustedClientCAs:
+	// pass ClientCertificateCRLs{...} with the CRLs of the CAs issuing
+	// attester certificates, your own ClientCertificateRevocation (OCSP,
+	// for example), or NoClientCertificateRevocationCheck{} to explicitly
+	// decline. A certificate's validity period alone can't stop a
+	// compromised attester key before it expires. It's checked, with the
+	// verified chain (leaf first, ending at the trust anchor) and
+	// Dependencies.Clock's time, on every attestation-authenticated
+	// request once the attestation and its PoP have verified; any error
+	// rejects the client with invalid_client. Tokens already issued to
+	// the client stay usable until they expire.
+	Revocation ClientCertificateRevocation
 }
 
 // AttesterIssuerBinding decides what ties an X5CAttesterChain signing
@@ -209,6 +229,14 @@ const (
 )
 
 func (c X5CAttesterChain) validate() error {
+	if c.Revocation == nil {
+		return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.Revocation is required (pass ClientCertificateCRLs{...} or NoClientCertificateRevocationCheck{} to explicitly decline)")
+	}
+	if v, ok := c.Revocation.(interface{ validate() error }); ok {
+		if err := v.validate(); err != nil {
+			return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.Revocation: %w", err)
+		}
+	}
 	switch c.IssuerBinding {
 	case AttesterIssuerInCertificate, AttesterIssuerByTrustAnchors, AttesterIssuerBoundToAnchor:
 	default:
@@ -280,7 +308,7 @@ func (c X5CAttesterChain) attesterKey(ctx context.Context, s *Server, client sto
 		}
 		chain = bound
 	}
-	return attesterSigner{key: leaf.PublicKey, chain: chain}, nil
+	return attesterSigner{key: leaf.PublicKey, chain: chain, revocation: c.Revocation}, nil
 }
 
 // resolveAnchors returns the pool a client's attestation chain must

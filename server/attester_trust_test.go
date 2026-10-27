@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -177,7 +178,7 @@ func TestX5CAttesterChainAcceptsChainToTrustAnchor(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerByTrustAnchors})
+			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerByTrustAnchors})
 			instanceKey := generateKey(t)
 			attestation := createX5CAttestation(t, tc.leaf.key, tc.x5c, tc.kid, &instanceKey.PublicKey, h.now)
 			if err := requestWithAttestation(t, h, attestation, instanceKey); err != nil {
@@ -221,7 +222,7 @@ func TestX5CAttesterChainRejectsUntrustedAttestation(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: tc.roots}, IssuerBinding: server.AttesterIssuerByTrustAnchors})
+			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: tc.roots}, IssuerBinding: server.AttesterIssuerByTrustAnchors})
 			instanceKey := generateKey(t)
 			attestation := createX5CAttestation(t, tc.signer, tc.x5c, "", &instanceKey.PublicKey, h.now)
 			err := requestWithAttestation(t, h, attestation, instanceKey)
@@ -254,7 +255,7 @@ func TestX5CAttesterChainChecksValidityAtServerClock(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			h := newHarnessWithAttesterTrustAt(t, serverNow, nil, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerByTrustAnchors})
+			h := newHarnessWithAttesterTrustAt(t, serverNow, nil, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerByTrustAnchors})
 			instanceKey := generateKey(t)
 			attestation := createX5CAttestation(t, tc.leaf.key, x5cOf(tc.leaf), "", &instanceKey.PublicKey, h.now)
 			err := requestWithAttestation(t, h, attestation, instanceKey)
@@ -298,7 +299,7 @@ func TestX5CAttesterChainUsesPerClientTrustAnchors(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{TrustAnchors: tc.anchors, IssuerBinding: server.AttesterIssuerByTrustAnchors})
+			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: tc.anchors, IssuerBinding: server.AttesterIssuerByTrustAnchors})
 			instanceKey := generateKey(t)
 			attestation := createX5CAttestation(t, leaf.key, x5cOf(leaf), "", &instanceKey.PublicKey, h.now)
 			err := requestWithAttestation(t, h, attestation, instanceKey)
@@ -341,12 +342,12 @@ func TestNewAttesterTrustRequirements(t *testing.T) {
 		"registered keys without a key source":  {true, server.RegisteredAttesterKeys{}, true},
 		"nil registered keys pointer":           {true, (*server.RegisteredAttesterKeys)(nil), true},
 		"nil x5c chain pointer":                 {true, (*server.X5CAttesterChain)(nil), true},
-		"x5c chain, issuer in certificate":      {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerInCertificate}, false},
-		"x5c chain, bound by trust anchors":     {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerByTrustAnchors}, false},
-		"x5c chain without issuer binding":      {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}}, true},
-		"x5c chain with unknown issuer binding": {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerBinding(99)}, true},
-		"x5c chain without trust anchors":       {true, server.X5CAttesterChain{IssuerBinding: server.AttesterIssuerInCertificate}, true},
-		"x5c chain with nil static anchor pool": {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{}, IssuerBinding: server.AttesterIssuerInCertificate}, true},
+		"x5c chain, issuer in certificate":      {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerInCertificate}, false},
+		"x5c chain, bound by trust anchors":     {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerByTrustAnchors}, false},
+		"x5c chain without issuer binding":      {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}}, true},
+		"x5c chain with unknown issuer binding": {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerBinding(99)}, true},
+		"x5c chain without trust anchors":       {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, IssuerBinding: server.AttesterIssuerInCertificate}, true},
+		"x5c chain with nil static anchor pool": {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{}, IssuerBinding: server.AttesterIssuerInCertificate}, true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -398,6 +399,7 @@ func TestX5CAttesterChainIssuerInCertificate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			leaf := newTestCert(t, "attester", certOptions{parent: &sharedRoot, uris: tc.uris})
 			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{
+				Revocation:    server.NoClientCertificateRevocationCheck{},
 				TrustAnchors:  server.StaticAttesterTrustAnchors{Roots: poolOf(sharedRoot)},
 				IssuerBinding: server.AttesterIssuerInCertificate,
 			})
@@ -464,6 +466,28 @@ func TestRegisteredAttesterKeysUnknownAttester(t *testing.T) {
 	}}
 	h := newAttestationHarness(t, now, attesterKey, trust, nil)
 	_, err := h.server.AuthenticateAttestedClient(context.Background(), server.AttestedClientAuthenticationRequest{
+		ClientAttestations:    []string{createAttestationHeader(t, attesterKey, testClientID.String(), &instanceKey.PublicKey, now, time.Hour)},
+		ClientAttestationPoPs: []string{createAttestationPoPHeader(t, instanceKey, testClientID.String(), testIssuer, "jti-1", now)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q (err %v)", code, server.ErrorInvalidClient, err)
+	}
+}
+
+// TestRegisteredAttesterKeysNoKeyForAlgorithm covers an attester whose
+// registered keys include none for the client's attestation algorithm.
+func TestRegisteredAttesterKeysNoKeyForAlgorithm(t *testing.T) {
+	now := time.Now()
+	attesterKey, instanceKey := generateKey(t), generateKey(t)
+	edPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	trust := server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{
+		testAttesterIssuer: {{Algorithm: fapi.EdDSA, PublicKey: edPub}},
+	}}
+	h := newAttestationHarness(t, now, attesterKey, trust, nil)
+	_, err = h.server.AuthenticateAttestedClient(context.Background(), server.AttestedClientAuthenticationRequest{
 		ClientAttestations:    []string{createAttestationHeader(t, attesterKey, testClientID.String(), &instanceKey.PublicKey, now, time.Hour)},
 		ClientAttestationPoPs: []string{createAttestationPoPHeader(t, instanceKey, testClientID.String(), testIssuer, "jti-1", now)},
 	})

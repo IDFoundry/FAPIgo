@@ -15,6 +15,88 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## Unreleased
+
+### `X5CAttesterChain.Revocation` is required (server)
+
+**Affects:** a server with `Config.AttestationBasedClientAuthentication`
+whose `Dependencies.AttesterTrust` is `server.X5CAttesterChain`, at every
+assurance level.
+
+**Why:** an attester's signing certificate was checked for its chain and
+validity period only, so a certificate revoked after its key was
+compromised went on authenticating attestations until it expired, and
+the doc said "Revocation isn't checked". `X5CAttesterChain` now asks a
+`ClientCertificateRevocation` — the same interface, check and CRL
+implementation `TrustedClientCAs.Revocation` uses for client
+certificates — about the verified chain, leaf first and ending at the
+trust anchor, at the server's `Clock` time. It runs on every
+attestation-authenticated request, once the attestation and its PoP
+have verified; any error is `invalid_client`.
+
+**What fails:** `server.New` returns an error naming
+`X5CAttesterChain.Revocation`.
+
+**What to change:** pass the CRLs of the CAs that issue your attesters'
+certificates, your own `ClientCertificateRevocation` (OCSP, for
+example), or `server.NoClientCertificateRevocationCheck{}` to keep the
+previous behavior:
+
+```go
+deps.AttesterTrust = server.X5CAttesterChain{
+	Anchors:       server.StaticAttesterAnchors{ /* ... */ },
+	IssuerBinding: server.AttesterIssuerBoundToAnchor,
+	Revocation: server.ClientCertificateCRLs{
+		Lists: func(ctx context.Context) ([]*x509.RevocationList, error) {
+			return attesterCRLs.Current(), nil // refreshed in the background
+		},
+	},
+}
+```
+
+`ClientCertificateCRLs` needs a current CRL from every CA that issues a
+certificate in the chain, the intermediates' issuers included, and
+fails closed without one.
+
+### Attestation-based client authentication needs `Dependencies.ClientAttestationStatus` (server, *production only*)
+
+**Affects:** a server under `AssuranceProduction` with
+`Config.AttestationBasedClientAuthentication` set.
+
+**Why:** a Client Attestation that verifies may still have been
+withdrawn by its attester. OpenID4VCI 1.0 gives a Wallet Attestation an
+optional `status` claim (a Token Status List,
+draft-ietf-oauth-status-list) for that, and since every instance of a
+wallet shares the attestation's `sub`, a status list is the only way a
+Wallet Provider can revoke a single compromised instance. The new
+`Dependencies.ClientAttestationStatus`, a
+`server.ClientAttestationStatusChecker`, is asked about every verified
+attestation, after its PoP has verified and its `jti` has been recorded.
+It's given every claim of the attestation, its `iat` and `exp`, the
+Client Instance Key's thumbprint, and the attester's key and (under
+`X5CAttesterChain`) verified certificate chain, to bind a Status List
+Token's signer to. An error wrapping `server.ErrClientAttestationRevoked`
+refuses the request with `invalid_client`; any other error with
+`server_error`. Whether to check status is an ecosystem decision this
+package can't make for you, so production asks for it explicitly.
+
+**What fails:** under `AssuranceProduction`, `server.New` returns an
+error naming `client_attestation_status`. Development assurance accepts
+nil, which checks nothing; setting a checker there works too.
+
+**What to change:** pass your checker, or
+`server.NoClientAttestationStatusCheck{}` when your attesters publish
+no status:
+
+```go
+deps.ClientAttestationStatus = walletStatusChecker{lists: statusLists}
+// or, when the attesters publish no status:
+deps.ClientAttestationStatus = server.NoClientAttestationStatusCheck{}
+```
+
+[GETTING_STARTED.md](GETTING_STARTED.md#wallet-attestation-status)
+sketches a checker.
+
 ## v0.61.0
 
 ### `NoClientCertificateChainTrust{}` is refused in production (server, *production only*)

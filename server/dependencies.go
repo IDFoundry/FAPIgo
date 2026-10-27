@@ -217,10 +217,32 @@ type Dependencies struct {
 	// is set, with no default: pass X5CAttesterChain{...} to verify the
 	// attestation's "x5c" certificate chain against trust anchors (HAIP
 	// 1.0 §4.4.1) — choosing its IssuerBinding, which decides what ties
-	// the certificate to the client's attester — or
+	// the certificate to the client's attester, and its Revocation — or
 	// RegisteredAttesterKeys{Keys: ...} to use keys registered for each
-	// attester, never ClientKeys. See both types' own doc comments.
+	// attester, never ClientKeys. See both types' own doc comments, and
+	// ClientAttestationStatus for whether an attestation that verifies
+	// has since been withdrawn.
 	AttesterTrust AttesterTrust
+
+	// ClientAttestationStatus decides whether a Client Attestation that
+	// has verified, with its PoP, is still valid — whether its attester
+	// has since withdrawn it, through the attestation's "status" claim
+	// (a Token Status List, draft-ietf-oauth-status-list, as OpenID4VCI
+	// 1.0 Appendix E gives a Wallet Attestation) or however else the
+	// attesters this server trusts publish it. It's asked on every
+	// attestation-authenticated request; an error wrapping
+	// ErrClientAttestationRevoked refuses the request with
+	// invalid_client, any other error with server_error. See
+	// ClientAttestationStatusChecker for when it runs, what it's given,
+	// and what an implementation fetching status lists must do.
+	//
+	// Used only when Config.AttestationBasedClientAuthentication is set.
+	// Under AssuranceProduction it is then required: pass your own
+	// checker, or NoClientAttestationStatusCheck{} when your attesters
+	// publish no status. Otherwise nil means no attestation's status is
+	// checked. Whether the attester's own signing certificate has been
+	// revoked is X5CAttesterChain.Revocation's to decide, not this.
+	ClientAttestationStatus ClientAttestationStatusChecker
 
 	// PairwiseSubjects derives the body of each pairwise sub (see
 	// Config.Subjects and package pairwise): pairwise.NewReversible or

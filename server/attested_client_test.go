@@ -49,7 +49,7 @@ func TestAuthenticateAttestedClient(t *testing.T) {
 // and naming the client's attester.
 func TestAuthenticateAttestedClientX5CIssuerInCertificate(t *testing.T) {
 	root := newTestCert(t, "trust list CA", certOptions{isCA: true})
-	trust := server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerInCertificate}
+	trust := server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerInCertificate}
 	for name, tc := range map[string]struct {
 		san    string
 		wantOK bool

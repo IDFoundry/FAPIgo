@@ -110,11 +110,11 @@ func (s *Server) verifyClientAttestation(ctx context.Context, client storage.Reg
 	if !s.cfg.Algorithms.ClientAttestation.Contains(client.ClientAttestationAlgorithm()) {
 		return clientattestation.VerifiedAttestation{}, newError(ErrorInvalidClient, 401, "client attestation algorithm is not permitted", nil)
 	}
-	attesterPub, err := s.deps.AttesterTrust.attesterKey(ctx, s, client, attestation)
+	signer, err := s.deps.AttesterTrust.attesterKey(ctx, s, client, attestation)
 	if err != nil {
 		return clientattestation.VerifiedAttestation{}, newError(ErrorInvalidClient, 401, "no matching attester key", err)
 	}
-	verified, err := attestation.Verify(attesterPub, clientattestation.VerifyPolicy{
+	verified, err := attestation.Verify(signer.key, clientattestation.VerifyPolicy{
 		ExpectedIssuer:  client.ExpectedAttesterIssuer(),
 		ExpectedSubject: client.ID().String(),
 		Algorithm:       client.ClientAttestationAlgorithm(),

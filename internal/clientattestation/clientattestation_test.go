@@ -773,3 +773,83 @@ func TestCertificateChain(t *testing.T) {
 		})
 	}
 }
+
+// TestAttestation_VerifyExposesClaims: a verified attestation carries
+// every claim of its payload raw, including ones this package doesn't
+// interpret (a status claim, a wallet_name), and its iat.
+func TestAttestation_VerifyExposesClaims(t *testing.T) {
+	attesterKey := generateKey(t)
+	clientKey := generateKey(t)
+	now := time.Unix(1300816000, 0)
+	payload, err := json.Marshal(map[string]any{
+		"iss":         "https://attester.example.com",
+		"sub":         "https://client.example.com",
+		"iat":         now.Unix(),
+		"exp":         now.Add(5 * time.Minute).Unix(),
+		"cnf":         map[string]any{"jwk": json.RawMessage(confirmationJWK(t, &clientKey.PublicKey))},
+		"status":      map[string]any{"status_list": map[string]any{"idx": 7, "uri": "https://attester.example.com/statuslists/1"}},
+		"wallet_name": "Example Wallet",
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	compact, err := jose.Sign(attesterKey, jose.Header{Algorithm: fapi.ES256, Type: TypHeader}, payload)
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+	parsed, err := Parse(compact)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	verified, err := parsed.Verify(&attesterKey.PublicKey, basePolicy(now))
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !verified.IssuedAt.Equal(now) {
+		t.Errorf("IssuedAt = %v, want %v", verified.IssuedAt, now)
+	}
+	for _, name := range []string{"iss", "sub", "iat", "exp", "cnf", "status", "wallet_name"} {
+		if _, ok := verified.Claims[name]; !ok {
+			t.Errorf("Claims lacks %q: %v", name, verified.Claims)
+		}
+	}
+	var status struct {
+		StatusList struct {
+			Index int    `json:"idx"`
+			URI   string `json:"uri"`
+		} `json:"status_list"`
+	}
+	if err := json.Unmarshal(verified.Claims["status"], &status); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if status.StatusList.Index != 7 || status.StatusList.URI != "https://attester.example.com/statuslists/1" {
+		t.Errorf("status = %+v", status)
+	}
+}
+
+// TestAttestation_VerifyWithoutIat: an attestation without iat (draft-07
+// allowed it) verifies with a zero IssuedAt.
+func TestAttestation_VerifyWithoutIat(t *testing.T) {
+	attesterKey := generateKey(t)
+	clientKey := generateKey(t)
+	now := time.Unix(1300816000, 0)
+	attestation := createTestAttestation(t, attesterKey, attestationClaimsInput{
+		Subject:   "https://client.example.com",
+		ExpiresAt: now.Add(5 * time.Minute).Unix(),
+		CNFJWK:    confirmationJWK(t, &clientKey.PublicKey),
+	})
+	parsed, err := Parse(attestation)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	verified, err := parsed.Verify(&attesterKey.PublicKey, basePolicy(now))
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !verified.IssuedAt.IsZero() {
+		t.Errorf("IssuedAt = %v, want zero", verified.IssuedAt)
+	}
+	if _, ok := verified.Claims["iat"]; ok {
+		t.Errorf("Claims has iat: %v", verified.Claims)
+	}
+}

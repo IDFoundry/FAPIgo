@@ -44,8 +44,18 @@ import (
 // never by resolving keys itself, so certificate path validation always
 // happens here rather than in code that could forget to do it.
 type AttesterTrust interface {
-	attesterKey(ctx context.Context, s *Server, client storage.RegisteredClient, attestation clientattestation.Attestation) (crypto.PublicKey, error)
+	attesterKey(ctx context.Context, s *Server, client storage.RegisteredClient, attestation clientattestation.Attestation) (attesterSigner, error)
 	validate() error
+}
+
+// attesterSigner is what an AttesterTrust establishes for an
+// attestation: the key to verify its signature with and, under
+// X5CAttesterChain, the verified certificate chain that key comes from
+// — leaf first, ending at the trust anchor, so chain[i+1] issued
+// chain[i]. chain is nil under RegisteredAttesterKeys.
+type attesterSigner struct {
+	key   crypto.PublicKey
+	chain []*x509.Certificate
 }
 
 // RegisteredAttesterKeys verifies a client's attestation with a key
@@ -70,15 +80,19 @@ type RegisteredAttesterKeys struct {
 	Keys keys.AttesterKeySource
 }
 
-func (r RegisteredAttesterKeys) attesterKey(ctx context.Context, _ *Server, client storage.RegisteredClient, attestation clientattestation.Attestation) (crypto.PublicKey, error) {
+func (r RegisteredAttesterKeys) attesterKey(ctx context.Context, _ *Server, client storage.RegisteredClient, attestation clientattestation.Attestation) (attesterSigner, error) {
 	alg, kid := client.ClientAttestationAlgorithm(), attestation.KeyID()
 	set, err := r.Keys.ResolveAttesterKeys(ctx, keys.AttesterKeyRequest{
 		Issuer: client.ExpectedAttesterIssuer(), Algorithm: alg, KeyID: kid,
 	})
 	if err != nil {
-		return nil, err
+		return attesterSigner{}, err
 	}
-	return selectVerificationKey(set, alg, kid)
+	key, err := selectVerificationKey(set, alg, kid)
+	if err != nil {
+		return attesterSigner{}, err
+	}
+	return attesterSigner{key: key}, nil
 }
 
 func (r RegisteredAttesterKeys) validate() error {
@@ -235,33 +249,38 @@ func (c X5CAttesterChain) validateBoundAnchors() error {
 	return nil
 }
 
-func (c X5CAttesterChain) attesterKey(ctx context.Context, s *Server, client storage.RegisteredClient, attestation clientattestation.Attestation) (crypto.PublicKey, error) {
+func (c X5CAttesterChain) attesterKey(ctx context.Context, s *Server, client storage.RegisteredClient, attestation clientattestation.Attestation) (attesterSigner, error) {
 	ders, present, err := attestation.CertificateChain()
 	if err != nil {
-		return nil, err
+		return attesterSigner{}, err
 	}
 	if !present {
-		return nil, errors.New("attestation has no x5c certificate chain")
+		return attesterSigner{}, errors.New("attestation has no x5c certificate chain")
 	}
 	roots, anchors, err := c.resolveAnchors(ctx, client)
 	if err != nil {
-		return nil, err
+		return attesterSigner{}, err
 	}
 	leaf, chains, err := verifyAttesterChain(ders, roots, s.deps.Clock.Now())
 	if err != nil {
-		return nil, err
+		return attesterSigner{}, err
 	}
 	if !keyFitsAlgorithm(leaf.PublicKey, client.ClientAttestationAlgorithm()) {
-		return nil, fmt.Errorf("attester certificate key does not fit algorithm %s", client.ClientAttestationAlgorithm())
+		return attesterSigner{}, fmt.Errorf("attester certificate key does not fit algorithm %s", client.ClientAttestationAlgorithm())
 	}
 	expected := client.ExpectedAttesterIssuer()
 	if c.IssuerBinding != AttesterIssuerByTrustAnchors && !hasURIName(leaf, expected) {
-		return nil, fmt.Errorf("attester certificate does not name the client's attester %q as a URI subject alternative name", expected)
+		return attesterSigner{}, fmt.Errorf("attester certificate does not name the client's attester %q as a URI subject alternative name", expected)
 	}
-	if c.IssuerBinding == AttesterIssuerBoundToAnchor && !chainEndsAtAnchorFor(chains, anchors, expected) {
-		return nil, fmt.Errorf("attester certificate chain does not end at a trust anchor bound to the client's attester %q", expected)
+	chain := chains[0]
+	if c.IssuerBinding == AttesterIssuerBoundToAnchor {
+		bound, ok := chainEndingAtAnchorFor(chains, anchors, expected)
+		if !ok {
+			return attesterSigner{}, fmt.Errorf("attester certificate chain does not end at a trust anchor bound to the client's attester %q", expected)
+		}
+		chain = bound
 	}
-	return leaf.PublicKey, nil
+	return attesterSigner{key: leaf.PublicKey, chain: chain}, nil
 }
 
 // resolveAnchors returns the pool a client's attestation chain must
@@ -292,10 +311,10 @@ func (c X5CAttesterChain) resolveAnchors(ctx context.Context, client storage.Reg
 	return roots, nil, nil
 }
 
-// chainEndsAtAnchorFor reports whether one of chains — each leaf first,
-// anchor last, as x509.Certificate.Verify returns them — ends at an
-// anchor bound to issuer.
-func chainEndsAtAnchorFor(chains [][]*x509.Certificate, anchors []AttesterAnchor, issuer string) bool {
+// chainEndingAtAnchorFor returns the first of chains — each leaf first,
+// anchor last, as x509.Certificate.Verify returns them — that ends at an
+// anchor bound to issuer, and whether there is one.
+func chainEndingAtAnchorFor(chains [][]*x509.Certificate, anchors []AttesterAnchor, issuer string) ([]*x509.Certificate, bool) {
 	for _, chain := range chains {
 		if len(chain) == 0 {
 			continue
@@ -303,11 +322,11 @@ func chainEndsAtAnchorFor(chains [][]*x509.Certificate, anchors []AttesterAnchor
 		root := chain[len(chain)-1]
 		for _, a := range anchors {
 			if a.Certificate.Equal(root) && slices.Contains(a.Issuers, issuer) {
-				return true
+				return chain, true
 			}
 		}
 	}
-	return false
+	return nil, false
 }
 
 // hasURIName reports whether cert carries uri, exactly, as a URI

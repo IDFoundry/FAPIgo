@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.64.0](https://github.com/IDFoundry/FAPIgo/compare/v0.63.0...v0.64.0) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **resource:** under AssuranceProduction, resource.NewVerifier refuses NoRevocation, a NoRevocationUntilExpiry over 15 minutes, a MaxDPoPProofAge over 5 minutes, a DPoPNonceLifetime over 15 minutes and a Clock that does not declare resource.ClockAssurance, and serverresource.NewVerifier refuses a production server declining revocation with an AccessTokenLifetime over 15 minutes. At every assurance level it refuses a typed-nil dependency and a NoRevocationUntilExpiry without a positive MaxTokenLifetime.
+* **client:** under AssuranceProduction, client.New refuses MaxClockSkew outside 10 to 60 seconds, SessionLifetime over an hour, ClientAssertionLifetime over 5 minutes, MaxIDTokenLifetime over 24 hours, MaxJARMResponseLifetime over 10 minutes, and a Clock that is not SystemClock and does not declare client.ClockAssurance. At every assurance level it refuses a typed-nil dependency, and RecommendedLimits now sets MaxJARMResponseLifetime to 10 minutes.
+* **server:** under AssuranceProduction, server.New refuses a MaxDPoPProofAge over 5 minutes, a DPoPNonceLifetime over 15 minutes, a JARMResponseLifetime over 10 minutes, an InteractionLifetime over an hour, and a Clock that is not SystemClock and does not declare server.ClockAssurance or reads more than MaxClockSkew from the system time. At every assurance level it refuses a typed-nil dependency.
+* **resource:** resource.Config.ResourceURLs and serverresource.Options.ResourceURLs are required, and resource.VerifyRequestFromHTTP takes only the request. A request whose target is outside the configured URLs is refused, and a DPoP proof's htm must equal the request method exactly. See UPGRADING.md.
+* **server:** BuildAuthorizationErrorRedirect returns server_error under AssuranceProduction, so render the LocalErrorResponse locally instead. CompleteAuthorization no longer redirects when the request's redirect URI was removed from the client's registration, or the client no longer resolves, and returns AuthorizationLocalError instead. ExchangeAuthorizationCode refuses a code whose redirect URI is no longer registered with invalid_grant.
+* **server:** a refresh token from IssueRefreshToken is refused with unauthorized_client once its grant type is no longer one of Config.AdditionalGrantTypes. A refresh token with no recorded grant type, which includes every one IssueRefreshToken issued before this release, CIBA refresh tokens from before v0.54.0 and authorization code refresh tokens from before v0.52.0, is refused with invalid_grant, and the client must obtain a new grant.
+* **server:** a request carrying Client Attestation headers together with a client_assertion or client_assertion_type form parameter is now refused with invalid_request instead of being authenticated by the attestation. Send one client authentication method per request.
+
+### Features
+
+* **keys:** add production client key sources and a ClientKeySource contract ([05304e2](https://github.com/IDFoundry/FAPIgo/commit/05304e28b4e7f6089391c9258b892d19fd6b9bcf))
+* **server:** end an interaction without a redirect, show its redirect URI, and refuse framing of authorization pages ([eb8ee4d](https://github.com/IDFoundry/FAPIgo/commit/eb8ee4d4af380f7a72e5c48b5ac8deee3f104a3e))
+
+
+### Bug Fixes
+
+* **client:** bind an authorization session to the client ID that began it ([c921d19](https://github.com/IDFoundry/FAPIgo/commit/c921d19aaa96ac7b06e820ed120ea8d7447a6263))
+* **client:** bound clock skew and lifetimes and require a system clock in production ([6bd1520](https://github.com/IDFoundry/FAPIgo/commit/6bd15209ee8b6dba3055241c7967a01691aafaad))
+* **resource:** build the DPoP target from configured resource URLs ([fd77a81](https://github.com/IDFoundry/FAPIgo/commit/fd77a81dde11e0130a5b0b7997b99eda40fc00f0))
+* **resource:** refuse NoRevocation and bound DPoP windows and the clock in production ([7b99f67](https://github.com/IDFoundry/FAPIgo/commit/7b99f67668d0fb67d585fb09fbfea8934312f383))
+* **server:** bind a CIBA auth_req_id to the client instance and dpop_jkt before polling ([b57cb56](https://github.com/IDFoundry/FAPIgo/commit/b57cb56ea5943d50595bf967e57c6b024f6434fd))
+* **server:** bound DPoP, JARM and interaction lifetimes and require a system clock in production ([f754606](https://github.com/IDFoundry/FAPIgo/commit/f754606593e714ff4741895fc1edb9fdec39e0ad))
+* **server:** re-check an embedder grant's type on refresh ([456f9be](https://github.com/IDFoundry/FAPIgo/commit/456f9be430f74b063fc25eda56acad18ecdb0f71))
+* **server:** refuse a request carrying more than one client authentication method ([6c70fde](https://github.com/IDFoundry/FAPIgo/commit/6c70fde9dbb003355933efe7846a69d65df6ba24))
+* **server:** refuse pre-authentication error redirects in production and redirects to a deregistered redirect URI ([d252c7d](https://github.com/IDFoundry/FAPIgo/commit/d252c7d9124b7e9e79cfb9cec74e16974bda6566))
+
 ## [0.63.0](https://github.com/IDFoundry/FAPIgo/compare/v0.62.0...v0.63.0) (2026-10-28)
 
 

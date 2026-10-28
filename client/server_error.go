@@ -35,7 +35,8 @@ import (
 // or a backchannel authentication request can simply be made again.
 // ExchangeCode can't: after a server_error the authorization server may
 // already have consumed the authorization code, so a retry typically
-// fails with invalid_grant, and the flow should restart with
+// fails with invalid_grant — and the server may then revoke the tokens
+// the first redemption issued — and the flow should restart with
 // BeginAuthorization.
 type ServerErrorResponse struct {
 	Code        string // "error", e.g. "invalid_client"

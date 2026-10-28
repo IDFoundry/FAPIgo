@@ -223,6 +223,15 @@ func (c IDTokenClaims) AsMap() map[string]any {
 // that routes a callback's exchange to the wrong one), or the zero value,
 // fails with ErrorInvalidRequest, so another issuer's code and PKCE
 // verifier never reach this issuer's token endpoint.
+//
+// Don't retry ExchangeCode with the same resp, after an error or a lost
+// response. An authorization code is single-use (RFC 6749 §4.1.2): the
+// server may have redeemed it even when its response never arrived or
+// was an error, and a server that sees the code again refuses it with
+// invalid_grant and SHOULD revoke every token already issued from it —
+// a FAPIgo server does. So a naive retry can cost the user a grant
+// that in fact succeeded. After a failure, start over with
+// BeginAuthorization.
 func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationResponse) (TokenSet, error) {
 	if resp.issuer != c.cfg.Issuer.String() || resp.clientID != c.cfg.ClientID.String() {
 		return TokenSet{}, newError(ErrorInvalidRequest, "the authorization response was validated by a client for a different issuer or client ID", nil)

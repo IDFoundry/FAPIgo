@@ -43,7 +43,9 @@ const errBackchannelAuthenticationRequestFailed = "backchannel authentication re
 // LoginHintToken or IDTokenHint must be set — validated locally before
 // any network call, mirroring the server's own
 // validateBackchannelAuthenticationParameters check, so a caller gets
-// an immediate ErrorInvalidRequest instead of a round trip.
+// an immediate ErrorInvalidRequest instead of a round trip. Scope must
+// include "openid", checked the same way: CIBA is an OpenID Connect
+// flow (CIBA Core §7.1).
 type BeginBackchannelAuthenticationRequest struct {
 	Scope []string
 
@@ -261,20 +263,23 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 
 // checkBackchannelAuthenticationRequest refuses a request
 // BeginBackchannelAuthentication can't send: a scope OAuthOnly forbids,
-// other than exactly one hint, no backchannel endpoint, or essential
-// acr values without "openid".
+// a scope without "openid", other than exactly one hint, or no
+// backchannel endpoint.
 func (c *Client) checkBackchannelAuthenticationRequest(req BeginBackchannelAuthenticationRequest) error {
 	if scopeErr := c.checkScope(req.Scope); scopeErr != nil {
 		return scopeErr
+	}
+	// CIBA is an OpenID Connect authentication flow: CIBA Core §7.1 says
+	// the scope "MUST" include openid, and a conforming server refuses
+	// a request without it.
+	if !slices.Contains(req.Scope, "openid") {
+		return newError(ErrorInvalidRequest, `Scope must include "openid": CIBA is an OpenID Connect flow (CIBA Core §7.1)`, nil)
 	}
 	if countNonEmpty(req.LoginHint, req.LoginHintToken, req.IDTokenHint) != 1 {
 		return newError(ErrorInvalidRequest, "exactly one of LoginHint, LoginHintToken, or IDTokenHint is required", nil)
 	}
 	if c.cfg.Endpoints.BackchannelAuthentication.IsZero() {
 		return newError(ErrorInvalidRequest, "backchannel authentication is not configured", nil)
-	}
-	if len(req.EssentialACRValues) > 0 && !slices.Contains(req.Scope, "openid") {
-		return newError(ErrorInvalidRequest, `EssentialACRValues requires "openid" in Scope: only an ID token's acr can meet it`, nil)
 	}
 	if resourceErr := checkResources(req.Resource); resourceErr != nil {
 		return resourceErr

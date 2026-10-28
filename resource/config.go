@@ -28,7 +28,9 @@ type Limits struct {
 	MaxClockSkew time.Duration
 
 	// DPoPNonceLifetime bounds how long an issued DPoP nonce remains
-	// valid. Required only when Dependencies.Nonces is non-nil — see
+	// valid, for any number of proofs (RFC 9449 §8.2); the next nonce
+	// is handed out once half of it has passed, so a client holding the
+	// previous one keeps at least half of it. Required only when Dependencies.Nonces is non-nil — see
 	// its own doc comment; NewVerifier rejects a zero value in that
 	// case, exactly like MaxDPoPProofAge above, but leaves it
 	// unvalidated when nonce-challenge support is disabled. At most 15

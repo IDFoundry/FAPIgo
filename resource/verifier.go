@@ -5,6 +5,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/depcheck"
+	"github.com/idfoundry/fapigo/internal/dpopnonce"
 )
 
 // Verifier is a FAPI 2.0 resource-server engine: it verifies incoming
@@ -14,6 +15,10 @@ type Verifier struct {
 	cfg          Config
 	deps         Dependencies
 	resourceURLs []resourceURL
+
+	// nonces holds the DPoP nonce this Verifier currently hands out,
+	// when deps.Nonces is set.
+	nonces dpopnonce.Rotator
 }
 
 // NewVerifier validates cfg and deps and returns a Verifier.

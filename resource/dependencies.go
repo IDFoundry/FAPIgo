@@ -41,16 +41,19 @@ type Dependencies struct {
 	// must declare ClockAssurance, as SystemClock does.
 	Clock Clock
 
-	// Nonces persists DPoP nonces this verifier issues and consumes.
+	// Nonces persists DPoP nonces this verifier issues and checks.
 	// Nil disables DPoP nonce-challenge support entirely — Verify never
 	// requires or checks a nonce, exactly like today. Set it (and
 	// Random, and Config.Limits.DPoPNonceLifetime) to have Verify
-	// challenge a request whose proof carries no valid nonce, and
-	// proactively reissue a fresh one on every successful call.
+	// challenge a request whose proof carries no valid nonce, and hand
+	// out its current nonce on every successful call. A nonce stays
+	// valid until it expires, for any number of proofs (see
+	// storage.NonceStore); the Verifier stores a new one only when half
+	// of Config.Limits.DPoPNonceLifetime has passed.
 	//
 	// Never pass an authorization server's own Dependencies.Nonces: a
 	// nonce store is keyed by the nonce alone, so a nonce one role issued
-	// could be consumed by the other, while RFC 9449 keeps the
+	// would be accepted by the other, while RFC 9449 keeps the
 	// authorization server's nonces (§8) apart from a resource server's
 	// (§9). serverresource.NewVerifier refuses that for its
 	// Options.Nonces; a Verifier built here can't tell.

@@ -89,7 +89,7 @@ type Dependencies struct {
 	// (see IdentityClaimsSource), not an error.
 	IdentityClaims IdentityClaimsSource
 
-	// Nonces persists DPoP nonces this server issues and consumes for
+	// Nonces persists DPoP nonces this server issues and checks for
 	// requests to the PAR and token endpoints. Nil disables DPoP
 	// nonce-challenge support entirely (RFC 9449 §8) — like
 	// IdentityClaims, this is a genuinely optional field, not a
@@ -101,7 +101,10 @@ type Dependencies struct {
 	// protected-resource endpoint uniformly rather than one store per
 	// endpoint. Set it (and Config.Limits.DPoPNonceLifetime) to have
 	// this server challenge a DPoP proof carrying no valid nonce, and
-	// proactively reissue a fresh one on every successful call.
+	// hand out its current nonce on every successful call. A nonce
+	// stays valid until it expires, for any number of proofs (see
+	// storage.NonceStore); the server stores a new one only when half
+	// of Config.Limits.DPoPNonceLifetime has passed.
 	Nonces storage.NonceStore
 
 	// Backchannel persists CIBA backchannel authentication requests.

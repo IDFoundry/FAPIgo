@@ -117,8 +117,8 @@ func NewError(code ErrorCode, httpStatus int, description string) *Error {
 // token doesn't cover what it asks for. Its challenge uses the scheme
 // the request presented the token with, as RFC 9449 §7.1 asks: DPoP for
 // a DPoP-bound token, Bearer otherwise. It carries authz.NextDPoPNonce,
-// which WriteJSON sends as DPoP-Nonce: Verify consumed the request's
-// nonce, so without it the client's next request would be challenged.
+// which WriteJSON sends as DPoP-Nonce, so the client's next request
+// carries the nonce Verify currently hands out.
 // description follows NewError's rules.
 func NewInsufficientScopeError(authz AuthorizationContext, description string) *Error {
 	e := NewError(ErrorInsufficientScope, http.StatusForbidden, description)

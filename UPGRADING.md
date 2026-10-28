@@ -761,6 +761,50 @@ federation.AutomaticRegistrationConfig{
 	// ...
 	IDTokenSigningAlgorithm:  srvCfg.Algorithms.IDToken,
 	UserInfoSigningAlgorithm: srvCfg.Algorithms.UserInfo,
+### DPoP nonces are valid for a time window, and `NonceStore.Consume` is now `Lookup` (storage, server, resource)
+
+**Affects:** a `storage.NonceStore` of your own, used as
+`server.Dependencies.Nonces`, `resource.Dependencies.Nonces` or
+`serverresource.Options.Nonces`. `memstore.NonceStore` needs no change.
+
+**Why:** a nonce was retired on first use and every response issued a
+new one, so concurrent requests from one client all presented the
+nonce it held, all but the first were challenged, and those
+challenged again on their one retry failed with `use_dpop_nonce`.
+RFC 9449 §8 doesn't ask for single-use nonces: "clients need to keep
+only one nonce value and servers need to keep a window of recent
+nonces", and a client uses a nonce "until the server supplies a new
+nonce" (§8.2). A replayed proof is still refused by its `jti`
+(`Dependencies.Replay`), unchanged. The server and the resource
+verifier now hand out one current nonce, valid for
+`Limits.DPoPNonceLifetime` for any number of proofs, and store the next
+once half of that has passed; the previous nonce keeps working until it
+expires. A nonce is written to the store once per half-lifetime per
+instance instead of once per request, and
+`resource.Verifier.IssueDPoPNonce` no longer adds a record per call.
+A nonce store is no longer required to declare `AtomicConsume` under
+`AssuranceProduction`; `Durable` (and `CrossInstanceConsistent` when
+horizontally scaled) still is.
+
+**What fails:** a custom store no longer compiles: `NonceStore` has
+`Lookup(ctx, storage.NonceLookup)` in place of
+`Consume(ctx, storage.NonceConsumption)`.
+
+**What to change:** rename the method and its input type, and stop
+deleting the record when it's read. Lookup must succeed for every call,
+concurrent or not, until the record is dropped; it may drop a record
+once its `ExpiresAt` has passed. Run `storage.TestNonceStoreContract`
+against it:
+
+```go
+func (s *SQLNonceStore) Lookup(ctx context.Context, lookup storage.NonceLookup) (storage.NonceRecord, error) {
+	var expiresAt time.Time
+	err := s.db.QueryRowContext(ctx,
+		`SELECT expires_at FROM dpop_nonces WHERE nonce = $1`, lookup.Nonce).Scan(&expiresAt)
+	if err != nil {
+		return storage.NonceRecord{}, err
+	}
+	return storage.NonceRecord{ExpiresAt: expiresAt}, nil
 }
 ```
 

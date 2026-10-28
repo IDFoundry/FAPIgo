@@ -109,7 +109,7 @@ func TestNewRejectsBackchannelStoreWithoutStoreAssuranceUnderProduction(t *testi
 type bareNonceStore struct{}
 
 func (bareNonceStore) Issue(context.Context, storage.NonceIssuance) error { return nil }
-func (bareNonceStore) Consume(context.Context, storage.NonceConsumption) (storage.NonceRecord, error) {
+func (bareNonceStore) Lookup(context.Context, storage.NonceLookup) (storage.NonceRecord, error) {
 	return storage.NonceRecord{}, nil
 }
 
@@ -140,7 +140,9 @@ func TestNewAcceptsAdequateNonceStoreUnderProduction(t *testing.T) {
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
-	deps.Nonces = capNonceStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true}}
+	// Durable alone: a nonce is looked up, never consumed, so there is no
+	// AtomicConsume to declare.
+	deps.Nonces = capNonceStore{caps: storage.Capabilities{Durable: true}}
 	cfg.Limits.DPoPNonceLifetime = time.Minute
 
 	if _, err := server.New(cfg, deps); err != nil {

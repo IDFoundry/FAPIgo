@@ -226,7 +226,11 @@ func TestExchangeAuthorizationCodeChallengesExpiredNonce(t *testing.T) {
 	}
 }
 
-func TestExchangeAuthorizationCodeAcceptsValidNonceAndIssuesNext(t *testing.T) {
+// TestExchangeAuthorizationCodeAcceptsValidNonceRepeatedly: a nonce is
+// valid for its lifetime, not for one use (RFC 9449 §8.2: the client
+// uses it "until the server supplies a new nonce"), and the success
+// response hands out the nonce the client should use next.
+func TestExchangeAuthorizationCodeAcceptsValidNonceRepeatedly(t *testing.T) {
 	h, _ := newHarnessWithNonces(t)
 	dpopKey := generateKey(t)
 
@@ -242,17 +246,13 @@ func TestExchangeAuthorizationCodeAcceptsValidNonceAndIssuesNext(t *testing.T) {
 		t.Fatalf("ExchangeAuthorizationCode(valid nonce): %v", err)
 	}
 	if result.NextDPoPNonce == "" {
-		t.Fatalf("NextDPoPNonce is empty, want a freshly issued nonce")
-	}
-	if result.NextDPoPNonce == issued {
-		t.Fatalf("NextDPoPNonce = %q, want different from the just-consumed nonce %q", result.NextDPoPNonce, issued)
+		t.Fatalf("NextDPoPNonce is empty, want the nonce to use next")
 	}
 
-	// The consumed nonce is single-use: presenting it again must fail
-	// (with a fresh authorization code, since the previous one is
-	// already spent by the successful exchange above).
-	if _, err := exchangeWithDPoPNonce(t, h, dpopKey, issued); err == nil {
-		t.Fatalf("ExchangeAuthorizationCode(reused nonce) = nil error, want error")
+	// A fresh authorization code and a fresh proof (new jti), the same
+	// nonce: still accepted.
+	if _, err := exchangeWithDPoPNonce(t, h, dpopKey, issued); err != nil {
+		t.Fatalf("ExchangeAuthorizationCode(same nonce again) = %v, want success", err)
 	}
 }
 
@@ -436,7 +436,7 @@ func TestPushAuthorizationRequestChallengesMissingNonceWhenDPoPPresented(t *test
 	}
 }
 
-func TestPushAuthorizationRequestAcceptsValidNonceAndIssuesNext(t *testing.T) {
+func TestPushAuthorizationRequestAcceptsValidNonceAndHandsOutNext(t *testing.T) {
 	h, _ := newHarnessWithNonces(t)
 	dpopKey := generateKey(t)
 	parURL, err := url.Parse(testPAREndpoint)
@@ -470,8 +470,8 @@ func TestPushAuthorizationRequestAcceptsValidNonceAndIssuesNext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PushAuthorizationRequest(valid nonce): %v", err)
 	}
-	if result.NextDPoPNonce == "" || result.NextDPoPNonce == issued {
-		t.Fatalf("NextDPoPNonce = %q, want a fresh value different from %q", result.NextDPoPNonce, issued)
+	if result.NextDPoPNonce == "" {
+		t.Fatal("NextDPoPNonce is empty, want the nonce to use next")
 	}
 }
 
@@ -505,11 +505,11 @@ func TestNonceIssuedAtPARIsValidAtTokenEndpoint(t *testing.T) {
 	}
 }
 
-// TestTokenErrorAfterTheNonceIsSpentCarriesTheNext: a token request
-// that presented a valid nonce and then failed (here, a wrong
-// code_verifier) has spent it, so the error carries a fresh one (RFC
-// 9449 §8) for the client's next request, which then isn't challenged.
-func TestTokenErrorAfterTheNonceIsSpentCarriesTheNext(t *testing.T) {
+// TestTokenErrorAfterAValidNonceCarriesTheNext: a token request that
+// presented a valid nonce and then failed (here, a wrong code_verifier)
+// still carries the nonce to use next (RFC 9449 §8), so the client's
+// next request isn't challenged.
+func TestTokenErrorAfterAValidNonceCarriesTheNext(t *testing.T) {
 	h, _ := newHarnessWithNonces(t)
 	dpopKey := generateKey(t)
 	_, err := exchangeWithDPoPNonce(t, h, dpopKey, "")
@@ -533,8 +533,8 @@ func TestTokenErrorAfterTheNonceIsSpentCarriesTheNext(t *testing.T) {
 		t.Fatalf("ExchangeAuthorizationCode(wrong verifier) = %v, want invalid_grant", err)
 	}
 	next := failed.Nonce()
-	if next == "" || next == serr.Nonce() {
-		t.Fatalf("Nonce() = %q, want a fresh nonce", next)
+	if next == "" {
+		t.Fatal("Nonce() is empty, want the nonce to use next")
 	}
 	if _, err := exchangeWithDPoPNonce(t, h, dpopKey, next); err != nil {
 		t.Fatalf("ExchangeAuthorizationCode(with the nonce from the error) = %v", err)

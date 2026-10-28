@@ -38,7 +38,7 @@ func (failingNonceStore) Issue(context.Context, storage.NonceIssuance) error {
 	return errors.New("nonce store unavailable")
 }
 
-func (failingNonceStore) Consume(context.Context, storage.NonceConsumption) (storage.NonceRecord, error) {
+func (failingNonceStore) Lookup(context.Context, storage.NonceLookup) (storage.NonceRecord, error) {
 	return storage.NonceRecord{}, errors.New("nonce store unavailable")
 }
 
@@ -54,5 +54,14 @@ func TestNextDPoPNonceFailsWhenItCantIssue(t *testing.T) {
 	var result TokenResult
 	if err := s.addNextDPoPNonce(context.Background(), dpopClient, time.Now(), &result); err == nil || err.Code() != ErrorServerError {
 		t.Errorf("addNextDPoPNonce = %v, want server_error", err)
+	}
+}
+
+// TestCheckDPoPNonceFailsWhenItCantIssue: a challenge that can't carry a
+// nonce is server_error, not a use_dpop_nonce the client can't answer.
+func TestCheckDPoPNonceFailsWhenItCantIssue(t *testing.T) {
+	s := &Server{deps: Dependencies{Nonces: failingNonceStore{}, Random: rand.Reader}}
+	if err := s.checkDPoPNonce(context.Background(), "", time.Now()); err == nil || err.Code() != ErrorServerError {
+		t.Errorf("checkDPoPNonce = %v, want server_error", err)
 	}
 }

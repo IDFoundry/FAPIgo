@@ -264,6 +264,14 @@ func TestDPoPStoreUnavailable(t *testing.T) {
 		})
 		assertResourceError(t, err, resource.ErrorInvalidDPoPProof, 401, f.replay.err)
 	})
+	t.Run("nonce can't be issued", func(t *testing.T) {
+		f := newNonceFixture(t, "", issueFailingNonceStore{})
+		_, err := f.verify(t)
+		var rerr *resource.Error
+		if !errors.As(err, &rerr) || rerr.Code() != resource.ErrorServerError || rerr.HTTPStatus() != 500 {
+			t.Fatalf("err = %v, want a 500 server_error", err)
+		}
+	})
 	t.Run("nonce unknown", func(t *testing.T) {
 		f := newNonceFixture(t, "presented-nonce", failingNonceStore{err: errors.New("unknown nonce")})
 		_, err := f.verify(t)
@@ -274,11 +282,18 @@ func TestDPoPStoreUnavailable(t *testing.T) {
 	})
 }
 
-// failingNonceStore issues nonces but fails every Consume with err.
+// failingNonceStore issues nonces but fails every Lookup with err.
 type failingNonceStore struct{ err error }
 
 func (failingNonceStore) Issue(context.Context, storage.NonceIssuance) error { return nil }
 
-func (s failingNonceStore) Consume(context.Context, storage.NonceConsumption) (storage.NonceRecord, error) {
+func (s failingNonceStore) Lookup(context.Context, storage.NonceLookup) (storage.NonceRecord, error) {
 	return storage.NonceRecord{}, s.err
+}
+
+// issueFailingNonceStore can't issue a nonce.
+type issueFailingNonceStore struct{ failingNonceStore }
+
+func (issueFailingNonceStore) Issue(context.Context, storage.NonceIssuance) error {
+	return errors.New("nonce store unavailable")
 }

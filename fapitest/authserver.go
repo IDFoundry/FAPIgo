@@ -160,6 +160,7 @@ func (a *authServer) handlePAR(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.t.Fatalf("fapitest: encode PAR result: %v", err)
 	}
+	setDPoPNonce(w, result.NextDPoPNonce)
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	w.WriteHeader(http.StatusCreated)
 	if _, err := w.Write(body); err != nil {
@@ -274,6 +275,7 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	if len(result.AuthorizationDetails) > 0 {
 		resp["authorization_details"] = result.AuthorizationDetails
 	}
+	setDPoPNonce(w, result.NextDPoPNonce)
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		a.t.Fatalf("fapitest: encode token response: %v", err)
@@ -346,7 +348,16 @@ func (a *authServer) writeServerError(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	setDPoPNonce(w, srvErr.Nonce())
 	a.writeOAuthError(w, srvErr.HTTPStatus(), string(srvErr.Code()), srvErr.PublicDescription())
+}
+
+// setDPoPNonce sets the DPoP-Nonce header (RFC 9449 §8) when the server
+// handed out a nonce.
+func setDPoPNonce(w http.ResponseWriter, nonce string) {
+	if nonce != "" {
+		w.Header().Set("DPoP-Nonce", nonce)
+	}
 }
 
 func (a *authServer) writeOAuthError(w http.ResponseWriter, status int, code, description string) {

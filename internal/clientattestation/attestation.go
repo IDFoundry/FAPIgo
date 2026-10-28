@@ -165,6 +165,17 @@ type VerifiedAttestation struct {
 	ConfirmationJWK []byte
 }
 
+// VerifySignature checks only a's signature against pub under alg, for
+// a caller choosing among candidate keys before Verify checks the rest.
+// A key that doesn't verify it returns an error wrapping
+// jose.ErrInvalidSignature.
+func (a Attestation) VerifySignature(pub crypto.PublicKey, alg fapi.SignatureAlgorithm) error {
+	if err := a.compact.Verify(pub, alg); err != nil {
+		return fmt.Errorf("clientattestation: %w", err)
+	}
+	return nil
+}
+
 // Verify checks a's signature against pub and its claims against
 // policy.
 func (a Attestation) Verify(pub crypto.PublicKey, policy VerifyPolicy) (VerifiedAttestation, error) {

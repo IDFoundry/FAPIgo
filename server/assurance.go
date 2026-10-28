@@ -41,7 +41,7 @@ const (
 	// CIBA is configured). Every declaration must assert at least
 	// Durable, and AtomicConsume for whichever of those expose a
 	// Consume/Redeem/UseOnce-style operation (Transactions, Grants,
-	// Replay, Nonces, Backchannel — Clients is a plain lookup and the
+	// Replay, Backchannel — Clients and Nonces are plain lookups and the
 	// opaque-token store and Revocation are plain create/lookup/mark
 	// operations, none with anything to assert atomicity for). A store
 	// that doesn't implement StoreAssurance at all is rejected rather

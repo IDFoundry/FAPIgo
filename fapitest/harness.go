@@ -192,6 +192,13 @@ type Config struct {
 	// server.OpaqueAccessTokens backed by an in-memory store instead of
 	// JWT access tokens; the harness's verifiers look them up there.
 	OpaqueAccessTokens bool
+
+	// DPoPNonces, if set, makes the harness's server require DPoP nonces
+	// (RFC 9449 §8) at its PAR and token endpoints, from an in-memory
+	// server.Dependencies.Nonces with a one-minute
+	// Limits.DPoPNonceLifetime. The harness's resource verifiers don't
+	// require them.
+	DPoPNonces bool
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -349,6 +356,10 @@ func New(t *testing.T, cfg Config) *Harness {
 		Random:                 rand.Reader,
 	}
 	srvDeps.IdentityClaims = cfg.IdentityClaims
+	if cfg.DPoPNonces {
+		srvDeps.Nonces = memstore.NewNonceStore()
+		srvCfg.Limits.DPoPNonceLifetime = time.Minute
+	}
 	srvDeps.ResourcePolicy = cfg.ResourcePolicy
 	if cfg.EncryptIDTokens {
 		srvDeps.ClientEncryptionKeys = &memClientEncryptionKeySource{clientID: ClientID, decrypter: clientDecryption}

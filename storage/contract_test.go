@@ -272,14 +272,13 @@ func (s *refNonceStore) Issue(_ context.Context, issuance storage.NonceIssuance)
 	return nil
 }
 
-func (s *refNonceStore) Consume(_ context.Context, c storage.NonceConsumption) (storage.NonceRecord, error) {
+func (s *refNonceStore) Lookup(_ context.Context, c storage.NonceLookup) (storage.NonceRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	issuance, ok := s.nonces[c.Nonce]
 	if !ok {
 		return storage.NonceRecord{}, fmt.Errorf("unknown nonce")
 	}
-	delete(s.nonces, c.Nonce)
 	return storage.NonceRecord{ExpiresAt: issuance.ExpiresAt}, nil
 }
 

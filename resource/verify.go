@@ -163,11 +163,11 @@ type AuthorizationContext struct {
 	Audience []string
 	IssuedAt time.Time
 
-	// NextDPoPNonce is a freshly issued DPoP nonce the caller should set
-	// as this response's own DPoP-Nonce header, so its next call already
-	// carries a valid one instead of needing its own challenge/retry
-	// round trip (RFC 9449 §9):
-	// SetDPoPNonce does that.
+	// NextDPoPNonce is the DPoP nonce this Verifier currently hands out
+	// (replaced before half its lifetime has passed), which the caller
+	// should set as this response's own DPoP-Nonce header, so its next
+	// call already carries a valid one instead of needing its own
+	// challenge/retry round trip (RFC 9449 §9): SetDPoPNonce does that.
 	// Always "" when Dependencies.Nonces is nil (nonce-challenge support
 	// disabled); otherwise always populated on a successful Verify.
 	NextDPoPNonce string

@@ -149,6 +149,82 @@ Also wrap `/authorize` and the login and consent pages in
 `server.AuthorizationPageHeaders` (RFC 9700 §4.16 clickjacking), and
 show `InteractionRequest.RedirectURI` on the consent page. See
 [GETTING_STARTED.md](GETTING_STARTED.md) §5.
+### `resource.Config.ResourceURLs` is required, and `VerifyRequestFromHTTP` takes no target (resource, serverresource, fapitest)
+
+**Affects:** every resource server: one built with `resource.NewVerifier`
+or `serverresource.NewVerifier`, and every handler calling
+`resource.VerifyRequestFromHTTP`. A caller building
+`resource.VerifyRequest` by hand is affected when its `URL` isn't under
+the new `ResourceURLs`.
+
+**Why:** a DPoP proof's `htu` must name the URL its request was sent to,
+and the target was built per request by integrator code. The documented
+recipe, a fixed origin with the decoded `r.URL.Path`, let a proof made
+for `/accounts/a/b` verify at `/accounts/a%2Fb`, a different resource. A
+target built from `r.Host` let a resource server that received a token
+and proof replay them, once, at a sibling resource server sharing the
+token's audience. The verifier now knows its own external URLs and
+builds the target itself, from the escaped path. A target that is
+relative, isn't http(s) or isn't under a configured URL is refused, and
+so is a proof whose `htu` is relative or names another scheme.
+
+**What fails:**
+- `resource.NewVerifier` and `serverresource.NewVerifier` return an
+  error naming `resource_urls` until `ResourceURLs` is set. Under
+  `AssuranceProduction` an entry parsed with `fapi.AllowLoopbackHTTP` is
+  refused, as is any entry with a query.
+- `resource.VerifyRequestFromHTTP(r, target)` no longer compiles: it
+  takes just `r`.
+- A request whose escaped path no `ResourceURLs` prefix covers, or whose
+  explicit `VerifyRequest.URL` names another origin, is refused with 400
+  `invalid_request`. A relative or non-http(s) `VerifyRequest.URL` is a
+  500 `server_error`.
+- `fapitest.Harness.Resource` and `Harness.NewResourceVerifier` accept
+  only targets at `fapitest.ResourceServer` or the harness server's own
+  address, unless given their own `ResourceURLs`.
+
+**What to change:** give the verifier your API's external URL(s), each
+an origin or an origin with a path prefix, and drop the target from
+`VerifyRequestFromHTTP`:
+
+```go
+apiURL, err := fapi.ParseEndpointURL("https://api.example.com")
+// ...
+cfg := resource.Config{
+	// ...
+	ResourceURLs: []fapi.URL{apiURL},
+}
+// or, for endpoints in the authorization server's process:
+verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{
+	ResourceURLs: []fapi.URL{apiURL},
+})
+
+// in the handler:
+authz, err := verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r))
+```
+
+List every name the API is reached under, an mTLS alias host included.
+Behind a proxy that rewrites the forwarded path, set
+`VerifyRequest.URL` to the absolute URL the client called, under one of
+`ResourceURLs`.
+
+### A DPoP proof's `htm` must equal the request method exactly (server, resource, client)
+
+**Affects:** a client whose proof's `htm` differs in case from the
+method its request is sent with: another client library that upper-cases
+`htm` for a request sent as `get`, say. A FAPIgo client no longer does.
+
+**Why:** methods are case-sensitive (RFC 9110 §9.1), but verification
+upper-cased the request's method before comparing it with `htm`, so a
+proof for `GET` verified on a request sent as `get`. Proofs are now
+compared exactly, and `client` writes `htm` exactly as the request is
+sent rather than upper-casing it.
+
+**What fails:** the authorization server and resource server refuse
+such a proof with `invalid_dpop_proof`.
+
+**What to change:** nothing for a FAPIgo client. Send standard
+upper-case methods (`http.MethodGet` and the rest) from any other.
 
 ## v0.63.0
 

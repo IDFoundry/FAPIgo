@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"time"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/serverresource"
@@ -52,7 +52,15 @@ func (w *World) newAPI() (*api, error) {
 	// The APIs run in the bank's own process, so their verifier comes
 	// straight from the bank's server configuration: same token format
 	// and keys, same revocation and replay stores.
-	verifier, err := serverresource.NewVerifier(w.bank.cfg, w.bank.deps, serverresource.Options{})
+	// Its ResourceURLs is the API's own external URL, which a DPoP
+	// proof's htu names: the verifier builds each request's target from
+	// it and the request's path, never from anything else the request
+	// says about itself.
+	apiURL, err := fapi.ParseEndpointURL(w.URL(apiHost, ""))
+	if err != nil {
+		return nil, err
+	}
+	verifier, err := serverresource.NewVerifier(w.bank.cfg, w.bank.deps, serverresource.Options{ResourceURLs: []fapi.URL{apiURL}})
 	if err != nil {
 		return nil, err
 	}
@@ -70,11 +78,7 @@ func (w *World) newAPI() (*api, error) {
 // API's own external URL rather than anything the request says about
 // itself.
 func (a *api) verify(r *http.Request) (resource.AuthorizationContext, error) {
-	target, err := url.Parse(a.w.URL(apiHost, r.URL.Path))
-	if err != nil {
-		return resource.AuthorizationContext{}, err
-	}
-	return a.verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r, target))
+	return a.verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r))
 }
 
 // forbidden is RFC 6750 §3.1's insufficient_scope: a valid token that

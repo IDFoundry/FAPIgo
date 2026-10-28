@@ -564,9 +564,10 @@ specific DCR plan) has no DCR module at all. If it is added:
 `Verifier.Verify(ctx, VerifyRequest{Method, URL, Authorization,
 DPoPProofs, PeerCertificate})` → `AuthorizationContext{InternalSubject,
 ClientSubject, ClientID, Scopes, Claims}`, with the request usually built by
-`resource.VerifyRequestFromHTTP(r, target)` — `target` being the
-endpoint's own fixed external URL, never one built from the `Host`
-header. Token
+`resource.VerifyRequestFromHTTP(r)`, whose target `Verify` builds from
+the verifier's own configured external URLs (`Config.ResourceURLs`) and
+the request's escaped path — never from the `Host` header or the decoded
+path. Token
 verification is inseparable from method/URL/DPoP context, so there is no
 bare `VerifyJWT` entry point — and, symmetrically, no bare `VerifyDPoP`
 entry point either, since a DPoP proof can't be judged valid without the

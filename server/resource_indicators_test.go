@@ -838,8 +838,9 @@ func audienceVerifier(t *testing.T, h harness, store *memstore.AccessTokenStore,
 		resolver = jwt
 	}
 	verifier, err := resource.NewVerifier(resource.Config{
-		Limits:    resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
-		Assurance: resource.AssuranceDevelopment,
+		Limits:       resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+		Assurance:    resource.AssuranceDevelopment,
+		ResourceURLs: testResourceServerURLs(t),
 	}, resource.Dependencies{
 		AccessTokens: resolver,
 		Replay:       memstore.NewReplayStore(),

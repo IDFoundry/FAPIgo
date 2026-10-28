@@ -294,12 +294,7 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 // client/userinfo_test.go, and this handler's job is the transport, not
 // re-proving that.
 func (a *authServer) handleUserInfo(w http.ResponseWriter, r *http.Request) {
-	authz, err := a.resource.Verify(r.Context(), resource.VerifyRequest{
-		Method:        r.Method,
-		URL:           requestURL(r, a.ts.URL),
-		Authorization: r.Header.Get("Authorization"),
-		DPoPProofs:    r.Header.Values("DPoP"),
-	})
+	authz, err := a.resource.Verify(r.Context(), resource.VerifyRequestFromHTTP(r))
 	if err != nil {
 		a.writeResourceError(w, err)
 		return
@@ -309,21 +304,6 @@ func (a *authServer) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]any{"sub": authz.InternalSubject}); err != nil {
 		a.t.Fatalf("fapitest: encode userinfo response: %v", err)
 	}
-}
-
-// requestURL reconstructs the absolute URL r was made against —
-// resource.VerifyRequest.URL must be absolute (it's compared against
-// the DPoP proof's own "htu" claim, itself always absolute), but an
-// http.Request's own r.URL is request-target-relative for a real server
-// listener.
-func requestURL(r *http.Request, base string) *url.URL {
-	u, err := url.Parse(base)
-	if err != nil {
-		panic(fmt.Sprintf("fapitest: parse base url: %v", err))
-	}
-	u.Path = r.URL.Path
-	u.RawQuery = r.URL.RawQuery
-	return u
 }
 
 func (a *authServer) writeResourceError(w http.ResponseWriter, err error) {

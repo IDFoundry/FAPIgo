@@ -44,8 +44,9 @@ func TestCodeReuseRevokesAccessTokensFromItsRefreshToken(t *testing.T) {
 	}
 
 	verifier, err := resource.NewVerifier(resource.Config{
-		Limits:    resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
-		Assurance: resource.AssuranceDevelopment,
+		Limits:       resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+		Assurance:    resource.AssuranceDevelopment,
+		ResourceURLs: testResourceServerURLs(t),
 	}, resource.Dependencies{
 		AccessTokens: resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: store},
 		Replay:       memstore.NewReplayStore(),
@@ -133,4 +134,15 @@ func TestRefreshRefusesARevokedCodeGrant(t *testing.T) {
 	if err := refresh(); err == nil {
 		t.Fatal("RefreshAccessToken with its code grant revoked = nil error, want invalid_grant")
 	}
+}
+
+// testResourceServerURLs are the origins the tests' resource servers
+// serve, as resource.Config.ResourceURLs.
+func testResourceServerURLs(t testing.TB) []fapi.URL {
+	t.Helper()
+	u, err := fapi.ParseEndpointURL("https://rs.example.com")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	return []fapi.URL{u}
 }

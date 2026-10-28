@@ -38,6 +38,7 @@ import (
 	"reflect"
 	"time"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/resourceindicator"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/pairwise"
@@ -56,6 +57,14 @@ const maxKeyCandidates = 8
 // Options are the verifier's own settings, which have no counterpart in
 // the server's configuration.
 type Options struct {
+	// ResourceURLs are the protected endpoints' own external URLs, as
+	// the verifier's resource.Config.ResourceURLs: each an origin,
+	// optionally with a path prefix, that a DPoP proof's htu must name
+	// ("https://as.example/userinfo", say). Required: the server's
+	// configuration names no protected endpoint of its own, and the
+	// request's Host header is the client's to choose.
+	ResourceURLs []fapi.URL
+
 	// Nonces enables DPoP nonce challenges at the protected endpoints
 	// (RFC 9449 §9); nil leaves them disabled. It must not be the
 	// server's own Dependencies.Nonces: nonce stores are keyed by nonce
@@ -107,6 +116,8 @@ type Options struct {
 //     server.NoRevocation becomes resource.NoRevocation.
 //   - deps.Replay, deps.Clock, and cfg.Limits.MaxDPoPProofAge and
 //     MaxClockSkew, as they are.
+//   - Options.ResourceURLs, as the verifier's
+//     resource.Config.ResourceURLs.
 //   - cfg.Assurance and cfg.Deployment, as the verifier's own
 //     resource.Config.Assurance and Deployment: a production
 //     server gets a production verifier, which also checks
@@ -150,8 +161,9 @@ func NewVerifier(cfg server.Config, deps server.Dependencies, opts Options) (*re
 			MaxDPoPProofAge: cfg.Limits.MaxDPoPProofAge,
 			MaxClockSkew:    cfg.Limits.MaxClockSkew,
 		},
-		Assurance:  assurance,
-		Deployment: deployment,
+		Assurance:    assurance,
+		Deployment:   deployment,
+		ResourceURLs: opts.ResourceURLs,
 	}
 	rdeps := resource.Dependencies{
 		AccessTokens: accessTokens,

@@ -33,9 +33,13 @@ type VerifyRequest struct {
 	// name.
 	Method string
 
-	// URL is this endpoint's own externally visible URL, which a DPoP
-	// proof's htu must name — never one built from the request's Host
-	// header (see VerifyRequestFromHTTP's target).
+	// URL is the absolute URL the client called, which a DPoP proof's
+	// htu must name. Leave it nil with a request built by
+	// VerifyRequestFromHTTP: Verify then builds it from the request's
+	// escaped path and Config.ResourceURLs. Set, it must be an absolute
+	// http(s) URL under one of Config.ResourceURLs, or Verify refuses
+	// the request — so one built from the request's Host header, which
+	// the client controls, can name no other resource server.
 	URL *url.URL
 
 	// Authorization is the request's one Authorization header. A request
@@ -71,6 +75,11 @@ type VerifyRequest struct {
 	// from anything the client controls lets anyone present a stolen
 	// certificate-bound token.
 	PeerCertificate *x509.Certificate
+
+	// requestPath is the escaped path (url.URL.EscapedPath) of the
+	// request VerifyRequestFromHTTP built this from, which Verify places
+	// under Config.ResourceURLs when URL is nil.
+	requestPath string
 
 	// repeatedAuthorization is VerifyRequestFromHTTP's mark of a request
 	// with more than one Authorization header.
@@ -252,10 +261,14 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 	if perr != nil {
 		return AuthorizationContext{}, usedDPoP, perr
 	}
+	targets, terr := v.requestTargets(req)
+	if terr != nil {
+		return AuthorizationContext{}, usedDPoP, terr
+	}
 
 	now := v.deps.Clock.Now()
 
-	senderConstrain, verifiedProof, certThumbprint, verr := v.resolveCredential(ctx, req, dpopProof, raw, usedDPoP, now)
+	senderConstrain, verifiedProof, certThumbprint, verr := v.resolveCredential(ctx, req, targets, dpopProof, raw, usedDPoP, now)
 	if verr != nil {
 		return AuthorizationContext{}, usedDPoP, verr
 	}
@@ -319,7 +332,7 @@ func parseAuthorization(req VerifyRequest) (dpopProof, raw string, usedDPoP bool
 	if req.Method == "" {
 		return "", "", false, newError(ErrorInvalidRequest, 400, "method is required", nil)
 	}
-	if req.URL == nil {
+	if req.URL == nil && req.requestPath == "" {
 		return "", "", false, newError(ErrorInvalidRequest, 400, "url is required", nil)
 	}
 
@@ -440,7 +453,7 @@ func (v *Verifier) checkNotRevoked(ctx context.Context, resolved ResolvedAccessT
 // the resolved access token against. Split out of Verify purely to keep
 // that method's own token-resolution/binding/revocation pipeline
 // readable — this is the one genuinely separable sub-task within it.
-func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpopProof, raw string, usedDPoP bool, now time.Time) (storage.SenderConstrain, dpop.VerifiedProof, string, *Error) {
+func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, targets []*url.URL, dpopProof, raw string, usedDPoP bool, now time.Time) (storage.SenderConstrain, dpop.VerifiedProof, string, *Error) {
 	if usedDPoP {
 		if dpopProof == "" {
 			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "DPoP header is required", nil)
@@ -451,13 +464,14 @@ func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpo
 		// proof's key. A proof anyone can sign with their own key and a
 		// made-up token must not be able to write to either store.
 		verifiedProof, err := dpop.Verify(ctx, dpop.VerifyRequest{
-			Proof:        dpopProof,
-			Method:       req.Method,
-			URL:          req.URL,
-			AccessToken:  raw,
-			Now:          now,
-			MaxProofAge:  v.cfg.Limits.MaxDPoPProofAge,
-			MaxClockSkew: v.cfg.Limits.MaxClockSkew,
+			Proof:         dpopProof,
+			Method:        req.Method,
+			URL:           targets[0],
+			AlternateURLs: targets[1:],
+			AccessToken:   raw,
+			Now:           now,
+			MaxProofAge:   v.cfg.Limits.MaxDPoPProofAge,
+			MaxClockSkew:  v.cfg.Limits.MaxClockSkew,
 		})
 		if err != nil {
 			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidDPoPProof, 401, "DPoP proof verification failed", err)

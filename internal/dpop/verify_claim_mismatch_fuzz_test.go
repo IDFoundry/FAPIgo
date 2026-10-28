@@ -6,7 +6,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -81,10 +80,9 @@ func FuzzVerifyDPoPProofClaimMismatch(f *testing.F) {
 // or a URL that canonicalizes the same way).
 func mismatchProofRequest(req *ProofRequest, field uint8, alt string) bool {
 	switch field % 4 {
-	case 0: // htm mismatch — req.Method is still the upper-case base
-		// method here. Conservatively skips any alt that upper-cases to
-		// it (e.g. "post"), even though Verify would reject that too.
-		if alt == "" || strings.ToUpper(alt) == req.Method {
+	case 0: // htm mismatch: methods are case-sensitive (RFC 9110
+		// §9.1), so any other spelling, "post" included, must fail.
+		if alt == "" || alt == req.Method {
 			return false
 		}
 		req.Method = alt

@@ -3,6 +3,7 @@ package resource
 import (
 	"time"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/pairwise"
 )
 
@@ -38,6 +39,26 @@ type Limits struct {
 // effect.
 type Config struct {
 	Limits Limits
+
+	// ResourceURLs are this resource server's own external URLs, as
+	// clients call it: each an origin ("https://api.example"),
+	// optionally with a path prefix ("https://api.example/accounts"),
+	// parsed with fapi.ParseEndpointURL and carrying no query. Required.
+	//
+	// A DPoP proof's htu must name the URL a request was made to (RFC
+	// 9449 §4.3), and only this resource server knows its own: the
+	// request's Host header, and the path a front end forwards it under,
+	// are the client's to choose. For a request built by
+	// VerifyRequestFromHTTP, Verify takes the target to be the request's
+	// escaped path (never its decoded one, which names another resource
+	// when a segment holds "%2F") at each origin here whose path prefix
+	// covers it, and refuses a request no prefix covers. An explicit
+	// VerifyRequest.URL must be under one of them too. Several origins
+	// serve one resource server reachable under more than one name, an
+	// mTLS alias host among them; a proof naming any of them is
+	// accepted. A URL parsed with fapi.AllowLoopbackHTTP is refused
+	// under AssuranceProduction.
+	ResourceURLs []fapi.URL
 
 	// Assurance is how strictly NewVerifier checks Dependencies; see
 	// AssuranceLevel. Required: the zero value is refused.

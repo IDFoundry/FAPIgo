@@ -89,8 +89,23 @@ func validConfig(t *testing.T) resource.Config {
 			MaxDPoPProofAge: time.Minute,
 			MaxClockSkew:    5 * time.Second,
 		},
-		Assurance: resource.AssuranceDevelopment,
+		Assurance:    resource.AssuranceDevelopment,
+		ResourceURLs: testResourceURLs(t),
 	}
+}
+
+// testResourceURLs are the origins the tests' resource servers serve.
+func testResourceURLs(t testing.TB) []fapi.URL {
+	t.Helper()
+	var out []fapi.URL
+	for _, raw := range []string{"https://rs.example.com", "https://rs.example"} {
+		u, err := fapi.ParseEndpointURL(raw)
+		if err != nil {
+			t.Fatalf("ParseEndpointURL(%q): %v", raw, err)
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 func validAccessTokens(t *testing.T) resource.AccessTokenResolver {

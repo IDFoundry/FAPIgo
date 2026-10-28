@@ -421,9 +421,16 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	// client-side nonce-challenge retry the way this module's own client
 	// package does, so turning this on unconditionally would risk
 	// breaking unrelated AS conformance.
-	var resourceOpts serverresource.Options
+	// Its URLs are the two protected endpoints', and the mTLS alias of
+	// UserInfo's when there is one: a DPoP proof names the URL its client
+	// called, never one taken from the request's Host header.
+	resourceOpts := serverresource.Options{ResourceURLs: []fapi.URL{userinfoURL, accountsURL}}
+	if mtlsUserinfoURL != nil {
+		resourceOpts.ResourceURLs = append(resourceOpts.ResourceURLs, *mtlsUserinfoURL)
+	}
 	if dpopNonceChallenge {
-		resourceOpts = serverresource.Options{Nonces: memstore.NewNonceStore(), NonceLifetime: dpopNonceLifetime}
+		resourceOpts.Nonces = memstore.NewNonceStore()
+		resourceOpts.NonceLifetime = dpopNonceLifetime
 	}
 	resourceVerifier, err := serverresource.NewVerifier(srvCfg, srvDeps, resourceOpts)
 	if err != nil {
@@ -433,8 +440,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	consent := newConsentHandler(srv, clientRepo, server.SystemClock{}, resolved.DefaultSubject)
 	backchannel := newBackchannelHandler(srv, server.SystemClock{}, resolved.DefaultSubject)
 	userinfoURLValue := userinfoURL.URL()
-	accountsURLValue := accountsURL.URL()
-	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, &accountsURLValue, identityClaims, clientRepo, userinfoSigning, cibaApprovalUIToken, resolved.Federation != nil, dynClients, federationTrustAnchorAdminToken), nil
+	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, identityClaims, clientRepo, userinfoSigning, cibaApprovalUIToken, resolved.Federation != nil, dynClients, federationTrustAnchorAdminToken), nil
 }
 
 // pairwisePrefix is put in front of every pairwise sub this binary

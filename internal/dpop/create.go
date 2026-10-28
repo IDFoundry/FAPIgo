@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"strings"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -31,7 +30,10 @@ type ProofRequest struct {
 	// Algorithm the proof is signed with. Signer's key must match it.
 	Algorithm fapi.SignatureAlgorithm
 
-	// Method is the HTTP method of the request this proof is bound to.
+	// Method is the HTTP method of the request this proof is bound to,
+	// written into the "htm" claim exactly as given: methods are
+	// case-sensitive (RFC 9110 §9.1), and net/http sends one as given,
+	// so a proof for "get" names the request "get" is sent as.
 	Method string
 
 	// URL is the target URI of the request this proof is bound to. It is
@@ -98,7 +100,7 @@ func CreateProof(req ProofRequest) (string, error) {
 
 	c := claims{
 		JTI: jti,
-		HTM: strings.ToUpper(req.Method),
+		HTM: req.Method,
 		HTU: canonical.URI(req.URL),
 		IAT: numericdate.Value(req.Now.Unix()),
 	}

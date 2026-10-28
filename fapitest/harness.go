@@ -45,6 +45,13 @@ const (
 
 	// Subject is the end-user every authorization is approved for.
 	Subject = "end-user-1"
+
+	// ResourceServer is the origin of the protected resources a test
+	// calls through Harness.Resource, and through a verifier from
+	// Harness.NewResourceVerifier given no ResourceURLs: those verifiers'
+	// resource.Config.ResourceURLs are it and the harness server's own
+	// loopback address, where its UserInfo endpoint is served.
+	ResourceServer = "https://rs.fapitest.internal"
 )
 
 // Config selects which FAPI 2.0 profile the harness's client and server
@@ -218,9 +225,11 @@ type Harness struct {
 	clientDeps   client.Dependencies
 
 	// serverConfig and serverDeps built the server, for
-	// NewResourceVerifier.
+	// NewResourceVerifier, and resourceURLs are its verifiers' default
+	// ResourceURLs.
 	serverConfig server.Config
 	serverDeps   server.Dependencies
+	resourceURLs []fapi.URL
 }
 
 // New builds a Harness: an in-memory-backed server.Server exposed over a
@@ -428,7 +437,8 @@ func New(t *testing.T, cfg Config) *Harness {
 		t.Fatalf("fapitest: client.New: %v", err)
 	}
 
-	rs, err := serverresource.NewVerifier(srvCfg, srvDeps, serverresource.Options{})
+	resourceURLs := harnessResourceURLs(t, as.ts.URL)
+	rs, err := serverresource.NewVerifier(srvCfg, srvDeps, serverresource.Options{ResourceURLs: resourceURLs})
 	if err != nil {
 		t.Fatalf("fapitest: serverresource.NewVerifier: %v", err)
 	}
@@ -438,8 +448,23 @@ func New(t *testing.T, cfg Config) *Harness {
 		t: t, Client: c, Resource: rs, Clock: clock, authServer: as, httpClient: httpClient,
 		clientKeys: clientKeys, signatureAlgorithm: sigAlg, MTLSCertificate: mtlsCert,
 		clientConfig: clientCfg, clientDeps: clientDeps,
-		serverConfig: srvCfg, serverDeps: srvDeps,
+		serverConfig: srvCfg, serverDeps: srvDeps, resourceURLs: resourceURLs,
 	}
+}
+
+// harnessResourceURLs are ResourceServer and the harness server's own
+// loopback URL, as resource.Config.ResourceURLs.
+func harnessResourceURLs(t *testing.T, serverURL string) []fapi.URL {
+	t.Helper()
+	rs, err := fapi.ParseEndpointURL(ResourceServer)
+	if err != nil {
+		t.Fatalf("fapitest: ParseEndpointURL(ResourceServer): %v", err)
+	}
+	local, err := fapi.ParseEndpointURL(serverURL, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("fapitest: ParseEndpointURL(server URL): %v", err)
+	}
+	return []fapi.URL{rs, local}
 }
 
 // newAccessTokenIssuer returns the harness server's access-token
@@ -466,7 +491,12 @@ func newAccessTokenIssuer(t *testing.T, cfg Config, asKeys keys.KeyManager, sigA
 // opts — Options.Resource set, say, for a resource server that accepts
 // only tokens issued for it (RFC 8707). Harness.Resource is the one
 // built with no options, accepting tokens addressed to the issuer.
+// Without opts.ResourceURLs, the verifier's are Harness.Resource's:
+// ResourceServer and the harness server's own address.
 func (h *Harness) NewResourceVerifier(opts serverresource.Options) (*resource.Verifier, error) {
+	if len(opts.ResourceURLs) == 0 {
+		opts.ResourceURLs = h.resourceURLs
+	}
 	return serverresource.NewVerifier(h.serverConfig, h.serverDeps, opts)
 }
 

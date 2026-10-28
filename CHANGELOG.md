@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.63.0](https://github.com/IDFoundry/FAPIgo/compare/v0.62.0...v0.63.0) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** a request object or CIBA signed request carrying a sub claim is now refused, from every client. A client assertion carrying an authorization or CIBA request claim (response_type, scope, state, nonce, login_hint and the like) is refused with invalid_client. Client assertions, request objects and CIBA requests share one replay namespace, so a jti a client reuses across them is refused as a replay. A core request-object or CIBA request parameter of the wrong JSON type, or an empty dpop_jkt, is refused at PAR with invalid_request_object and at the CIBA endpoint with invalid_request. See UPGRADING.md.
+* **server:** extension.NewRegistry refuses a ReturnInTokenClaims definition under a reserved token claim name, including roles, groups, entitlements, act, may_act, events, code, state and error and the names server.New refused before. GrantedAuthorization.IDTokenClaims refuses code, state and error. SignUserInfoResponse refuses events, _claim_names, _claim_sources, sub_jwk, azp, nonce, the hashes, code, state and error. JWTAccessTokens refuses events, _claim_names, _claim_sources and sub_jwk in its claims. The client refuses ID tokens, JARM responses and signed UserInfo responses whose typ is neither absent nor JWT, and JARM responses carrying an ID token claim. See UPGRADING.md.
+* **server:** authorization codes are stored under a new digest, so a code issued before the upgrade and exchanged after it is refused with invalid_grant, and anything computing a code's digest outside the server must follow. storage.TestGrantStoreContract now fails a store that keys codes and refresh tokens by digest alone in one table; such a store must add the kind to its key. See UPGRADING.md.
+* a URL with a non-ASCII host is refused by fapi.ParseIssuerURL, ParseEndpointURL and ParseRedirectURL, by the server's pushed authorization request and by client.ResourceClient.Do, and a DPoP proof whose htu has one never verifies. Give an internationalized domain name in its xn-- A-label form. See UPGRADING.md.
+* **jose:** an RSA JWK with a public exponent other than 65537 is refused everywhere, and an RSA key over 4096 bits is refused in a DPoP proof or attestation PoP and skipped in a client JWK Set or a federation entity's keys, a Trust Anchor's configured JWKS included. Re-key such clients, attesters and entities with a 2048 to 4096-bit RSA key and exponent 65537, or an EC P-256 or Ed25519 key. See UPGRADING.md.
+
+### Bug Fixes
+
+* **canonical:** make URI idempotent for a // path after a scheme ([b4d3ffe](https://github.com/IDFoundry/FAPIgo/commit/b4d3ffeeea846ede142695088894f8cfad5ed177))
+* **client:** send response_mode=jwt under message signing ([2f75508](https://github.com/IDFoundry/FAPIgo/commit/2f755082d6fb497f711a4a9817ba59a189998406))
+* compare hosts and schemes in ASCII case only, and refuse non-ASCII hosts ([b6280ec](https://github.com/IDFoundry/FAPIgo/commit/b6280ecd9b914731e5ee6940546e01af7cf57639))
+* **jose:** limit caller-supplied RSA keys to 4096 bits and exponent 65537 ([dfeb5f9](https://github.com/IDFoundry/FAPIgo/commit/dfeb5f9db63ca874c29d97f3068bd1e6a6e91ad0))
+* **server:** keep authorization codes and refresh tokens apart ([3067b14](https://github.com/IDFoundry/FAPIgo/commit/3067b1453ee59043b873d57ef285d58de023ae14))
+* **server:** keep client-signed JWT kinds apart and type request-object parameters ([bdc6325](https://github.com/IDFoundry/FAPIgo/commit/bdc63251bd86403c29b1cad34e5cbb3d12cd01d4))
+* **server:** reserve claim names with one policy across every claim source ([27c55b2](https://github.com/IDFoundry/FAPIgo/commit/27c55b2f70a9899243a12dfcee3684dee611baf8))
+
 ## [0.62.0](https://github.com/IDFoundry/FAPIgo/compare/v0.61.0...v0.62.0) (2026-10-27)
 
 

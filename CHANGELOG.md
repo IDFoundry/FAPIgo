@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.1](https://github.com/IDFoundry/FAPIgo/compare/v0.65.0...v0.65.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **server:** recommend a DPoP nonce lifetime now that production uses nonces ([a28ff1b](https://github.com/IDFoundry/FAPIgo/commit/a28ff1befdd57556a45aa38d85b0bcc6c5510a69))
+
 ## [0.65.0](https://github.com/IDFoundry/FAPIgo/compare/v0.64.0...v0.65.0) (2026-10-28)
 
 

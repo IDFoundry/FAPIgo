@@ -345,7 +345,10 @@ type Limits struct {
 	// BackchannelAuthenticationRequestLifetime bounds how long a
 	// pending CIBA request remains pollable — reported to the client as
 	// expires_in, mirroring PushedRequestLifetime's role for PAR.
-	// Required only when Endpoints.BackchannelAuthentication is set.
+	// Required only when Endpoints.BackchannelAuthentication is set,
+	// and then New requires a whole number of seconds, at least one:
+	// expires_in is an integer (CIBA §7.3), so any other value would be
+	// advertised truncated.
 	BackchannelAuthenticationRequestLifetime time.Duration
 
 	// MaxBackchannelAuthenticationRequestLifetime bounds how far in the
@@ -360,7 +363,10 @@ type Limits struct {
 	// must wait between two polls of the same auth_req_id — reported to
 	// the client as "interval", and enforced server-side (a poll sooner
 	// than this fails with ErrorSlowDown). Required only when
-	// Endpoints.BackchannelAuthentication is set.
+	// Endpoints.BackchannelAuthentication is set, and then New requires
+	// a whole number of seconds, at least one: interval is an integer
+	// (CIBA §7.3), and a truncated value would tell the client to poll
+	// sooner than this enforces.
 	BackchannelAuthenticationPollInterval time.Duration
 
 	// MaxClientAttestationLifetime bounds how far in the future a

@@ -56,7 +56,7 @@ func cibaConfigAndDeps(t *testing.T, assurance server.AssuranceLevel, notifier s
 	cfg.Algorithms.BackchannelAuthenticationRequest = server.AlgorithmSet{fapi.ES256}
 	cfg.Limits.BackchannelAuthenticationRequestLifetime = 2 * time.Minute
 	cfg.Limits.MaxBackchannelAuthenticationRequestLifetime = time.Minute
-	cfg.Limits.BackchannelAuthenticationPollInterval = time.Millisecond
+	cfg.Limits.BackchannelAuthenticationPollInterval = time.Second
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Backchannel = declaredBackchannelStore{memstore.NewBackchannelAuthenticationStore()}

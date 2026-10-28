@@ -342,16 +342,25 @@ func validateCIBALimits(cfg Config, cibaEnabled bool) error {
 	if !cibaEnabled {
 		return nil
 	}
-	if cfg.Limits.BackchannelAuthenticationRequestLifetime <= 0 {
-		return fmt.Errorf("server: config: limits.backchannel_authentication_request_lifetime must be positive when endpoints.backchannel_authentication is set")
+	if !isWholePositiveSeconds(cfg.Limits.BackchannelAuthenticationRequestLifetime) {
+		return fmt.Errorf("server: config: limits.backchannel_authentication_request_lifetime must be a whole number of seconds, at least 1s, when endpoints.backchannel_authentication is set (CIBA §7.3 sends it as integer expires_in)")
 	}
 	if cfg.Limits.MaxBackchannelAuthenticationRequestLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.max_backchannel_authentication_request_lifetime must be positive when endpoints.backchannel_authentication is set")
 	}
-	if cfg.Limits.BackchannelAuthenticationPollInterval <= 0 {
-		return fmt.Errorf("server: config: limits.backchannel_authentication_poll_interval must be positive when endpoints.backchannel_authentication is set")
+	if !isWholePositiveSeconds(cfg.Limits.BackchannelAuthenticationPollInterval) {
+		return fmt.Errorf("server: config: limits.backchannel_authentication_poll_interval must be a whole number of seconds, at least 1s, when endpoints.backchannel_authentication is set (CIBA §7.3 sends it as integer interval)")
 	}
 	return nil
+}
+
+// isWholePositiveSeconds reports whether d is at least one second and
+// a whole number of seconds: CIBA §7.3's expires_in and interval are
+// integers, so any other value would be advertised truncated — a
+// lifetime the client sees as shorter than enforced, or an interval it
+// sees as shorter than the one that answers slow_down.
+func isWholePositiveSeconds(d time.Duration) bool {
+	return d >= time.Second && d%time.Second == 0
 }
 
 func validateAttestationLimits(cfg Config) error {

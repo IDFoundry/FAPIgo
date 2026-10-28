@@ -291,6 +291,27 @@ sent as `expires_in: 0`.
 
 ```go
 cfg.Limits.PushedRequestLifetime = 90 * time.Second
+### CIBA's poll interval and request lifetime must be whole seconds (server)
+
+**Affects:** a server with `Endpoints.BackchannelAuthentication` set whose
+`Limits.BackchannelAuthenticationPollInterval` or
+`Limits.BackchannelAuthenticationRequestLifetime` is under one second or
+not a whole number of seconds, at every assurance level.
+
+**Why:** CIBA §7.3 sends `interval` and `expires_in` as integer seconds,
+and the acknowledgement truncated them. A 1.5 s interval was advertised
+as 1, so a client that waited exactly the advertised interval got
+`slow_down`; a sub-second interval or lifetime was advertised as 0.
+
+**What fails:** `server.New` returns an error naming
+`limits.backchannel_authentication_poll_interval` or
+`limits.backchannel_authentication_request_lifetime`.
+
+**What to change:** use a whole number of seconds, at least one:
+
+```go
+cfg.Limits.BackchannelAuthenticationPollInterval = 2 * time.Second
+cfg.Limits.BackchannelAuthenticationRequestLifetime = 3 * time.Minute
 ```
 
 ## v0.64.0

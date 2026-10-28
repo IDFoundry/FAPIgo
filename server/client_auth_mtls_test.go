@@ -651,7 +651,7 @@ func TestBeginBackchannelAuthenticationCertClientAuthReachesPeerCertificate(t *t
 			MaxClockSkew:                                5 * time.Second,
 			BackchannelAuthenticationRequestLifetime:    2 * time.Minute,
 			MaxBackchannelAuthenticationRequestLifetime: time.Minute,
-			BackchannelAuthenticationPollInterval:       time.Millisecond,
+			BackchannelAuthenticationPollInterval:       time.Second,
 		},
 		Assurance: server.AssuranceDevelopment,
 	}

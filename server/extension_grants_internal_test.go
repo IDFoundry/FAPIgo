@@ -56,3 +56,12 @@ func TestNextDPoPNonceFailsWhenItCantIssue(t *testing.T) {
 		t.Errorf("addNextDPoPNonce = %v, want server_error", err)
 	}
 }
+
+// TestCheckDPoPNonceFailsWhenItCantIssue: a challenge that can't carry a
+// nonce is server_error, not a use_dpop_nonce the client can't answer.
+func TestCheckDPoPNonceFailsWhenItCantIssue(t *testing.T) {
+	s := &Server{deps: Dependencies{Nonces: failingNonceStore{}, Random: rand.Reader}}
+	if err := s.checkDPoPNonce(context.Background(), "", time.Now()); err == nil || err.Code() != ErrorServerError {
+		t.Errorf("checkDPoPNonce = %v, want server_error", err)
+	}
+}

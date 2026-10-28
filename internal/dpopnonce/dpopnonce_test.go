@@ -107,7 +107,20 @@ func TestRotatorRetriesAfterAFailedIssue(t *testing.T) {
 	if _, err := r.Current(context.Background(), failingStore{}, rand.Reader, lifetime, now); err == nil {
 		t.Fatal("Current over a failing store = nil error, want error")
 	}
-	if nonce := current(t, &r, memstore.NewNonceStore(), now); nonce == "" {
+	if current(t, &r, memstore.NewNonceStore(), now) == "" {
 		t.Fatal("Current after a failed Issue = \"\", want a new nonce")
+	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("no entropy") }
+
+// TestRotatorFailsWithoutRandomness: a nonce that can't be generated is
+// an error, and nothing is stored.
+func TestRotatorFailsWithoutRandomness(t *testing.T) {
+	var r Rotator
+	if _, err := r.Current(context.Background(), memstore.NewNonceStore(), failingReader{}, lifetime, time.Unix(1_800_000_000, 0)); err == nil {
+		t.Fatal("Current with a failing reader = nil error, want error")
 	}
 }

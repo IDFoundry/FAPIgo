@@ -31,6 +31,20 @@ type fixedClock struct{ now time.Time }
 
 func (c fixedClock) Now() time.Time { return c.now }
 
+// withURLs is opts with ResourceURLs naming every origin the tests'
+// protected endpoints are called at.
+func withURLs(t testing.TB, opts serverresource.Options) serverresource.Options {
+	t.Helper()
+	for _, raw := range []string{"https://as.example.com", "https://api.saas.example", "https://issuer-b.example.com"} {
+		u, err := fapi.ParseEndpointURL(raw)
+		if err != nil {
+			t.Fatalf("ParseEndpointURL(%q): %v", raw, err)
+		}
+		opts.ResourceURLs = append(opts.ResourceURLs, u)
+	}
+	return opts
+}
+
 func serverConfig(t *testing.T) server.Config {
 	t.Helper()
 	issuer, err := fapi.ParseIssuerURL("https://as.example.com")
@@ -104,7 +118,7 @@ func TestVerifierSeesServerRevocation(t *testing.T) {
 			ctx := context.Background()
 			cfg := serverConfig(t)
 			deps := serverDependencies(t, accessTokens, now)
-			verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{})
+			verifier, err := serverresource.NewVerifier(cfg, deps, withURLs(t, serverresource.Options{}))
 			if err != nil {
 				t.Fatalf("NewVerifier: %v", err)
 			}
@@ -175,7 +189,7 @@ func TestNewVerifierRejectsWhatItCannotMirror(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(&deps)
 			}
-			_, err := serverresource.NewVerifier(serverConfig(t), deps, tc.opts)
+			_, err := serverresource.NewVerifier(serverConfig(t), deps, withURLs(t, tc.opts))
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("NewVerifier = %v, want an error mentioning %q", err, tc.wantErr)
 			}
@@ -203,7 +217,7 @@ func TestNewVerifierAccepts(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(&deps)
 			}
-			if _, err := serverresource.NewVerifier(serverConfig(t), deps, tc.opts); err != nil {
+			if _, err := serverresource.NewVerifier(serverConfig(t), deps, withURLs(t, tc.opts)); err != nil {
 				t.Fatalf("NewVerifier: %v", err)
 			}
 		})
@@ -229,7 +243,7 @@ func TestNewVerifierInheritsAssurance(t *testing.T) {
 	production.Deployment = server.DeploymentSingleInstance
 
 	t.Run("production refuses an undeclared replay store", func(t *testing.T) {
-		_, err := serverresource.NewVerifier(production, serverDependencies(t, jwt, now), serverresource.Options{})
+		_, err := serverresource.NewVerifier(production, serverDependencies(t, jwt, now), withURLs(t, serverresource.Options{}))
 		if err == nil || !strings.Contains(err.Error(), "resource: dependencies: replay must implement storage.StoreAssurance under AssuranceProduction") {
 			t.Fatalf("NewVerifier = %v, want the production replay check", err)
 		}
@@ -238,7 +252,7 @@ func TestNewVerifierInheritsAssurance(t *testing.T) {
 		deps := serverDependencies(t, jwt, now)
 		deps.Replay = declaredReplay{memstore.NewReplayStore()}
 		deps.Revocation = server.NoRevocation{}
-		_, err := serverresource.NewVerifier(production, deps, serverresource.Options{Nonces: memstore.NewNonceStore(), NonceLifetime: time.Minute})
+		_, err := serverresource.NewVerifier(production, deps, withURLs(t, serverresource.Options{Nonces: memstore.NewNonceStore(), NonceLifetime: time.Minute}))
 		if err == nil || !strings.Contains(err.Error(), "resource: dependencies: nonces must implement storage.StoreAssurance") {
 			t.Fatalf("NewVerifier = %v, want the production nonces check", err)
 		}
@@ -247,7 +261,7 @@ func TestNewVerifierInheritsAssurance(t *testing.T) {
 		deps := serverDependencies(t, jwt, now)
 		deps.Replay = declaredReplay{memstore.NewReplayStore()}
 		deps.Revocation = server.NoRevocation{}
-		if _, err := serverresource.NewVerifier(production, deps, serverresource.Options{}); err != nil {
+		if _, err := serverresource.NewVerifier(production, deps, withURLs(t, serverresource.Options{})); err != nil {
 			t.Fatalf("NewVerifier = %v, want accepted", err)
 		}
 	})
@@ -257,7 +271,7 @@ func TestNewVerifierInheritsAssurance(t *testing.T) {
 		deps := serverDependencies(t, jwt, now)
 		deps.Replay = declaredReplay{memstore.NewReplayStore()}
 		deps.Revocation = server.NoRevocation{}
-		_, err := serverresource.NewVerifier(scaled, deps, serverresource.Options{})
+		_, err := serverresource.NewVerifier(scaled, deps, withURLs(t, serverresource.Options{}))
 		if err == nil || !strings.Contains(err.Error(), "replay must declare CrossInstanceConsistent") {
 			t.Fatalf("NewVerifier = %v, want the DeploymentHorizontallyScaled check", err)
 		}
@@ -265,7 +279,7 @@ func TestNewVerifierInheritsAssurance(t *testing.T) {
 	t.Run("invalid server level", func(t *testing.T) {
 		invalid := serverConfig(t)
 		invalid.Assurance = 0
-		_, err := serverresource.NewVerifier(invalid, serverDependencies(t, jwt, now), serverresource.Options{})
+		_, err := serverresource.NewVerifier(invalid, serverDependencies(t, jwt, now), withURLs(t, serverresource.Options{}))
 		if err == nil || !strings.Contains(err.Error(), "assurance level is invalid") {
 			t.Fatalf("NewVerifier = %v, want the level refused", err)
 		}
@@ -278,7 +292,7 @@ func TestNewVerifierRefusesInvalidDeployment(t *testing.T) {
 	cfg := serverConfig(t)
 	cfg.Deployment = server.DeploymentHorizontallyScaled + 1
 	deps := serverDependencies(t, jwtAccessTokens(t), time.Now())
-	if _, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{}); err == nil || !strings.Contains(err.Error(), "deployment is invalid") {
+	if _, err := serverresource.NewVerifier(cfg, deps, withURLs(t, serverresource.Options{})); err == nil || !strings.Contains(err.Error(), "deployment is invalid") {
 		t.Fatalf("NewVerifier(invalid deployment) = %v, want refusal", err)
 	}
 }
@@ -308,7 +322,7 @@ func TestNewVerifierResolvesPairwiseSubjects(t *testing.T) {
 			cfg.Subjects = server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Prefix: prefix}
 			deps := serverDependencies(t, tc.accessTokens, now)
 			deps.PairwiseSubjects = tc.deriver
-			verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{})
+			verifier, err := serverresource.NewVerifier(cfg, deps, withURLs(t, serverresource.Options{}))
 			if err != nil {
 				t.Fatalf("NewVerifier: %v", err)
 			}
@@ -410,7 +424,7 @@ func TestNewVerifierPassesTheServersSubjectResolver(t *testing.T) {
 	deps.PairwiseSubjects = oneWay
 	resolver := &mapResolver{}
 	deps.PairwiseSubjectResolver = resolver
-	verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{})
+	verifier, err := serverresource.NewVerifier(cfg, deps, withURLs(t, serverresource.Options{}))
 	if err != nil {
 		t.Fatalf("NewVerifier: %v", err)
 	}
@@ -425,5 +439,14 @@ func TestNewVerifierPassesTheServersSubjectResolver(t *testing.T) {
 	}
 	if authz.InternalSubject != "alice" || authz.ClientSubject != clientSub {
 		t.Errorf("Subject, ClientSubject = %q, %q; want alice, %q", authz.InternalSubject, authz.ClientSubject, clientSub)
+	}
+}
+
+// TestNewVerifierRequiresResourceURLs: the server's configuration names
+// no protected endpoint, so the verifier's own URLs must be given.
+func TestNewVerifierRequiresResourceURLs(t *testing.T) {
+	deps := serverDependencies(t, jwtAccessTokens(t), time.Now())
+	if _, err := serverresource.NewVerifier(serverConfig(t), deps, serverresource.Options{}); err == nil || !strings.Contains(err.Error(), "resource_urls is required") {
+		t.Fatalf("NewVerifier(no ResourceURLs) = %v, want resource_urls required", err)
 	}
 }

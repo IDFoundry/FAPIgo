@@ -6,7 +6,7 @@ import "net/http"
 // issued one, so the client's next request already carries a valid
 // nonce (RFC 9449 §9). Call it on every successful response:
 //
-//	authz, err := verifier.Verify(ctx, resource.VerifyRequestFromHTTP(r, target))
+//	authz, err := verifier.Verify(ctx, resource.VerifyRequestFromHTTP(r))
 //	// ...
 //	authz.SetDPoPNonce(w.Header())
 func (a AuthorizationContext) SetDPoPNonce(h http.Header) {

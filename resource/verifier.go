@@ -1,13 +1,18 @@
 package resource
 
-import "fmt"
+import (
+	"fmt"
+
+	fapi "github.com/idfoundry/fapigo"
+)
 
 // Verifier is a FAPI 2.0 resource-server engine: it verifies incoming
 // access tokens and their DPoP sender-constraint proofs. It is entirely
 // unexported — construct one with NewVerifier.
 type Verifier struct {
-	cfg  Config
-	deps Dependencies
+	cfg          Config
+	deps         Dependencies
+	resourceURLs []resourceURL
 }
 
 // NewVerifier validates cfg and deps and returns a Verifier.
@@ -24,7 +29,12 @@ func NewVerifier(cfg Config, deps Dependencies) (*Verifier, error) {
 	if err := validateAssurance(cfg, deps); err != nil {
 		return nil, err
 	}
-	return &Verifier{cfg: cfg, deps: deps}, nil
+	resourceURLs, err := prepareResourceURLs(cfg)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ResourceURLs = append([]fapi.URL(nil), cfg.ResourceURLs...)
+	return &Verifier{cfg: cfg, deps: deps, resourceURLs: resourceURLs}, nil
 }
 
 func validateConfig(cfg Config, deps Dependencies) error {

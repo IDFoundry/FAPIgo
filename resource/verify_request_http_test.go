@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"net/http/httptest"
-	"net/url"
 	"slices"
 	"testing"
 
@@ -12,10 +11,6 @@ import (
 )
 
 func TestVerifyRequestFromHTTP(t *testing.T) {
-	target, err := url.Parse("https://api.example.com/accounts")
-	if err != nil {
-		t.Fatal(err)
-	}
 	cert := &x509.Certificate{Raw: []byte("client certificate")}
 	r := httptest.NewRequest("POST", "https://attacker.example/accounts?x=1", nil)
 	r.Header.Set("Authorization", "DPoP token-1")
@@ -23,7 +18,7 @@ func TestVerifyRequestFromHTTP(t *testing.T) {
 	r.Header.Add("DPoP", "proof-2")
 	r.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}}
 
-	got := resource.VerifyRequestFromHTTP(r, target)
+	got := resource.VerifyRequestFromHTTP(r)
 
 	if got.Method != "POST" || got.Authorization != "DPoP token-1" {
 		t.Errorf("Method %q, Authorization %q", got.Method, got.Authorization)
@@ -35,18 +30,15 @@ func TestVerifyRequestFromHTTP(t *testing.T) {
 	if got.PeerCertificate != cert {
 		t.Error("PeerCertificate isn't the connection's client certificate")
 	}
-	// The endpoint's own URL, never the request's Host.
-	if got.URL.String() != "https://api.example.com/accounts" {
-		t.Errorf("URL = %s, want the target", got.URL)
-	}
-	got.URL.Path = "/changed"
-	if target.Path != "/accounts" {
-		t.Error("VerifyRequestFromHTTP's URL aliases target")
+	// No URL from the request's Host: Verify builds it from
+	// Config.ResourceURLs.
+	if got.URL != nil {
+		t.Errorf("URL = %s, want nil", got.URL)
 	}
 }
 
-func TestVerifyRequestFromHTTPWithoutTLSOrTarget(t *testing.T) {
-	got := resource.VerifyRequestFromHTTP(httptest.NewRequest("GET", "/accounts", nil), nil)
+func TestVerifyRequestFromHTTPWithoutTLS(t *testing.T) {
+	got := resource.VerifyRequestFromHTTP(httptest.NewRequest("GET", "/accounts", nil))
 	if got.PeerCertificate != nil || got.URL != nil || len(got.DPoPProofs) != 0 {
 		t.Errorf("got %+v, want no certificate, URL or proofs", got)
 	}

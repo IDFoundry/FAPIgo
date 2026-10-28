@@ -50,7 +50,7 @@ func TestNewVerifierResource(t *testing.T) {
 			t.Run(name+"/"+format, func(t *testing.T) {
 				cfg := serverConfig(t)
 				deps := serverDependencies(t, accessTokens, now)
-				verifier, err := serverresource.NewVerifier(cfg, deps, tc.opts)
+				verifier, err := serverresource.NewVerifier(cfg, deps, withURLs(t, tc.opts))
 				if err != nil {
 					t.Fatalf("NewVerifier: %v", err)
 				}
@@ -97,14 +97,14 @@ func TestNewVerifierRefusesInvalidResourceOptions(t *testing.T) {
 		"issuer audience, resource": {AcceptIssuerAudience: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := serverresource.NewVerifier(cfg, deps, opts); err == nil {
+			if _, err := serverresource.NewVerifier(cfg, deps, withURLs(t, opts)); err == nil {
 				t.Fatal("NewVerifier accepted invalid Options")
 			}
 		})
 	}
 	// The issuer itself as Resource, with AcceptIssuerAudience, is just
 	// the issuer.
-	if _, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{Resource: cfg.Issuer.String(), AcceptIssuerAudience: true}); err != nil {
+	if _, err := serverresource.NewVerifier(cfg, deps, withURLs(t, serverresource.Options{Resource: cfg.Issuer.String(), AcceptIssuerAudience: true})); err != nil {
 		t.Fatalf("NewVerifier(issuer as resource): %v", err)
 	}
 }

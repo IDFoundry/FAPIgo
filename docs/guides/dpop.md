@@ -59,14 +59,19 @@ current nonce and issues a fresh one with every response.
 ## Resource server: one call
 
 `resource.Verifier` checks the access token and its DPoP proof together:
-the signature, `htm`/`htu` against the URL you pass (never one the
-request describes), `ath` against the token, the key against `cnf.jkt`,
-and replay.
+the signature, `htm` against the method exactly, `htu` against the
+request's escaped path at your API's own external URL (never a `Host`
+the request describes), `ath` against the token, the key against
+`cnf.jkt`, and replay. You give it that URL once, as
+`resource.Config.ResourceURLs` (or `serverresource.Options.ResourceURLs`):
+an origin, optionally with a path prefix. A request whose path no prefix
+covers is refused, and so is a proof whose `htu` is relative or names
+another scheme.
 
 ```go
-// paymentsEndpoint is this API's own external URL, a *url.URL.
+// verifier's ResourceURLs: this API's own external URL, e.g. https://api.example.com.
 func pay(w http.ResponseWriter, r *http.Request) {
-	authz, err := verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r, paymentsEndpoint))
+	authz, err := verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r))
 	if err != nil {
 		resource.WriteError(w, err) // 401 with the matching DPoP challenge
 		return

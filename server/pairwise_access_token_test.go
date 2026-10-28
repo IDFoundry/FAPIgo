@@ -44,8 +44,9 @@ func pairwiseResourceVerifier(t *testing.T, h harness, lookup pairwise.Lookup) *
 		resolver = jwt
 	}
 	cfg := resource.Config{
-		Limits:    resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
-		Assurance: resource.AssuranceDevelopment,
+		Limits:       resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+		Assurance:    resource.AssuranceDevelopment,
+		ResourceURLs: testResourceServerURLs(t),
 	}
 	deps := resource.Dependencies{
 		AccessTokens: resolver,
@@ -320,8 +321,9 @@ func resolverResourceVerifier(t *testing.T, h harness, resolver pairwise.Subject
 		t.Fatal(err)
 	}
 	verifier, err := resource.NewVerifier(resource.Config{
-		Limits:    resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
-		Assurance: resource.AssuranceDevelopment,
+		Limits:       resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+		Assurance:    resource.AssuranceDevelopment,
+		ResourceURLs: testResourceServerURLs(t),
 	}, resource.Dependencies{
 		AccessTokens:            jwt,
 		Replay:                  memstore.NewReplayStore(),

@@ -29,14 +29,16 @@ import (
 // single simulated request, plus the pieces a test needs to mutate to
 // exercise a failure path.
 type fixture struct {
-	verifier    *resource.Verifier
-	accessToken string
-	jti         string
-	dpopProof   string
-	target      *url.URL
-	replay      *fakeReplayStore
-	revocation  *fakeRevocationChecker
-	now         time.Time
+	verifier     *resource.Verifier
+	accessToken  string
+	jti          string
+	dpopProof    string
+	dpopKey      *ecdsa.PrivateKey
+	accessTokens resource.AccessTokenResolver
+	target       *url.URL
+	replay       *fakeReplayStore
+	revocation   *fakeRevocationChecker
+	now          time.Time
 }
 
 func newFixture(t *testing.T) fixture {
@@ -111,7 +113,7 @@ func newFixture(t *testing.T) fixture {
 		t.Fatalf("NewVerifier: %v", err)
 	}
 
-	return fixture{verifier: v, accessToken: accessToken, jti: jti, dpopProof: dpopProof, target: target, replay: replay, revocation: revocation, now: now}
+	return fixture{verifier: v, accessToken: accessToken, jti: jti, dpopProof: dpopProof, dpopKey: dpopKey, accessTokens: jwtAccessTokens, target: target, replay: replay, revocation: revocation, now: now}
 }
 
 func TestVerifyAcceptsValidRequest(t *testing.T) {
@@ -608,10 +610,10 @@ func TestVerifyRefusesRepeatedAuthorization(t *testing.T) {
 		return r
 	}
 
-	if _, err := f.verifier.Verify(context.Background(), resource.VerifyRequestFromHTTP(request("DPoP "+f.accessToken), f.target)); err != nil {
+	if _, err := f.verifier.Verify(context.Background(), resource.VerifyRequestFromHTTP(request("DPoP "+f.accessToken))); err != nil {
 		t.Fatalf("Verify(one Authorization header) = %v, want nil", err)
 	}
-	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequestFromHTTP(request("DPoP "+f.accessToken, "Bearer other"), f.target))
+	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequestFromHTTP(request("DPoP "+f.accessToken, "Bearer other")))
 	var rerr *resource.Error
 	if !errors.As(err, &rerr) || rerr.Code() != resource.ErrorInvalidRequest || rerr.HTTPStatus() != http.StatusBadRequest {
 		t.Errorf("Verify(two Authorization headers) = %v, want a 400 invalid_request", err)

@@ -3,8 +3,8 @@ package linked
 import (
 	"encoding/json"
 	"net/http"
-	"net/url"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/serverresource"
@@ -25,7 +25,15 @@ func (w *World) newAPI() (*api, error) {
 	// The API runs in the bank's own process, so its verifier comes
 	// straight from the bank's server configuration: the same token keys,
 	// clock and revocation store RevokeGrant writes to.
-	verifier, err := serverresource.NewVerifier(w.bank.cfg, w.bank.deps, serverresource.Options{})
+	// Its ResourceURLs is the API's own external URL, which a DPoP
+	// proof's htu names: the verifier builds each request's target from
+	// it and the request's path, never from anything else the request
+	// says about itself.
+	apiURL, err := fapi.ParseEndpointURL(w.URL(apiHost, ""))
+	if err != nil {
+		return nil, err
+	}
+	verifier, err := serverresource.NewVerifier(w.bank.cfg, w.bank.deps, serverresource.Options{ResourceURLs: []fapi.URL{apiURL}})
 	if err != nil {
 		return nil, err
 	}
@@ -45,12 +53,9 @@ type accountView struct {
 }
 
 func (a *api) accounts(w http.ResponseWriter, r *http.Request) {
-	target, err := url.Parse(a.w.URL(apiHost, accountsPath))
-	if err != nil {
-		internalError(w, err)
-		return
-	}
-	authz, err := a.verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r, target))
+	// Verified against the API's own external URL (the verifier's
+	// ResourceURLs), never one the request describes.
+	authz, err := a.verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r))
 	if err != nil {
 		resource.WriteError(w, err)
 		return

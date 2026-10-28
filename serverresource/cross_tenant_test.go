@@ -61,7 +61,7 @@ func TestVerifierRefusesAnotherTenantsAccessToken(t *testing.T) {
 				Authorization: "Bearer " + tok, PeerCertificate: cert,
 			}
 			verify := func(cfg server.Config) (resource.AuthorizationContext, error) {
-				v, err := serverresource.NewVerifier(cfg, serverDependencies(t, tokens, now), serverresource.Options{Resource: api})
+				v, err := serverresource.NewVerifier(cfg, serverDependencies(t, tokens, now), withURLs(t, serverresource.Options{Resource: api}))
 				if err != nil {
 					t.Fatalf("NewVerifier: %v", err)
 				}

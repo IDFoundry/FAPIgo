@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/idfoundry/fapigo/internal/canonical"
@@ -31,10 +30,19 @@ type VerifyRequest struct {
 	Proof string
 
 	// Method and URL are the HTTP method and target URI of the request
-	// the proof was presented with. The proof's "htm"/"htu" claims must
-	// match them exactly (after canonicalization).
+	// the proof was presented with. The proof's "htm" must equal Method
+	// exactly: methods are case-sensitive (RFC 9110 §9.1), so "get" is
+	// not "GET". Its "htu" must name URL once both are canonicalized
+	// (canonical.URI). URL must be an absolute http or https URL with a
+	// host, as must the htu: a relative reference, or another scheme,
+	// binds the proof to no origin at all.
 	Method string
 	URL    *url.URL
+
+	// AlternateURLs are further target URIs the proof's "htu" may name
+	// instead of URL, for a resource reachable at more than one origin;
+	// each is held to URL's own rules. Empty, the htu must name URL.
+	AlternateURLs []*url.URL
 
 	// AccessToken, if non-empty, is the access token presented alongside
 	// this proof. When set, the proof's "ath" claim must match its hash;
@@ -97,6 +105,11 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 	if req.URL == nil {
 		return VerifiedProof{}, fmt.Errorf("dpop: url is nil")
 	}
+	for _, u := range append([]*url.URL{req.URL}, req.AlternateURLs...) {
+		if !isAbsoluteHTTP(u) {
+			return VerifiedProof{}, fmt.Errorf("dpop: url must be an absolute http or https URL with a host")
+		}
+	}
 	if req.Now.IsZero() {
 		return VerifiedProof{}, fmt.Errorf("dpop: now is zero")
 	}
@@ -145,6 +158,28 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 	return VerifiedProof{Thumbprint: thumbprint, IssuedAt: iat, Nonce: c.Nonce, JTI: c.JTI}, nil
 }
 
+// isAbsoluteHTTP reports whether u is an absolute http or https URL
+// with a host (the scheme compared case-insensitively, as RFC 3986 §3.1
+// has it).
+func isAbsoluteHTTP(u *url.URL) bool {
+	if u == nil || u.Opaque != "" || u.Host == "" {
+		return false
+	}
+	scheme := canonical.LowerASCII(u.Scheme)
+	return scheme == "https" || scheme == "http"
+}
+
+// namesTarget reports whether htu, canonicalized, names req.URL or one
+// of req.AlternateURLs. A target whose host isn't ASCII never matches.
+func namesTarget(htu string, req VerifyRequest) bool {
+	for _, u := range append([]*url.URL{req.URL}, req.AlternateURLs...) {
+		if canonical.IsASCII(u.Host) && canonical.URI(u) == htu {
+			return true
+		}
+	}
+	return false
+}
+
 // checkProofTimes holds the proof to its iat: no further in the future
 // than MaxClockSkew and no older than MaxProofAge. An nbf or exp the
 // proof carries counts too (RFC 7519 §4.1.4-§4.1.5): FAPI 2.0 Security
@@ -172,7 +207,7 @@ func checkProofTimes(c claims, req VerifyRequest, iat time.Time) error {
 // req, given iat already parsed from c.IAT — split out of Verify
 // purely to keep that function's own cognitive complexity manageable.
 func verifyProofClaims(c claims, req VerifyRequest, iat time.Time) error {
-	if c.HTM != strings.ToUpper(req.Method) {
+	if c.HTM != req.Method {
 		return ErrMethodMismatch
 	}
 	// htu is compared canonicalized on both sides (RFC 9449 §4.3: "the
@@ -188,11 +223,14 @@ func verifyProofClaims(c claims, req VerifyRequest, iat time.Time) error {
 	// could equate ("İbank.example" is "xn--ibank-7fd.example", not
 	// "ibank.example"). An internationalized host is given as its xn--
 	// A-label on both sides.
+	//
+	// A relative htu ("/accounts"), or one with another scheme, binds the
+	// proof to no origin, so it never matches either.
 	htu, err := url.Parse(c.HTU)
-	if err != nil || !canonical.IsASCII(htu.Host) || !canonical.IsASCII(req.URL.Host) {
+	if err != nil || !isAbsoluteHTTP(htu) || !canonical.IsASCII(htu.Host) {
 		return ErrURIMismatch
 	}
-	if canonical.URI(htu) != canonical.URI(req.URL) {
+	if !namesTarget(canonical.URI(htu), req) {
 		return ErrURIMismatch
 	}
 

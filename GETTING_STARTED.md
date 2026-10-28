@@ -1017,19 +1017,34 @@ OIDF suite's AS test plan needs a protected-resource endpoint to call
 ### Build a `Config`
 
 ```go
+apiURL, err := fapi.ParseEndpointURL("https://api.example.com")
+if err != nil {
+	return err
+}
 cfg := resource.Config{
 	Limits: resource.Limits{
 		MaxDPoPProofAge: time.Minute,      // how old a DPoP proof's iat may be
 		MaxClockSkew:    10 * time.Second, // tolerance either direction: 10 to 60 seconds in production
 	},
-	Assurance: resource.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
+	Assurance:    resource.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
+	ResourceURLs: []fapi.URL{apiURL},             // this API's own external URL(s), as clients call it
 	// Deployment: resource.DeploymentSingleInstance, // required under AssuranceProduction: or DeploymentHorizontallyScaled for a fleet
 }
 ```
 
-All three are required — `NewVerifier` rejects a zero `MaxDPoPProofAge`,
-a negative `MaxClockSkew` or a zero `Assurance`, the same "no implicit
-default" discipline `server.Config` follows. As with the server,
+All four are required — `NewVerifier` rejects a zero `MaxDPoPProofAge`,
+a negative `MaxClockSkew`, a zero `Assurance` or no `ResourceURLs`, the
+same "no implicit default" discipline `server.Config` follows.
+
+`ResourceURLs` are this resource server's own external URLs: each an
+origin, optionally with a path prefix (`https://api.example.com/v1`),
+with no query. A DPoP proof's `htu` must name the URL its request was
+sent to, and only you know yours: the `Host` header, and whatever path
+a front end forwards, are the client's to choose. `Verify` takes the
+request's target to be its escaped path at one of these origins, and
+refuses a request no `ResourceURLs` prefix covers. List more than one
+for an API reachable under several names (an mTLS alias host, say): a
+proof naming any of them is accepted. As with the server,
 `resource.AssuranceProduction` refuses `memstore`'s stores and
 `keys/ephemeral`'s key sources: it requires the issuer key source to
 declare `keys.KeySourceAssurance` (`keys.LocalIssuerKeys` does, and so
@@ -1120,10 +1135,15 @@ store can't be checked from the resource side:
 
 ```go
 // cfg and deps: the server.Config and server.Dependencies from steps 2 and 4.
-verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{})
+// userinfoURL: the endpoint's own external URL, which a DPoP proof's htu names.
+verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{
+	ResourceURLs: []fapi.URL{userinfoURL},
+})
 ```
 
-It checks the verifier at the server's own `Assurance` and
+`ResourceURLs` is required: the server's configuration names no
+protected endpoint of its own (see `resource.Config.ResourceURLs`
+below). It checks the verifier at the server's own `Assurance` and
 `Deployment`, so a production server gets a production verifier.
 
 A resource server deployed on its own wires `Dependencies` itself:
@@ -1276,7 +1296,8 @@ audience. A Credential Endpoint in the AS's own process passes it to
 
 ```go
 verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{
-	Resource: "https://pid-issuer.example.com",
+	Resource:     "https://pid-issuer.example.com",
+	ResourceURLs: []fapi.URL{credentialEndpointURL},
 })
 ```
 
@@ -1319,9 +1340,9 @@ every request.
 ### Verify a request
 
 ```go
-// protectedResourceURL: this endpoint's own fixed external URL — see
-// below, never r.URL.
-authCtx, err := verifier.Verify(ctx, resource.VerifyRequestFromHTTP(r, protectedResourceURL))
+// The target a DPoP proof's htu must name comes from Config.ResourceURLs
+// and the request's escaped path — see below.
+authCtx, err := verifier.Verify(ctx, resource.VerifyRequestFromHTTP(r))
 ```
 
 On success, `authCtx.InternalSubject`/`ClientID`/`Scopes`/`Claims` are
@@ -1371,12 +1392,19 @@ the token was presented with (DPoP or Bearer).
 hand compiles just as well with a field left out, and then fails only
 for the clients that need it — which is why the constructor exists.
 
-The one thing it takes from you is the URL: this endpoint's own fixed,
-externally-visible URL (it's the DPoP proof's expected `htu`) — never
-inferred from the incoming request's `Host` header, the same reasoning
-`server.Endpoints` is never inferred from a request either. For a route
-with path parameters, copy a fixed origin and set its `Path` from
-`r.URL.Path`.
+It takes no URL from you, and none from `r`'s `Host` header, which the
+client controls — the same reasoning `server.Endpoints` is never
+inferred from a request either. `Verify` builds the DPoP proof's
+expected `htu` from `Config.ResourceURLs` and `r.URL.EscapedPath()`:
+the escaped path, never the decoded `r.URL.Path`, under which a request
+for `/accounts/a%2Fb` (one segment, `a/b`) would be the different
+resource `/accounts/a/b`, and a proof made for that one would verify
+here. A handler mounted on a path outside every `ResourceURLs` prefix
+has each request refused with 400 `invalid_request`. Behind a proxy
+that rewrites the path it forwards (stripping a prefix, say), set
+`VerifyRequest.URL` to the absolute URL the client called instead;
+`Verify` refuses one that is relative, isn't http(s), or isn't under a
+`ResourceURLs` entry.
 
 `DPoPProofs` carries every raw "DPoP" header value the request
 carried — `r.Header.Values("DPoP")`, never `r.Header.Get("DPoP")`,

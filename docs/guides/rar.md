@@ -99,7 +99,7 @@ granted details as `ClientCredentialsTokenResult.AuthorizationDetails`.
 ## Resource server: read what was granted
 
 ```go
-authz, err := verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r, paymentsEndpoint))
+authz, err := verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r))
 // ...
 granted, err := extension.ParseGrantedRAR(authz.Claims[extension.AuthorizationDetailsClaim])
 // ...

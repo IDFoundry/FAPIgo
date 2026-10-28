@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-	"net/url"
 
 	fapires "github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
@@ -35,17 +34,18 @@ const contentTypeHeader = "Content-Type"
 // fapi2-security-profile-final-test-claims-parameter-identity-claims
 // actually checks).
 //
-// userinfoURL is this endpoint's own fixed, externally-visible URL,
-// used as the DPoP proof's expected "htu" — not read from the incoming
-// request's Host header, matching how this binary's other endpoints
-// (server.Endpoints) are never inferred from it either.
+// The DPoP proof's expected "htu" is this endpoint's own fixed,
+// externally-visible URL: verifier's resource.Config.ResourceURLs (see
+// wiring.go) with the request's escaped path — never read from the
+// incoming request's Host header, matching how this binary's other
+// endpoints (server.Endpoints) are never inferred from it either.
 //
 // userinfoSigning, when true (main.go's -userinfo-signing flag), signs
 // the response as a JWS via srv.SignUserInfoResponse instead of
 // returning plain JSON, serving Content-Type: application/jwt per OIDC
 // Core §5.3.2 — the worked example proving server.Config.Algorithms.UserInfo
 // actually interoperates with client.FetchUserInfo end to end.
-func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL *url.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool) http.HandlerFunc {
+func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Set before anything else, and unconditionally, on every
 		// response this request produces — success or error alike
@@ -58,7 +58,7 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 		}
 		w.Header().Set(fapires.InteractionIDHeader, interactionID)
 
-		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequestFromHTTP(r, userinfoURL))
+		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequestFromHTTP(r))
 		if err != nil {
 			writeResourceError(w, err)
 			return
@@ -106,7 +106,7 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 // of /userinfo. Every other profile's resource.resourceUrl still
 // points at /userinfo unchanged; only the client-credentials plans use
 // this one.
-func accountsHandler(verifier *fapires.Verifier, accountsURL *url.URL) http.HandlerFunc {
+func accountsHandler(verifier *fapires.Verifier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Same FAPI 1.0 Part 1 §6.2.1 requirement userinfoHandler's own
 		// opening comment explains — set before any WriteHeader call.
@@ -117,7 +117,7 @@ func accountsHandler(verifier *fapires.Verifier, accountsURL *url.URL) http.Hand
 		}
 		w.Header().Set(fapires.InteractionIDHeader, interactionID)
 
-		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequestFromHTTP(r, accountsURL))
+		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequestFromHTTP(r))
 		if err != nil {
 			writeResourceError(w, err)
 			return

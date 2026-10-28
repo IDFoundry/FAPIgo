@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"sync"
 	"time"
@@ -111,6 +110,18 @@ func (w *World) registerBankClient(rp *relyingParty) (storage.RegisteredClient, 
 		return storage.RegisteredClient{}, fmt.Errorf("register %s: %w", rp.setup.name, err)
 	}
 	return client, nil
+}
+
+// userinfoVerifier verifies requests to the UserInfo endpoint. The
+// endpoint runs in the bank's own process, so its verifier comes straight
+// from the server configuration, with the endpoint's own external URL,
+// which a DPoP proof's htu names.
+func (w *World) userinfoVerifier(cfg server.Config, deps server.Dependencies) (*resource.Verifier, error) {
+	userinfoURL, err := fapi.ParseEndpointURL(w.URL(bankHost, userinfoPath))
+	if err != nil {
+		return nil, err
+	}
+	return serverresource.NewVerifier(cfg, deps, serverresource.Options{ResourceURLs: []fapi.URL{userinfoURL}})
 }
 
 func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
@@ -219,9 +230,7 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	if b.srv, err = server.New(cfg, deps); err != nil {
 		return nil, err
 	}
-	// The UserInfo endpoint runs in the bank's own process, so its
-	// verifier comes straight from the server configuration.
-	if b.verifier, err = serverresource.NewVerifier(cfg, deps, serverresource.Options{}); err != nil {
+	if b.verifier, err = w.userinfoVerifier(cfg, deps); err != nil {
 		return nil, err
 	}
 
@@ -356,12 +365,7 @@ func (b *bank) token(w http.ResponseWriter, r *http.Request) {
 // claims the customer approved for UserInfo, signed by the bank and, for
 // a client that registered for it, encrypted to the client.
 func (b *bank) userinfo(w http.ResponseWriter, r *http.Request) {
-	target, err := url.Parse(b.w.URL(bankHost, userinfoPath))
-	if err != nil {
-		internalError(w, err)
-		return
-	}
-	authz, err := b.verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r, target))
+	authz, err := b.verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r))
 	if err != nil {
 		resource.WriteError(w, err)
 		return

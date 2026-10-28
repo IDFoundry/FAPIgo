@@ -70,7 +70,7 @@ func TestCreateVerifyRoundTrip(t *testing.T) {
 	proof, err := CreateProof(ProofRequest{
 		Signer:    key,
 		Algorithm: fapi.ES256,
-		Method:    "post",
+		Method:    "POST",
 		URL:       target,
 		Now:       now,
 	})

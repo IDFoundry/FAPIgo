@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -86,14 +87,30 @@ func TestClientKeySourceContract(t *testing.T, newSource func(t *testing.T, clie
 		return s
 	}
 
-	t.Run("KeyIDNeverResolvesForAnotherClient", func(t *testing.T) { testContractKeyIDNeverResolvesForAnotherClient(t, source(t), fixture) })
-	t.Run("SharedKeyIDResolvesPerClient", func(t *testing.T) { testContractSharedKeyIDResolvesPerClient(t, source(t), fixture) })
-	t.Run("UnknownClientIsAnError", func(t *testing.T) { testContractUnknownClientIsAnError(t, source(t)) })
-	t.Run("FiltersByAlgorithm", func(t *testing.T) { testContractFiltersByAlgorithm(t, source(t)) })
-	t.Run("EveryKeyBelongsToTheRequestingClient", func(t *testing.T) {
-		testContractEveryKeyBelongsToTheRequestingClient(t, source(t), fixture)
-	})
-	t.Run("ResolvesOwnKey", func(t *testing.T) { testContractResolvesOwnKey(t, source(t), fixture) })
+	for _, c := range contractChecks {
+		t.Run(c.name, func(t *testing.T) {
+			for _, problem := range c.check(source(t), fixture) {
+				t.Error(problem)
+			}
+		})
+	}
+}
+
+// contractCheck is one of TestClientKeySourceContract's subtests: check
+// returns what it found wrong with a source, nothing if it passes.
+type contractCheck struct {
+	name  string
+	check func(ClientKeySource, contractFixture) []string
+}
+
+// contractChecks are TestClientKeySourceContract's subtests, in order.
+var contractChecks = []contractCheck{
+	{"KeyIDNeverResolvesForAnotherClient", checkContractKeyIDNeverResolvesForAnotherClient},
+	{"SharedKeyIDResolvesPerClient", checkContractSharedKeyIDResolvesPerClient},
+	{"UnknownClientIsAnError", checkContractUnknownClientIsAnError},
+	{"FiltersByAlgorithm", checkContractFiltersByAlgorithm},
+	{"EveryKeyBelongsToTheRequestingClient", checkContractEveryKeyBelongsToTheRequestingClient},
+	{"ResolvesOwnKey", checkContractResolvesOwnKey},
 }
 
 // newContractFixture generates the contract clients' keys: client A
@@ -151,26 +168,19 @@ func (f contractFixture) documents(t *testing.T) map[fapi.ClientID][]byte {
 	return out
 }
 
-// key is client id's key with kid.
-func (f contractFixture) key(t *testing.T, id fapi.ClientID, kid string) contractKey {
-	t.Helper()
+// key is client id's fixture key with kid.
+func (f contractFixture) key(id fapi.ClientID, kid string) contractKey {
 	for _, k := range f.keys[id] {
 		if k.kid == kid {
 			return k
 		}
 	}
-	t.Fatalf("contract: no fixture key %q for %q", kid, id)
 	return contractKey{}
 }
 
 // owns reports whether pub is one of client id's keys.
 func (f contractFixture) owns(id fapi.ClientID, pub crypto.PublicKey) bool {
-	for _, k := range f.keys[id] {
-		if samePublicKey(k.pub, pub) {
-			return true
-		}
-	}
-	return false
+	return containsPublicKey(f.keys[id], func(k contractKey) crypto.PublicKey { return k.pub }, pub)
 }
 
 func samePublicKey(a, b crypto.PublicKey) bool {
@@ -178,11 +188,22 @@ func samePublicKey(a, b crypto.PublicKey) bool {
 	return ok && eq.Equal(b)
 }
 
-// contractResolve asks source for req and returns the keys, treating an error
-// as no keys (allowed wherever the contract only requires that no
+// containsPublicKey reports whether any of ks has public key pub.
+func containsPublicKey[K any](ks []K, pubOf func(K) crypto.PublicKey, pub crypto.PublicKey) bool {
+	for _, k := range ks {
+		if samePublicKey(pubOf(k), pub) {
+			return true
+		}
+	}
+	return false
+}
+
+func verificationKeyPublic(k VerificationKey) crypto.PublicKey { return k.PublicKey }
+
+// contractResolve asks source for req and returns the keys, treating an
+// error as no keys (allowed wherever the contract only requires that no
 // wrong key is returned).
-func contractResolve(t *testing.T, source ClientKeySource, req ClientKeyRequest) []VerificationKey {
-	t.Helper()
+func contractResolve(source ClientKeySource, req ClientKeyRequest) []VerificationKey {
 	set, err := source.ResolveVerificationKeys(context.Background(), req)
 	if err != nil {
 		return nil
@@ -190,10 +211,10 @@ func contractResolve(t *testing.T, source ClientKeySource, req ClientKeyRequest)
 	return set.Keys
 }
 
-// testContractKeyIDNeverResolvesForAnotherClient: a request naming
+// checkContractKeyIDNeverResolvesForAnotherClient: a request naming
 // client B with a kid only client A publishes (as an assertion from A
 // claiming to be B would) gets none of A's keys, and vice versa.
-func testContractKeyIDNeverResolvesForAnotherClient(t *testing.T, source ClientKeySource, f contractFixture) {
+func checkContractKeyIDNeverResolvesForAnotherClient(source ClientKeySource, f contractFixture) []string {
 	cases := []struct {
 		requester, owner fapi.ClientID
 		kid              string
@@ -203,55 +224,60 @@ func testContractKeyIDNeverResolvesForAnotherClient(t *testing.T, source ClientK
 		{contractClientB, contractClientA, contractKIDAPS256, fapi.PS256},
 		{contractClientA, contractClientB, contractKIDBES256, fapi.ES256},
 	}
+	var problems []string
 	for _, c := range cases {
-		got := contractResolve(t, source, ClientKeyRequest{ClientID: c.requester, Purpose: ClientAssertionVerification, Algorithm: c.alg, KeyID: c.kid})
+		got := contractResolve(source, ClientKeyRequest{ClientID: c.requester, Purpose: ClientAssertionVerification, Algorithm: c.alg, KeyID: c.kid})
 		for _, k := range got {
 			if f.owns(c.owner, k.PublicKey) {
-				t.Errorf("kid %q of client %q resolved for client %q: a client could authenticate as another", c.kid, c.owner, c.requester)
+				problems = append(problems, fmt.Sprintf("kid %q of client %q resolved for client %q: a client could authenticate as another", c.kid, c.owner, c.requester))
 			}
 		}
 		if len(got) > 0 {
-			t.Errorf("kid %q, which client %q doesn't publish, resolved %d key(s) for it", c.kid, c.requester, len(got))
+			problems = append(problems, fmt.Sprintf("kid %q, which client %q doesn't publish, resolved %d key(s) for it", c.kid, c.requester, len(got)))
 		}
 	}
+	return problems
 }
 
-// testContractSharedKeyIDResolvesPerClient: both clients publish
+// checkContractSharedKeyIDResolvesPerClient: both clients publish
 // contractSharedKID, each for its own key; each gets exactly its own.
-func testContractSharedKeyIDResolvesPerClient(t *testing.T, source ClientKeySource, f contractFixture) {
+func checkContractSharedKeyIDResolvesPerClient(source ClientKeySource, f contractFixture) []string {
+	var problems []string
 	for _, id := range []fapi.ClientID{contractClientA, contractClientB} {
-		want := f.key(t, id, contractSharedKID)
+		want := f.key(id, contractSharedKID)
 		set, err := source.ResolveVerificationKeys(context.Background(), ClientKeyRequest{
 			ClientID: id, Purpose: ClientAssertionVerification, Algorithm: fapi.ES256, KeyID: contractSharedKID,
 		})
-		if err != nil {
-			t.Errorf("client %q, shared kid: %v", id, err)
-			continue
-		}
-		if len(set.Keys) != 1 || !samePublicKey(want.pub, set.Keys[0].PublicKey) {
-			t.Errorf("client %q, kid %q: got %d key(s), want exactly the client's own key", id, contractSharedKID, len(set.Keys))
+		switch {
+		case err != nil:
+			problems = append(problems, fmt.Sprintf("client %q, shared kid: %v", id, err))
+		case len(set.Keys) != 1 || !samePublicKey(want.pub, set.Keys[0].PublicKey):
+			problems = append(problems, fmt.Sprintf("client %q, kid %q: got %d key(s), want exactly the client's own key", id, contractSharedKID, len(set.Keys)))
 		}
 	}
+	return problems
 }
 
-// testContractUnknownClientIsAnError: an unregistered client ID is an
+// checkContractUnknownClientIsAnError: an unregistered client ID is an
 // error, whether or not the request names a kid a registered client
 // publishes.
-func testContractUnknownClientIsAnError(t *testing.T, source ClientKeySource) {
+func checkContractUnknownClientIsAnError(source ClientKeySource, _ contractFixture) []string {
+	var problems []string
 	for _, kid := range []string{"", contractKIDAES256, contractSharedKID} {
 		set, err := source.ResolveVerificationKeys(context.Background(), ClientKeyRequest{
 			ClientID: contractUnknownClient, Purpose: ClientAssertionVerification, Algorithm: fapi.ES256, KeyID: kid,
 		})
 		if err == nil {
-			t.Errorf("unregistered client, kid %q: no error (got %d key(s)), want an error", kid, len(set.Keys))
+			problems = append(problems, fmt.Sprintf("unregistered client, kid %q: no error (got %d key(s)), want an error", kid, len(set.Keys)))
 		}
 	}
+	return problems
 }
 
-// testContractFiltersByAlgorithm: only keys for the requested algorithm
-// are returned, including none for an algorithm the client has no key
-// for.
-func testContractFiltersByAlgorithm(t *testing.T, source ClientKeySource) {
+// checkContractFiltersByAlgorithm: only keys for the requested
+// algorithm are returned, including none for an algorithm the client
+// has no key for.
+func checkContractFiltersByAlgorithm(source ClientKeySource, _ contractFixture) []string {
 	cases := []struct {
 		id   fapi.ClientID
 		alg  fapi.SignatureAlgorithm
@@ -264,73 +290,73 @@ func testContractFiltersByAlgorithm(t *testing.T, source ClientKeySource) {
 		{contractClientA, fapi.EdDSA, "", 0},
 		{contractClientB, fapi.PS256, "", 0},
 	}
+	var problems []string
 	for _, c := range cases {
-		got := contractResolve(t, source, ClientKeyRequest{ClientID: c.id, Purpose: ClientAssertionVerification, Algorithm: c.alg, KeyID: c.kid})
+		got := contractResolve(source, ClientKeyRequest{ClientID: c.id, Purpose: ClientAssertionVerification, Algorithm: c.alg, KeyID: c.kid})
 		for _, k := range got {
 			if k.Algorithm != c.alg {
-				t.Errorf("client %q, %v, kid %q: returned a %v key", c.id, c.alg, c.kid, k.Algorithm)
+				problems = append(problems, fmt.Sprintf("client %q, %v, kid %q: returned a %v key", c.id, c.alg, c.kid, k.Algorithm))
 			}
 		}
 		if len(got) != c.want {
-			t.Errorf("client %q, %v, kid %q: got %d key(s), want %d", c.id, c.alg, c.kid, len(got), c.want)
+			problems = append(problems, fmt.Sprintf("client %q, %v, kid %q: got %d key(s), want %d", c.id, c.alg, c.kid, len(got), c.want))
 		}
 	}
+	return problems
 }
 
-// testContractEveryKeyBelongsToTheRequestingClient: whatever is asked,
+// checkContractEveryKeyBelongsToTheRequestingClient: whatever is asked,
 // every key returned is one of the requesting client's own, and has the
 // requested kid when one was requested.
-func testContractEveryKeyBelongsToTheRequestingClient(t *testing.T, source ClientKeySource, f contractFixture) {
+func checkContractEveryKeyBelongsToTheRequestingClient(source ClientKeySource, f contractFixture) []string {
 	kids := []string{"", contractKIDAES256, contractKIDAPS256, contractKIDBES256, contractSharedKID, "never-published"}
+	var problems []string
 	for _, id := range []fapi.ClientID{contractClientA, contractClientB} {
 		for _, alg := range []fapi.SignatureAlgorithm{fapi.ES256, fapi.PS256, fapi.EdDSA} {
 			for _, kid := range kids {
-				checkOwnKeys(t, f, id, kid, contractResolve(t, source, ClientKeyRequest{ClientID: id, Purpose: RequestObjectVerification, Algorithm: alg, KeyID: kid}))
+				got := contractResolve(source, ClientKeyRequest{ClientID: id, Purpose: RequestObjectVerification, Algorithm: alg, KeyID: kid})
+				problems = append(problems, ownKeyProblems(f, id, kid, got)...)
 			}
 		}
 	}
+	return problems
 }
 
-func checkOwnKeys(t *testing.T, f contractFixture, id fapi.ClientID, kid string, got []VerificationKey) {
-	t.Helper()
+// ownKeyProblems is what is wrong with got as client id's answer for
+// kid: keys the client doesn't publish, or with another kid.
+func ownKeyProblems(f contractFixture, id fapi.ClientID, kid string, got []VerificationKey) []string {
+	var problems []string
 	for _, k := range got {
 		if !f.owns(id, k.PublicKey) {
-			t.Errorf("client %q, kid %q: returned a key the client doesn't publish", id, kid)
+			problems = append(problems, fmt.Sprintf("client %q, kid %q: returned a key the client doesn't publish", id, kid))
 		}
 		if kid != "" && k.KeyID != kid {
-			t.Errorf("client %q, kid %q: returned a key with kid %q", id, kid, k.KeyID)
+			problems = append(problems, fmt.Sprintf("client %q, kid %q: returned a key with kid %q", id, kid, k.KeyID))
 		}
 	}
+	return problems
 }
 
-// testContractResolvesOwnKey: a client's own key resolves, by its kid
+// checkContractResolvesOwnKey: a client's own key resolves, by its kid
 // and with no kid.
-func testContractResolvesOwnKey(t *testing.T, source ClientKeySource, f contractFixture) {
+func checkContractResolvesOwnKey(source ClientKeySource, f contractFixture) []string {
+	var problems []string
 	for _, c := range []struct {
 		id  fapi.ClientID
 		kid string
 	}{{contractClientA, contractKIDAES256}, {contractClientA, contractKIDAPS256}, {contractClientB, contractKIDBES256}} {
-		want := f.key(t, c.id, c.kid)
+		want := f.key(c.id, c.kid)
 		for _, kid := range []string{c.kid, ""} {
 			set, err := source.ResolveVerificationKeys(context.Background(), ClientKeyRequest{
 				ClientID: c.id, Purpose: ClientAssertionVerification, Algorithm: want.alg, KeyID: kid,
 			})
-			if err != nil {
-				t.Errorf("client %q, kid %q: %v", c.id, kid, err)
-				continue
-			}
-			if !containsKey(set.Keys, want.pub) {
-				t.Errorf("client %q, kid %q: the client's own key %q wasn't returned", c.id, kid, c.kid)
+			switch {
+			case err != nil:
+				problems = append(problems, fmt.Sprintf("client %q, kid %q: %v", c.id, kid, err))
+			case !containsPublicKey(set.Keys, verificationKeyPublic, want.pub):
+				problems = append(problems, fmt.Sprintf("client %q, kid %q: the client's own key %q wasn't returned", c.id, kid, c.kid))
 			}
 		}
 	}
-}
-
-func containsKey(ks []VerificationKey, pub crypto.PublicKey) bool {
-	for _, k := range ks {
-		if samePublicKey(k.PublicKey, pub) {
-			return true
-		}
-	}
-	return false
+	return problems
 }

@@ -6,14 +6,48 @@ import (
 	"time"
 
 	"github.com/idfoundry/fapigo/internal/dpopnonce"
+	"github.com/idfoundry/fapigo/storage"
 )
+
+// NoDPoPNonces explicitly declines DPoP nonces (RFC 9449 §9) as
+// Dependencies.Nonces: Verify then accepts a DPoP proof without a
+// "nonce" claim, as it does with Nonces left nil. AssuranceProduction
+// refuses a nil Nonces, so declining there is a conscious, visible line
+// of code (Nonces: resource.NoDPoPNonces{}), the same reason
+// NoRevocation exists.
+//
+// Without nonces, a DPoP proof's freshness rests on its "iat" alone
+// (Limits.MaxDPoPProofAge): an attacker who can make a client generate
+// proofs ahead of time, or capture them, can use one here until it ages
+// out (RFC 9449 §11.1, the FAPI 2.0 attacker model's A5). Right when
+// every client is sender-constrained by mTLS rather than DPoP, or when
+// that window is acceptable.
+//
+// NewVerifier treats it as if Nonces were nil, so Random and
+// Limits.DPoPNonceLifetime aren't needed with it; it never stores or
+// looks up a nonce. Passed anywhere else as a storage.NonceStore, Issue
+// and Lookup fail.
+type NoDPoPNonces struct{}
+
+// Issue implements storage.NonceStore by failing: NoDPoPNonces stores
+// nothing.
+func (NoDPoPNonces) Issue(context.Context, storage.NonceIssuance) error {
+	return fmt.Errorf("resource: %w", dpopnonce.ErrDeclined)
+}
+
+// Lookup implements storage.NonceStore by failing: NoDPoPNonces stores
+// nothing.
+func (NoDPoPNonces) Lookup(context.Context, storage.NonceLookup) (storage.NonceRecord, error) {
+	return storage.NonceRecord{}, fmt.Errorf("resource: %w", dpopnonce.ErrDeclined)
+}
 
 // IssueDPoPNonce returns a DPoP nonce this Verifier will accept, for a
 // resource server to hand out ahead of a request rather than in answer
 // to one: an OpenID4VCI 1.0 §7.2 Nonce Response's DPoP-Nonce header,
 // say, which the Wallet then uses at the Credential Endpoint this
 // Verifier guards. It returns "" and no error when Dependencies.Nonces is
-// nil: the Verifier doesn't use DPoP nonces, so there is none to give.
+// nil or NoDPoPNonces{}: the Verifier doesn't use DPoP nonces, so there
+// is none to give.
 //
 // It is the nonce the Verifier currently hands out to every caller, the
 // same one Verify's challenges and AuthorizationContext.NextDPoPNonce
@@ -49,7 +83,8 @@ func (v *Verifier) issueDPoPNonce(ctx context.Context, now time.Time) (string, e
 // method) for the caller to retry with; a valid one returns nil,
 // letting Verify proceed.
 //
-// Called only when v.deps.Nonces != nil — Verify itself guards that,
+// Called only when v.deps.Nonces != nil (NewVerifier has turned
+// NoDPoPNonces into nil) — Verify itself guards that,
 // since this is the one dependency this package treats as genuinely
 // optional rather than required-with-visible-opt-out (see
 // Dependencies.Nonces's own doc comment).

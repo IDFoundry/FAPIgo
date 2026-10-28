@@ -8,6 +8,7 @@ import (
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/serverresource"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 const accountsPath = "/accounts"
@@ -33,7 +34,14 @@ func (w *World) newAPI() (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	verifier, err := serverresource.NewVerifier(w.bank.cfg, w.bank.deps, serverresource.Options{ResourceURLs: []fapi.URL{apiURL}})
+	// The API challenges for DPoP nonces too (RFC 9449 §9), from a
+	// store of its own: a nonce the bank's token endpoint handed out
+	// isn't valid here, nor the other way round.
+	verifier, err := serverresource.NewVerifier(w.bank.cfg, w.bank.deps, serverresource.Options{
+		ResourceURLs:  []fapi.URL{apiURL},
+		Nonces:        memstore.NewNonceStore(),
+		NonceLifetime: w.bank.cfg.Limits.DPoPNonceLifetime,
+	})
 	if err != nil {
 		return nil, err
 	}

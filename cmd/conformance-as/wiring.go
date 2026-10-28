@@ -389,14 +389,17 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		srvDeps.Clients = dynClients
 		srvDeps.ClientKeys = dynClients
 	}
-	// Off by default (main.go's -dpop-nonce-challenge flag) — same
-	// reasoning as the resource-side block below: client.ExchangeCode
-	// already retries a use_dpop_nonce challenge, but the OIDF suite's
-	// own driver isn't guaranteed to, so this stays opt-in. A separate
-	// nonce store from the resource side's: PAR/token (this server's
-	// own role, RFC 9449 §8) and /userinfo (the resource role, §9) are
-	// logically distinct nonce spaces, even though this one demo binary
-	// happens to host both.
+	// On by default (main.go's -dpop-nonce-challenge flag), as a
+	// production deployment's server.New requires: client.ExchangeCode
+	// retries a use_dpop_nonce challenge, and so does the OIDF suite's
+	// FAPI2 AS-plan client at PAR, the token endpoint and the protected
+	// resource. -dpop-nonce-challenge=false declines with
+	// server.NoDPoPNonces{}, as a production deployment without nonces
+	// would have to. A separate nonce store from the resource side's:
+	// PAR/token (this server's own role, RFC 9449 §8) and /userinfo
+	// (the resource role, §9) are logically distinct nonce spaces, even
+	// though this one demo binary happens to host both.
+	srvDeps.Nonces = server.NoDPoPNonces{}
 	if dpopNonceChallenge {
 		srvCfg.Limits.DPoPNonceLifetime = dpopNonceLifetime
 		srvDeps.Nonces = memstore.NewNonceStore()
@@ -417,12 +420,10 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 
 	// The protected-resource verifier mirrors srv's own access-token
 	// format, revocation store, replay store, clock and DPoP limits.
-	// Nonce challenges are off by default (main.go's
-	// -dpop-nonce-challenge flag): the OIDF suite's own AS-plan
-	// protected-resource caller isn't guaranteed to implement the
-	// client-side nonce-challenge retry the way this module's own client
-	// package does, so turning this on unconditionally would risk
-	// breaking unrelated AS conformance.
+	// Nonce challenges follow -dpop-nonce-challenge (on by default),
+	// with a store of the resource side's own; with it off,
+	// serverresource.NewVerifier follows the server's
+	// server.NoDPoPNonces{} and declines too.
 	// Its URLs are the two protected endpoints', and the mTLS alias of
 	// UserInfo's when there is one: a DPoP proof names the URL its client
 	// called, never one taken from the request's Host header.

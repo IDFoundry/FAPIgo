@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/idfoundry/fapigo/internal/depcheck"
+	"github.com/idfoundry/fapigo/internal/dpopnonce"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -43,9 +44,10 @@ const (
 	//   - Dependencies.Replay must implement storage.StoreAssurance and
 	//     declare Durable and AtomicConsume: a DPoP proof used twice is
 	//     only refused if the store records each use atomically and keeps
-	//     it. Dependencies.Nonces, when set, must implement it and declare
-	//     Durable; a nonce is looked up, never consumed, so it has no
-	//     atomicity to declare.
+	//     it. Dependencies.Nonces is required: a nonce store, which must
+	//     implement it and declare Durable (a nonce is looked up, never
+	//     consumed, so it has no atomicity to declare), or the explicit
+	//     NoDPoPNonces{} decline.
 	//   - Dependencies.Revocation must implement storage.StoreAssurance
 	//     and declare Durable, or be NoRevocationUntilExpiry with a
 	//     MaxTokenLifetime of at most 15 minutes. NoRevocation is refused:
@@ -56,7 +58,7 @@ const (
 	//     does), and read within Limits.MaxClockSkew of time.Now when
 	//     NewVerifier runs: a fixed or offset test clock would accept
 	//     tokens and proofs long expired.
-	//   - Dependencies.Random, when Nonces is set, must be
+	//   - Dependencies.Random, when Nonces is a nonce store, must be
 	//     crypto/rand.Reader itself: every DPoP nonce this verifier
 	//     issues is only as unguessable as that reader.
 	//   - Limits.MaxClockSkew must be between 10 and 60 seconds, as
@@ -165,9 +167,7 @@ func validateAssurance(cfg Config, deps Dependencies) error {
 	errs = append(errs, productionLimitErrors(cfg.Limits)...)
 	errs = append(errs, checkClock(deps.Clock, cfg.Limits.MaxClockSkew))
 	errs = append(errs, checkStoreAssurance("replay", deps.Replay, true, scaled))
-	if deps.Nonces != nil {
-		errs = append(errs, checkStoreAssurance("nonces", deps.Nonces, false, scaled), checkRandom(deps.Random))
-	}
+	errs = append(errs, checkProductionNonces(deps, scaled)...)
 	errs = append(errs, checkProductionRevocation(deps.Revocation, scaled))
 	if deps.PairwiseSubjects != nil {
 		errs = append(errs, checkKeyCustody("pairwise_subjects", deps.PairwiseSubjects, scaled))
@@ -176,6 +176,19 @@ func validateAssurance(cfg Config, deps Dependencies) error {
 		errs = append(errs, checkKeyCustody("subject_resolver", deps.PairwiseSubjectResolver, scaled))
 	}
 	return errors.Join(errs...)
+}
+
+// checkProductionNonces requires a nonce store, declaring
+// StoreAssurance, with Random from crypto/rand, unless nonces were
+// declined with NoDPoPNonces.
+func checkProductionNonces(deps Dependencies, scaled bool) []error {
+	switch {
+	case deps.Nonces == nil:
+		return []error{errors.New("resource: dependencies: nonces is required under AssuranceProduction (pass a storage.NonceStore, with Random and Limits.DPoPNonceLifetime, to challenge DPoP proofs for a nonce, or NoDPoPNonces{} to explicitly decline)")}
+	case dpopnonce.Declined[NoDPoPNonces](deps.Nonces):
+		return nil
+	}
+	return []error{checkStoreAssurance("nonces", deps.Nonces, false, scaled), checkRandom(deps.Random)}
 }
 
 // productionLimitErrors checks Limits against AssuranceProduction's

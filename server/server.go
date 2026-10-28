@@ -43,6 +43,9 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 	if err := validateDependencies(cfg, deps); err != nil {
 		return nil, err
 	}
+	// NoDPoPNonces declines nonces as nil does; every nonce check below
+	// New tests deps.Nonces against nil.
+	deps.Nonces = dpopnonce.Active[NoDPoPNonces](deps.Nonces)
 	// Copied, so a caller changing its slice later changes nothing here.
 	cfg.Resources = slices.Clone(cfg.Resources)
 	if cfg.Extensions == nil {
@@ -692,7 +695,7 @@ func validateConditionalDependencies(cfg Config, deps Dependencies) error {
 	if err := validateEncryptionDependencies(cfg, deps); err != nil {
 		return err
 	}
-	if deps.Nonces != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
+	if dpopnonce.Active[NoDPoPNonces](deps.Nonces) != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.dpop_nonce_lifetime must be positive when dependencies.nonces is set")
 	}
 	cibaEnabled := !cfg.Endpoints.BackchannelAuthentication.IsZero()
@@ -861,8 +864,9 @@ func x5cAttesterTrustSources(c X5CAttesterChain) []namedSource {
 }
 
 // checkProductionStateStores checks the stores holding flow state:
-// transactions, grants, replay records, and the backchannel and nonce
-// stores when they're in use.
+// transactions, grants, replay records, the backchannel store when CIBA
+// is in use, and the DPoP nonce store, which is required unless
+// declined with NoDPoPNonces.
 func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) []error {
 	errs := []error{
 		checkStoreAssurance("transactions", deps.Transactions, true, scaled),
@@ -874,11 +878,18 @@ func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) []e
 			checkStoreAssurance("backchannel", deps.Backchannel, true, scaled),
 			checkNotifierAssurance(deps.BackchannelNotifier))
 	}
-	if deps.Nonces != nil {
+	switch {
+	case deps.Nonces == nil:
+		errs = append(errs, errProductionNoncesRequired)
+	case !dpopnonce.Declined[NoDPoPNonces](deps.Nonces):
 		errs = append(errs, checkStoreAssurance("nonces", deps.Nonces, false, scaled))
 	}
 	return errs
 }
+
+// errProductionNoncesRequired is AssuranceProduction's refusal of a nil
+// Dependencies.Nonces.
+var errProductionNoncesRequired = errors.New("server: dependencies: nonces is required under AssuranceProduction (pass a storage.NonceStore, with Limits.DPoPNonceLifetime, to challenge DPoP proofs for a server nonce, or NoDPoPNonces{} to explicitly decline)")
 
 // checkProductionTokenStores checks the access token issuer's store,
 // when it keeps tokens (opaque tokens), and the revocation store, unless

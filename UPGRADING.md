@@ -833,6 +833,67 @@ needs to tell tenants apart puts the tenant in the path:
 issuer, err := fapi.ParseIssuerURL("https://as.example/tenants/a") // not https://as.example/?tenant=a
 ```
 
+### DPoP server nonces are required under `AssuranceProduction` (server, resource) — *production only*
+
+**Affects:** a server built with `Config.Assurance = AssuranceProduction`
+whose `Dependencies.Nonces` is nil; a resource verifier built with
+`resource.AssuranceProduction` whose `Dependencies.Nonces` is nil,
+including one `serverresource.NewVerifier` builds for a production
+server whose `Dependencies.Nonces` is a nonce store while
+`Options.Nonces` is nil. `AssuranceDevelopment` is unchanged: nil still
+means no nonces.
+
+**Why:** DPoP server nonces (RFC 9449 §8, §9) were off unless a
+deployment opted in, so in production a DPoP proof's freshness rested on
+the `iat` the client chose. An attacker who can have a client generate
+proofs ahead of time, or who captures them, could use one until it aged
+out of `MaxDPoPProofAge` (RFC 9449 §11, the FAPI 2.0 attacker model's
+A5). With a nonce the server picked, a proof made before it was handed
+out is refused. Production now requires the choice to be made: a nonce
+store, or the explicit `server.NoDPoPNonces{}` / `resource.NoDPoPNonces{}`
+decline, by value or pointer. The cost of nonces is one extra round trip
+per client per endpoint on first use, and again each time the nonce
+rotates, after half of `Limits.DPoPNonceLifetime`: the server answers
+`use_dpop_nonce` with a `DPoP-Nonce` header and the client retries once
+with it, as this module's `client` package does on its own.
+
+**What fails:** `server.New` returns an error naming
+`nonces is required under AssuranceProduction`; `resource.NewVerifier`
+the same, prefixed `resource:`; `serverresource.NewVerifier` an error
+naming `Options.Nonces`.
+
+**What to change:** add a nonce store, with a lifetime of at most 15
+minutes. It must declare `storage.StoreAssurance` with `Durable`, and be
+shared by every instance behind the same issuer (or resource URLs),
+declaring `CrossInstanceConsistent`, with `DeploymentHorizontallyScaled`:
+a nonce one instance hands out must be valid at the next. Give the
+resource side a store of its own, never the server's:
+
+```go
+cfg.Limits.DPoPNonceLifetime = 5 * time.Minute
+deps.Nonces = sharedNonceStore // your storage.NonceStore
+
+verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{
+	ResourceURLs:  []fapi.URL{userinfoURL},
+	Nonces:        resourceNonceStore, // not deps.Nonces
+	NonceLifetime: cfg.Limits.DPoPNonceLifetime,
+})
+```
+
+A standalone resource server sets `resource.Dependencies.Nonces`,
+`Random` (`crypto/rand.Reader`) and `Limits.DPoPNonceLifetime`.
+
+Or keep the previous behavior by declining explicitly — right when every
+client is sender-constrained with mTLS rather than DPoP:
+
+```go
+deps.Nonces = server.NoDPoPNonces{}
+```
+
+`serverresource.NewVerifier` follows that decline when `Options.Nonces`
+is nil; a standalone resource server passes `resource.NoDPoPNonces{}`.
+Neither needs `Limits.DPoPNonceLifetime`.
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

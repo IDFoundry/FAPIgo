@@ -173,6 +173,34 @@ func TestExchangeAuthorizationCodeNonceDisabledByDefault(t *testing.T) {
 	}
 }
 
+// TestNoDPoPNoncesDisablesNonceChallenges covers NoDPoPNonces, by value
+// or pointer, declining nonces as nil does: a DPoP proof without a nonce
+// is accepted at PAR and the token endpoint, and no nonce is handed out.
+func TestNoDPoPNoncesDisablesNonceChallenges(t *testing.T) {
+	for _, nonces := range []storage.NonceStore{server.NoDPoPNonces{}, &server.NoDPoPNonces{}} {
+		h := newHarness(t, server.ProfileFAPISecurity, true)
+		deps := h.deps
+		deps.Nonces = nonces
+		srv, err := server.New(h.cfg, deps)
+		if err != nil {
+			t.Fatalf("New(%T): %v", nonces, err)
+		}
+		h.server = srv
+		dpopKey := generateKey(t)
+		par, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+			HTTP:       server.FormRequest{Parameters: parFormParams(t, h)},
+			DPoPProofs: []string{parDPoPProof(t, dpopKey, h.now)},
+		})
+		if err != nil || par.NextDPoPNonce != "" {
+			t.Fatalf("PushAuthorizationRequest(%T) = nonce %q, %v; want no nonce, no error", nonces, par.NextDPoPNonce, err)
+		}
+		result, err := exchangeWithDPoPNonce(t, h, dpopKey, "")
+		if err != nil || result.NextDPoPNonce != "" {
+			t.Fatalf("ExchangeAuthorizationCode(%T) = nonce %q, %v; want no nonce, no error", nonces, result.NextDPoPNonce, err)
+		}
+	}
+}
+
 func TestExchangeAuthorizationCodeChallengesMissingNonce(t *testing.T) {
 	h, _ := newHarnessWithNonces(t)
 	dpopKey := generateKey(t)
@@ -390,6 +418,22 @@ func parFormParams(t *testing.T, h harness) []server.FormParameter {
 	}
 }
 
+// parDPoPProof is a DPoP proof for a PAR request, carrying no nonce.
+func parDPoPProof(t *testing.T, dpopKey *ecdsa.PrivateKey, now time.Time) string {
+	t.Helper()
+	parURL, err := url.Parse(testPAREndpoint)
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+	proof, err := dpop.CreateProof(dpop.ProofRequest{
+		Signer: dpopKey, Algorithm: fapi.ES256, Method: "POST", URL: parURL, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("dpop.CreateProof: %v", err)
+	}
+	return proof
+}
+
 // TestPushAuthorizationRequestWithoutDPoPUnaffectedByNonceChallenge is
 // the key regression case: PAR's own DPoP proof stays entirely
 // optional even with nonce-challenge enabled — a client that never
@@ -538,5 +582,17 @@ func TestTokenErrorAfterAValidNonceCarriesTheNext(t *testing.T) {
 	}
 	if _, err := exchangeWithDPoPNonce(t, h, dpopKey, next); err != nil {
 		t.Fatalf("ExchangeAuthorizationCode(with the nonce from the error) = %v", err)
+	}
+}
+
+// TestNoDPoPNoncesStoresNothing covers NoDPoPNonces used as a store
+// somewhere its constructor doesn't turn it into nil: both methods fail.
+func TestNoDPoPNoncesStoresNothing(t *testing.T) {
+	ctx := context.Background()
+	if err := (server.NoDPoPNonces{}).Issue(ctx, storage.NonceIssuance{Nonce: "n"}); err == nil {
+		t.Error("Issue = nil, want an error")
+	}
+	if _, err := (server.NoDPoPNonces{}).Lookup(ctx, storage.NonceLookup{Nonce: "n"}); err == nil {
+		t.Error("Lookup = nil error, want one")
 	}
 }

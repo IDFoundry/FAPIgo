@@ -150,16 +150,81 @@ func TestNewAcceptsAdequateNonceStoreUnderProduction(t *testing.T) {
 	}
 }
 
-func TestNewSkipsNonceCheckWhenNoncesNotConfigured(t *testing.T) {
-	cfg := validConfig(t)
-	asProduction(&cfg)
-	cfg.Deployment = server.DeploymentSingleInstance
-	deps := validDependencies()
-	deps.Audit = &fakeAuditSink{}
-	deps.Nonces = nil // genuinely optional — DPoP nonce-challenge support disabled
+// TestProductionRequiresNoncesOrNoDPoPNonces covers DPoP server nonces
+// as AssuranceProduction's default: a nil Dependencies.Nonces is
+// refused, naming both choices, while a nonce store and the explicit
+// NoDPoPNonces{} decline, by value or pointer, are accepted.
+func TestProductionRequiresNoncesOrNoDPoPNonces(t *testing.T) {
+	cases := map[string]struct {
+		nonces      storage.NonceStore
+		wantRefused bool
+	}{
+		"nil":             {nil, true},
+		"NoDPoPNonces":    {server.NoDPoPNonces{}, false},
+		"*NoDPoPNonces":   {&server.NoDPoPNonces{}, false},
+		"declaring store": {capNonceStore{caps: storage.Capabilities{Durable: true}}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg, deps := productionConfigAndDeps(t)
+			cfg.Limits.DPoPNonceLifetime = time.Minute
+			deps.Nonces = tc.nonces
+			_, err := server.New(cfg, deps)
+			assertNoncesRefusal(t, err, tc.wantRefused)
+		})
+	}
+}
 
-	if _, err := server.New(cfg, deps); err != nil {
-		t.Fatalf("New(production, no nonce store configured): %v", err)
+// assertNoncesRefusal checks err is the nil-Nonces refusal, naming both
+// a nonce store and NoDPoPNonces, exactly when wantRefused.
+func assertNoncesRefusal(t *testing.T, err error, wantRefused bool) {
+	t.Helper()
+	if !wantRefused {
+		if err != nil {
+			t.Fatalf("New(production) = %v, want accepted", err)
+		}
+		return
+	}
+	if err == nil {
+		t.Fatal("New(production, nil Nonces) = nil, want refused")
+	}
+	for _, want := range []string{"nonces is required under AssuranceProduction", "storage.NonceStore", "NoDPoPNonces{}"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("New(production, nil Nonces) = %q, want it to name %q", err, want)
+		}
+	}
+}
+
+// TestProductionRefusesNilPointerNoDPoPNonces covers a typed-nil
+// *NoDPoPNonces, refused like any other typed nil.
+func TestProductionRefusesNilPointerNoDPoPNonces(t *testing.T) {
+	err := productionNew(t, func(d *server.Dependencies) { d.Nonces = (*server.NoDPoPNonces)(nil) })
+	if err == nil || !strings.Contains(err.Error(), "nonces is a nil *NoDPoPNonces") {
+		t.Fatalf("New(production, nil *NoDPoPNonces) = %v, want the typed nil refused", err)
+	}
+}
+
+// TestDevelopmentLeavesNoncesOptional covers AssuranceDevelopment, where
+// a nil Dependencies.Nonces still disables nonce challenges.
+func TestDevelopmentLeavesNoncesOptional(t *testing.T) {
+	deps := validDependencies()
+	deps.Nonces = nil
+	if _, err := server.New(validConfig(t), deps); err != nil {
+		t.Fatalf("New(development, nil Nonces): %v", err)
+	}
+}
+
+// TestNoDPoPNoncesNeedsNoNonceLifetime covers NoDPoPNonces declining
+// nonces as nil does: no Limits.DPoPNonceLifetime is required for it.
+func TestNoDPoPNoncesNeedsNoNonceLifetime(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Limits.DPoPNonceLifetime = 0
+	deps := validDependencies()
+	for _, nonces := range []storage.NonceStore{server.NoDPoPNonces{}, &server.NoDPoPNonces{}} {
+		deps.Nonces = nonces
+		if _, err := server.New(cfg, deps); err != nil {
+			t.Errorf("New(%T, no nonce lifetime): %v", nonces, err)
+		}
 	}
 }
 

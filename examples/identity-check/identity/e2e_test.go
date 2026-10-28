@@ -140,7 +140,10 @@ func TestVerifyWithFernway(t *testing.T) {
 	mustContain(t, "the verified check", page, `pill ok">verified`,
 		"Rivera", "1991-04-12", "14 Quay Street", "sam.rivera@example.com", "urn:alder-bank:acr:app",
 		"Pushed authorization request (PAR)", "max_age: 600", "acr_values: urn:alder-bank:acr:app",
-		"encrypted (JWE, 5 parts)", "UserInfo request")
+		"encrypted (JWE, 5 parts)", "UserInfo request",
+		// DPoP server nonces: the bank and its UserInfo endpoint each
+		// challenge the first proof, and the retry carries the nonce.
+		"use_dpop_nonce", "DPoP-Nonce: ")
 }
 
 func TestWithheldClaimsStayWithheld(t *testing.T) {

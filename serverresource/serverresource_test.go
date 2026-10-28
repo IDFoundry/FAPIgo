@@ -229,6 +229,56 @@ func TestNewVerifierAccepts(t *testing.T) {
 	}
 }
 
+// TestNewVerifierDerivesNonces covers how a production verifier's DPoP
+// nonces follow Options.Nonces and the server's own Dependencies.Nonces.
+func TestNewVerifierDerivesNonces(t *testing.T) {
+	production := serverConfig(t)
+	production.Assurance = server.AssuranceProduction
+	production.Deployment = server.DeploymentSingleInstance
+	for name, tc := range map[string]struct {
+		server  storage.NonceStore
+		opts    storage.NonceStore
+		wantErr string
+	}{
+		"server declines":                      {server: server.NoDPoPNonces{}},
+		"server declines by pointer":           {server: &server.NoDPoPNonces{}},
+		"options decline":                      {opts: resource.NoDPoPNonces{}},
+		"options decline by pointer":           {opts: &resource.NoDPoPNonces{}},
+		"options decline with server's":        {server: memstore.NewNonceStore(), opts: server.NoDPoPNonces{}},
+		"server's own decline as options":      {server: server.NoDPoPNonces{}, opts: server.NoDPoPNonces{}},
+		"server nonces, none of its own":       {server: memstore.NewNonceStore(), wantErr: "Options.Nonces is required under AssuranceProduction"},
+		"neither":                              {wantErr: "nonces is required under AssuranceProduction"},
+		"options a nil *resource.NoDPoPNonces": {opts: (*resource.NoDPoPNonces)(nil), wantErr: "nonces is a nil *NoDPoPNonces"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			deps := serverDependencies(t, jwtAccessTokens(t), time.Now())
+			deps.Replay = declaredReplay{memstore.NewReplayStore()}
+			deps.Revocation = server.NoRevocation{}
+			deps.Nonces = tc.server
+			v, err := serverresource.NewVerifier(production, deps, withURLs(t, serverresource.Options{Nonces: tc.opts}))
+			assertDerivedNonces(t, v, err, tc.wantErr)
+		})
+	}
+}
+
+// assertDerivedNonces checks err mentions wantErr, or, with wantErr
+// empty, that v was built and declines nonces.
+func assertDerivedNonces(t *testing.T, v *resource.Verifier, err error, wantErr string) {
+	t.Helper()
+	if wantErr != "" {
+		if err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Fatalf("NewVerifier = %v, want an error mentioning %q", err, wantErr)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("NewVerifier = %v, want accepted", err)
+	}
+	if nonce, err := v.IssueDPoPNonce(context.Background()); nonce != "" || err != nil {
+		t.Fatalf("IssueDPoPNonce = %q, %v; want nonces declined", nonce, err)
+	}
+}
+
 type declaredReplay struct {
 	*memstore.ReplayStore
 }
@@ -266,6 +316,7 @@ func TestNewVerifierInheritsAssurance(t *testing.T) {
 		deps := serverDependencies(t, jwt, now)
 		deps.Replay = declaredReplay{memstore.NewReplayStore()}
 		deps.Revocation = server.NoRevocation{}
+		deps.Nonces = server.NoDPoPNonces{}
 		if _, err := serverresource.NewVerifier(production, deps, withURLs(t, serverresource.Options{})); err != nil {
 			t.Fatalf("NewVerifier = %v, want accepted", err)
 		}

@@ -144,6 +144,9 @@ func TestPayByBank(t *testing.T) {
 	}
 	mustContain(t, "the order", order, "your payment went through", "executed", "Everyday ····7890",
 		"Pushed authorization request (PAR)", "signed request object", "Authorization response (JARM)", "Token request", "Payments API call")
+	// DPoP server nonces: the bank and its API each challenge the shop's
+	// first proof, hand out a nonce, and the retried proof carries it.
+	mustContain(t, "the protocol trace", order, "use_dpop_nonce", "DPoP-Nonce: ")
 
 	id := regexp.MustCompile(`name="id" value="([A-Z0-9]+)"`).FindStringSubmatch(order)
 	if id == nil {

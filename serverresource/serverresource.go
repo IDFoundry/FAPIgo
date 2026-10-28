@@ -66,11 +66,16 @@ type Options struct {
 	ResourceURLs []fapi.URL
 
 	// Nonces enables DPoP nonce challenges at the protected endpoints
-	// (RFC 9449 §9); nil leaves them disabled. It must not be the
-	// server's own Dependencies.Nonces: nonce stores are keyed by nonce
-	// value alone, so a shared store would let a nonce issued by one
-	// role be accepted by the other. The verifier draws nonces from the
-	// server's Dependencies.Random.
+	// (RFC 9449 §9). It must not be the server's own Dependencies.Nonces:
+	// nonce stores are keyed by nonce value alone, so a shared store
+	// would let a nonce issued by one role be accepted by the other. The
+	// verifier draws nonces from the server's Dependencies.Random.
+	//
+	// resource.NoDPoPNonces{} (or server.NoDPoPNonces{}) declines them.
+	// Left nil, the verifier follows the server: it declines when the
+	// server's Dependencies.Nonces is server.NoDPoPNonces{} or nil, and
+	// under AssuranceProduction NewVerifier refuses a nil Nonces when the
+	// server has a nonce store, since this verifier needs a separate one.
 	Nonces storage.NonceStore
 
 	// NonceLifetime bounds how long an issued nonce remains valid.
@@ -125,6 +130,10 @@ type Options struct {
 //     resource.Config.Assurance and Deployment: a production
 //     server gets a production verifier, which also checks
 //     Options.Nonces.
+//   - DPoP nonces: Options.Nonces when set; without it,
+//     resource.NoDPoPNonces{} when deps.Nonces is server.NoDPoPNonces,
+//     and an error under AssuranceProduction when deps.Nonces is a
+//     nonce store (see Options.Nonces).
 //   - Pairwise subjects: with a reversible deriver (deps.PairwiseSubjects
 //     implements pairwise.Lookup), it and cfg.Subjects.Prefix, as the
 //     verifier's Dependencies.PairwiseSubjects and Config.PairwisePrefix,
@@ -179,12 +188,13 @@ func NewVerifier(cfg server.Config, deps server.Dependencies, opts Options) (*re
 		rcfg.PairwisePrefix = cfg.Subjects.Prefix
 	}
 	rdeps.PairwiseSubjectResolver = deps.PairwiseSubjectResolver
-	if opts.Nonces != nil {
-		if sameValue(opts.Nonces, deps.Nonces) {
-			return nil, errors.New("serverresource: Options.Nonces must not be the server's own Dependencies.Nonces")
-		}
+	nonces, err := verifierNonces(cfg.Assurance, deps.Nonces, opts.Nonces)
+	if err != nil {
+		return nil, err
+	}
+	rdeps.Nonces = nonces
+	if nonces != nil && !declinedNonces(nonces) {
 		rcfg.Limits.DPoPNonceLifetime = opts.NonceLifetime
-		rdeps.Nonces = opts.Nonces
 		rdeps.Random = deps.Random
 	}
 	v, err := resource.NewVerifier(rcfg, rdeps)
@@ -286,6 +296,45 @@ func revocationChecker(sink server.RevocationSink, accessTokenLifetime time.Dura
 		return nil, fmt.Errorf("serverresource: revocation sink %T does not implement resource.RevocationChecker, so the verifier can't see what the server revokes", sink)
 	}
 	return checker, nil
+}
+
+// verifierNonces is the verifier's Dependencies.Nonces, given the
+// server's own Dependencies.Nonces and Options.Nonces: Options.Nonces
+// when set, as resource.NoDPoPNonces{} when it declines (with either
+// package's NoDPoPNonces); without it, resource.NoDPoPNonces{} when the
+// server declined with server.NoDPoPNonces, and nil otherwise — which
+// AssuranceProduction refuses when the server uses nonces, since the
+// verifier needs a store of its own.
+func verifierNonces(level server.AssuranceLevel, serverNonces, nonces storage.NonceStore) (storage.NonceStore, error) {
+	switch {
+	case declinedNonces(nonces):
+		return resource.NoDPoPNonces{}, nil
+	case nonces != nil:
+		if sameValue(nonces, serverNonces) {
+			return nil, errors.New("serverresource: Options.Nonces must not be the server's own Dependencies.Nonces")
+		}
+		return nonces, nil
+	case declinedNonces(serverNonces):
+		return resource.NoDPoPNonces{}, nil
+	case serverNonces != nil && level == server.AssuranceProduction:
+		return nil, errors.New("serverresource: Options.Nonces is required under AssuranceProduction when the server's Dependencies.Nonces is a nonce store (pass a separate storage.NonceStore, with Options.NonceLifetime, or resource.NoDPoPNonces{} to explicitly decline)")
+	}
+	return nil, nil
+}
+
+// declinedNonces reports whether nonces is server.NoDPoPNonces or
+// resource.NoDPoPNonces, by value or pointer. A nil pointer isn't: the
+// verifier refuses it as a typed nil.
+func declinedNonces(nonces storage.NonceStore) bool {
+	switch n := nonces.(type) {
+	case server.NoDPoPNonces, resource.NoDPoPNonces:
+		return true
+	case *server.NoDPoPNonces:
+		return n != nil
+	case *resource.NoDPoPNonces:
+		return n != nil
+	}
+	return false
 }
 
 // sameValue reports whether a and b hold the same comparable value. A

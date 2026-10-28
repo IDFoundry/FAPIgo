@@ -145,7 +145,7 @@ func TestLinkAndSync(t *testing.T) {
 
 	page = d.post("pocketwise.localhost", "/sync", nil)
 	mustContain(t, "a sync", latestLog(page), `pill ok">ok`, "Read Everyday, Savings")
-	mustContain(t, "a sync", page, "Token request: refresh", "not rotated")
+	mustContain(t, "a sync", page, "Token request: refresh", "not rotated", "DPoP-Nonce: ")
 
 	d.post("pocketwise.localhost", "/rotate-key", nil)
 	d.post("console.localhost", "/clock", url.Values{"days": {"1"}})

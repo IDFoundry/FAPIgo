@@ -60,31 +60,40 @@ func (r resourceURL) covers(target *url.URL) bool {
 // Config.ResourceURLs.
 func (v *Verifier) requestTargets(req VerifyRequest) ([]*url.URL, *Error) {
 	if req.URL != nil {
-		if !req.URL.IsAbs() || req.URL.Host == "" || (req.URL.Scheme != "https" && req.URL.Scheme != "http") {
-			return nil, newError(ErrorServerError, 500, "failed to verify request", errors.New("resource: VerifyRequest.URL must be an absolute http(s) URL, or left nil with a request built by VerifyRequestFromHTTP"))
-		}
-		for _, r := range v.resourceURLs {
-			if r.covers(req.URL) {
-				return []*url.URL{req.URL}, nil
-			}
-		}
-		return nil, outsideResourceURLs(req.URL.String())
+		return v.explicitTarget(req.URL)
 	}
-	if !strings.HasPrefix(req.requestPath, "/") {
-		return nil, outsideResourceURLs(req.requestPath)
+	return v.pathTargets(req.requestPath)
+}
+
+// explicitTarget is target, once it is known to be an absolute http(s)
+// URL under one of Config.ResourceURLs.
+func (v *Verifier) explicitTarget(target *url.URL) ([]*url.URL, *Error) {
+	if !target.IsAbs() || target.Host == "" || (target.Scheme != "https" && target.Scheme != "http") {
+		return nil, newError(ErrorServerError, 500, "failed to verify request", errors.New("resource: VerifyRequest.URL must be an absolute http(s) URL, or left nil with a request built by VerifyRequestFromHTTP"))
+	}
+	for _, r := range v.resourceURLs {
+		if r.covers(target) {
+			return []*url.URL{target}, nil
+		}
+	}
+	return nil, outsideResourceURLs(target.String())
+}
+
+// pathTargets is escapedPath at each configured origin whose path
+// prefix covers it.
+func (v *Verifier) pathTargets(escapedPath string) ([]*url.URL, *Error) {
+	if !strings.HasPrefix(escapedPath, "/") {
+		return nil, outsideResourceURLs(escapedPath)
 	}
 	var targets []*url.URL
 	for _, r := range v.resourceURLs {
-		t, err := url.Parse(r.origin.String() + req.requestPath)
-		if err != nil || t.Host != r.origin.Host || t.RawQuery != "" || t.Fragment != "" {
-			continue
-		}
-		if r.covers(t) {
+		t, err := url.Parse(r.origin.String() + escapedPath)
+		if err == nil && t.Host == r.origin.Host && t.RawQuery == "" && t.Fragment == "" && r.covers(t) {
 			targets = append(targets, t)
 		}
 	}
 	if len(targets) == 0 {
-		return nil, outsideResourceURLs(req.requestPath)
+		return nil, outsideResourceURLs(escapedPath)
 	}
 	return targets, nil
 }

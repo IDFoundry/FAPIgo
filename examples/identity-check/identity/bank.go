@@ -112,6 +112,18 @@ func (w *World) registerBankClient(rp *relyingParty) (storage.RegisteredClient, 
 	return client, nil
 }
 
+// userinfoVerifier verifies requests to the UserInfo endpoint. The
+// endpoint runs in the bank's own process, so its verifier comes straight
+// from the server configuration, with the endpoint's own external URL,
+// which a DPoP proof's htu names.
+func (w *World) userinfoVerifier(cfg server.Config, deps server.Dependencies) (*resource.Verifier, error) {
+	userinfoURL, err := fapi.ParseEndpointURL(w.URL(bankHost, userinfoPath))
+	if err != nil {
+		return nil, err
+	}
+	return serverresource.NewVerifier(cfg, deps, serverresource.Options{ResourceURLs: []fapi.URL{userinfoURL}})
+}
+
 func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	issuer, err := fapi.ParseIssuerURL(w.URL(bankHost, ""))
 	if err != nil {
@@ -218,14 +230,7 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	if b.srv, err = server.New(cfg, deps); err != nil {
 		return nil, err
 	}
-	// The UserInfo endpoint runs in the bank's own process, so its
-	// verifier comes straight from the server configuration, with the
-	// endpoint's own external URL, which a DPoP proof's htu names.
-	userinfoURL, err := fapi.ParseEndpointURL(w.URL(bankHost, userinfoPath))
-	if err != nil {
-		return nil, err
-	}
-	if b.verifier, err = serverresource.NewVerifier(cfg, deps, serverresource.Options{ResourceURLs: []fapi.URL{userinfoURL}}); err != nil {
+	if b.verifier, err = w.userinfoVerifier(cfg, deps); err != nil {
 		return nil, err
 	}
 

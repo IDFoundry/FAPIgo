@@ -167,6 +167,8 @@ jobs:
             name: FuzzURIEquivalence
           - pkg: ./internal/numericdate
             name: FuzzNumericDateParse
+          - pkg: ./internal/numericdate
+            name: FuzzNumericDateOrderPreserving
           - pkg: ./internal/strictb64
             name: FuzzStrictMatchesCanonical
           - pkg: ./internal/strictjson

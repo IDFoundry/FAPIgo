@@ -16,6 +16,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/internal/requestobject"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -138,7 +139,8 @@ func (s BackchannelAuthenticationSession) AuthReqID() string { return s.authReqI
 
 // Interval is the minimum time to wait between polls (CIBA §7.3's
 // "interval") — defaultBackchannelAuthenticationPollInterval if the
-// server's response omitted one.
+// server's response omitted one, and 5 seconds longer for each
+// slow_down (see BackchannelAuthenticationPending.Session).
 func (s BackchannelAuthenticationSession) Interval() time.Duration { return s.interval }
 
 // ExpiresAt is when this session's auth_req_id stops being pollable.
@@ -444,11 +446,17 @@ type BackchannelAuthenticationResult interface {
 // BackchannelAuthenticationPending means no decision has been made
 // yet. SlowDown reports whether this specific poll was rejected for
 // being too fast (CIBA §11's slow_down) rather than merely still
-// pending — RFC 8628's own convention is for the caller to widen its
-// own interval by 5s when this is true, but this package leaves that
-// policy decision to the caller rather than picking one on its
-// behalf.
-type BackchannelAuthenticationPending struct{ SlowDown bool }
+// pending.
+//
+// Session is the session to poll with from now on, and to seal in
+// place of the one polled: after slow_down its Interval is
+// slowDownIntervalIncrease (5 seconds) longer, since CIBA §11 says the
+// interval "MUST be increased by at least 5 seconds for this and all
+// subsequent requests"; otherwise it is the session polled, unchanged.
+type BackchannelAuthenticationPending struct {
+	SlowDown bool
+	Session  BackchannelAuthenticationSession
+}
 
 // Discriminator for BackchannelAuthenticationResult — deliberately empty.
 func (BackchannelAuthenticationPending) backchannelAuthenticationResult() {}
@@ -532,7 +540,7 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 	if status == http.StatusOK {
 		return c.backchannelApprovedTokens(ctx, session, body)
 	}
-	return backchannelPollOutcome(status, header, body)
+	return backchannelPollOutcome(session, status, header, body)
 }
 
 // ownsBackchannelSession reports whether session was begun by a Client
@@ -589,18 +597,23 @@ func (c *Client) backchannelApprovedTokens(ctx context.Context, session Backchan
 	return BackchannelAuthenticationApproved{Tokens: result}, nil
 }
 
-// backchannelPollOutcome reads a non-200 poll response: one of CIBA's
-// expected polling outcomes, or an error.
-func backchannelPollOutcome(status int, header http.Header, body []byte) (BackchannelAuthenticationResult, error) {
+// slowDownIntervalIncrease is how much a slow_down widens a session's
+// poll interval: CIBA §11's "at least 5 seconds".
+const slowDownIntervalIncrease = 5 * time.Second
+
+// backchannelPollOutcome reads a non-200 poll response for session: one
+// of CIBA's expected polling outcomes, or an error.
+func backchannelPollOutcome(session BackchannelAuthenticationSession, status int, header http.Header, body []byte) (BackchannelAuthenticationResult, error) {
 	errResp, decodeErr := par.DecodeErrorResponse(body)
 	if decodeErr != nil {
 		return nil, parErrorFromResponse(status, header, body)
 	}
 	switch errResp.Code {
 	case "authorization_pending":
-		return BackchannelAuthenticationPending{}, nil
+		return BackchannelAuthenticationPending{Session: session}, nil
 	case "slow_down":
-		return BackchannelAuthenticationPending{SlowDown: true}, nil
+		session.interval = timeutil.SaturatingAdd(session.interval, slowDownIntervalIncrease)
+		return BackchannelAuthenticationPending{SlowDown: true, Session: session}, nil
 	case "access_denied":
 		return BackchannelAuthenticationDenied{Code: errResp.Code, Description: newServerErrorResponse(status, errResp.Code, errResp.Description, "").Description}, nil
 	case "expired_token":

@@ -26,7 +26,8 @@ session, err := c.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAut
 result, err := c.PollBackchannelAuthentication(ctx, session)
 switch r := result.(type) {
 case client.BackchannelAuthenticationPending:
-	retryLater(r.SlowDown) // SlowDown: the last poll came too soon, so back off
+	session = r.Session // after slow_down (r.SlowDown), Interval() is 5 s longer
+	retryLater(session.Interval())
 case client.BackchannelAuthenticationApproved:
 	useTokens(r.Tokens)
 case client.BackchannelAuthenticationDenied:
@@ -42,7 +43,10 @@ signs the request, authenticates as the client and sends it, after
 checking locally that exactly one hint is set. `PollBackchannelAuthentication`
 makes exactly one attempt, so you poll on your own schedule (a job
 queue, a ticker) rather than blocking a goroutine while a person
-decides. The session survives restarts: seal it with a
+decides. Keep polling with the pending result's `Session`: after
+`slow_down` its `Interval()` is 5 seconds longer, for that poll and
+every later one, as CIBA §11 requires, and if you store sessions, store
+that one. The session survives restarts: seal it with a
 `client.BackchannelSessionSealer` (`NewBackchannelSessionSealer(c, keys)`,
 then `Seal(session, owner)`), store the result keyed by its `AuthReqID`,
 and `Open(sealed, owner)` it on any instance. The sealing is AES-256-GCM,

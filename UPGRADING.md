@@ -362,6 +362,35 @@ so a minute is plenty:
 cfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
 ```
 
+### `BackchannelAuthenticationPending` carries the session to poll with (client)
+
+**Affects:** code that compares a `client.BackchannelAuthenticationPending`
+with `==`, or a `BackchannelAuthenticationResult` holding one with `==`,
+and code that builds one with an unkeyed literal.
+
+**Why:** CIBA §11 says that after `slow_down` the poll interval "MUST be
+increased by at least 5 seconds for this and all subsequent requests",
+but the session's `Interval()` never changed, so a client polling at
+`Interval()` kept being slowed down. `BackchannelAuthenticationPending`
+now has a `Session` field: the session to poll with from now on, whose
+`Interval()` is 5 seconds longer after each `slow_down`. A sealed copy
+of it keeps the longer interval. The new field holds slices, so the
+struct is no longer comparable.
+
+**What fails:** `==` on the struct doesn't compile; `==` on a
+`BackchannelAuthenticationResult` holding one panics at run time.
+
+**What to change:** switch on the type and read `SlowDown`, and poll
+(and seal) `Session` from then on:
+
+```go
+switch r := result.(type) {
+case client.BackchannelAuthenticationPending:
+	session = r.Session
+	retryAfter(session.Interval())
+}
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

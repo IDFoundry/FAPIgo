@@ -166,6 +166,7 @@ func (t *till) poll(ctx context.Context, o *order) {
 	}
 	switch res := result.(type) {
 	case client.BackchannelAuthenticationPending:
+		o.session = res.Session // after slow_down, a longer Interval()
 	case client.BackchannelAuthenticationDenied:
 		o.Status, o.Problem = "denied", res.Code+": "+res.Description
 	case client.BackchannelAuthenticationExpired:

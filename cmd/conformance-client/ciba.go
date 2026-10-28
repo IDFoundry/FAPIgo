@@ -340,9 +340,10 @@ func pollCIBABackchannelAuthentication(ctx context.Context, cl *client.Client, s
 		}
 		switch r := result.(type) {
 		case client.BackchannelAuthenticationPending:
-			if r.SlowDown {
-				interval += 5 * time.Second // RFC 8628's own convention
-			}
+			// After slow_down, r.Session's interval is 5s longer
+			// (CIBA §11).
+			session = r.Session
+			interval = session.Interval()
 			continue
 		case client.BackchannelAuthenticationDenied:
 			return awaitVerdict(rawHTTP, apiBase, moduleID, "").String()

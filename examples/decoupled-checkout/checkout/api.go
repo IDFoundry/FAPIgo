@@ -81,6 +81,19 @@ func (a *api) verify(r *http.Request) (resource.AuthorizationContext, error) {
 	return a.verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r))
 }
 
+// customerOf is the customer authz's token was issued for. A token a
+// client was issued for itself (the client credentials grant) names no
+// customer, even when the client's client_id equals a customer's login
+// hint, so EndUser, not InternalSubject alone, says whose accounts are
+// paid from and read.
+func customerOf(authz resource.AuthorizationContext) (customer, bool) {
+	hint, ok := authz.EndUser()
+	if !ok {
+		return customer{}, false
+	}
+	return customerByHint(hint)
+}
+
 // forbidden is RFC 6750 §3.1's insufficient_scope: a valid token that
 // doesn't cover this request.
 func forbidden(w http.ResponseWriter, authz resource.AuthorizationContext, description string) {
@@ -126,6 +139,11 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 	// The client's next call carries a fresh DPoP nonce, when the
 	// verifier issues them.
 	authz.SetDPoPNonce(w.Header())
+	c, ok := customerOf(authz)
+	if !ok {
+		forbidden(w, authz, "the access token wasn't issued for a customer")
+		return
+	}
 	var order paymentOrder
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&order); err != nil {
 		resource.NewError(resource.ErrorInvalidRequest, http.StatusBadRequest, "malformed payment order").WriteJSON(w)
@@ -148,7 +166,6 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 		forbidden(w, authz, "this approval was for one payment, and it has been made")
 		return
 	}
-	c, _ := customerByHint(authz.InternalSubject)
 	writeJSON(w, paymentResult{
 		Status: "executed", Amount: "€" + order.InstructedAmount.Amount,
 		Payee: payees[order.CreditorAccount.IBAN], From: describeAccount(c.accounts[0]),
@@ -171,6 +188,11 @@ func (a *api) readAccount(w http.ResponseWriter, r *http.Request) {
 	// The client's next call carries a fresh DPoP nonce, when the
 	// verifier issues them.
 	authz.SetDPoPNonce(w.Header())
+	c, ok := customerOf(authz)
+	if !ok {
+		forbidden(w, authz, "the access token wasn't issued for a customer")
+		return
+	}
 	iban, action := r.PathValue("iban"), accountEndpoints[r.PathValue("what")]
 	if action == "" {
 		http.NotFound(w, r)
@@ -188,7 +210,6 @@ func (a *api) readAccount(w http.ResponseWriter, r *http.Request) {
 		forbidden(w, authz, fmt.Sprintf("the customer didn't approve %s for %s", actionLabels[action], iban))
 		return
 	}
-	c, _ := customerByHint(authz.InternalSubject)
 	acct, ok := c.account(iban)
 	if !ok {
 		http.NotFound(w, r)

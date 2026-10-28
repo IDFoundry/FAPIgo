@@ -77,7 +77,14 @@ func pay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authz.SetDPoPNonce(w.Header()) // when the verifier issues nonces
-	// authz.InternalSubject, authz.Scopes, authz.Claims ...
+	// Whose payment: not InternalSubject alone, which for a client
+	// credentials token is the client's own client_id.
+	user, ok := authz.EndUser()
+	if !ok {
+		resource.NewInsufficientScopeError(authz, "the access token wasn't issued for a user").WriteJSON(w)
+		return
+	}
+	// user, authz.Scopes, authz.Claims ...
 }
 ```
 

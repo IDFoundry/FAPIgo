@@ -63,6 +63,11 @@ func (a *api) accounts(w http.ResponseWriter, r *http.Request) {
 	// The client's next call carries a fresh DPoP nonce, when the
 	// verifier issues them.
 	authz.SetDPoPNonce(w.Header())
+	c, ok := customerOf(authz)
+	if !ok {
+		resource.NewInsufficientScopeError(authz, "the access token wasn't issued for a customer").WriteJSON(w)
+		return
+	}
 	details, err := grantedAccess(authz)
 	if err != nil {
 		resource.NewError(resource.ErrorInvalidToken, http.StatusUnauthorized, "the token's authorization details are malformed").WriteJSON(w)
@@ -72,7 +77,6 @@ func (a *api) accounts(w http.ResponseWriter, r *http.Request) {
 		resource.NewInsufficientScopeError(authz, "the token grants no account access").WriteJSON(w)
 		return
 	}
-	c, _ := customerByName(authz.InternalSubject)
 	out := []accountView{}
 	for _, iban := range details[0].Fields.Accounts {
 		acct, ok := c.account(iban)
@@ -101,4 +105,17 @@ func grantedAccess(authz resource.AuthorizationContext) ([]extension.RARDetail[a
 		return nil, err
 	}
 	return extension.RARGet(granted, accountAccessType)
+}
+
+// customerOf is the customer authz's token was issued for. A token a
+// client was issued for itself (the client credentials grant) names no
+// customer, even when the client's client_id equals a customer's
+// username, so EndUser, not InternalSubject alone, says whose accounts
+// are read.
+func customerOf(authz resource.AuthorizationContext) (customer, bool) {
+	username, ok := authz.EndUser()
+	if !ok {
+		return customer{}, false
+	}
+	return customerByName(username)
 }

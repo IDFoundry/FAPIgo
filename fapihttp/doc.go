@@ -31,4 +31,10 @@
 // AssuranceProduction. TransportConfig.Certificates presents a client
 // certificate for mutual TLS, and RootCAs and VerifyConnection set the
 // roots and any pinning, without touching the transport afterwards.
+//
+// One helper is for incoming requests instead: ForwardedClientCertificate
+// reads the client certificate a TLS-terminating reverse proxy forwards
+// in RFC 9440's Client-Cert header, for a server or resource server
+// behind one, and only from a request its trusted function (RemoteAddrIn,
+// say) says came from the proxy.
 package fapihttp

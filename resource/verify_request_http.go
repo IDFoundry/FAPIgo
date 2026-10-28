@@ -23,7 +23,8 @@ import (
 // request refused.
 //
 // Behind a proxy that terminates TLS, r carries no client certificate:
-// set PeerCertificate afterwards from however the proxy forwards it. A
+// set PeerCertificate afterwards from however the proxy forwards it
+// (fapihttp.ForwardedClientCertificate, for RFC 9440's Client-Cert). A
 // proxy that rewrites the path it forwards (stripping a prefix, say)
 // leaves r with a path the client didn't call: give Verify the URL the
 // client called in VerifyRequest.URL instead.

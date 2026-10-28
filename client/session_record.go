@@ -31,6 +31,14 @@ type sessionRecord struct {
 	// Issuer is the authorization server the response must come from.
 	Issuer string `json:"issuer"`
 
+	// ClientID is the Config.ClientID of the Client that began the
+	// session: only that Client may complete it, so a callback routed to
+	// another Client for the same issuer over a shared SessionStore is
+	// refused. A record written before this field existed has none, and
+	// is refused the same way: sessions last Limits.SessionLifetime, so
+	// at most a flow begun before an upgrade has to start again.
+	ClientID string `json:"client_id,omitempty"`
+
 	// RedirectURI is the redirect_uri the request carried, presented
 	// again at code exchange.
 	RedirectURI string `json:"redirect_uri"`

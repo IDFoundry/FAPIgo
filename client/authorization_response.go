@@ -218,15 +218,20 @@ func (c *Client) consumeCallbackSession(ctx context.Context, cb AuthorizationCal
 	if consumeErr != nil {
 		return sessionRecord{}, newError(ErrorInvalidRequest, "session is invalid, expired, or already used", consumeErr)
 	}
-	// A session belongs to the client that began it. An application
-	// running one client per issuer over a shared SessionStore routes
-	// each callback to a client itself; a callback routed to the wrong
-	// one must not complete another issuer's flow with that flow's PKCE
-	// verifier and nonce. A misrouted callback is normally refused
-	// before Consume, leaving the session for the right client: its
-	// "iss" (or JARM response's signed iss) names the other issuer. Only
-	// one without "iss", under TolerateAbsentAuthorizationResponseIss,
-	// gets this far, and spends the session: SessionStore has no read
+	// A session belongs to the client that began it: its issuer and its
+	// client ID. An application running several clients over a shared
+	// SessionStore — one per issuer, or several registrations at one
+	// issuer — routes each callback to a client itself; a callback
+	// routed to the wrong one must not complete another client's flow
+	// with that flow's PKCE verifier and nonce. A callback routed to
+	// another issuer's client is normally refused before Consume,
+	// leaving the session for the right client: its "iss" (or JARM
+	// response's signed iss) names the other issuer, and a JARM
+	// response's signed aud names the other client. A plain-mode
+	// response carries no client identifier, so one routed to another
+	// client at the same issuer — or one without "iss", under
+	// TolerateAbsentAuthorizationResponseIss — gets this far and is
+	// refused here, having spent the session: SessionStore has no read
 	// that doesn't consume, so the user signs in again.
 	record, decodeErr := decodeSessionRecord(consumed.Record)
 	if decodeErr != nil {
@@ -234,6 +239,9 @@ func (c *Client) consumeCallbackSession(ctx context.Context, cb AuthorizationCal
 	}
 	if record.Issuer != c.cfg.Issuer.String() {
 		return sessionRecord{}, newError(ErrorInvalidRequest, "session was begun by a client for a different issuer", nil)
+	}
+	if record.ClientID != c.cfg.ClientID.String() {
+		return sessionRecord{}, newError(ErrorInvalidRequest, "session was begun by a different client", nil)
 	}
 	now := c.deps.Clock.Now()
 	if !now.Before(consumed.ExpiresAt) {

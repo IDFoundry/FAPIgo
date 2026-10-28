@@ -338,8 +338,50 @@ func TestNewRejectsClientKeysWithoutKeySourceAssuranceUnderProduction(t *testing
 	deps.Audit = &fakeAuditSink{}
 	deps.ClientKeys = bareClientKeySource{}
 
-	if _, err := server.New(cfg, deps); err == nil {
+	_, err := server.New(cfg, deps)
+	if err == nil {
 		t.Fatal("New(production, client keys without KeySourceAssurance) = nil error, want error")
+	}
+	// The error points at the bundled sources and at the contract test
+	// for a source of the application's own.
+	for _, want := range []string{"keys.StaticClientKeys", "keys.NewClientJWKSSource", "keys.TestClientKeySourceContract"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q doesn't mention %s", err, want)
+		}
+	}
+}
+
+// TestNewAcceptsBundledClientKeySourcesUnderProduction: both bundled
+// production client key sources pass production assurance as client
+// keys and client encryption keys — ClientJWKSSource when its fetcher
+// is hardened for production, or when it has none.
+func TestNewAcceptsBundledClientKeySourcesUnderProduction(t *testing.T) {
+	static, err := keys.NewStaticClientKeys(map[fapi.ClientID]keys.ClientKeyMaterial{testClientID: {}})
+	if err != nil {
+		t.Fatalf("NewStaticClientKeys: %v", err)
+	}
+	inline, err := keys.NewClientJWKSSource(nil, func(context.Context, fapi.ClientID) (fapi.URL, []byte, error) {
+		return fapi.URL{}, nil, nil
+	})
+	if err != nil {
+		t.Fatalf("NewClientJWKSSource: %v", err)
+	}
+	for name, source := range map[string]interface {
+		keys.ClientKeySource
+		keys.ClientEncryptionKeySource
+	}{"StaticClientKeys": static, "ClientJWKSSource": inline} {
+		cfg := validConfig(t)
+		asProduction(&cfg)
+		cfg.Deployment = server.DeploymentSingleInstance
+		cfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+		cfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+		deps := validDependencies()
+		deps.Audit = &fakeAuditSink{}
+		deps.ClientKeys = source
+		deps.ClientEncryptionKeys = source
+		if _, err := server.New(cfg, deps); err != nil {
+			t.Errorf("New(production, %s): %v", name, err)
+		}
 	}
 }
 

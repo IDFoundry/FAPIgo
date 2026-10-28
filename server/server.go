@@ -572,7 +572,7 @@ func validateRequiredDependencies(deps Dependencies) error {
 		return fmt.Errorf("server: dependencies: replay is required")
 	}
 	if deps.ClientKeys == nil {
-		return fmt.Errorf("server: dependencies: client keys is required")
+		return fmt.Errorf("server: dependencies: client keys is required (keys.StaticClientKeys or keys.NewClientJWKSSource)")
 	}
 	if deps.Keys == nil {
 		return fmt.Errorf("server: dependencies: keys is required")
@@ -711,10 +711,10 @@ func checkProductionKeyCustody(deps Dependencies, issuer AccessTokenAssurance, s
 func checkProductionClientSources(deps Dependencies, scaled, attestation bool) []error {
 	errs := []error{
 		checkStoreAssurance("clients", deps.Clients, false, scaled),
-		checkKeySourceAssurance("client_keys", deps.ClientKeys),
+		withClientKeySourceHint(checkKeySourceAssurance("client_keys", deps.ClientKeys), clientKeySourceContractHint),
 	}
 	if deps.ClientEncryptionKeys != nil {
-		errs = append(errs, checkKeySourceAssurance("client_encryption_keys", deps.ClientEncryptionKeys))
+		errs = append(errs, withClientKeySourceHint(checkKeySourceAssurance("client_encryption_keys", deps.ClientEncryptionKeys), ""))
 	}
 	if attestation {
 		for _, source := range attesterTrustSources(deps.AttesterTrust) {

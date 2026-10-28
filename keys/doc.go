@@ -50,7 +50,13 @@
 // hardened JWKS fetch, declared hardened only while its fapihttp.Client
 // grants no loopback exception) or LocalIssuerKeys (an authorization server's own
 // KeyManager, for a verifier in the same process); production assurance
-// requires such a key source to declare KeySourceAssurance.
+// requires such a key source to declare KeySourceAssurance. A
+// registered client's keys come from StaticClientKeys (keys registered
+// per client up front) or ClientJWKSSource (each client's registered
+// jwks_uri or inline jwks, fetched through fapihttp and cached per
+// client), both of which also serve clients' encryption keys;
+// TestClientKeySourceContract checks a ClientKeySource of the
+// application's own keeps each client's keys to that client.
 //
 // The one exception to "production-suitable" above is keys/ephemeral,
 // an in-tree, in-memory KeyManager/Decrypter/ClientKeySource set whose

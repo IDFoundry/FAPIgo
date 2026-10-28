@@ -65,7 +65,9 @@ callback, so a plain response can't stand in for a signed one.
 
 - **PAR** accepts only a signed request object; plain parameters are
   refused. The object must verify under the client's registered key and
-  algorithm, name this server as its audience, carry `nbf` (Message
+  algorithm (from `Dependencies.ClientKeys`: see the
+  [PAR guide](par.md#authorization-server-the-endpoint-and-the-authorization-step)
+  for which source to use), name this server as its audience, carry `nbf` (Message
   Signing §5.3.1), be within `Limits.MaxRequestObjectLifetime`, be
   unused before, and not carry a `request_uri` of its own.
 - **The authorization response**, success or error, is a JWT signed with

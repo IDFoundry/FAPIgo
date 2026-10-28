@@ -3,7 +3,9 @@
 // resolves clients' encryption keys, keys.ClientEncryptionKeySource) —
 // for local development and testing only. Never production — its KeyManager deliberately doesn't
 // implement keys.KeyCustodyAssurance, so server.AssuranceProduction and
-// client.AssuranceProduction reject it.
+// client.AssuranceProduction reject it. For clients' keys in
+// production, use keys.StaticClientKeys or keys.NewClientJWKSSource
+// instead of ClientKeySource.
 //
 // KeyManager generates fresh keys once at process startup and never
 // persists them. Restarting the process invalidates every previously

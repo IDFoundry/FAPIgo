@@ -29,12 +29,14 @@ type KeySourceCapabilities struct {
 // an implementation that doesn't implement this interface at all is
 // rejected under AssuranceProduction — the same "declaring capabilities
 // is not optional" stance storage.StoreAssurance takes; see that type's
-// own doc comment. JWKSIssuerKeySource (this package) and
-// keys/ephemeral.ClientKeySource are this module's own two bundled
-// live-fetch implementations; only JWKSIssuerKeySource declares
-// LiveFetchHardened — true only when its fapihttp.Client is
-// HardenedForProduction — and LocalIssuerKeys and StaticAttesterKeys, which fetch
-// nothing, declare it too. keys/ephemeral is explicitly "local development
+// own doc comment. JWKSIssuerKeySource, ClientJWKSSource (this
+// package) and keys/ephemeral.ClientKeySource are this module's own
+// bundled live-fetch implementations; only JWKSIssuerKeySource and
+// ClientJWKSSource declare LiveFetchHardened — true only when their
+// fapihttp.Client is HardenedForProduction (or, for ClientJWKSSource,
+// when it has none and so fetches nothing) — and LocalIssuerKeys,
+// StaticClientKeys and StaticAttesterKeys, which fetch nothing,
+// declare it too. keys/ephemeral is explicitly "local development
 // and testing only, never production" (see that package's own doc
 // comment), so it deliberately does not implement this interface,
 // keeping it correctly rejected under AssuranceProduction rather than

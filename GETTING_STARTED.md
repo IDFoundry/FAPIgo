@@ -30,6 +30,8 @@ specifically so you don't have to do it before you can run anything:
   `NonceStore` (DPoP nonces) and, on the relying-party side,
   `SessionStore`.
 - **`keys/ephemeral`** — in-memory `KeyManager` and `ClientKeySource`.
+  (For client keys you can skip it: `keys.StaticClientKeys` and
+  `keys.NewClientJWKSSource`, shown in step 4, are production-ready.)
 
 **Both are development/testing only. Never production** — see each
 package's own doc comment for exactly why (non-durable, no expiry GC,
@@ -53,6 +55,22 @@ Pass it `keys.DeclareCustody(keys.KeyCustody{Durable: true})` (plus
 `CrossInstanceConsistent` if every instance shares the keys) to state
 how those keys are held — production assurance requires the
 declaration, and only you know the answer.
+
+For `keys.ClientKeySource` you shouldn't need to implement anything
+either, and should think twice before you do: it decides whose key
+verifies a client assertion or signed request, and the server accepts
+whatever key it returns for the client the token names. A source that
+looks a `kid` up across every client's keys — a natural JWKS-cache
+design — lets any registered client authenticate as any other.
+`keys.NewStaticClientKeys` serves keys you register per client up front
+(their `jwks`, or `crypto.PublicKey`s, validated once at
+construction); `keys.NewClientJWKSSource` resolves each client's
+registered `jwks_uri` (or inline `jwks`) through your client registry
+and a hardened `fapihttp.Client`, caching per client. Both only ever
+look a `kid` up within the requesting client's own keys, refuse an
+unknown client, and also serve clients' encryption keys
+(`keys.ClientEncryptionKeySource`). If you do write your own, run
+`keys.TestClientKeySourceContract` against it in your tests.
 
 ## 2. Build a `Config`
 
@@ -396,10 +414,19 @@ keyManager, err := ephemeral.NewKeyManager(map[keys.SigningPurpose]fapi.Signatur
 	keys.IDTokenSigning:     fapi.ES256,
 })
 
-clientKeys, err := ephemeral.NewClientKeySource(fetcher, []ephemeral.ClientKeySpec{
-	{ClientID: "demo-client", JWKS: theClientsJWKSDocument},
-	// or JWKSURI: "https://rp.example.com/.well-known/jwks.json" to fetch live instead
+// Each client's own public keys: a kid is only ever looked up within
+// the requesting client's keys. Also usable as ClientEncryptionKeys.
+clientKeys, err := keys.NewStaticClientKeys(map[fapi.ClientID]keys.ClientKeyMaterial{
+	"demo-client": {JWKS: theClientsJWKSDocument},
 })
+// Or, to follow each client's registered jwks_uri (or jwks) live,
+// cached per client:
+//
+//	clientKeys, err := keys.NewClientJWKSSource(fetcher,
+//		func(ctx context.Context, id fapi.ClientID) (fapi.URL, []byte, error) {
+//			// Look id up in your client registry; error if unknown.
+//			return jwksURI, inlineJWKS, nil
+//		})
 
 // JWT (RFC 9068) is the default, ship-in-the-box access-token format —
 // self-contained, verified locally by a resource server against this
@@ -447,8 +474,8 @@ srv, err := server.New(cfg, deps)
 ```
 
 (`fetcher` is a `*fapihttp.Client` — only needed if any client's keys
-are fetched live via `JWKSURI` rather than supplied inline; pass `nil`
-if every client uses inline `JWKS`. Build one with
+are fetched live from a `jwks_uri` rather than supplied inline; pass
+`nil` if every client uses an inline `jwks`. Build one with
 `fapihttp.New(transport, fapihttp.RecommendedConfig())`, where
 `transport` comes from
 `fapihttp.NewClient(fapihttp.RecommendedTransportConfig())`. Under

@@ -64,6 +64,17 @@ can't leak into the CSRF FAPI 2.0 Security Profile §6.4 describes.
 Unregistered parameters are ignored rather than echoed into the grant,
 and a PAR request that itself carries a `request_uri` is refused.
 
+The key that verifies a client assertion or request object comes from
+`Dependencies.ClientKeys`, for the client the token names, and the
+server accepts whatever key it returns. Use one of the bundled sources
+rather than writing your own: `keys.NewStaticClientKeys` for keys you
+register per client up front, or `keys.NewClientJWKSSource` to follow
+each client's registered `jwks_uri` (or inline `jwks`), cached per
+client. Both look a `kid` up only within the requesting client's own
+keys. A source that looks it up across every client's keys lets one
+client authenticate as another; if you write your own, run
+`keys.TestClientKeySourceContract` against it.
+
 ## See it running
 
 - [payment-consent](../../examples/payment-consent/README.md): its attack

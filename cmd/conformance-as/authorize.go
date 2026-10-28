@@ -66,7 +66,7 @@ func newConsentHandler(srv *server.Server, clients storage.ClientRepository, clo
 	}
 }
 
-// handleBegin serves GET /authorize.
+// handleBegin serves GET and POST /authorize.
 func (h *consentHandler) handleBegin(w http.ResponseWriter, r *http.Request) {
 	req, err := server.BeginAuthorizationRequestFromHTTP(r)
 	if err != nil {

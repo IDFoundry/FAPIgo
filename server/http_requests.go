@@ -130,28 +130,54 @@ func (t TokenEndpointRequest) BackchannelTokenExchange() BackchannelTokenExchang
 }
 
 // BeginAuthorizationRequestFromHTTP reads the authorization endpoint's
-// request from r's query string: the client_id and request_uri a client
-// sends the browser with after a pushed authorization request (RFC 9126
-// §4). r.URL.Query().Get would silently take the first of a repeated
+// request from r: the client_id and request_uri a client sends the
+// browser with after a pushed authorization request (RFC 9126 §4). OIDC
+// Core §3.1.2.1 has an authorization server "support the use of the HTTP
+// GET and POST methods": a POST is read from its
+// application/x-www-form-urlencoded body, as FormRequestFromHTTP reads
+// one (and only from it), any other method from the query string.
+// r.URL.Query().Get would silently take the first of a repeated
 // parameter; RFC 6749 §3.1 says one "MUST NOT be included more than
-// once", so a repeated client_id or request_uri, or a malformed query,
-// is an invalid_request *Error. Render it locally: an authorization
-// endpoint never redirects for a request it can't attribute to a
-// client's registered redirect URI. A missing value is left empty for
+// once", so a repeated client_id or request_uri, a malformed
+// query or body, or a POST that isn't form-encoded, is an
+// invalid_request *Error. Render it locally: an authorization endpoint
+// never redirects for a request it can't attribute to a client's
+// registered redirect URI. A missing value is left empty for
 // BeginAuthorization to answer, as it does any request_uri or client_id
 // it doesn't accept.
 func BeginAuthorizationRequestFromHTTP(r *http.Request) (BeginAuthorizationRequest, error) {
-	query, err := url.ParseQuery(r.URL.RawQuery)
+	params, err := authorizationEndpointParameters(r)
 	if err != nil {
-		return BeginAuthorizationRequest{}, newError(ErrorInvalidRequest, 400, "the authorization request's query is malformed", err)
+		return BeginAuthorizationRequest{}, err
 	}
 	for _, name := range []string{"client_id", "request_uri"} {
-		if len(query[name]) > 1 {
+		if len(params[name]) > 1 {
 			return BeginAuthorizationRequest{}, newError(ErrorInvalidRequest, 400, name+" is included more than once", nil)
 		}
 	}
 	return BeginAuthorizationRequest{
-		RequestURI: query.Get("request_uri"),
-		ClientID:   fapi.ClientID(query.Get("client_id")),
+		RequestURI: params.Get("request_uri"),
+		ClientID:   fapi.ClientID(params.Get("client_id")),
 	}, nil
+}
+
+// authorizationEndpointParameters is an authorization request's
+// parameters: a POST's form body, or any other request's query string.
+func authorizationEndpointParameters(r *http.Request) (url.Values, error) {
+	if r.Method != http.MethodPost {
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			return nil, newError(ErrorInvalidRequest, 400, "the authorization request's query is malformed", err)
+		}
+		return query, nil
+	}
+	form, err := FormRequestFromHTTP(r)
+	if err != nil {
+		return nil, err
+	}
+	params := url.Values{}
+	for _, p := range form.Parameters {
+		params.Add(p.Name, p.Value)
+	}
+	return params, nil
 }

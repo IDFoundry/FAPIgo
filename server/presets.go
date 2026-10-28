@@ -15,8 +15,7 @@ import (
 //
 // It covers the limits every server needs. The ones only an optional
 // feature needs are left zero, and New refuses that zero once the
-// feature is enabled, so set them yourself: DPoPNonceLifetime
-// (Dependencies.Nonces, unless it's NoDPoPNonces{}), the three BackchannelAuthentication limits
+// feature is enabled, so set them yourself: the three BackchannelAuthentication limits
 // (Endpoints.BackchannelAuthentication), and MaxClientAttestationLifetime
 // and MaxClientAttestationPoPAge
 // (Config.AttestationBasedClientAuthentication).
@@ -124,6 +123,17 @@ func RecommendedLimits() Limits {
 		// specific number. 60s is a concrete point within that
 		// guidance, not a value RFC 9449 itself specifies.
 		MaxDPoPProofAge: 60 * time.Second,
+
+		// RFC 9449 §8 sets no number either: a server "will need to
+		// keep a window of recent nonces" and decides when to supply a
+		// new one. A nonce here is valid until it expires and is
+		// replaced once half its lifetime has passed, so 5 minutes
+		// keeps a client reusing one nonce for minutes at a time (one
+		// use_dpop_nonce round trip per client per endpoint at most
+		// every couple of minutes) while staying well inside
+		// AssuranceProduction's 15-minute ceiling. Unused under
+		// NoDPoPNonces{}.
+		DPoPNonceLifetime: 5 * time.Minute,
 
 		// Spec: FAPI 2.0 Security Profile Final §5.3.2.1 item 13 —
 		// "to accommodate clock offsets, shall accept JWTs with an

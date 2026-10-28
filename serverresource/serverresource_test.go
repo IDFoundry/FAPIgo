@@ -521,3 +521,20 @@ func TestNewVerifierRequiresResourceURLs(t *testing.T) {
 		t.Fatalf("NewVerifier(no ResourceURLs) = %v, want resource_urls required", err)
 	}
 }
+
+// TestNewVerifierNonceLifetimeFollowsServer covers a zero
+// Options.NonceLifetime taking the server's Limits.DPoPNonceLifetime.
+func TestNewVerifierNonceLifetimeFollowsServer(t *testing.T) {
+	now := time.Now()
+	jwt := jwtAccessTokens(t)
+	cfg := serverConfig(t)
+	cfg.Limits.DPoPNonceLifetime = 5 * time.Minute
+	opts := withURLs(t, serverresource.Options{Nonces: memstore.NewNonceStore()})
+	if _, err := serverresource.NewVerifier(cfg, serverDependencies(t, jwt, now), opts); err != nil {
+		t.Fatalf("NewVerifier with the server's nonce lifetime: %v", err)
+	}
+	cfg.Limits.DPoPNonceLifetime = 0
+	if _, err := serverresource.NewVerifier(cfg, serverDependencies(t, jwt, now), opts); err == nil {
+		t.Fatal("NewVerifier with no nonce lifetime on either side succeeded, want an error")
+	}
+}

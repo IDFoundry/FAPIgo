@@ -78,8 +78,9 @@ type Options struct {
 	// server has a nonce store, since this verifier needs a separate one.
 	Nonces storage.NonceStore
 
-	// NonceLifetime bounds how long an issued nonce remains valid.
-	// Required when Nonces is set.
+	// NonceLifetime bounds how long an issued nonce remains valid. Zero
+	// uses the server's own Limits.DPoPNonceLifetime (which
+	// server.RecommendedLimits sets).
 	NonceLifetime time.Duration
 
 	// Resource is the RFC 8707 resource indicator identifying the
@@ -195,6 +196,9 @@ func NewVerifier(cfg server.Config, deps server.Dependencies, opts Options) (*re
 	rdeps.Nonces = nonces
 	if nonces != nil && !declinedNonces(nonces) {
 		rcfg.Limits.DPoPNonceLifetime = opts.NonceLifetime
+		if rcfg.Limits.DPoPNonceLifetime == 0 {
+			rcfg.Limits.DPoPNonceLifetime = cfg.Limits.DPoPNonceLifetime
+		}
 		rdeps.Random = deps.Random
 	}
 	v, err := resource.NewVerifier(rcfg, rdeps)

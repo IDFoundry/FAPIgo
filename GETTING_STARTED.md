@@ -90,9 +90,6 @@ never reaches for them on its own. Override any field your own security
 policy calls for.
 
 ```go
-limits := server.RecommendedLimits()
-limits.DPoPNonceLifetime = 5 * time.Minute // with Dependencies.Nonces (step 4); at most 15 minutes in production
-
 cfg := server.Config{
 	Issuer: issuer, // fapi.ParseIssuerURL("https://as.example.com")
 	Endpoints: server.Endpoints{
@@ -103,7 +100,7 @@ cfg := server.Config{
 	},
 	Profile:    server.ProfileFAPISecurity, // or ProfileFAPISecurityWithMessageSigning
 	Algorithms: server.RecommendedAlgorithms(),
-	Limits:     limits, // server.RecommendedLimits(), with DPoPNonceLifetime set (step 4)
+	Limits:     server.RecommendedLimits(), // includes DPoPNonceLifetime for Dependencies.Nonces (step 4)
 	Assurance:  server.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
 	Subjects:   server.PublicSubjects(),     // every client sees the same sub for a user
 	// Deployment: server.DeploymentSingleInstance, // required under AssuranceProduction: or DeploymentHorizontallyScaled for a fleet
@@ -1206,8 +1203,7 @@ verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{
 	// handed out mustn't be valid here. resource.NoDPoPNonces{} declines;
 	// left nil, the verifier follows a server that declined with
 	// server.NoDPoPNonces{}, and production refuses it otherwise.
-	Nonces:        memstore.NewNonceStore(),
-	NonceLifetime: cfg.Limits.DPoPNonceLifetime,
+	Nonces: memstore.NewNonceStore(), // NonceLifetime left zero follows cfg.Limits.DPoPNonceLifetime
 })
 ```
 

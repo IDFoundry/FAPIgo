@@ -72,7 +72,7 @@ func newHarnessWithRARTypes(t *testing.T, profile server.Profile, registry *exte
 		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
 		ClientAssertionAlgorithm: fapi.ES256,
 		RequestObjectAlgorithm:   fapi.ES256,
-		AllowedScopes:            []string{"openid", "accounts"},
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
 		BackchannelAuthenticationRequestAlgorithm: fapi.ES256,
 		AuthorizationDetailsTypes:                 types,
 	})

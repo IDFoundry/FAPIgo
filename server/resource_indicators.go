@@ -249,22 +249,38 @@ func grantedResources(requested, granted []string) ([]string, *Error) {
 }
 
 // allowedGrantAudience is checkGrantStillAllowed for a token request
-// from grant asking for scope, followed by narrowedAudience for the
-// resources it requested.
-func (s *Server) allowedGrantAudience(ctx context.Context, client storage.RegisteredClient, grant grantRecord, scope, requested []string) (string, []string, *Error) {
+// from grant asking for scope, followed by accessTokenGrant for the
+// authorization_details it requested and narrowedAudience for the
+// resources it requested. It returns the grant the access token is
+// issued from (accessTokenGrant) with that token's audience.
+func (s *Server) allowedGrantAudience(ctx context.Context, client storage.RegisteredClient, grant grantRecord, scope []string, details requestedAuthorizationDetails, requested []string) (grantRecord, string, []string, *Error) {
 	if err := s.checkGrantStillAllowed(client, grant, scope); err != nil {
-		return "", nil, err
+		return grantRecord{}, "", nil, err
 	}
-	return s.narrowedAudience(ctx, client, grant.Resources, requested)
+	return s.narrowedAccessGrant(ctx, client, grant, details, requested)
 }
 
 // usableGrantAudience is allowedGrantAudience for the CIBA token
 // exchange, whose grant checkGrantUsable checks.
-func (s *Server) usableGrantAudience(ctx context.Context, client storage.RegisteredClient, grant grantRecord, requested []string) (string, []string, *Error) {
+func (s *Server) usableGrantAudience(ctx context.Context, client storage.RegisteredClient, grant grantRecord, details requestedAuthorizationDetails, requested []string) (grantRecord, string, []string, *Error) {
 	if err := s.checkGrantUsable(ctx, client, grant); err != nil {
-		return "", nil, err
+		return grantRecord{}, "", nil, err
 	}
-	return s.narrowedAudience(ctx, client, grant.Resources, requested)
+	return s.narrowedAccessGrant(ctx, client, grant, details, requested)
+}
+
+// narrowedAccessGrant is accessTokenGrant for details, then
+// narrowedAudience for the requested resources.
+func (s *Server) narrowedAccessGrant(ctx context.Context, client storage.RegisteredClient, grant grantRecord, details requestedAuthorizationDetails, requested []string) (grantRecord, string, []string, *Error) {
+	accessGrant, err := s.accessTokenGrant(grant, details)
+	if err != nil {
+		return grantRecord{}, "", nil, err
+	}
+	audience, audiences, err := s.narrowedAudience(ctx, client, grant.Resources, requested)
+	if err != nil {
+		return grantRecord{}, "", nil, err
+	}
+	return accessGrant, audience, audiences, nil
 }
 
 // narrowedAudience is the audience of an access token from a grant for

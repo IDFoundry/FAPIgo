@@ -76,11 +76,14 @@ type TokenResult struct {
 	ExpiresIn time.Duration
 	Scope     string
 
-	// AuthorizationDetails is the resource owner's granted Rich
-	// Authorization Requests (RFC 9396) detail array — RFC 9396 §7's own
-	// token response echo, reflecting exactly what the issued access token's
-	// own "authorization_details" claim carries. Nil if the authorization
-	// carried no authorization_details, or none of it was granted.
+	// AuthorizationDetails is the Rich Authorization Requests (RFC 9396)
+	// detail array assigned to the issued access token — RFC 9396 §7's
+	// token response echo, exactly what the access token's own
+	// "authorization_details" claim carries: the resource owner's whole
+	// grant, or the part of it the token request's own
+	// "authorization_details" parameter asked for (RFC 9396 §6). Nil if
+	// the authorization carried no authorization_details, none of it was
+	// granted, or the token request asked for none (an empty array).
 	AuthorizationDetails json.RawMessage
 
 	// IDToken is set only when the granted scope included "openid".
@@ -206,7 +209,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", authErr)
 	}
 
-	code, redirectURI, codeVerifier, paramErr := codeExchangeParameters(params)
+	code, redirectURI, codeVerifier, details, paramErr := s.codeExchangeParameters(params)
 	if paramErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), paramErr)
 	}
@@ -254,12 +257,14 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if grantErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), grantErr)
 	}
-	audience, audiences, allowedErr := s.allowedGrantAudience(ctx, client, grant, grant.Scope, requestedResources)
+	// The refresh token keeps all of grant: only the access token is
+	// narrowed to the authorization_details and resources requested.
+	accessGrant, audience, audiences, allowedErr := s.allowedGrantAudience(ctx, client, grant, grant.Scope, details, requestedResources)
 	if allowedErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), allowedErr)
 	}
 
-	accessTokenClaims, err := grant.accessTokenClaims()
+	accessTokenClaims, err := accessGrant.accessTokenClaims()
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
@@ -285,7 +290,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		TokenType:            tokenTypeFor(client.SenderConstrain()),
 		ExpiresIn:            s.cfg.Limits.AccessTokenLifetime,
 		Scope:                strings.Join(grant.Scope, " "),
-		AuthorizationDetails: grant.AuthorizationDetails,
+		AuthorizationDetails: accessGrant.AuthorizationDetails,
 	}
 
 	if idErr := s.issueOptionalIDToken(ctx, client, grant, accessToken, &result); idErr != nil {
@@ -418,15 +423,18 @@ func checkCodeInstance(grant grantRecord, instanceKey string) *Error {
 }
 
 // codeExchangeParameters returns the code, redirect_uri and
-// code_verifier an authorization code token request must carry.
-func codeExchangeParameters(params map[string]string) (code, redirectURI, codeVerifier string, err *Error) {
+// code_verifier an authorization code token request must carry, and the
+// authorization_details it may (tokenRequestAuthorizationDetails) —
+// checked here, before the code is redeemed, so a malformed one doesn't
+// spend it.
+func (s *Server) codeExchangeParameters(params map[string]string) (code, redirectURI, codeVerifier string, details requestedAuthorizationDetails, err *Error) {
 	code = params["code"]
 	if code == "" {
-		return "", "", "", newError(ErrorInvalidRequest, 400, "code is required", nil)
+		return "", "", "", details, newError(ErrorInvalidRequest, 400, "code is required", nil)
 	}
 	redirectURI = params["redirect_uri"]
 	if redirectURI == "" {
-		return "", "", "", newError(ErrorInvalidRequest, 400, "redirect_uri is required", nil)
+		return "", "", "", details, newError(ErrorInvalidRequest, 400, "redirect_uri is required", nil)
 	}
 	codeVerifier = params["code_verifier"]
 	if codeVerifier == "" {
@@ -437,9 +445,13 @@ func codeExchangeParameters(params map[string]string) (code, redirectURI, codeVe
 		// covering the case where PKCE was required for the
 		// authorization but the token request omits the verifier
 		// entirely.
-		return "", "", "", newError(ErrorInvalidGrant, 400, "code_verifier is required", nil)
+		return "", "", "", details, newError(ErrorInvalidGrant, 400, "code_verifier is required", nil)
 	}
-	return code, redirectURI, codeVerifier, nil
+	details, err = s.tokenRequestAuthorizationDetails(params)
+	if err != nil {
+		return "", "", "", details, err
+	}
+	return code, redirectURI, codeVerifier, details, nil
 }
 
 // revokeTokensForReusedCode best-effort revokes whatever was already
@@ -783,11 +795,11 @@ func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClie
 
 // issueRefreshToken generates and persists a new refresh token carrying
 // grant forward (see grantRecord.forRefreshToken), returning its raw
-// value. The grant's AuthorizationDetails carry forward unchanged —
-// RefreshAccessToken re-embeds them on every refresh, since RFC 9396
-// defines no refresh-time narrowing parameter the way RFC 6749 §6 does
-// for scope. binding is what the token is issued against — see
-// refreshBinding.
+// value. The grant's AuthorizationDetails carry forward in full, whatever
+// the access token issued alongside was narrowed to: a refresh request
+// may again ask for any of them (RFC 9396 §6, §6.1), as it may for any
+// of the grant's scopes (RFC 6749 §6). binding is what the token is
+// issued against — see refreshBinding.
 func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, grant grantRecord, binding refreshBinding) (string, error) {
 	raw, err := generateRefreshToken(s.deps.Random)
 	if err != nil {

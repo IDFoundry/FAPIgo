@@ -143,6 +143,41 @@ func (s *Store) BeginAuthorization(ctx context.Context, txn storage.BeginAuthori
 		return storage.PushedAuthorizationRequest{}, errors.New("request_uri has expired")
 	}
 	// ... then insert the interaction under txn.Handle.
+### A token request's `authorization_details` is checked against the grant (server)
+
+**Affects:** a client that sends an `authorization_details` parameter
+on a token request for the authorization code, refresh token or CIBA
+grant (`ExchangeAuthorizationCode`, `RefreshAccessToken`,
+`ExchangeBackchannelAuthentication`).
+
+**Why:** RFC 9396 §6 lets a token request ask for an access token with
+only part of the grant's authorization details, and says the server
+refuses the request with `invalid_authorization_details` when the grant
+doesn't allow what was asked. The parameter used to be ignored at these
+three grants: a request for less got the whole grant, and a malformed or
+wider value was accepted. The server now parses it against
+`Config.RAR`, compares it with the grant the way a resource owner's
+approval is compared with the request (`RARDefinition.ValidateGrant`,
+or an exact match), and issues the access token, and the token
+response's `authorization_details`, with only what was asked for. The
+refresh token keeps the whole grant. A token request without the
+parameter is unchanged.
+
+**What fails:** the token request, with `invalid_authorization_details`
+(400), when its `authorization_details` is malformed, names a type or
+field `Config.RAR` doesn't accept, asks for more than the grant holds,
+or is sent to a server without `Config.RAR`. A malformed value is
+refused before the authorization code or CIBA approval is spent.
+
+**What to change:** send `authorization_details` on a token request
+only to narrow the grant, with objects taken from it; to get everything
+granted, leave the parameter out:
+
+```go
+form := url.Values{
+	"grant_type": {"refresh_token"},
+	"refresh_token": {refreshToken},
+	// no authorization_details: the access token gets the whole grant
 }
 ```
 

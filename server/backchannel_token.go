@@ -102,7 +102,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", authErr)
 	}
 
-	authReqID, paramErr := backchannelTokenParameters(client, params)
+	authReqID, details, paramErr := s.backchannelTokenParameters(client, params)
 	if paramErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), paramErr)
 	}
@@ -126,11 +126,14 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), grantErr)
 	}
 	grant.CodeGrantID = s.backchannelGrantID(authReqIDHash)
-	audience, audiences, usableErr := s.usableGrantAudience(ctx, client, grant, requestedResources)
+	// A refresh token issued alongside keeps all of grant: only the
+	// access token is narrowed to the authorization_details and
+	// resources requested.
+	accessGrant, audience, audiences, usableErr := s.usableGrantAudience(ctx, client, grant, details, requestedResources)
 	if usableErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), usableErr)
 	}
-	accessTokenClaims, err := grant.accessTokenClaims()
+	accessTokenClaims, err := accessGrant.accessTokenClaims()
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
@@ -150,7 +153,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		TokenType:            tokenTypeFor(client.SenderConstrain()),
 		ExpiresIn:            s.cfg.Limits.AccessTokenLifetime,
 		Scope:                strings.Join(grant.Scope, " "),
-		AuthorizationDetails: grant.AuthorizationDetails,
+		AuthorizationDetails: accessGrant.AuthorizationDetails,
 	}
 
 	if issueErr := s.issueBackchannelOptionalTokens(ctx, client, grant, accessToken, refreshBinding{Thumbprint: thumbprint, InstanceKey: authn.InstanceKey}, &result); issueErr != nil {
@@ -169,16 +172,22 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 // request must carry, once client is still registered for CIBA: the
 // registration may have changed since the request was made, as at the
 // authorization code exchange and refresh. Checked before polling, so an
-// approval refused this way isn't spent.
-func backchannelTokenParameters(client storage.RegisteredClient, params map[string]string) (string, *Error) {
+// approval refused this way isn't spent. So is a malformed
+// authorization_details (tokenRequestAuthorizationDetails), which it also
+// returns.
+func (s *Server) backchannelTokenParameters(client storage.RegisteredClient, params map[string]string) (string, requestedAuthorizationDetails, *Error) {
 	if _, permitted := client.BackchannelAuthenticationRequestAlgorithm(); !permitted {
-		return "", newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for CIBA", nil)
+		return "", requestedAuthorizationDetails{}, newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for CIBA", nil)
 	}
 	authReqID := params["auth_req_id"]
 	if authReqID == "" {
-		return "", newError(ErrorInvalidRequest, 400, "auth_req_id is required", nil)
+		return "", requestedAuthorizationDetails{}, newError(ErrorInvalidRequest, 400, "auth_req_id is required", nil)
 	}
-	return authReqID, nil
+	details, err := s.tokenRequestAuthorizationDetails(params)
+	if err != nil {
+		return "", requestedAuthorizationDetails{}, err
+	}
+	return authReqID, details, nil
 }
 
 // backchannelAuthReqIDHashPrefix separates the digest of an auth_req_id

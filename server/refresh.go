@@ -66,8 +66,10 @@ type RefreshTokenRequest struct {
 // extraordinary circumstances", so the presented token is returned
 // unchanged in the response and remains valid for the caller's next
 // refresh too — see storage.GrantStore.RedeemRefreshToken's doc
-// comment. A requested scope may narrow, but never widen, the token's
-// original grant.
+// comment. A requested scope, authorization_details (RFC 9396 §6) or
+// resource may narrow, but never widen, the token's original grant; the
+// narrowing applies to the access token issued, never to the refresh
+// token, which keeps the whole grant.
 //
 // The grant is checked against the client's current registration, not
 // only the one it was issued under: a scope the client may no longer use
@@ -100,9 +102,9 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", authErr)
 	}
 
-	rawToken := params["refresh_token"]
-	if rawToken == "" {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidRequest, 400, "refresh_token is required", nil))
+	rawToken, details, paramErr := s.refreshParameters(params)
+	if paramErr != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), paramErr)
 	}
 
 	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
@@ -128,14 +130,15 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if scopeErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), scopeErr)
 	}
-	// The refresh token stays bound to all of the grant's resources,
-	// whatever this access token is narrowed to (RFC 8707 §2.2).
-	audience, audiences, allowedErr := s.allowedGrantAudience(ctx, client, grant, scope, requestedResources)
+	// The refresh token stays bound to all of the grant's resources and
+	// authorization_details, whatever this access token is narrowed to
+	// (RFC 8707 §2.2, RFC 9396 §6.1).
+	accessGrant, audience, audiences, allowedErr := s.allowedGrantAudience(ctx, client, grant, scope, details, requestedResources)
 	if allowedErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), allowedErr)
 	}
 
-	accessTokenClaims, err := grant.accessTokenClaims()
+	accessTokenClaims, err := accessGrant.accessTokenClaims()
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
@@ -160,7 +163,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		TokenType:            tokenTypeFor(client.SenderConstrain()),
 		ExpiresIn:            s.cfg.Limits.AccessTokenLifetime,
 		Scope:                strings.Join(scope, " "),
-		AuthorizationDetails: grant.AuthorizationDetails,
+		AuthorizationDetails: accessGrant.AuthorizationDetails,
 	}
 
 	if containsScope(scope, "openid") {
@@ -415,6 +418,21 @@ func (s *Server) checkGrantUsable(ctx context.Context, client storage.Registered
 		return revErr
 	}
 	return s.checkGrantStillAllowed(client, grant, grant.Scope)
+}
+
+// refreshParameters returns the refresh_token a refresh request must
+// carry and the authorization_details it may
+// (tokenRequestAuthorizationDetails).
+func (s *Server) refreshParameters(params map[string]string) (string, requestedAuthorizationDetails, *Error) {
+	rawToken := params["refresh_token"]
+	if rawToken == "" {
+		return "", requestedAuthorizationDetails{}, newError(ErrorInvalidRequest, 400, "refresh_token is required", nil)
+	}
+	details, err := s.tokenRequestAuthorizationDetails(params)
+	if err != nil {
+		return "", requestedAuthorizationDetails{}, err
+	}
+	return rawToken, details, nil
 }
 
 // refreshScope is the scope a refresh request asks for: the grant's,

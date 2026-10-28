@@ -543,6 +543,33 @@ cfg := federation.SelfIssueConfig{
 }
 ```
 
+### A federation Entity ID must be the issuer (server) or the client_id (client)
+
+**Affects:** a `server.Config` whose `Federation.EntityID` isn't exactly
+`Issuer.String()`, and a `client.Config` whose `Federation.EntityID`
+isn't exactly `ClientID`, including a difference of a trailing slash.
+
+**Why:** OpenID Federation 1.0 §5.1.3 says the `openid_provider`
+`issuer` "MUST match the Federation Entity Identifier", and a
+federation RP addresses its request objects and client assertions to
+the OP's Entity Identifier (§12.1.1.1, §12.1.1.2), which the server
+compares with its issuer. §12.1 says "the RP employs its Entity
+Identifier as the Client ID", which is how the OP finds the RP's Entity
+Configuration. A mismatch used to fail only later, when a conformant
+peer's request was refused or the OP resolved the wrong entity.
+
+**What fails:** `server.New` or `client.New`, with an error naming
+`federation.entity_id` and the value it must equal.
+
+**What to change:** use one identifier for both:
+
+```go
+cfg.Issuer = issuer // https://op.example.org
+cfg.Federation.EntityID = issuer.String()
+```
+
+and on the client, `cfg.ClientID = fapi.ClientID(cfg.Federation.EntityID)`.
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

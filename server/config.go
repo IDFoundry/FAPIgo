@@ -763,6 +763,9 @@ type FederationConfig struct {
 	// Federation 1.0 §1.2) — see federation.SelfIssueConfig.EntityID.
 	// Conventionally the same origin EntityConfiguration's output is
 	// served from, at federation.WellKnownPath.
+	// Must equal Config.Issuer exactly (OpenID Federation 1.0 §5.1.3:
+	// the openid_provider issuer "MUST match the Federation Entity
+	// Identifier"); New refuses a mismatch.
 	EntityID string
 
 	// AuthorityHints is this server's own "authority_hints" claim — see

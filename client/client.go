@@ -526,6 +526,12 @@ func validateFederationConfig(cfg Config) error {
 	if err := federation.ValidEntityID(cfg.Federation.EntityID); err != nil {
 		return fmt.Errorf("client: config: federation.entity_id: %w", err)
 	}
+	// OpenID Federation 1.0 §12.1: under Automatic Registration "the RP
+	// employs its Entity Identifier as the Client ID", which is how the
+	// OP finds the RP's Entity Configuration.
+	if cfg.Federation.EntityID != string(cfg.ClientID) {
+		return fmt.Errorf("client: config: federation.entity_id %q must equal client_id %q (OpenID Federation 1.0 §12.1)", cfg.Federation.EntityID, cfg.ClientID)
+	}
 	if cfg.Federation.Lifetime <= 0 {
 		return fmt.Errorf("client: config: federation.lifetime must be positive when federation.entity_id is set")
 	}

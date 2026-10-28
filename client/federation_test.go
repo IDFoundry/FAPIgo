@@ -26,6 +26,9 @@ import (
 func federationConfiguredConfig(t *testing.T) client.Config {
 	t.Helper()
 	cfg := validConfig(t)
+	// OpenID Federation 1.0 §12.1: the RP's Entity Identifier is its
+	// client_id.
+	cfg.ClientID = "https://rp.example.org"
 	cfg.Federation = client.FederationConfig{
 		EntityID:  "https://rp.example.org",
 		Lifetime:  time.Hour,
@@ -410,5 +413,17 @@ func TestDiscoverViaFederationRejectsUnusableEndpoint(t *testing.T) {
 	})
 	if _, err := client.DiscoverViaFederation(context.Background(), resolver, entityID); err == nil {
 		t.Fatal("DiscoverViaFederation(http token_endpoint) = nil error, want error")
+	}
+}
+
+// TestNewRejectsFederationEntityIDNotClientID covers OpenID Federation
+// 1.0 §12.1, "the RP employs its Entity Identifier as the Client ID": a
+// configuration where they differ is refused, since the OP would
+// resolve a different entity from the client_id.
+func TestNewRejectsFederationEntityIDNotClientID(t *testing.T) {
+	cfg := federationConfiguredConfig(t)
+	cfg.ClientID = "https://rp.example.org/"
+	if _, err := client.New(cfg, federationConfiguredDependencies(t)); err == nil || !strings.Contains(err.Error(), "must equal client_id") {
+		t.Fatalf("New(entity ID %q, client_id %q) = %v, want it refused", cfg.Federation.EntityID, cfg.ClientID, err)
 	}
 }

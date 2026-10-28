@@ -630,6 +630,9 @@ type FederationConfig struct {
 	// Federation 1.0 §1.2) — see federation.SelfIssueConfig.EntityID.
 	// Conventionally the same origin EntityConfiguration's output is
 	// served from, at federation.WellKnownPath.
+	// Must equal Config.ClientID exactly (OpenID Federation 1.0 §12.1:
+	// "the RP employs its Entity Identifier as the Client ID"); New
+	// refuses a mismatch.
 	EntityID string
 
 	// AuthorityHints is this client's own "authority_hints" claim — see

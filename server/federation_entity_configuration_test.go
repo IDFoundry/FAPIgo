@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,5 +73,20 @@ func TestEntityConfigurationRefusesForeignIssuer(t *testing.T) {
 		"openid_provider": json.RawMessage(`{"issuer":"https://someone-else.example.org"}`),
 	}); err == nil {
 		t.Fatal("EntityConfiguration(foreign issuer) = nil error, want it refused")
+	}
+}
+
+// TestNewRejectsFederationEntityIDNotIssuer covers OpenID Federation
+// 1.0 §5.1.3: an OP's Entity Identifier is its issuer, so a
+// configuration where they differ, even by a trailing slash, is refused.
+func TestNewRejectsFederationEntityIDNotIssuer(t *testing.T) {
+	for _, entityID := range []string{testIssuer + "/", "https://as.example.org", testIssuer + "/federation"} {
+		cfg := federationConfiguredConfig(t)
+		cfg.Federation.EntityID = entityID
+		deps := validDependencies()
+		deps.Keys = &fakeKeyManager{key: generateKey(t), keyID: "as-fed-kid", federationKey: generateKey(t)}
+		if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "must equal issuer") {
+			t.Errorf("New(entity ID %q, issuer %q) = %v, want it refused", entityID, testIssuer, err)
+		}
 	}
 }

@@ -119,6 +119,7 @@ func TestNewRequiresKeysWhenSomethingIsSigned(t *testing.T) {
 			c.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
 		},
 		"federation": func(c *client.Config) {
+			c.ClientID = testIssuer + "/rp"
 			c.Federation = client.FederationConfig{EntityID: testIssuer + "/rp", Algorithm: fapi.ES256, Lifetime: time.Hour}
 		},
 	}

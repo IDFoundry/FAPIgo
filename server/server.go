@@ -560,6 +560,14 @@ func validateFederationConfig(cfg Config) error {
 	if err := federation.ValidEntityID(cfg.Federation.EntityID); err != nil {
 		return fmt.Errorf("server: config: federation.entity_id: %w", err)
 	}
+	// OpenID Federation 1.0 §5.1.3: "The issuer parameter value in the
+	// openid_provider metadata MUST match the Federation Entity
+	// Identifier". A federation RP also addresses its request objects
+	// and client assertions to the OP's Entity Identifier (§12.1.1.1,
+	// §12.1.1.2), which this server checks against Issuer.
+	if cfg.Federation.EntityID != cfg.Issuer.String() {
+		return fmt.Errorf("server: config: federation.entity_id %q must equal issuer %q (OpenID Federation 1.0 §5.1.3)", cfg.Federation.EntityID, cfg.Issuer.String())
+	}
 	if cfg.Federation.Lifetime <= 0 {
 		return fmt.Errorf("server: config: federation.lifetime must be positive when federation.entity_id is set")
 	}

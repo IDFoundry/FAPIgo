@@ -22,7 +22,7 @@ side.
 cfg.Profile = server.ProfileFAPISecurityWithMessageSigning
 cfg.Algorithms.RequestObject = server.AlgorithmSet{fapi.ES256} // accepted from clients
 cfg.Algorithms.JARM = fapi.ES256                                // signs authorization responses
-cfg.Limits.MaxRequestObjectLifetime = time.Minute
+cfg.Limits.MaxRequestObjectLifetime = 10 * time.Minute // what server.RecommendedLimits sets
 cfg.Limits.JARMResponseLifetime = 90 * time.Second
 
 // Client.

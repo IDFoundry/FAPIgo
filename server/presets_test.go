@@ -4,8 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"testing"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/requestobject"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/server"
@@ -141,6 +144,51 @@ func assertContains(t *testing.T, got []string, want ...string) {
 		}
 		if !found {
 			t.Fatalf("%v does not contain %q", got, w)
+		}
+	}
+}
+
+// TestRecommendedLimitsAcceptMessageSigningRequestObjectWindows checks
+// that a server on RecommendedLimits accepts request objects signed with
+// a window of a few minutes, as Message Signing clients commonly do (the
+// OIDF conformance suite uses exp - nbf = 300s; Message Signing §5.3.1
+// allows up to 60 minutes), while still refusing one past its own limit.
+func TestRecommendedLimitsAcceptMessageSigningRequestObjectWindows(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
+	cfg := h.cfg
+	cfg.Limits = server.RecommendedLimits()
+	srv, err := server.New(cfg, h.deps)
+	if err != nil {
+		t.Fatalf("server.New with RecommendedLimits: %v", err)
+	}
+	h.server = srv
+
+	cases := []struct {
+		lifetime time.Duration
+		wantErr  bool
+	}{
+		{lifetime: 300 * time.Second, wantErr: false},
+		{lifetime: 10 * time.Minute, wantErr: false},
+		{lifetime: 11 * time.Minute, wantErr: true},
+	}
+	for _, c := range cases {
+		obj, err := requestobject.Create(requestobject.CreateParams{
+			Signer: h.key, Algorithm: fapi.ES256,
+			ClientID: testClientID.String(), Audience: testIssuer,
+			Now: h.now, Lifetime: c.lifetime, Parameters: standardAuthParams(t),
+		})
+		if err != nil {
+			t.Fatalf("requestobject.Create: %v", err)
+		}
+		_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+			HTTP: server.FormRequest{Parameters: []server.FormParameter{
+				formParam("client_assertion", h.clientAssertion(t)),
+				formParam("client_assertion_type", clientassertion.AssertionType),
+				formParam("request", obj),
+			}},
+		})
+		if (err != nil) != c.wantErr {
+			t.Errorf("request object with exp - nbf = %v: err = %v, want error %v", c.lifetime, err, c.wantErr)
 		}
 	}
 }

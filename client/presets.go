@@ -36,8 +36,11 @@ func RecommendedLimits() Limits {
 		// little value.
 		ClientAssertionLifetime: 60 * time.Second,
 
-		// Not spec-mandated — mirrors server.RecommendedLimits'
-		// MaxRequestObjectLifetime for the same reason.
+		// Not spec-mandated — the same short-lived-artifact principle
+		// as ClientAssertionLifetime. It fits within
+		// server.RecommendedLimits' MaxRequestObjectLifetime (10
+		// minutes), and within the 60 seconds a stricter
+		// authorization server might allow.
 		RequestObjectLifetime: 60 * time.Second,
 
 		// Not spec-mandated — a UX budget for how long a user has to

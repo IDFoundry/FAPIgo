@@ -90,6 +90,9 @@ never reaches for them on its own. Override any field your own security
 policy calls for.
 
 ```go
+limits := server.RecommendedLimits()
+limits.DPoPNonceLifetime = 5 * time.Minute // with Dependencies.Nonces (step 4); at most 15 minutes in production
+
 cfg := server.Config{
 	Issuer: issuer, // fapi.ParseIssuerURL("https://as.example.com")
 	Endpoints: server.Endpoints{
@@ -100,7 +103,7 @@ cfg := server.Config{
 	},
 	Profile:    server.ProfileFAPISecurity, // or ProfileFAPISecurityWithMessageSigning
 	Algorithms: server.RecommendedAlgorithms(),
-	Limits:     server.RecommendedLimits(),
+	Limits:     limits, // server.RecommendedLimits(), with DPoPNonceLifetime set (step 4)
 	Assurance:  server.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
 	Subjects:   server.PublicSubjects(),     // every client sees the same sub for a user
 	// Deployment: server.DeploymentSingleInstance, // required under AssuranceProduction: or DeploymentHorizontallyScaled for a fleet
@@ -132,6 +135,9 @@ token when nothing else does, so keep them short, and shorter still with
 authorization code no longer revokes what it issued, `RevokeGrant`
 refuses, `RevokeToken` removes a refresh token but not the access tokens
 issued from it, and a stolen access token works until it expires.
+
+`AssuranceProduction` also requires `Dependencies.Nonces`: a DPoP nonce
+store (step 4), or `server.NoDPoPNonces{}` to explicitly decline.
 
 `Subjects` is required: it states what kind of `sub` (OpenID Connect
 Core §8) a user gets at each client. `server.PublicSubjects()` gives
@@ -488,12 +494,32 @@ deps := server.Dependencies{
 	// NoClientCertificateChainTrust{} accepts the certificate with no
 	// chain trust at all, outside production only.
 	ClientCertificateTrust: server.NoPKIClientAuthentication{},
-	Clock:                  server.SystemClock{},
-	Random:                 rand.Reader, // crypto/rand; production assurance requires exactly this reader
+	// DPoP server nonces (RFC 9449 §8): a DPoP proof at PAR, the token
+	// endpoint or the backchannel authentication endpoint must carry a
+	// nonce this server handed out, so a proof made ahead of time or
+	// captured is refused. Needs cfg.Limits.DPoPNonceLifetime (step 2).
+	// Required under AssuranceProduction: there, a store every instance
+	// shares, declaring storage.StoreAssurance — or
+	// server.NoDPoPNonces{} to explicitly decline.
+	Nonces: memstore.NewNonceStore(),
+	Clock:  server.SystemClock{},
+	Random: rand.Reader, // crypto/rand; production assurance requires exactly this reader
 }
 
 srv, err := server.New(cfg, deps)
 ```
+
+A client's first DPoP request to PAR or the token endpoint is then
+answered `400 use_dpop_nonce` with a `DPoP-Nonce` header; it retries
+once with that nonce in its proof (this module's `client` package does
+so on its own), and keeps using it until a response hands it the next.
+That costs one extra round trip per client per endpoint on first use,
+and again each time the nonce rotates (after half of
+`DPoPNonceLifetime`). What it buys: without a server nonce, a DPoP
+proof's freshness rests on the `iat` the client chose, so an attacker
+who can have a client generate proofs for later, or capture them, can
+use one until it ages out (RFC 9449 §11, the FAPI 2.0 attacker model's
+A5). See [docs/guides/dpop.md](docs/guides/dpop.md).
 
 (`fetcher` is a `*fapihttp.Client` — only needed if any client's keys
 are fetched live from a `jwks_uri` rather than supplied inline; pass
@@ -1049,6 +1075,8 @@ cfg := resource.Config{
 	Limits: resource.Limits{
 		MaxDPoPProofAge: time.Minute,      // how old a DPoP proof's iat may be
 		MaxClockSkew:    10 * time.Second, // tolerance either direction: 10 to 60 seconds in production
+		// With Dependencies.Nonces: at most 15 minutes in production.
+		DPoPNonceLifetime: 5 * time.Minute,
 	},
 	Assurance:    resource.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
 	ResourceURLs: []fapi.URL{apiURL},             // this API's own external URL(s), as clients call it
@@ -1075,7 +1103,9 @@ declare `keys.KeySourceAssurance` (`keys.LocalIssuerKeys` does, and so
 does `keys.JWKSIssuerKeySource` on a `fapihttp` client without a loopback
 exception), the opaque-token, replay, nonce and
 revocation stores to declare `storage.StoreAssurance`, and
-`crypto/rand.Reader` when DPoP nonces are on. It refuses
+`crypto/rand.Reader` when DPoP nonces are on. It requires
+`Dependencies.Nonces`, or `resource.NoDPoPNonces{}` to explicitly
+decline. It refuses
 `resource.NoRevocation{}`: decline revocation there with
 `resource.NoRevocationUntilExpiry{MaxTokenLifetime: ...}` of at most 15
 minutes, which `Verify` then holds every token's remaining lifetime
@@ -1171,6 +1201,13 @@ store can't be checked from the resource side:
 // userinfoURL: the endpoint's own external URL, which a DPoP proof's htu names.
 verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{
 	ResourceURLs: []fapi.URL{userinfoURL},
+	// DPoP nonces at the protected endpoints (RFC 9449 §9), from a store
+	// of their own, never deps.Nonces: a nonce the token endpoint
+	// handed out mustn't be valid here. resource.NoDPoPNonces{} declines;
+	// left nil, the verifier follows a server that declined with
+	// server.NoDPoPNonces{}, and production refuses it otherwise.
+	Nonces:        memstore.NewNonceStore(),
+	NonceLifetime: cfg.Limits.DPoPNonceLifetime,
 })
 ```
 
@@ -1231,6 +1268,12 @@ deps := resource.Dependencies{
 	Replay:       memstore.NewReplayStore(), // DPoP proof jti reuse — its own instance; may differ from the AS's
 	Revocation:   revocationStore,           // the same instance the AS writes to
 	Clock:        resource.SystemClock{},
+	// DPoP nonces (RFC 9449 §9), with cfg.Limits.DPoPNonceLifetime: a
+	// store of this resource server's own, shared by its instances —
+	// never the AS's. Required under AssuranceProduction, or
+	// resource.NoDPoPNonces{} to explicitly decline.
+	Nonces: memstore.NewNonceStore(),
+	Random: rand.Reader, // for the nonces; crypto/rand.Reader in production
 }
 
 verifier, err := resource.NewVerifier(cfg, deps)

@@ -52,14 +52,40 @@ are the ones RFC 9449 §4.3 lists, plus the ones that are easy to miss:
   can be used once (`Dependencies.Replay`);
 - a key committed at PAR must match the key at the token endpoint.
 
-DPoP nonces ([RFC 9449] §8) are optional: set `Dependencies.Nonces` and
-`Limits.DPoPNonceLifetime`, and the server challenges a proof without a
-current nonce and sends its current nonce with every response. A nonce
-is valid until it expires, for any number of proofs, so concurrent
-requests from one client all succeed (the `jti` check is what refuses a
-replayed proof); the server switches to a new nonce once half the
-lifetime has passed, and the previous one keeps working until it
-expires.
+### Server nonces: on in production, unless you decline
+
+Set `Dependencies.Nonces` and `Limits.DPoPNonceLifetime`, and the server
+challenges a proof without a current nonce ([RFC 9449] §8) and sends its
+current nonce with every response. A nonce is valid until it expires,
+for any number of proofs, so concurrent requests from one client all
+succeed (the `jti` check is what refuses a replayed proof); the server
+switches to a new nonce once half the lifetime has passed, and the
+previous one keeps working until it expires.
+
+Why it matters: without a server nonce, a proof's freshness rests on the
+`iat` the client chose. An attacker who can have a client generate
+proofs for later, or who captures them, can use one until it ages out
+of `MaxDPoPProofAge` (RFC 9449 §11; the FAPI 2.0 attacker model's A5).
+A nonce the server picked can't be known in advance. The cost is one
+extra round trip per client per endpoint on first use (the `400
+use_dpop_nonce` challenge and the retry), and again each time the nonce
+rotates; a response's `DPoP-Nonce` header otherwise keeps the client
+current.
+
+`AssuranceProduction` requires the choice to be made:
+
+```go
+deps.Nonces = sharedNonceStore // every instance's, declaring storage.StoreAssurance
+cfg.Limits.DPoPNonceLifetime = 5 * time.Minute // at most 15 in production
+
+// or, to explicitly decline (an mTLS-only deployment, say):
+deps.Nonces = server.NoDPoPNonces{}
+```
+
+Behind a load balancer the store must be shared and declare `Durable`
+and `CrossInstanceConsistent` (with `DeploymentHorizontallyScaled`): a
+nonce one instance hands out must be valid at the next. Under
+`AssuranceDevelopment`, nil still means no nonces.
 
 ## Resource server: one call
 
@@ -72,6 +98,16 @@ the request describes), `ath` against the token, the key against
 an origin, optionally with a path prefix. A request whose path no prefix
 covers is refused, and so is a proof whose `htu` is relative or names
 another scheme.
+
+Nonces work as at the authorization server ([RFC 9449] §9, answered
+`401` with a `WWW-Authenticate: DPoP error="use_dpop_nonce"` challenge):
+set `resource.Dependencies.Nonces`, `Random` and
+`Limits.DPoPNonceLifetime`, or `resource.NoDPoPNonces{}` to decline;
+`resource.AssuranceProduction` requires one or the other. Use a store of
+the resource server's own, never the authorization server's, so a nonce
+one hands out isn't valid at the other. `serverresource.NewVerifier`
+takes it as `Options.Nonces` (and follows a server that declined with
+`server.NoDPoPNonces{}` when you leave it nil).
 
 ```go
 // verifier's ResourceURLs: this API's own external URL, e.g. https://api.example.com.
@@ -99,7 +135,8 @@ func pay(w http.ResponseWriter, r *http.Request) {
   syncing with a DPoP-bound refresh token, rotating its DPoP key midway,
   and an attack that presents its access token with another app's key.
 - [payment-consent](../../examples/payment-consent/README.md): a
-  DPoP-bound payment API; the handler above is from
+  DPoP-bound payment API, with the `use_dpop_nonce` challenge and retry
+  in its protocol trace; the handler above is from
   [`payment/api.go`](../../examples/payment-consent/payment/api.go).
 - [payroll-run](../../examples/payroll-run/README.md): the mTLS
   alternative, with its own stolen-token attack.

@@ -73,6 +73,12 @@ type Claims struct {
 	// Entity Configuration.
 	AuthorityHints []string
 
+	// TrustAnchorHints is an Entity Configuration's own
+	// "trust_anchor_hints" claim: the Trust Anchors the entity trusts
+	// (OpenID Federation 1.0 §3.1.2). Nil when absent; never the empty
+	// array, which Parse refuses.
+	TrustAnchorHints []string
+
 	// MetadataPolicy is a Subordinate Statement's own "metadata_policy"
 	// claim — nil for an Entity Configuration, and a normal (not an
 	// error) absence for a Subordinate Statement that doesn't
@@ -204,6 +210,9 @@ func parseClaims(payload []byte) (Claims, error) {
 	if err := checkParsedClaimPlacement(raw, iss == sub); err != nil {
 		return Claims{}, err
 	}
+	if err := refuseExplicitRegistrationClaims(raw); err != nil {
+		return Claims{}, err
+	}
 	jwks, hasJWKS := raw["jwks"]
 	if !hasJWKS {
 		return Claims{}, fmt.Errorf("%w: missing \"jwks\"", ErrMalformedClaims)
@@ -224,40 +233,11 @@ func parseClaims(payload []byte) (Claims, error) {
 		JWKS:      jwks,
 	}
 
-	if metadataRaw, ok := raw["metadata"]; ok {
-		var metadata map[string]json.RawMessage
-		if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
-			return Claims{}, fmt.Errorf("%w: metadata: %v", ErrMalformedClaims, err)
-		}
-		c.Metadata = metadata
+	if err := parseEntityConfigurationLists(raw, &c); err != nil {
+		return Claims{}, err
 	}
-	if hintsRaw, ok := raw["authority_hints"]; ok {
-		var hints []string
-		if err := json.Unmarshal(hintsRaw, &hints); err != nil {
-			return Claims{}, fmt.Errorf("%w: authority_hints: %v", ErrMalformedClaims, err)
-		}
-		c.AuthorityHints = hints
-	}
-	if policyRaw, ok := raw["metadata_policy"]; ok {
-		var policy MetadataPolicy
-		if err := json.Unmarshal(policyRaw, &policy); err != nil {
-			return Claims{}, fmt.Errorf("%w: metadata_policy: %v", ErrMalformedClaims, err)
-		}
-		c.MetadataPolicy = policy
-	}
-	if critRaw, ok := raw["metadata_policy_crit"]; ok {
-		var crit []string
-		if err := json.Unmarshal(critRaw, &crit); err != nil {
-			return Claims{}, fmt.Errorf("%w: metadata_policy_crit: %v", ErrMalformedClaims, err)
-		}
-		c.MetadataPolicyCritical = crit
-	}
-	if sourceRaw, ok := raw["source_endpoint"]; ok {
-		var source string
-		if err := json.Unmarshal(sourceRaw, &source); err != nil {
-			return Claims{}, fmt.Errorf("%w: source_endpoint: %v", ErrMalformedClaims, err)
-		}
-		c.SourceEndpoint = source
+	if err := parseSubordinateClaims(raw, &c); err != nil {
+		return Claims{}, err
 	}
 	if constraintsRaw, ok := raw["constraints"]; ok {
 		constraints, err := parseConstraints(constraintsRaw)
@@ -281,12 +261,68 @@ func parseClaims(payload []byte) (Claims, error) {
 	return c, nil
 }
 
+// parseEntityConfigurationLists parses raw's "metadata",
+// "authority_hints" and "trust_anchor_hints" claims into c — split out
+// of parseClaims to keep its cognitive complexity manageable.
+func parseEntityConfigurationLists(raw map[string]json.RawMessage, c *Claims) error {
+	if metadataRaw, ok := raw["metadata"]; ok {
+		metadata, err := parseMetadataClaim(metadataRaw)
+		if err != nil {
+			return err
+		}
+		c.Metadata = metadata
+	}
+	if hintsRaw, ok := raw["authority_hints"]; ok {
+		hints, err := parseEntityIdentifiers(hintsRaw, "authority_hints")
+		if err != nil {
+			return err
+		}
+		c.AuthorityHints = hints
+	}
+	if hintsRaw, ok := raw["trust_anchor_hints"]; ok {
+		hints, err := parseEntityIdentifiers(hintsRaw, "trust_anchor_hints")
+		if err != nil {
+			return err
+		}
+		c.TrustAnchorHints = hints
+	}
+	return nil
+}
+
+// parseSubordinateClaims parses raw's "metadata_policy",
+// "metadata_policy_crit" and "source_endpoint" claims into c — split
+// out of parseClaims to keep its cognitive complexity manageable.
+func parseSubordinateClaims(raw map[string]json.RawMessage, c *Claims) error {
+	if policyRaw, ok := raw["metadata_policy"]; ok {
+		var policy MetadataPolicy
+		if err := json.Unmarshal(policyRaw, &policy); err != nil {
+			return fmt.Errorf("%w: metadata_policy: %v", ErrMalformedClaims, err)
+		}
+		c.MetadataPolicy = policy
+	}
+	if critRaw, ok := raw["metadata_policy_crit"]; ok {
+		crit, err := parseNonEmptyStrings(critRaw, "metadata_policy_crit")
+		if err != nil {
+			return err
+		}
+		c.MetadataPolicyCritical = crit
+	}
+	if sourceRaw, ok := raw["source_endpoint"]; ok {
+		source, err := parseSourceEndpoint(sourceRaw)
+		if err != nil {
+			return err
+		}
+		c.SourceEndpoint = source
+	}
+	return nil
+}
+
 // subordinateOnlyClaims and entityConfigurationOnlyClaims are the
 // claims OpenID Federation 1.0 §3.2 (steps 14 to 23) allows in only one
 // kind of Entity Statement.
 var (
 	subordinateOnlyClaims         = []string{"metadata_policy", "metadata_policy_crit", "constraints", "source_endpoint"}
-	entityConfigurationOnlyClaims = []string{"authority_hints", "trust_marks", "trust_mark_issuers", "trust_mark_owners"}
+	entityConfigurationOnlyClaims = []string{"authority_hints", "trust_anchor_hints", "trust_marks", "trust_mark_issuers", "trust_mark_owners"}
 )
 
 // checkParsedClaimPlacement refuses a statement carrying a claim its

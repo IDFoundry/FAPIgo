@@ -1163,6 +1163,10 @@ func rpMetadataWith(t *testing.T, extra map[string]any) func(rpID string, rpOIDC
 			"jwks":                            json.RawMessage(jwksFor(t, "rp-oidc", rpOIDCKey)),
 		}
 		for k, v := range extra {
+			if v == nil {
+				delete(md, k)
+				continue
+			}
 			md[k] = v
 		}
 		raw, err := json.Marshal(md)

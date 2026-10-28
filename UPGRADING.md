@@ -458,6 +458,47 @@ kind, one that checks its own `typ` and claims, rather than
 ```go
 payload, err := c.VerifyIssuerJWS(ctx, signedUserInfo) // typ absent or "JWT"
 ```
+### Entity Statements that OpenID Federation 1.0 §3.2 rejects are refused (federation)
+
+**Affects:** a federation resolver, automatic registration or RP
+discovery that fetches an Entity Configuration or Subordinate Statement
+carrying any of the following, and a federation entity that publishes
+one:
+
+- `aud` or `trust_anchor` (Explicit Registration claims, §3.2);
+- `trust_anchor_hints` in a Subordinate Statement, or as `[]`, or
+  listing something other than an https Entity Identifier (§3.1.2);
+- `authority_hints` as `[]` or listing a non-https value (§3.1.2);
+- `metadata_policy_crit` as `[]` (§3.1.3);
+- `metadata` whose Entity Type value isn't a JSON object, or with a
+  `null` parameter value (§5);
+- a `source_endpoint` that isn't an https URL (§3.2);
+- the same JSON member name twice anywhere in the payload (§6.1.2 for
+  `metadata_policy`; RFC 7519 §4 for the claims);
+- a `trust_chain` or `peer_trust_chain` JWS header (§4.3, §4.4).
+
+**Why:** §3.2 ends "If any of these validation steps fail, the Entity
+Statement MUST be rejected". These statements used to be accepted: a
+`null` Entity Type read as an empty object, and a duplicate
+`metadata_policy` member kept the last value, where another validator
+may keep the first and derive a different policy from the same signed
+statement.
+
+**What fails:** resolving any Trust Chain through such a statement,
+with an error wrapping the internal "malformed claims" (or "forbidden
+parameter" for the headers) error and naming the claim. A `null`
+metadata parameter, which a metadata policy used to treat as absent,
+now fails the chain instead of reading as left out.
+
+**What to change:** leave the member out instead of publishing `null`
+or `[]`, publish `source_endpoint` as the issuer's https fetch
+endpoint, and publish each claim once:
+
+```json
+{"metadata": {"openid_relying_party": {"client_name": "Example RP"}}}
+```
+
+rather than `{"client_name": "Example RP", "logo_uri": null}`.
 
 ## v0.64.0
 

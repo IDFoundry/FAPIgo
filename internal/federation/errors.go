@@ -21,6 +21,12 @@ var (
 	// JWK Set MUST have a unique kid").
 	ErrMalformedJWKS = errors.New("federation: malformed jwks claim")
 
+	// ErrForbiddenHeader indicates the statement's JWS header carried
+	// trust_chain or peer_trust_chain, which an Entity Configuration or
+	// Subordinate Statement MUST NOT contain (OpenID Federation 1.0
+	// §4.3, §4.4).
+	ErrForbiddenHeader = errors.New("federation: entity statement header carries a forbidden parameter")
+
 	// ErrMissingKeyID indicates the statement's JWS header had no "kid"
 	// (OpenID Federation 1.0 §3.2 step 11: it "MUST be a non-zero length
 	// string").

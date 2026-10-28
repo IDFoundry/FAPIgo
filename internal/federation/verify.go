@@ -25,7 +25,14 @@ type Statement struct {
 	claims  Claims
 }
 
-// Parse parses an Entity Statement without verifying its signature.
+// Parse parses an Entity Statement without verifying its signature. It
+// refuses every statement OpenID Federation 1.0 §3.2's syntactic steps
+// reject: besides the required claims, a claim the statement's kind
+// may not carry, aud or trust_anchor (Explicit Registration only), an
+// empty authority_hints, trust_anchor_hints or metadata_policy_crit,
+// metadata that isn't an object of objects or uses null, a
+// source_endpoint that isn't an https URL, a duplicate JSON member
+// name, and a trust_chain or peer_trust_chain header (§4.3, §4.4).
 func Parse(token string) (Statement, error) {
 	compact, err := jose.ParseCompact(token)
 	if err != nil {
@@ -36,6 +43,12 @@ func Parse(token string) (Statement, error) {
 	}
 	if compact.Header.KeyID == "" {
 		return Statement{}, ErrMissingKeyID
+	}
+	if err := refuseForbiddenHeaders(token); err != nil {
+		return Statement{}, err
+	}
+	if err := refuseDuplicateMembers(compact.Payload); err != nil {
+		return Statement{}, err
 	}
 	claims, err := parseClaims(compact.Payload)
 	if err != nil {

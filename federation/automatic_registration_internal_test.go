@@ -97,6 +97,24 @@ func jwksWithCertificate(t *testing.T, key *ecdsa.PrivateKey, cert *x509.Certifi
 	return string(body)
 }
 
+// generatedRPJWKS is an RP JWK Set holding one freshly generated P-256
+// key, for a test that needs a usable key (testRPJWKS's isn't one).
+func generatedRPJWKS(t *testing.T) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	body, err := json.Marshal(map[string]any{"keys": []map[string]any{{
+		"kty": "EC", "crv": "P-256", "kid": "rp-generated",
+		"x": base64URLEncode(key.X.FillBytes(make([]byte, 32))), "y": base64URLEncode(key.Y.FillBytes(make([]byte, 32))),
+	}}})
+	if err != nil {
+		t.Fatalf("marshal jwks: %v", err)
+	}
+	return string(body)
+}
+
 func base64URLEncode(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
@@ -244,7 +262,7 @@ func TestRegisteredClientConfigFromMetadataAcceptsSelfSignedTLSClientAuth(t *tes
 }
 
 func TestRegisteredClientConfigFromMetadataAcceptsTLSClientAuthSubjectDN(t *testing.T) {
-	raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"tls_client_auth","tls_client_auth_subject_dn":"CN=rp.example.org","jwks":` + testRPJWKS + `}`
+	raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"tls_client_auth","tls_client_auth_subject_dn":"CN=rp.example.org","jwks":` + generatedRPJWKS(t) + `}`
 	cfg, _, err := call(t, newTestAutomaticClientRepository(AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}}), raw)
 	if err != nil {
 		t.Fatalf("registeredClientConfigFromMetadata: %v", err)
@@ -276,7 +294,7 @@ func TestRegisteredClientConfigFromMetadataAcceptsSANMethods(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"` + tc.method + `","` + tc.field + `":"` + tc.value + `","jwks":` + testRPJWKS + `}`
+			raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"` + tc.method + `","` + tc.field + `":"` + tc.value + `","jwks":` + generatedRPJWKS(t) + `}`
 			cfg, _, err := call(t, newTestAutomaticClientRepository(AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}}), raw)
 			if err != nil {
 				t.Fatalf("registeredClientConfigFromMetadata: %v", err)

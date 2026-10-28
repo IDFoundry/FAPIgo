@@ -226,7 +226,9 @@ func TestAutomaticRegistrationRegistersPKIMethodsOnlyWhenVerifiedOrNamed(t *test
 				"token_endpoint_auth_methods_supported": []string{"private_key_jwt", "tls_client_auth"},
 				"tls_client_auth_subject_dn":            "CN=victim-rp",
 			})
-			cert := selfSignedTestClientCertWithSAN(t, func(c *x509.Certificate) {
+			// The RP's own key: OpenID Federation 1.0 §12.1.1.2 requires
+			// the authenticating key to be in its RP JWK Set.
+			cert := selfSignedTestClientCertForKey(t, f.rpOIDCKey, func(c *x509.Certificate) {
 				c.Subject = pkix.Name{CommonName: "victim-rp"}
 				c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
 			})

@@ -98,6 +98,10 @@ srv, err := server.New(server.Config{
   `AssuranceProduction`. Federation automatic registration registers
   `tls_client_auth` only under `TrustedClientCAs`, or under the other
   two when `AutomaticRegistration.AllowedClientAuthMethods` names it.
+  Either way, the Relying Party's certificate must also carry one of
+  the keys in its RP JWK Set: OpenID Federation 1.0 §12.1.1.2 has it
+  prove possession of one of those keys, which a subject DN alone
+  doesn't.
 - **The certificate.** The `…FromHTTP` request constructors read it from
   the request's own TLS connection (`PeerCertificateFromHTTP`). Behind a
   proxy that terminates TLS, set it yourself, with

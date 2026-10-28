@@ -172,10 +172,12 @@
 // storage.ClientAuthMethod this module implements, declared with
 // token_endpoint_auth_method, RP Metadata Choices 1.0's
 // token_endpoint_auth_methods_supported, or both (private_key_jwt, and
-// every RFC 8705 mTLS method — self_signed_tls_client_auth reads the
-// RP's own certificate from its jwks/jwks_uri's own "x5c" member; the
-// four SAN-typed siblings each read their own plain-string RFC 8705
-// §2.1.2 metadata parameter directly); jwks or jwks_uri; CIBA and
+// every RFC 8705 mTLS method — self_signed_tls_client_auth accepts the
+// certificate in the "x5c" member of any key of its jwks/jwks_uri;
+// tls_client_auth and the four SAN-typed siblings each read their own
+// plain-string RFC 8705 §2.1.2 metadata parameter directly, and require
+// the certificate to carry a key of that JWK Set, per OpenID
+// Federation 1.0 §12.1.1.2); jwks or jwks_uri; CIBA and
 // client_credentials each gated by their own
 // AutomaticRegistrationConfig switch, off by default. Deliberately not
 // yet implemented: Explicit Registration (§12.2, not implemented by

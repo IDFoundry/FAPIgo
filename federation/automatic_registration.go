@@ -299,13 +299,20 @@ func newRememberedFailure(err error) error {
 // method the RP's metadata supports is registered, and the server
 // accepts whichever it uses (see declaredClientAuthMethods) —
 // including every RFC 8705 mTLS method: ClientAuthMethodSelfSignedTLSClientAuth
-// reads the RP's own certificate from the "x5c" member of a jwks/jwks_uri
-// entry (RFC 8705 §2.2) and computes its expected thumbprint from it;
-// ClientAuthMethodTLSClientAuth and its four SAN-typed siblings read
-// their own plain-string metadata parameter directly (RFC 8705 §2.1.2:
-// tls_client_auth_subject_dn/tls_client_auth_san_dns/_san_uri/_san_ip/
-// _san_email) — see registeredClientConfigFromMetadata — unless
-// AutomaticRegistrationConfig.AllowedClientAuthMethods narrows that set. PAR/JAR-level
+// reads the RP's own certificates from the "x5c" members of its
+// jwks/jwks_uri entries (RFC 8705 §2.2) and accepts the certificate of
+// any of them; ClientAuthMethodTLSClientAuth and its four SAN-typed
+// siblings read their own plain-string metadata parameter directly (RFC
+// 8705 §2.1.2: tls_client_auth_subject_dn/tls_client_auth_san_dns/
+// _san_uri/_san_ip/_san_email) — see registeredClientConfigFromMetadata
+// — unless AutomaticRegistrationConfig.AllowedClientAuthMethods narrows
+// that set. A CA-issued certificate must also carry one of the keys of
+// the RP's JWK Set (storage.RegisteredClientConfig.CertificateKeyThumbprints):
+// OpenID Federation 1.0 §12.1.1.2 requires an RP to prove possession of
+// a key in its RP JWK Set, and a matching subject or SAN under a trusted
+// CA proves possession only of whatever key that CA certified. The PKI
+// requirement itself stays: the certificate must still chain to
+// Dependencies.ClientCertificateTrust. PAR/JAR-level
 // enforcement of OpenID Federation 1.0 §12.1.1's own
 // aud/sub/jti Request Object rules is a request-handling concern, not a
 // client registration one — see storage.RegisteredClientConfig's own
@@ -924,11 +931,43 @@ func applyClientAuthMethodFields(cfg *storage.RegisteredClientConfig, authMethod
 		}
 		cfg.ClientAssertionAlgorithm, cfg.ClientAssertionAlgorithms = algs[0], algs
 	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
-		thumbprint, err := certificateThumbprintFromJWKS(jwks)
+		thumbprints, err := certificateThumbprintsFromJWKS(jwks)
 		if err != nil {
 			return fmt.Errorf("self_signed_tls_client_auth: %w", err)
 		}
-		cfg.ExpectedCertificateThumbprint = thumbprint
+		cfg.ExpectedCertificateThumbprint, cfg.AdditionalCertificateThumbprints = thumbprints[0], thumbprints[1:]
+	default:
+		if err := applyPKIClientAuthFields(cfg, authMethod, m); err != nil {
+			return err
+		}
+		return requireKeyPossession(cfg, authMethod, jwks)
+	}
+	return nil
+}
+
+// requireKeyPossession sets cfg.CertificateKeyThumbprints to the keys
+// of the RP JWK Set, for a CA-issued certificate method (tls_client_auth
+// and its SAN siblings). OpenID Federation 1.0 §12.1.1.2 has an RP that
+// doesn't sign a Request Object authenticate at PAR with a method "that
+// proves possession of one of the RP's private keys", and "the
+// corresponding public key MUST be in the Entity's RP JWK Set": a
+// certificate matching the registered subject or SAN alone proves
+// possession of a key the federation never vouched for. The server
+// therefore requires the certificate to carry one of these keys as well,
+// at every endpoint, whether or not a Request Object is sent.
+func requireKeyPossession(cfg *storage.RegisteredClientConfig, authMethod storage.ClientAuthMethod, jwks json.RawMessage) error {
+	thumbprints, err := keyThumbprintsFromJWKS(jwks)
+	if err != nil {
+		return fmt.Errorf("%s: %w", authMethod, err)
+	}
+	cfg.CertificateKeyThumbprints = thumbprints
+	return nil
+}
+
+// applyPKIClientAuthFields sets the subject or SAN field a CA-issued
+// certificate method authenticates by.
+func applyPKIClientAuthFields(cfg *storage.RegisteredClientConfig, authMethod storage.ClientAuthMethod, m relyingPartyMetadata) error {
+	switch authMethod {
 	case storage.ClientAuthMethodTLSClientAuth:
 		if m.TLSClientAuthSubjectDN == "" {
 			return fmt.Errorf("tls_client_auth_subject_dn is required for tls_client_auth")
@@ -1284,31 +1323,58 @@ func parseEncryptionAlgorithmPair(algValue, encValue *string, algLabel, encLabel
 	return alg, enc, nil
 }
 
-// certificateThumbprintFromJWKS extracts and computes the RFC 8705 §3.1
-// x5t#S256 thumbprint of the first "x5c"-bearing entry found across
-// jwks' own keys (RFC 8705 §2.2: "the existing jwks_uri or jwks
-// metadata parameters... are used to convey the client's certificates
-// via JWK... A certificate is represented with the x5c parameter").
-// AutomaticClientRepository only ever registers one mTLS-authenticating
-// identity per client, so the first usable entry is sufficient — unlike
-// resource-server-side signature verification, there's no second
-// candidate to try if this one doesn't work; a client publishing more
-// than one is expected to put its authenticating certificate first.
-func certificateThumbprintFromJWKS(jwks json.RawMessage) (string, error) {
+// certificateThumbprintsFromJWKS computes the RFC 8705 §3.1 x5t#S256
+// thumbprint of every key's own certificate in jwks — the first entry
+// of each key's "x5c", which RFC 7517 §4.7 says contains the key (RFC
+// 8705 §2.2: "the existing jwks_uri or jwks metadata parameters... are
+// used to convey the client's certificates via JWK... A certificate is
+// represented with the x5c parameter"). Every one is registered, so an
+// RP may authenticate with the certificate of any key in its RP JWK Set
+// (OpenID Federation 1.0 §12.1.1.2: "an x5c Claim for a key in the
+// Entity's RP JWK Set"), the second one during a key rollover, say.
+func certificateThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
 	candidates, err := jose.ParseJWKSet(jwks)
 	if err != nil {
-		return "", fmt.Errorf("parse jwks: %w", err)
+		return nil, fmt.Errorf("parse jwks: %w", err)
 	}
+	var thumbprints []string
 	for _, c := range candidates {
-		for _, der := range c.Certificates {
-			cert, err := x509.ParseCertificate(der)
-			if err != nil {
-				continue
-			}
-			return mtls.Thumbprint(cert), nil
+		if len(c.Certificates) == 0 {
+			continue
+		}
+		cert, err := x509.ParseCertificate(c.Certificates[0])
+		if err != nil {
+			continue
+		}
+		if t := mtls.Thumbprint(cert); !slices.Contains(thumbprints, t) {
+			thumbprints = append(thumbprints, t)
 		}
 	}
-	return "", fmt.Errorf("jwks has no usable x5c certificate")
+	if len(thumbprints) == 0 {
+		return nil, fmt.Errorf("jwks has no usable x5c certificate")
+	}
+	return thumbprints, nil
+}
+
+// keyThumbprintsFromJWKS is internal/mtls.PublicKeyThumbprint of every
+// key in jwks, the keys a CA-issued certificate must carry one of.
+func keyThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
+	candidates, err := jose.ParseJWKSet(jwks)
+	if err != nil {
+		return nil, fmt.Errorf("parse jwks: %w", err)
+	}
+	var thumbprints []string
+	for _, c := range candidates {
+		t, err := mtls.PublicKeyThumbprint(c.PublicKey)
+		if err != nil || slices.Contains(thumbprints, t) {
+			continue
+		}
+		thumbprints = append(thumbprints, t)
+	}
+	if len(thumbprints) == 0 {
+		return nil, fmt.Errorf("the RP JWK Set has no usable key for the certificate to carry (OpenID Federation 1.0 §12.1.1.2)")
+	}
+	return thumbprints, nil
 }
 
 // applyDisplayAndSubjectType sets cfg's Display and SubjectType from m:

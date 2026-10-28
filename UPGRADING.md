@@ -570,6 +570,45 @@ cfg.Federation.EntityID = issuer.String()
 
 and on the client, `cfg.ClientID = fapi.ClientID(cfg.Federation.EntityID)`.
 
+### An automatically registered `tls_client_auth` RP's certificate must carry a key of its RP JWK Set (federation, server)
+
+**Affects:** a server with `Config.AutomaticRegistration` that
+registers Relying Parties for `tls_client_auth` or one of its
+`tls_client_auth_san_*` siblings (under `TrustedClientCAs`, or where
+`AllowedClientAuthMethods` names them), and a federation RP
+authenticating that way. A custom `storage.ClientRepository` setting
+`RegisteredClientConfig.CertificateKeyThumbprints` itself is affected
+the same way; one that doesn't is not.
+
+**Why:** OpenID Federation 1.0 §12.1.1.2 says an RP that doesn't sign a
+Request Object authenticates at PAR with a method "that proves
+possession of one of the RP's private keys", and "the corresponding
+public key MUST be in the Entity's RP JWK Set". A CA-issued certificate
+naming the RP's subject DN proves possession only of whatever key the
+CA certified, which the federation never vouched for. The requirement
+that the certificate chain to a trusted CA is kept; the key requirement
+is added to it. Automatic registration now records the keys of the RP
+JWK Set in `RegisteredClientConfig.CertificateKeyThumbprints`, and the
+server requires the client certificate to carry one of them, at every
+endpoint.
+
+**What fails:** authentication of such an RP whose certificate's key
+isn't in its RP JWK Set, with `invalid_client` (401) and the
+description "client certificate's public key is not one of the
+client's registered keys". An RP whose RP JWK Set has no usable key
+isn't registered for these methods at all.
+
+**What to change:** an RP publishes the public key of its client
+certificate in the `jwks` (or `jwks_uri`) of its `openid_relying_party`
+metadata, with the certificate in that key's `x5c` if it likes:
+
+```json
+{"jwks": {"keys": [{"kty": "EC", "crv": "P-256", "kid": "mtls", "x": "...", "y": "..."}]}}
+```
+
+`self_signed_tls_client_auth` now accepts the certificate of any key in
+the RP JWK Set, not only the first, which needs no change.
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

@@ -232,8 +232,9 @@ several PAR/request_uri validation failures straight to the client's
 callback with a structured OAuth error (see
 `server.BuildAuthorizationErrorRedirect`'s doc comment for why —
 briefly, the suite has no mechanism to verify a locally rendered error
-page, only a redirect-delivered one), so those specific `/authorize`
-visits never land on `/authorize` at all. Without this flag those
+page, only a redirect-delivered one; the method refuses under
+`AssuranceProduction`, and this binary runs development assurance), so
+those specific `/authorize` visits never land on `/authorize` at all. Without this flag those
 negative-test modules fail outright instead of grading PASSED.
 
 Two `override` entries, both keyed by exact suite module name

@@ -396,6 +396,11 @@ func (s *Server) redeemedCodeGrant(ctx context.Context, client storage.Registere
 	if !client.AllowsAuthorizationCodeGrant() {
 		return grantRecord{}, newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil)
 	}
+	// Equal to the code's own redirect URI (validateRedeemedAuthorizationCode):
+	// one since removed from the registration is refused, as at completion.
+	if !client.HasRedirectURI(presented.redirectURI) {
+		return grantRecord{}, newError(ErrorInvalidGrant, 400, "redirect_uri is no longer registered for this client", nil)
+	}
 	return grant, nil
 }
 

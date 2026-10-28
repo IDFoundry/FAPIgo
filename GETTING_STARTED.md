@@ -701,6 +701,13 @@ member of an OpenID Federation registered automatically. So:
   `server.InteractionNeeded(...)`, which redirects. This is the
   silent-authentication exception §4.11.2 makes.
 
+`CompleteAuthorization` also checks that the redirect URI is still
+registered for the client, and answers `AuthorizationLocalError` if it
+was removed since the request was pushed.
+`server.BuildAuthorizationErrorRedirect`, which builds an error redirect
+for a request that never got as far as an interaction, is for test
+harnesses and refuses under `AssuranceProduction`.
+
 Redirect with **303 See Other** after the login or consent form's POST,
 so the browser follows with a GET (FAPI 2.0 Security Profile §5.3.2.2).
 A 307 would make it re-send the form, password included, to the

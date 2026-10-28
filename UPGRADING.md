@@ -91,6 +91,64 @@ rt, err := srv.IssueRefreshToken(ctx, server.IssueRefreshTokenRequest{
 	Scope:     []string{"credential"},
 })
 ```
+### The authorization server redirects only after authentication, and only to a redirect URI still registered (server)
+
+**Affects:**
+- a caller of `Server.BuildAuthorizationErrorRedirect` under
+  `AssuranceProduction`;
+- a deployment that removes a redirect URI from a client's
+  registration (or the client itself) while an authorization for it is
+  in flight, or while a code issued for it is unredeemed;
+- a login UI that completes with `server.Deny` or
+  `server.AuthenticationFailed` for a user who never authenticated. Its
+  behaviour hasn't changed, but it no longer meets RFC 9700, as
+  described below.
+
+**Why:** RFC 9700 §4.11.2 says the authorization server "MUST always
+authenticate the user first ... before redirecting the user". Any
+client can register its own phishing page as a redirect URI. That
+includes a member of an OpenID Federation registered automatically.
+A redirect to that page carries the authorization server's `iss`, so
+the server lends the phishing page its name. Before this release:
+
+- `BuildAuthorizationErrorRedirect` built such a redirect for a request
+  nobody pushed, with nobody signed in;
+- a sign-in page whose Cancel button completed with `Deny` sent the
+  user back to the client;
+- a redirect URI removed from the registration after the request was
+  pushed still received the code, and the code was still exchanged for
+  it.
+
+**What fails:**
+- `BuildAuthorizationErrorRedirect` returns a `*server.Error` with
+  `server_error` under `AssuranceProduction`. Development assurance is
+  unchanged.
+- `CompleteAuthorization` returns `AuthorizationLocalError` instead of
+  a redirect, whatever the result, when the request's redirect URI is
+  no longer registered for the client (`invalid_request`) or the client
+  no longer resolves (`unauthorized_client`). It now resolves the client
+  through `Dependencies.Clients` for every result, not only `Authorize`.
+- `ExchangeAuthorizationCode` refuses a code whose redirect URI is no
+  longer registered, with `invalid_grant`.
+
+**What to change:** render a `LocalErrorResponse` locally instead of
+calling `BuildAuthorizationErrorRedirect` in production. For a user who
+cancels or abandons the sign-in page before authenticating, complete
+with the new `server.DenyLocally` and render the `AuthorizationLocalError`
+it returns (`access_denied`). Keep `Deny` and `AuthenticationFailed` for
+a user who has authenticated:
+
+```go
+result := server.DenyLocally("you cancelled before signing in")
+if signedIn {
+	result = server.Deny("the customer declined")
+}
+```
+
+Also wrap `/authorize` and the login and consent pages in
+`server.AuthorizationPageHeaders` (RFC 9700 §4.16 clickjacking), and
+show `InteractionRequest.RedirectURI` on the consent page. See
+[GETTING_STARTED.md](GETTING_STARTED.md) §5.
 
 ## v0.63.0
 

@@ -246,7 +246,19 @@ func (s *Server) beginFail(ctx context.Context, clientID fapi.ClientID, err *Err
 // clients have no such need — a rendered local error page is a
 // perfectly good, safe outcome for a human in a browser — so
 // BeginAuthorization itself is deliberately unaware this method exists.
+//
+// Under AssuranceProduction it refuses, with ErrorServerError, to build
+// anything. The redirect it builds happens before any user has
+// authenticated, from a request nobody pushed, which RFC 9700 §4.11.2
+// forbids: the authorization server "MUST always authenticate the user
+// first ... before redirecting the user", since any client — one
+// registered automatically through OpenID Federation, say — can
+// register its own phishing page as a redirect URI and use the server
+// to bounce users there. Render a LocalErrorResponse locally instead.
 func (s *Server) BuildAuthorizationErrorRedirect(ctx context.Context, client storage.RegisteredClient, redirectURI, state, errorCode, description string) (fapi.URL, error) {
+	if s.cfg.Assurance == AssuranceProduction {
+		return fapi.URL{}, newError(ErrorServerError, 500, "an authorization error redirect before the user has authenticated is refused under AssuranceProduction (RFC 9700 §4.11.2)", nil)
+	}
 	if !client.HasRedirectURI(redirectURI) {
 		return fapi.URL{}, newError(ErrorInvalidRequest, 400, "redirect_uri is not registered for this client", nil)
 	}
@@ -270,6 +282,26 @@ func (s *Server) BuildAuthorizationErrorRedirect(ctx context.Context, client sto
 	}
 	s.audit(ctx, AuditEventBeginAuthorization, client.ID(), AuditOutcomeFailure, errorCode)
 	return dest, nil
+}
+
+// checkRedirectURIStillRegistered checks, as an interaction completes,
+// that redirectURI — validated against the client's registration when
+// the request was pushed — is still one of clientID's: a redirect URI
+// removed since, because its host changed hands say, must not receive
+// a code or an error. Either way the caller renders the failure
+// locally.
+func (s *Server) checkRedirectURIStillRegistered(ctx context.Context, clientID fapi.ClientID, redirectURI string) *Error {
+	client, err := s.deps.Clients.ResolveClient(ctx, clientID)
+	if err != nil {
+		if clientStoreUnavailable(ctx, err) {
+			return newError(ErrorServerError, 500, "failed to look up the client", err)
+		}
+		return newError(ErrorUnauthorizedClient, 400, "client is no longer registered", err)
+	}
+	if !client.HasRedirectURI(redirectURI) {
+		return newError(ErrorInvalidRequest, 400, "redirect_uri is no longer registered for this client", nil)
+	}
+	return nil
 }
 
 // localDenial is DenyLocally's outcome: access_denied, rendered by the

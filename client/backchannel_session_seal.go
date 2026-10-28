@@ -66,6 +66,13 @@ type sealedBackchannelSession struct {
 // credential, and don't log it. Open returns the session it sealed,
 // whatever key it was looked up by, so check its AuthReqID against the
 // one you expected when that matters.
+//
+// An auth_req_id is unique only at the server that issued it (CIBA Core
+// §7.3), so a relying party talking to several issuers keys its stored
+// sessions by (issuer, auth_req_id), not auth_req_id alone: otherwise
+// one issuer's auth_req_id can overwrite, or be looked up as, another's
+// session. That one then fails to open, for the issuer binding above,
+// so the cost is a lost session, not a confused one.
 type BackchannelSessionSealer struct {
 	client *Client
 	keys   sealKeyring

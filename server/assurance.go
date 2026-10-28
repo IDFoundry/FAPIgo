@@ -188,6 +188,20 @@ func checkKeySourceAssurance(name string, source any) error {
 	return nil
 }
 
+// clientKeySourceContractHint is the part of a refused client_keys
+// error that points at the check for a ClientKeySource of the
+// application's own.
+const clientKeySourceContractHint = "; check a source of your own with keys.TestClientKeySourceContract, which tests that it keeps each client's keys to that client"
+
+// withClientKeySourceHint adds to err, a refused client key source,
+// the bundled sources that production assurance accepts, and extra.
+func withClientKeySourceHint(err error, extra string) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w (keys.StaticClientKeys and keys.NewClientJWKSSource's ClientJWKSSource over a hardened fetcher declare it)%s", err, extra)
+}
+
 // checkNotifierAssurance requires notifier to implement
 // BackchannelNotifierAssurance and to declare OutboundHardened.
 func checkNotifierAssurance(notifier BackchannelNotifier) error {

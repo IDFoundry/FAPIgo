@@ -66,6 +66,15 @@ type VerificationKeySet struct {
 // registered keys over a live JWKS fetch in the request-handling path;
 // see the package doc comment for the protections a live fetch must
 // apply if one is unavoidable.
+//
+// The server verifies a client's assertion or signed request with
+// whatever key this returns for the ClientID the token names, so an
+// implementation must only ever return that client's own keys: a kid
+// is a lookup key within one client's set, never across clients, and
+// an unknown client is an error, not a fallback set. StaticClientKeys
+// and ClientJWKSSource are this package's production implementations;
+// TestClientKeySourceContract checks another implementation keeps the
+// same per-client isolation.
 type ClientKeySource interface {
 	ResolveVerificationKeys(ctx context.Context, req ClientKeyRequest) (VerificationKeySet, error)
 }

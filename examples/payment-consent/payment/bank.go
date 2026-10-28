@@ -95,7 +95,9 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 	if err != nil {
 		return nil, err
 	}
-	clientKeySource, err := ephemeral.NewClientKeySource(nil, []ephemeral.ClientKeySpec{{ClientID: shopClientID, JWKS: shop.authJWKS}})
+	// The shop's own keys, registered up front: a kid is only ever
+	// looked up within the shop's keys, never another client's.
+	clientKeySource, err := keys.NewStaticClientKeys(map[fapi.ClientID]keys.ClientKeyMaterial{shopClientID: {JWKS: shop.authJWKS}})
 	if err != nil {
 		return nil, err
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"sync"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -36,39 +35,13 @@ const jwksAlternateContentType = "application/jwk-set+json"
 // for the common case where that isn't practical, and implements
 // IssuerKeySource so both client and resource can use it.
 type JWKSIssuerKeySource struct {
-	fetcher            *fapihttp.Client
-	jwksURI            *url.URL
-	cacheTTL           time.Duration
-	minRefreshInterval time.Duration
-	refreshBackoff     time.Duration
-	issuer             string // "" when no WithIssuer
-	now                func() time.Time
-
-	mu               sync.Mutex
-	cached           []IssuerKey
-	cachedAt         time.Time
-	lastAttempt      time.Time
-	lastRefreshErr   error
-	lastRefreshErrAt time.Time
-	inflight         *refreshCall
-	negativeKIDs     map[string]time.Time
+	fetcher *fapihttp.Client
+	jwksURI *url.URL
+	timing  jwksCacheTiming
+	issuer  string // "" when no WithIssuer
+	now     func() time.Time
+	cache   *jwksCache[[]IssuerKey]
 }
-
-// refreshCall is an in-flight refresh shared by every caller that
-// arrives while it is running, so a burst of concurrent unknown-kid
-// misses collapses into a single upstream fetch.
-type refreshCall struct {
-	done chan struct{}
-	keys []IssuerKey
-	err  error
-}
-
-// maxNegativeKIDs bounds the negative-cache map so an attacker sending
-// an unbounded number of distinct unknown kids cannot grow it without
-// limit. When full, expired entries are evicted first; if it is still
-// full, new misses simply aren't remembered — the worst case is an
-// occasional extra refresh, which minRefreshInterval already bounds.
-const maxNegativeKIDs = 1024
 
 // JWKSOption configures a JWKSIssuerKeySource.
 type JWKSOption func(*JWKSIssuerKeySource)
@@ -81,19 +54,19 @@ type JWKSOption func(*JWKSIssuerKeySource)
 // requests with distinct unknown kids cannot force more than one
 // upstream fetch per interval.
 func WithMinRefreshInterval(d time.Duration) JWKSOption {
-	return func(s *JWKSIssuerKeySource) { s.minRefreshInterval = d }
+	return func(s *JWKSIssuerKeySource) { s.timing.minRefreshInterval = d }
 }
 
-// WithRefreshBackoff bounds how soon the base TTL-refresh path
-// (currentKeys) will re-attempt a fetch after one fails, so a
-// sequential request stream against a failing upstream doesn't issue
-// one outbound fetch per request. Defaults to min(cacheTTL, 5s) —
+// WithRefreshBackoff bounds how soon the base TTL-refresh path (a
+// request arriving once the cache has expired) will re-attempt a fetch
+// after one fails, so a sequential request stream against a failing
+// upstream doesn't issue one outbound fetch per request. Defaults to min(cacheTTL, 5s) —
 // short relative to a long cacheTTL, but never longer than it — so a
 // cold-start recovery isn't blocked for a full TTL window. This is
 // distinct from minRefreshInterval, which rate-limits only the
 // unknown-kid forced-refresh path.
 func WithRefreshBackoff(d time.Duration) JWKSOption {
-	return func(s *JWKSIssuerKeySource) { s.refreshBackoff = d }
+	return func(s *JWKSIssuerKeySource) { s.timing.refreshBackoff = d }
 }
 
 // WithIssuer binds the source to the issuer whose JWKS it fetches:
@@ -121,21 +94,17 @@ func NewJWKSIssuerKeySource(fetcher *fapihttp.Client, jwksURI fapi.URL, cacheTTL
 	}
 	u := jwksURI.URL()
 	s := &JWKSIssuerKeySource{
-		fetcher:      fetcher,
-		jwksURI:      &u,
-		cacheTTL:     cacheTTL,
-		now:          time.Now,
-		negativeKIDs: make(map[string]time.Time),
+		fetcher: fetcher,
+		jwksURI: &u,
+		timing:  jwksCacheTiming{cacheTTL: cacheTTL},
+		now:     time.Now,
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
-	if s.minRefreshInterval <= 0 {
-		s.minRefreshInterval = cacheTTL
-	}
-	if s.refreshBackoff <= 0 {
-		s.refreshBackoff = min(cacheTTL, 5*time.Second)
-	}
+	s.timing = s.timing.withDefaults()
+	// now is read through s, so a test may still swap s.now after New.
+	s.cache = newJWKSCache(s.timing, func() time.Time { return s.now() }, s.doFetch)
 	return s, nil
 }
 
@@ -167,105 +136,13 @@ func (s *JWKSIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req IssuerK
 	if s.issuer != "" && req.Issuer != s.issuer {
 		return IssuerKeySet{}, fmt.Errorf("keys: JWKSIssuerKeySource for %q cannot resolve keys for issuer %q", s.issuer, req.Issuer)
 	}
-	current, err := s.currentKeys(ctx)
+	matched, err := resolveFromJWKSCache(ctx, s.cache, req.KeyID, func(current []IssuerKey) []IssuerKey {
+		return matchIssuerKeys(current, req)
+	})
 	if err != nil {
 		return IssuerKeySet{}, err
-	}
-	matched := matchIssuerKeys(current, req)
-	if len(matched) > 0 || req.KeyID == "" {
-		return IssuerKeySet{Keys: matched}, nil
-	}
-
-	if !s.shouldForceRefresh(req.KeyID) {
-		return IssuerKeySet{Keys: nil}, nil
-	}
-	fresh, err := s.refreshSingleflight(ctx)
-	if err != nil {
-		return IssuerKeySet{}, err
-	}
-	matched = matchIssuerKeys(fresh, req)
-	if len(matched) == 0 {
-		s.rememberMiss(req.KeyID)
 	}
 	return IssuerKeySet{Keys: matched}, nil
-}
-
-// shouldForceRefresh reports whether an unknown-kid miss on kid may
-// force a live refresh right now: it may not if kid is still
-// negative-cached, or if the last refresh attempt was within
-// minRefreshInterval.
-func (s *JWKSIssuerKeySource) shouldForceRefresh(kid string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	if retryAt, ok := s.negativeKIDs[kid]; ok && now.Before(retryAt) {
-		return false
-	}
-	if !s.lastAttempt.IsZero() && now.Sub(s.lastAttempt) < s.minRefreshInterval {
-		return false
-	}
-	return true
-}
-
-// rememberMiss negative-caches kid until minRefreshInterval has passed,
-// so a repeated request for the same unknown kid doesn't force another
-// refresh before then. It also opportunistically evicts expired
-// entries so the map stays bounded under maxNegativeKIDs.
-func (s *JWKSIssuerKeySource) rememberMiss(kid string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	if len(s.negativeKIDs) >= maxNegativeKIDs {
-		for k, retryAt := range s.negativeKIDs {
-			if !now.Before(retryAt) {
-				delete(s.negativeKIDs, k)
-			}
-		}
-	}
-	if len(s.negativeKIDs) < maxNegativeKIDs {
-		s.negativeKIDs[kid] = now.Add(s.minRefreshInterval)
-	}
-}
-
-// refreshSingleflight coalesces concurrent refresh attempts: the first
-// caller performs the fetch outside the lock, and every caller that
-// arrives while it's in flight waits on the same result instead of
-// starting its own.
-func (s *JWKSIssuerKeySource) refreshSingleflight(ctx context.Context) ([]IssuerKey, error) {
-	s.mu.Lock()
-	if s.inflight != nil {
-		call := s.inflight
-		s.mu.Unlock()
-		select {
-		case <-call.done:
-			return call.keys, call.err
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-	call := &refreshCall{done: make(chan struct{})}
-	s.inflight = call
-	s.lastAttempt = s.now()
-	s.mu.Unlock()
-
-	go func() {
-		// Detached: fapihttp.Client.Fetch applies its own RequestTimeout,
-		// so the fetch still cannot hang forever; WithoutCancel only
-		// stops one caller's cancellation from aborting a fetch shared
-		// by others.
-		call.keys, call.err = s.refresh(context.WithoutCancel(ctx))
-		s.mu.Lock()
-		s.inflight = nil
-		s.mu.Unlock()
-		close(call.done)
-	}()
-
-	select {
-	case <-call.done:
-		return call.keys, call.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 }
 
 func matchIssuerKeys(keys []IssuerKey, req IssuerKeyRequest) []IssuerKey {
@@ -280,44 +157,6 @@ func matchIssuerKeys(keys []IssuerKey, req IssuerKeyRequest) []IssuerKey {
 		matched = append(matched, k)
 	}
 	return matched
-}
-
-func (s *JWKSIssuerKeySource) currentKeys(ctx context.Context) ([]IssuerKey, error) {
-	s.mu.Lock()
-	now := s.now()
-	fresh := s.cached != nil && now.Sub(s.cachedAt) < s.cacheTTL
-	cached := s.cached
-	inBackoff := s.lastRefreshErr != nil && now.Sub(s.lastRefreshErrAt) < s.refreshBackoff
-	backoffErr := s.lastRefreshErr
-	s.mu.Unlock()
-	if fresh {
-		return cached, nil
-	}
-	if inBackoff {
-		// Serve the remembered failure rather than issuing another
-		// outbound fetch — a sequential request stream against a down
-		// JWKS endpoint would otherwise produce one fetch per request.
-		// The caller (ResolveIssuerKeys) discards these keys whenever
-		// err is non-nil, so this stays fail-closed, not stale-serving.
-		return cached, fmt.Errorf("keys: jwks refresh in backoff after recent failure: %w", backoffErr)
-	}
-	return s.refreshSingleflight(ctx)
-}
-
-func (s *JWKSIssuerKeySource) refresh(ctx context.Context) ([]IssuerKey, error) {
-	parsed, err := s.doFetch(ctx)
-
-	s.mu.Lock()
-	if err != nil {
-		s.lastRefreshErr = err
-		s.lastRefreshErrAt = s.now()
-	} else {
-		s.cached = parsed
-		s.cachedAt = s.now()
-		s.lastRefreshErr = nil
-	}
-	s.mu.Unlock()
-	return parsed, err
 }
 
 func (s *JWKSIssuerKeySource) doFetch(ctx context.Context) ([]IssuerKey, error) {

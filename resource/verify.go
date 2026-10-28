@@ -67,9 +67,10 @@ type VerifyRequest struct {
 	// own TLS state; this package never terminates TLS itself.
 	//
 	// Behind a proxy that terminates TLS, set it from however the proxy
-	// forwards the certificate — but only from your own proxy, over a
-	// hop the client can't reach or forge, with the proxy removing any
-	// copy of its forwarding header the client sent. A certificate is
+	// forwards the certificate (fapihttp.ForwardedClientCertificate
+	// reads RFC 9440's Client-Cert header) — but only from your own
+	// proxy, over a hop the client can't reach or forge, with the proxy
+	// removing any copy of its forwarding header the client sent. A certificate is
 	// public, so having one proves nothing; only the TLS handshake
 	// proves the client holds its private key. A certificate taken
 	// from anything the client controls lets anyone present a stolen

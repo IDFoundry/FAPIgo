@@ -52,7 +52,9 @@ func readHTTPRequestParts(r *http.Request) (httpRequestParts, error) {
 // attestation-based client authentication.
 //
 // Behind a proxy that terminates TLS, r carries no client certificate:
-// set PeerCertificate afterwards from however the proxy forwards it.
+// set PeerCertificate afterwards from however the proxy forwards it —
+// fapihttp.ForwardedClientCertificate reads RFC 9440's Client-Cert
+// header, only from a request that came from the proxy.
 // A certificate is public — the client presents it in every handshake,
 // and a self-signed one is published in its registered JWKS — so having
 // one proves nothing; only the TLS handshake proves the client holds its
@@ -100,7 +102,8 @@ func (t TokenEndpointRequest) GrantType() string { return t.parts.HTTP.Get("gran
 // SetPeerCertificate sets the TLS client certificate, for a server
 // behind a proxy that terminates TLS and forwards the certificate itself.
 // Set it only from your own proxy's forwarding, never from anything the
-// client can send directly — see PushAuthorizationRequestFromHTTP.
+// client can send directly (fapihttp.ForwardedClientCertificate) — see
+// PushAuthorizationRequestFromHTTP.
 func (t *TokenEndpointRequest) SetPeerCertificate(cert *x509.Certificate) {
 	t.parts.PeerCertificate = cert
 }

@@ -180,6 +180,32 @@ func TestSignUserInfoResponseRejectsReservedClaims(t *testing.T) {
 	}
 }
 
+// TestSignUserInfoResponseRequiresSub: OIDC Core §5.3.2, "The sub
+// (subject) Claim MUST always be returned in the UserInfo Response" — a
+// public-subject client's response without one, or with one that isn't
+// a non-empty string, is refused rather than signed.
+func TestSignUserInfoResponseRequiresSub(t *testing.T) {
+	h, client := newHarnessWithUserInfo(t, nil, nil, 0, 0, nil)
+	for name, sub := range map[string]json.RawMessage{
+		"absent": nil, "empty": json.RawMessage(`""`), "null": json.RawMessage(`null`), "number": json.RawMessage(`42`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			claims := testUserInfoClaims(t)
+			delete(claims, "sub")
+			if sub != nil {
+				claims["sub"] = sub
+			}
+			signed, srvErr := h.server.SignUserInfoResponse(context.Background(), client, claims)
+			if srvErr == nil {
+				t.Fatalf("SignUserInfoResponse(sub %s) = %q, want an error", name, signed)
+			}
+			if srvErr.Code() != server.ErrorServerError {
+				t.Fatalf("error code = %q, want %q", srvErr.Code(), server.ErrorServerError)
+			}
+		})
+	}
+}
+
 // TestSignUserInfoResponseAllowsAuthorizationAttributes: the embedder
 // decides a user's roles and groups itself, so it may put them in a
 // signed UserInfo response, unlike a client's extension value.

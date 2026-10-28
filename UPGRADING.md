@@ -251,6 +251,29 @@ storage.RegisteredClientConfig{
 `fapi.URL.WithAddedQuery` adds parameters after a URL's own query in the
 same way, for code that builds on an endpoint URL itself.
 
+### `SignUserInfoResponse` requires `sub` (server)
+
+**Affects:** an application that calls `Server.SignUserInfoResponse`
+directly, for a client with public subjects, with claims that carry no
+`sub` or a `sub` that isn't a non-empty string.
+`serverresource.SignUserInfoResponse` and `serverresource.UserInfoClaims`
+already supply and check it.
+
+**Why:** OIDC Core §5.3.2 says "The sub (subject) Claim MUST always be
+returned in the UserInfo Response". Only a pairwise client's `sub` was
+checked, so a public client's response could be signed without one.
+
+**What fails:** the call, with a `server_error` `*server.Error` whose
+description names `sub`.
+
+**What to change:** put the sub the client was given for the user in
+the claims:
+
+```go
+claims["sub"], _ = json.Marshal(authz.ClientSubject)
+signed, srvErr := srv.SignUserInfoResponse(ctx, client, claims)
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

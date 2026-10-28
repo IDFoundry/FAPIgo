@@ -49,7 +49,9 @@ import (
 // and code, state and error, by whose presence a relying party tells a
 // JARM response from another JWT of the same issuer and audience.
 //
-// For a client that gets pairwise subs, claims' "sub" must be the one
+// claims must carry "sub", a non-empty string: OIDC Core §5.3.2 says it
+// "MUST always be returned in the UserInfo Response". For a client that
+// gets pairwise subs, claims' "sub" must be the one
 // the client was given (resource.AuthorizationContext.ClientSubject),
 // never the user's internal subject (AuthorizationContext.InternalSubject): it
 // must carry Config.Subjects' Prefix and a well-formed body. With an
@@ -149,11 +151,18 @@ func (s *Server) encryptUserInfoResponse(ctx context.Context, clientID fapi.Clie
 }
 
 // checkUserInfoSubject refuses a UserInfo "sub" (raw, nil when absent)
-// that isn't a pairwise sub this server issued to client, when client
-// gets pairwise subs: signing the user's internal subject to a pairwise
-// client would give away exactly what its pairwise sub hides. A public
-// client's sub isn't checked.
+// that is missing or not a non-empty string, and one that isn't a
+// pairwise sub this server issued to client, when client gets pairwise
+// subs: signing the user's internal subject to a pairwise client would
+// give away exactly what its pairwise sub hides. A public client's sub
+// isn't checked further.
 func (s *Server) checkUserInfoSubject(ctx context.Context, client storage.RegisteredClient, raw json.RawMessage) *Error {
+	// OIDC Core §5.3.2: "The sub (subject) Claim MUST always be returned
+	// in the UserInfo Response", for every subject type.
+	var anySub string
+	if err := json.Unmarshal(raw, &anySub); err != nil || anySub == "" {
+		return newError(ErrorServerError, 500, `userinfo claims must carry the user's "sub", a non-empty string (OIDC Core §5.3.2)`, err)
+	}
 	subjectType, typeErr := s.subjectTypeFor(client)
 	if typeErr != nil {
 		return typeErr

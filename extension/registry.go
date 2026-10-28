@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+
+	"github.com/idfoundry/fapigo/internal/claimnames"
 )
 
 // Registry is an immutable set of registered Definitions, built once via
@@ -15,19 +17,15 @@ type Registry struct {
 
 // NewRegistry validates and indexes defs. It fails if any Definition
 // has an empty wire name, if two Definitions share a wire name, if any
-// Definition's declared Cardinality does not match its Go type, or if
-// any Definition leaves Sensitivity unset.
+// Definition's declared Cardinality does not match its Go type, if any
+// Definition leaves Sensitivity unset, or if any Definition sets
+// ReturnInTokenClaims under a reserved token claim name
+// (ErrReservedTokenClaim).
 func NewRegistry(defs ...Registered) (*Registry, error) {
 	byName := make(map[string]Registered, len(defs))
 	for _, d := range defs {
-		if d.name() == "" {
-			return nil, fmt.Errorf("extension: definition has an empty name")
-		}
-		if !d.cardinalityOK() {
-			return nil, fmt.Errorf("%w: %q", ErrCardinalityMismatch, d.name())
-		}
-		if !d.sensitivityOK() {
-			return nil, fmt.Errorf("extension: definition %q: sensitivity is required (NotSensitive or Sensitive)", d.name())
+		if err := checkDefinition(d); err != nil {
+			return nil, err
 		}
 		if _, exists := byName[d.name()]; exists {
 			return nil, fmt.Errorf("%w: %q", ErrDuplicateDefinition, d.name())
@@ -35,6 +33,23 @@ func NewRegistry(defs ...Registered) (*Registry, error) {
 		byName[d.name()] = d
 	}
 	return &Registry{byName: byName}, nil
+}
+
+// checkDefinition is NewRegistry's check of one Definition on its own.
+func checkDefinition(d Registered) error {
+	if d.name() == "" {
+		return fmt.Errorf("extension: definition has an empty name")
+	}
+	if !d.cardinalityOK() {
+		return fmt.Errorf("%w: %q", ErrCardinalityMismatch, d.name())
+	}
+	if !d.sensitivityOK() {
+		return fmt.Errorf("extension: definition %q: sensitivity is required (NotSensitive or Sensitive)", d.name())
+	}
+	if d.returnInTokenClaims() && claimnames.ReservedInTokens(claimnames.Client, d.name()) {
+		return fmt.Errorf("%w: %q", ErrReservedTokenClaim, d.name())
+	}
+	return nil
 }
 
 // Parse validates params against the registry: every name not present

@@ -306,3 +306,25 @@ func TestVerifyRequiresMaxLifetime(t *testing.T) {
 		t.Fatalf("Verify with zero MaxLifetime = nil error, want error")
 	}
 }
+
+// TestVerifyRejectsIDTokenCarryingCode: an ID token an issuer added a
+// "code" claim to otherwise passes every JARM check — same signer, iss,
+// aud, and a code — so a claim only an ID token carries must make it
+// fail, whichever one it is.
+func TestVerifyRejectsIDTokenCarryingCode(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	for _, name := range []string{"sub", "nonce", "auth_time", "acr", "amr", "azp", "at_hash", "c_hash", "s_hash"} {
+		t.Run(name, func(t *testing.T) {
+			params := successParameters(t)
+			params[name] = jsonRaw(t, "x")
+			resp, err := Parse(createTestResponse(t, key, now, time.Minute, params))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if _, err := resp.Verify(&key.PublicKey, basePolicy(now)); !errors.Is(err, ErrIDTokenClaims) {
+				t.Fatalf("Verify(code + %s) = %v, want ErrIDTokenClaims", name, err)
+			}
+		})
+	}
+}

@@ -21,6 +21,13 @@ var (
 	// with a slice T, or vice versa).
 	ErrCardinalityMismatch = errors.New("extension: cardinality does not match the definition's type")
 
+	// ErrReservedTokenClaim indicates a Definition registered with
+	// ReturnInTokenClaims under a name a client's value must never
+	// appear under in a token: one the authorization server or the
+	// resource owner supplies, or one that changes how a recipient
+	// processes the token (see Definition.ReturnInTokenClaims).
+	ErrReservedTokenClaim = errors.New("extension: ReturnInTokenClaims under a reserved token claim name")
+
 	// ErrDuplicateMember indicates a RAR detail object or an extension
 	// parameter's value, or an object nested at any depth in one, had the
 	// same JSON member name more than once, compared case-insensitively

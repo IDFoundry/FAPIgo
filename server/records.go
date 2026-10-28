@@ -346,7 +346,7 @@ func (g grantRecord) accessTokenClaims() (map[string]json.RawMessage, error) {
 }
 
 // withManagedClaim returns claims with name set to value, unless value
-// is empty. name is a managed claim (managedTokenClaims), so never
+// is empty. name is a managed claim (serverTokenClaims), so never
 // among claims already.
 func withManagedClaim(claims map[string]json.RawMessage, name, value string) map[string]json.RawMessage {
 	if value == "" {

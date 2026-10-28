@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -192,10 +193,12 @@ func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityCl
 
 // TestNewRejectsExtensionClaimShadowingManagedClaim checks that an
 // extension can't copy a client-supplied value into tokens under a name
-// the server or the resource owner supplies — an identity claim such as
-// "email", or a claim the server sets itself.
+// the server or the resource owner supplies. extension.NewRegistry
+// refuses the names every authorization server reserves (see
+// TestExtensionCannotReturnAuthorityOrProcessingClaims); server.New
+// also refuses the ones this server adds to access tokens itself.
 func TestNewRejectsExtensionClaimShadowingManagedClaim(t *testing.T) {
-	for _, name := range []string{"email", "acr", "requested_userinfo_claims", "grant_id", "code_grant_id", "grant_type"} {
+	for _, name := range []string{"requested_userinfo_claims", "grant_id", "code_grant_id", "grant_type", "pairwise_sector", "client_sub"} {
 		t.Run(name, func(t *testing.T) {
 			registry, err := extension.NewRegistry(extension.Definition[string]{
 				Sensitivity: extension.NotSensitive,
@@ -228,6 +231,33 @@ func TestNewRejectsExtensionClaimShadowingManagedClaim(t *testing.T) {
 	cfg.Extensions = registry
 	if _, err := server.New(cfg, validDependencies()); err != nil {
 		t.Fatalf("New(extension not returned in token claims): %v", err)
+	}
+}
+
+// TestExtensionCannotReturnAuthorityOrProcessingClaims: an extension
+// returned in token claims copies the client's own value into the ID
+// and access tokens, so one named "roles" would put a client-chosen
+// roles:["admin"] in the access token (RFC 9068 §2.2.3.1), one named
+// "events" would make the ID token look like a logout token (RFC 8417),
+// and one named "code" would let it pass for a JARM response. Such a
+// registry is refused before a server can be built with it.
+func TestExtensionCannotReturnAuthorityOrProcessingClaims(t *testing.T) {
+	for _, name := range []string{
+		"roles", "groups", "entitlements", "act", "may_act",
+		"events", "_claim_names", "_claim_sources", "sub_jwk",
+		"code", "state", "error", "email", "acr",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := extension.NewRegistry(extension.Definition[string]{
+				Sensitivity: extension.NotSensitive,
+				Name:        name, Cardinality: extension.Single,
+				AllowedSources: extension.SourceRequestObject, MaxBytes: 512,
+				ReturnInTokenClaims: true,
+			})
+			if !errors.Is(err, extension.ErrReservedTokenClaim) {
+				t.Fatalf("NewRegistry(%q returned in token claims) = %v, want ErrReservedTokenClaim", name, err)
+			}
+		})
 	}
 }
 
@@ -655,9 +685,11 @@ func TestIDTokenKeepsServerManagedClaimsRequestedThroughClaimsParameter(t *testi
 			"auth_time": json.RawMessage(`1`),
 			"cnf":       json.RawMessage(`{"jkt":"attacker"}`),
 			"events":    json.RawMessage(`{"http://schemas.openid.net/event/backchannel-logout":{}}`),
+			"code":      json.RawMessage(`"c"`),
+			"state":     json.RawMessage(`"s"`),
 		},
 	})
-	code := completeAuthorizationWithClaims(t, h, `{"id_token":{"name":null,"sub":null,"acr":{"essential":true},"auth_time":{"essential":true},"cnf":null,"events":null}}`)
+	code := completeAuthorizationWithClaims(t, h, `{"id_token":{"name":null,"sub":null,"acr":{"essential":true},"auth_time":{"essential":true},"cnf":null,"events":null,"code":null,"state":null}}`)
 
 	validated := exchangeForValidatedIDToken(t, h, code)
 	if validated.Subject != "user-1" {
@@ -672,7 +704,7 @@ func TestIDTokenKeepsServerManagedClaimsRequestedThroughClaimsParameter(t *testi
 	if name, err := jsonStringParam(validated.Parameters, "name"); err != nil || name != "Test User" {
 		t.Fatalf("name = %q, %v; want %q", name, err, "Test User")
 	}
-	for _, managed := range []string{"cnf", "events"} {
+	for _, managed := range []string{"cnf", "events", "code", "state"} {
 		if _, ok := validated.Parameters[managed]; ok {
 			t.Fatalf("ID token carries the source's %q", managed)
 		}

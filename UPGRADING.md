@@ -179,6 +179,105 @@ func (s *Store) RedeemRefreshToken(ctx context.Context, r storage.RefreshTokenRe
 }
 ```
 
+### One reserved-claim-name policy for every claim source (server, extension)
+
+**Affects:**
+
+- an `extension.Definition` with `ReturnInTokenClaims` named `roles`,
+  `groups`, `entitlements`, `act`, `may_act`, `events`,
+  `_claim_names`, `_claim_sources`, `sub_jwk`, `code`, `state` or
+  `error`;
+- `GrantedAuthorization.IDTokenClaims` setting `code`, `state` or
+  `error`;
+- claims passed to `Server.SignUserInfoResponse` that set anything
+  beyond the user's claims: `events`, `_claim_names`,
+  `_claim_sources`, `sub_jwk`, `azp`, `nonce`, `at_hash`, `c_hash`,
+  `s_hash`, `code`, `state` or `error` (`iss` and `aud` were already
+  refused);
+- a custom `server.AccessTokenIssuer` that adds `events`,
+  `_claim_names`, `_claim_sources` or `sub_jwk` to
+  `AccessTokenParams.Claims` before calling `JWTAccessTokens`.
+
+**Why:** each claim source kept its own list of names it refused, and
+the lists disagreed. An extension's value is the client's own, yet an
+extension could put a client-chosen `roles: ["admin"]` into the access
+token, which a resource server enforcing RFC 9068 §2.2.3.1 roles
+trusts as the authorization server's decision, or `events` into the ID
+token, the claim that marks a logout token. An ID token or a signed
+UserInfo response carrying `code` passes the check a relying party uses
+to tell a JARM response apart. Every source now uses one policy, which
+differs by token kind and by who chose the value:
+
+- nothing may set the claims the server sets itself, nor `events`,
+  `_claim_names`, `_claim_sources` or `sub_jwk`, which change how a
+  recipient processes a token;
+- an ID token or signed UserInfo response never carries `code`,
+  `state` or `error`, and a UserInfo response never carries an ID
+  token's `azp`, `nonce` or hashes;
+- a client's value (an extension's) may also never use the RFC 9068
+  authorization attributes `roles`, `groups` and `entitlements`, the
+  RFC 8693 delegation claims `act` and `may_act`,
+  `authorization_details`, or an OIDC Core §5.1 standard claim.
+
+The application may still set authorization attributes and delegation
+itself: in `GrantedAuthorization.IDTokenClaims`, a signed UserInfo
+response, or its own `AccessTokenIssuer`.
+
+**What fails:**
+
+- `extension.NewRegistry` returns an error wrapping the new
+  `extension.ErrReservedTokenClaim`. It now also refuses the names
+  `server.New` already refused (`email`, `acr` and the like), so that
+  error moves from `server.New` to `NewRegistry`;
+- `CompleteAuthorization` returns an `AuthorizationLocalError`
+  (`invalid_request`), and `CompleteBackchannelAuthentication` an
+  `invalid_request` error, for `IDTokenClaims` setting one of the names above;
+- `SignUserInfoResponse` returns `server_error`;
+- token issuance fails with `server_error` for a custom
+  `AccessTokenIssuer` passing one of those names to `JWTAccessTokens`.
+
+A claim an `IdentityClaimsSource` returns under one of these names is
+dropped, for the ID token as before and now also by
+`serverresource.UserInfoClaims`, rather than failing.
+
+**What to change:** rename the extension, or drop `ReturnInTokenClaims`
+if the value only needs to reach the interaction step
+(`InteractionRequest.Extensions`). Set roles or delegation from your own
+policy instead of a client's parameter:
+
+```go
+server.Authorize(subject, authn, server.GrantedAuthorization{
+	Scope:         approvedScope,
+	IDTokenClaims: map[string]json.RawMessage{"roles": rolesJSON},
+})
+```
+
+Drop `code`, `state` and `error` from ID token and UserInfo claims.
+
+### ID tokens, JARM responses and signed UserInfo accept only a generic `typ` (client)
+
+**Affects:** a client whose authorization server sends ID tokens, JARM
+responses or signed UserInfo responses with a `typ` header other than
+absent or `JWT`, or JARM responses carrying an ID token claim.
+
+**Why:** the client refused a `typ` naming one of a fixed list of other
+JWT kinds and accepted everything else. A JWT the same issuer signs for
+the same audience under a type outside that list (an SD-JWT credential,
+a status list token, or `at+jwt; charset=x`) was taken for an ID token,
+a JARM response or a UserInfo response. None of the three has a media
+type of its own, so `typ` is now an allow-list: absent, or `JWT` in
+any case, with or without `application/`. This is what the OpenID
+Foundation conformance suite sends. A JARM response is also refused
+when it carries a claim only an ID token carries (`sub`, `nonce`,
+`auth_time`, `acr`, `amr`, `azp` or a hash), even alongside a `code`.
+
+**What fails:** `ExchangeCode`, `HandleAuthorizationResponse`, a CIBA
+or refresh token response, and `FetchUserInfo` return
+`invalid_response`.
+
+**What to change:** nothing for a conforming authorization server. If
+yours sets another `typ` on these JWTs, have it send `JWT` or no `typ`.
+
 ## v0.62.0
 
 ### `X5CAttesterChain.Revocation` is required (server)

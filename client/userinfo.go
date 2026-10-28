@@ -203,10 +203,11 @@ func (c *Client) verifyUserInfoJWS(ctx context.Context, raw string) (map[string]
 		}
 		return nil, newError(ErrorInvalidResponse, "UserInfo response verification failed", err)
 	}
-	// A UserInfo response's typ is optional, but one that says it is
+	// A UserInfo response's typ is optional and has no media type of
+	// its own, so one that is neither absent nor "JWT" says it is
 	// another kind of JWT — an access token signed with the same key,
-	// say — isn't taken for one (RFC 8725 §3.11).
-	if err := jose.RefuseOtherExplicitType(parsed.Header.Type); err != nil {
+	// say — and isn't taken for one (RFC 8725 §3.11).
+	if err := jose.RequireGenericType(parsed.Header.Type); err != nil {
 		return nil, newError(ErrorInvalidResponse, "UserInfo response is another kind of JWT", err)
 	}
 	claims, decErr := decodeUserInfoJSON(parsed.Payload)

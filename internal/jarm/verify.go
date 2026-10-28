@@ -11,6 +11,11 @@ import (
 	"github.com/idfoundry/fapigo/internal/timeutil"
 )
 
+// idTokenClaims are claims an ID token carries (OIDC Core §2, §3.1.3.6,
+// §3.3.2.11) that are no authorization response parameter, so never
+// appear in a JARM response (JARM §2.1).
+var idTokenClaims = []string{"sub", "nonce", "auth_time", "acr", "amr", "azp", "at_hash", "c_hash", "s_hash"}
+
 // Response is a parsed, but not yet signature-verified, JARM response.
 // KeyID, Algorithm, ClaimedIssuer and Parameter are available before
 // Verify succeeds so a caller can look up which key to verify against —
@@ -30,7 +35,7 @@ func Parse(token string) (Response, error) {
 	if err != nil {
 		return Response{}, fmt.Errorf("jarm: %w", err)
 	}
-	if err := jose.RefuseOtherExplicitType(compact.Header.Type); err != nil {
+	if err := jose.RequireGenericType(compact.Header.Type); err != nil {
 		return Response{}, fmt.Errorf("jarm: %w", err)
 	}
 	claims, err := parseClaims(compact.Payload)
@@ -142,17 +147,33 @@ func (r Response) Verify(pub crypto.PublicKey, policy VerifyPolicy) (VerifiedRes
 		return VerifiedResponse{}, ErrNotYetValid
 	}
 
-	// A validly signed, correctly-audienced JWT from the expected issuer
-	// isn't necessarily a JARM response — an AS-signed ID token for the
-	// same client would also pass every check above. Requiring at least
-	// one recognised authorization-response parameter distinguishes a
-	// genuine JARM response without depending on "typ", which the spec
-	// doesn't mandate.
-	if _, hasCode := c.Parameters["code"]; !hasCode {
-		if _, hasErr := c.Parameters["error"]; !hasErr {
-			return VerifiedResponse{}, ErrNotAuthorizationResponse
-		}
+	if err := checkAuthorizationResponseShape(c.Parameters); err != nil {
+		return VerifiedResponse{}, err
 	}
 
 	return VerifiedResponse{Issuer: c.Issuer, Parameters: c.Parameters, ExpiresAt: c.ExpiresAt}, nil
+}
+
+// checkAuthorizationResponseShape refuses parameters that aren't an
+// authorization response's. A validly signed, correctly-audienced JWT
+// from the expected issuer isn't necessarily a JARM response — an
+// AS-signed ID token for the same client would also pass every other
+// check Verify makes. Requiring at least one recognised
+// authorization-response parameter distinguishes a genuine JARM
+// response without depending on "typ", which the spec doesn't mandate.
+// An ID token's own claims are no authorization response parameter, so
+// a JWT carrying one is refused even when it also carries a "code" — an
+// ID token an issuer added one to.
+func checkAuthorizationResponseShape(params map[string]json.RawMessage) error {
+	_, hasCode := params["code"]
+	_, hasErr := params["error"]
+	if !hasCode && !hasErr {
+		return ErrNotAuthorizationResponse
+	}
+	for _, name := range idTokenClaims {
+		if _, ok := params[name]; ok {
+			return fmt.Errorf("%w: %q", ErrIDTokenClaims, name)
+		}
+	}
+	return nil
 }

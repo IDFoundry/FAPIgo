@@ -255,7 +255,7 @@ func ParseIDTokenMax(tok string, maxBytes int) (IDToken, error) {
 	if err != nil {
 		return IDToken{}, fmt.Errorf("token: %w", err)
 	}
-	if err := jose.RefuseOtherExplicitType(compact.Header.Type); err != nil {
+	if err := jose.RequireGenericType(compact.Header.Type); err != nil {
 		return IDToken{}, fmt.Errorf("token: ID token: %w", err)
 	}
 	claims, err := parseIDTokenClaims(compact.Payload)

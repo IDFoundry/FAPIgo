@@ -203,6 +203,33 @@ func TestIssueIDTokenRejectsReservedClaimName(t *testing.T) {
 	}
 }
 
+// TestIssueIDTokenRejectsReservedParameters: beyond the claims
+// IssueIDToken sets itself, an ID token never carries a claim that
+// changes how a relying party processes it, nor code, state or error,
+// by whose presence a relying party tells a JARM response from an ID
+// token.
+func TestIssueIDTokenRejectsReservedParameters(t *testing.T) {
+	key := generateKey(t)
+	for _, name := range []string{"code", "state", "error", "events", "_claim_names", "_claim_sources", "sub_jwk", "azp", "jti", "nbf", "cnf", "c_hash", "s_hash"} {
+		p := baseIDTokenParams(key, time.Now(), time.Minute)
+		p.Parameters = map[string]json.RawMessage{name: jsonRaw(t, "x")}
+		if _, err := IssueIDToken(p); err == nil {
+			t.Errorf("IssueIDToken(parameter %q) = nil error, want error", name)
+		}
+	}
+}
+
+// TestIssueIDTokenAllowsAuthorizationAttributes: roles and delegation
+// are the issuer's to decide, so its own parameters may carry them.
+func TestIssueIDTokenAllowsAuthorizationAttributes(t *testing.T) {
+	key := generateKey(t)
+	p := baseIDTokenParams(key, time.Now(), time.Minute)
+	p.Parameters = map[string]json.RawMessage{"roles": jsonRaw(t, []string{"admin"}), "act": jsonRaw(t, map[string]string{"sub": "delegate"})}
+	if _, err := IssueIDToken(p); err != nil {
+		t.Fatalf("IssueIDToken(roles, act) = %v", err)
+	}
+}
+
 func TestIDTokenValidateRejectsWrongKey(t *testing.T) {
 	key := generateKey(t)
 	other := generateKey(t)

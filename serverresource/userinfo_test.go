@@ -28,6 +28,9 @@ func (s *claimsSource) ResolveIdentityClaims(_ context.Context, subject string, 
 		"name":  json.RawMessage(`"Sam Rivera"`),
 		"phone": json.RawMessage(`"+44 7700 900000"`),
 		"sub":   json.RawMessage(`"someone-else"`),
+		"iss":   json.RawMessage(`"https://evil.example"`),
+		"code":  json.RawMessage(`"c"`),
+		"state": json.RawMessage(`"s"`),
 	}, s.err
 }
 
@@ -53,6 +56,26 @@ func TestUserInfoClaimsReturnsOnlyWhatWasRequested(t *testing.T) {
 	}
 	if len(source.asked) != 1 || len(source.asked[0]) != 2 {
 		t.Errorf("source asked for %v, want [email name]", source.asked)
+	}
+}
+
+// TestUserInfoClaimsDropsReservedClaims: a claim a signed UserInfo
+// response may never carry — one SignUserInfoResponse sets itself, or
+// code or state, which would make it pass for a JARM response — is
+// dropped even when the client requested it, rather than failing
+// SignUserInfoResponse.
+func TestUserInfoClaimsDropsReservedClaims(t *testing.T) {
+	claims, err := serverresource.UserInfoClaims(context.Background(), authzFor([]string{"openid"}, `["email","iss","code","state"]`), &claimsSource{})
+	if err != nil {
+		t.Fatalf("UserInfoClaims: %v", err)
+	}
+	for _, name := range []string{"iss", "code", "state"} {
+		if _, ok := claims[name]; ok {
+			t.Errorf("claims carry %q: %s", name, claims)
+		}
+	}
+	if string(claims["email"]) != `"sam@example.com"` {
+		t.Errorf("email = %s, want the source's", claims["email"])
 	}
 }
 

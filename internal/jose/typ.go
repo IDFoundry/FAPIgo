@@ -10,6 +10,10 @@ import (
 // explicitly typed kind of JWT than the one being parsed.
 var ErrOtherExplicitType = errors.New("jose: header typ names another kind of JWT")
 
+// ErrUnexpectedType reports a JWT whose "typ" is neither absent, the
+// generic "JWT", nor the media type of the kind being parsed.
+var ErrUnexpectedType = errors.New(`jose: header typ is neither absent, "JWT", nor the expected media type`)
+
 // TypeIs reports whether typ names the media type want, comparing as
 // RFC 7515 §4.1.9 asks: case-insensitively (RFC 2045), and with
 // "application/" implied for a value containing no '/'. So
@@ -51,14 +55,31 @@ var explicitTypes = []string{
 	"token-introspection+jwt",
 }
 
+// RequireGenericType returns ErrUnexpectedType unless typ is absent or
+// the generic "JWT" (RFC 7519 §5.1, which the OpenID Foundation
+// conformance suite sends), compared as TypeIs compares, so
+// "application/jwt" and "jwt" are accepted too. It is the allow-list
+// for the kinds whose specifications leave "typ" optional and register
+// no media type of their own — ID tokens, JARM responses, signed
+// UserInfo responses — so a JWT that says it is anything else,
+// including a kind this library has never heard of (an SD-JWT, a status
+// list token) or a known type with parameters RefuseOtherExplicitType's
+// list wouldn't match ("at+jwt; charset=x"), isn't taken for one of
+// these (RFC 8725 §3.11).
+func RequireGenericType(typ string) error {
+	if typ == "" || TypeIs(typ, "JWT") {
+		return nil
+	}
+	return ErrUnexpectedType
+}
+
 // RefuseOtherExplicitType returns ErrOtherExplicitType when typ names an
 // explicitly typed kind of JWT other than own. It is for the kinds whose
-// specifications leave "typ" optional — ID tokens, JARM responses,
-// client assertions — so a missing or generic typ ("JWT") is accepted,
-// but a token that says it is something else isn't taken for one of
-// these: a resource-bound access token signed by the same key as ID
-// tokens, say, or a client's request object offered as its client
-// assertion (RFC 8725 §3.11).
+// specifications leave "typ" optional but which may also carry a media
+// type of their own — client assertions — so a missing or generic typ
+// ("JWT") is accepted, but a token that says it is something else isn't
+// taken for one of these: a client's request object offered as its
+// client assertion, say (RFC 8725 §3.11).
 func RefuseOtherExplicitType(typ string, own ...string) error {
 	if typ == "" {
 		return nil

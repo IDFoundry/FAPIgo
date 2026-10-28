@@ -133,9 +133,9 @@ func TestFetchUserInfoVerifiesSignedJWTResponse(t *testing.T) {
 	}
 }
 
-// A signed UserInfo response whose typ names another explicitly typed
-// kind of JWT — a JWT access token signed with the same key — is
-// refused; a generic "JWT" isn't. VerifyIssuerJWS, which verifies any
+// A signed UserInfo response whose typ names another kind of JWT — a
+// JWT access token signed with the same key, an SD-JWT, a kind no list
+// of known types would name — is refused; a generic "JWT" isn't. VerifyIssuerJWS, which verifies any
 // kind of issuer-signed JWS, doesn't look at typ.
 func TestFetchUserInfoRefusesOtherExplicitType(t *testing.T) {
 	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -158,9 +158,12 @@ func TestFetchUserInfoRefusesOtherExplicitType(t *testing.T) {
 	defer ts.Close()
 	c := newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, nil, nil)
 
-	typ = "at+jwt"
-	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
-		t.Fatal("FetchUserInfo(typ at+jwt) = nil error, want refusal")
+	// Anything but an absent typ or "JWT" is refused: a signed UserInfo
+	// response has no media type of its own.
+	for _, typ = range []string{"dc+sd-jwt", "statuslist+jwt", "at+jwt; charset=x", "something-new+jwt", "at+jwt"} {
+		if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+			t.Fatalf("FetchUserInfo(typ %s) = nil error, want refusal", typ)
+		}
 	}
 	compact, err := jose.Sign(userInfoKey, jose.Header{Algorithm: fapi.ES256, KeyID: "userinfo-kid", Type: typ}, payload)
 	if err != nil {

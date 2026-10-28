@@ -156,12 +156,17 @@ func TestSignUserInfoResponseProducesVerifiableJWS(t *testing.T) {
 
 // TestSignUserInfoResponseRejectsReservedClaims confirms a caller
 // cannot override iss/aud by setting them in its own claims map —
-// SignUserInfoResponse owns those two, the same reserved-claim
-// discipline IssueIDToken/IssueAccessToken already apply.
+// SignUserInfoResponse owns those two — nor set a claim that would
+// change how a relying party processes the response, make it pass for
+// an ID token, or, carrying code, state or error, for a JARM response:
+// the same reserved-claim policy ID tokens and access tokens follow.
 func TestSignUserInfoResponseRejectsReservedClaims(t *testing.T) {
 	h, client := newHarnessWithUserInfo(t, nil, nil, 0, 0, nil)
 
-	for _, reserved := range []string{"iss", "aud"} {
+	for _, reserved := range []string{
+		"iss", "aud", "events", "_claim_names", "_claim_sources", "sub_jwk",
+		"azp", "nonce", "at_hash", "c_hash", "s_hash", "code", "state", "error",
+	} {
 		claims := testUserInfoClaims(t)
 		v, err := json.Marshal("attacker-supplied-value")
 		if err != nil {
@@ -171,6 +176,19 @@ func TestSignUserInfoResponseRejectsReservedClaims(t *testing.T) {
 		if _, srvErr := h.server.SignUserInfoResponse(context.Background(), client, claims); srvErr == nil {
 			t.Fatalf("SignUserInfoResponse(claims setting %q) = nil error, want error", reserved)
 		}
+	}
+}
+
+// TestSignUserInfoResponseAllowsAuthorizationAttributes: the embedder
+// decides a user's roles and groups itself, so it may put them in a
+// signed UserInfo response, unlike a client's extension value.
+func TestSignUserInfoResponseAllowsAuthorizationAttributes(t *testing.T) {
+	h, client := newHarnessWithUserInfo(t, nil, nil, 0, 0, nil)
+	claims := testUserInfoClaims(t)
+	claims["roles"] = json.RawMessage(`["admin"]`)
+	claims["groups"] = json.RawMessage(`["staff"]`)
+	if _, srvErr := h.server.SignUserInfoResponse(context.Background(), client, claims); srvErr != nil {
+		t.Fatalf("SignUserInfoResponse(roles, groups) = %v", srvErr)
 	}
 }
 

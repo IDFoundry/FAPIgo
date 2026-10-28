@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/claimnames"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/token"
 )
@@ -145,29 +146,38 @@ func approvedClaimNames(params map[string]json.RawMessage, approved []string) (i
 	return keep(requested.IDToken), keep(requested.UserInfo), nil
 }
 
-// managedTokenClaims are claim names whose meaning a token's recipient
-// takes from this server or from the resource owner, never from a
-// client: the claims this package sets in access and ID tokens itself,
-// and the OIDC Core §5.1 standard claims, which Dependencies.IdentityClaims
-// supplies once approved. A client-supplied extension value must not
-// appear under one of them — an unapproved "email" would otherwise
-// reach an ID token as the client's own value.
-var managedTokenClaims = []string{
-	"iss", "sub", "aud", "exp", "iat", "nbf", "jti", "client_id", "scope", "cnf",
-	"nonce", "auth_time", "acr", "amr", "azp", "at_hash", "c_hash", "s_hash",
-	authorizationDetailsParameter, RequestedUserinfoClaimsKey, grantrevocation.Claim, grantrevocation.CodeClaim, token.GrantTypeClaim,
+// serverTokenClaims are the claims this package adds to access tokens
+// itself, beyond those internal/claimnames reserves for every
+// authorization server: they record the grant behind a token, so only
+// this server may set them.
+var serverTokenClaims = []string{
+	RequestedUserinfoClaimsKey, grantrevocation.Claim, grantrevocation.CodeClaim, token.GrantTypeClaim,
 	token.PairwiseSectorClaim, token.ClientSubjectClaim,
-	"name", "given_name", "family_name", "middle_name", "nickname",
-	"preferred_username", "profile", "picture", "website", "email",
-	"email_verified", "gender", "birthdate", "zoneinfo", "locale",
-	"phone_number", "phone_number_verified", "address", "updated_at",
+}
+
+// isManagedTokenClaim reports whether name is a claim whose meaning a
+// token's recipient takes from this server, the resource owner or the
+// token's own structure, never from a client: one internal/claimnames
+// reserves against a client in an ID token or an access token (the
+// claims set by the server itself, RFC 9068 roles/groups/entitlements,
+// RFC 8693 act/may_act, authorization_details, the OIDC Core §5.1
+// standard claims, events and the other claims that change how a
+// recipient processes a token, and the JARM parameters code, state and
+// error), or one in serverTokenClaims. A client-supplied extension
+// value must not appear under one of them: a client-chosen
+// roles:["admin"] would otherwise reach the access token, and an
+// unapproved "email" an ID token, as the client's own value.
+func isManagedTokenClaim(name string) bool {
+	return claimnames.ReservedInTokens(claimnames.Client, name) || slices.Contains(serverTokenClaims, name)
 }
 
 // checkExtensionClaimNames rejects a registry that would copy a
-// client-supplied value into a token under a managedTokenClaims name.
+// client-supplied value into a token under a managed claim name
+// (isManagedTokenClaim). extension.NewRegistry already refuses every
+// name but serverTokenClaims; this also covers those.
 func checkExtensionClaimNames(registry *extension.Registry) error {
 	for _, name := range registry.TokenClaimNames() {
-		if slices.Contains(managedTokenClaims, name) {
+		if isManagedTokenClaim(name) {
 			return fmt.Errorf("server: config: extension %q has ReturnInTokenClaims set, but %q is a claim the server or the resource owner supplies, not the client", name, name)
 		}
 	}

@@ -10,14 +10,13 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/claimnames"
 	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // jtiSize is the byte length of the random value used to build an
 // access token's "jti" claim — 128 bits.
 const jtiSize = 16
-
-var accessTokenReservedClaims = []string{"iss", "sub", "aud", "client_id", "scope", "exp", "iat", "jti", "cnf"}
 
 // AccessTokenParams describes one access token to issue.
 type AccessTokenParams struct {
@@ -51,8 +50,9 @@ type AccessTokenParams struct {
 
 	// Parameters are additional top-level claims to embed — most
 	// notably a granted authorization_details (RFC 9396) — each already
-	// encoded as JSON. Parameters must not use the reserved claim names
-	// this package manages itself.
+	// encoded as JSON. Parameters must not use a claim name
+	// internal/claimnames reserves against the embedder for this kind of
+	// token.
 	Parameters map[string]json.RawMessage
 }
 
@@ -85,10 +85,8 @@ func validateAccessTokenParams(p AccessTokenParams) error {
 	if p.Lifetime <= 0 {
 		return fmt.Errorf("token: lifetime must be positive")
 	}
-	for _, reserved := range accessTokenReservedClaims {
-		if _, ok := p.Parameters[reserved]; ok {
-			return fmt.Errorf("token: parameters must not set reserved claim %q", reserved)
-		}
+	if err := checkReservedParameters(claimnames.AccessToken, p.Parameters); err != nil {
+		return err
 	}
 	if p.Confirmation != nil && (p.Confirmation.JKT == "") == (p.Confirmation.X5TS256 == "") {
 		return fmt.Errorf("token: confirmation must set exactly one of jkt or x5t#S256")
@@ -165,18 +163,17 @@ func IssueAccessToken(p AccessTokenParams) (token string, jti string, err error)
 	return tok, jti, nil
 }
 
-var idTokenReservedClaims = []string{"iss", "sub", "aud", "exp", "iat", "nonce", "auth_time", "acr", "amr", "at_hash"}
-
-// IsIDTokenReservedClaim reports whether name is one of the claims
-// IssueIDToken manages itself, which IDTokenParams.Parameters must not
-// set.
-func IsIDTokenReservedClaim(name string) bool {
-	for _, reserved := range idTokenReservedClaims {
-		if name == reserved {
-			return true
+// checkReservedParameters refuses parameters that use a name
+// claimnames reserves in a JWT of kind against the embedder — the
+// claims IssueIDToken/IssueAccessToken set themselves, and the ones
+// that would change how a recipient processes the token.
+func checkReservedParameters(kind claimnames.Kind, parameters map[string]json.RawMessage) error {
+	for name := range parameters {
+		if claimnames.Reserved(kind, claimnames.Embedder, name) {
+			return fmt.Errorf("token: parameters must not set reserved claim %q", name)
 		}
 	}
-	return false
+	return nil
 }
 
 // IDTokenParams describes one ID token to issue.
@@ -207,8 +204,9 @@ type IDTokenParams struct {
 	Lifetime time.Duration
 
 	// Parameters are additional top-level claims to embed, each already
-	// encoded as JSON. Parameters must not use the reserved claim names
-	// this package manages itself.
+	// encoded as JSON. Parameters must not use a claim name
+	// internal/claimnames reserves against the embedder for this kind of
+	// token.
 	Parameters map[string]json.RawMessage
 }
 
@@ -237,10 +235,8 @@ func validateIDTokenParams(p IDTokenParams) error {
 	if p.Lifetime <= 0 {
 		return fmt.Errorf("token: lifetime must be positive")
 	}
-	for _, reserved := range idTokenReservedClaims {
-		if _, ok := p.Parameters[reserved]; ok {
-			return fmt.Errorf("token: parameters must not set reserved claim %q", reserved)
-		}
+	if err := checkReservedParameters(claimnames.IDToken, p.Parameters); err != nil {
+		return err
 	}
 	return nil
 }

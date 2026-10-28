@@ -340,6 +340,28 @@ real notifier:
 deps.BackchannelNotifier, err = backchannelhttp.New(backchannelhttp.Config{ /* ... */ })
 ```
 
+### The client's CIBA request lifetime is capped at 60 minutes (client)
+
+**Affects:** a client with `Endpoints.BackchannelAuthentication` set and
+`Limits.BackchannelAuthenticationRequestLifetime` over 60 minutes, at
+every assurance level.
+
+**Why:** FAPI-CIBA §5.2.3 applies FAPI 1.0 Advanced §5.2.3's client
+rules to the signed authentication request, so its `exp` may be at most
+60 minutes after its `nbf`. The client signed a request with any
+lifetime, which a conforming server refuses; `client.New` already capped
+PAR's request object the same way.
+
+**What fails:** `client.New` returns an error naming
+`limits.backchannel_authentication_request_lifetime`.
+
+**What to change:** use 60 minutes or less; the request is sent at once,
+so a minute is plenty:
+
+```go
+cfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

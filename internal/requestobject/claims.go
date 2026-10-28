@@ -41,9 +41,8 @@ func isRequestObjectType(typ string) bool {
 
 // Claims is a parsed request object payload. iss, aud and exp are the
 // JWT-standard claims RFC 9101 relies on; sub is popped out too (only
-// its presence is tracked, via HasSubject) because OpenID Federation
-// 1.0 §12.1.1 requires a request object used for Automatic Registration
-// to carry no "sub" claim at all — everything else — the actual
+// its presence is tracked, via HasSubject) because Verify refuses a
+// request object carrying one (see ErrUnexpectedSubject) — everything else — the actual
 // authorization request parameters (response_type, client_id,
 // redirect_uri, scope, state, nonce, code_challenge,
 // code_challenge_method, authorization_details, and any registered

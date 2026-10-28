@@ -336,6 +336,20 @@ func TestParseIgnoresUnknownClaim(t *testing.T) {
 	}
 }
 
+// TestParseRejectsRequestClaims: an assertion carrying a claim only an
+// authorization or CIBA request carries is a signed request presented
+// as an assertion (RFC 8725 §3.12), and is refused.
+func TestParseRejectsRequestClaims(t *testing.T) {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	signature := base64.RawURLEncoding.EncodeToString(make([]byte, 64))
+	for _, name := range requestClaims {
+		payload := `{"iss":"client-123","sub":"client-123","aud":"https://as.example","jti":"abc","exp":9999999999,"` + name + `":null}`
+		if _, err := Parse(header + "." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + signature); !errors.Is(err, ErrRequestClaim) {
+			t.Errorf("Parse(with %s) = %v, want ErrRequestClaim", name, err)
+		}
+	}
+}
+
 func TestParseRejectsMissingRequiredClaims(t *testing.T) {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
 	cases := []string{

@@ -455,7 +455,7 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 		Now:               s.deps.Clock.Now(),
 		MaxLifetime:       s.cfg.Limits.MaxClientAssertionLifetime,
 		MaxClockSkew:      s.cfg.Limits.MaxClockSkew,
-		Replay:            s.clientAssertionReplayChecker(client.ID()),
+		Replay:            s.clientSignedJWTReplayChecker(client.ID()),
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
@@ -590,14 +590,14 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		Now:              s.deps.Clock.Now(),
 		MaxLifetime:      s.cfg.Limits.MaxRequestObjectLifetime,
 		MaxClockSkew:     s.cfg.Limits.MaxClockSkew,
-		Replay:           s.requestObjectReplayChecker(client.ID()),
+		Replay:           s.clientSignedJWTReplayChecker(client.ID()),
 		// FAPI 2.0 Message Signing Final §5.3.1 mandates nbf on a
 		// request object; the base FAPI 2.0 Security Profile does not —
 		// see requestobject.VerifyPolicy.RequireNotBefore's doc comment.
 		RequireNotBefore: s.cfg.Profile == ProfileFAPISecurityWithMessageSigning,
-		// OpenID Federation 1.0 §12.1.1's stricter aud/sub/jti Request
+		// OpenID Federation 1.0 §12.1.1's stricter aud/jti Request
 		// Object rules apply only to a client resolved via Automatic
-		// Registration — see
+		// Registration (its no-sub rule applies to every client) — see
 		// requestobject.VerifyPolicy.AutomaticFederationRegistration's
 		// own doc comment.
 		AutomaticFederationRegistration: client.AutomaticFederationRegistration(),
@@ -623,6 +623,9 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	// that one present equals iss.
 	if _, hasClientID := verified.Parameters["client_id"]; !hasClientID && client.AutomaticFederationRegistration() {
 		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object must contain client_id", nil)
+	}
+	if err := checkParameterTypes(verified.Parameters, authorizationParameterTypes); err != nil {
+		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, err.Error(), nil)
 	}
 	resources, resourceErr := s.resourcesFromParameters(verified.Parameters)
 	if resourceErr != nil {
@@ -980,6 +983,15 @@ func jsonString(params map[string]json.RawMessage, key string) (string, error) {
 		return "", fmt.Errorf("missing %q", key)
 	}
 	return jsonStringValue(raw)
+}
+
+// optionalJSONString is jsonString for a parameter that may be absent:
+// "" when it is, and an error only when it is present and not a string.
+func optionalJSONString(params map[string]json.RawMessage, key string) (string, error) {
+	if _, ok := params[key]; !ok {
+		return "", nil
+	}
+	return jsonString(params, key)
 }
 
 func jsonStringValue(raw json.RawMessage) (string, error) {

@@ -453,10 +453,11 @@ func TestVerifyAutomaticFederationRegistrationAcceptsExactAudience(t *testing.T)
 	}
 }
 
-// OpenID Federation 1.0 §12.1.1: "sub" MUST NOT be present, specifically
-// to stop a request object being reused as a private_key_jwt client
-// assertion (which is keyed on iss+sub).
-func TestVerifyAutomaticFederationRegistrationRejectsSubjectClaim(t *testing.T) {
+// A "sub" claim is refused from every client — not only one registered
+// automatically, for which OpenID Federation 1.0 §12.1.1 requires it —
+// since with it a request object carries every claim a private_key_jwt
+// client assertion does (RFC 9101 §10.8, RFC 8725 §3.12).
+func TestVerifyRejectsSubjectClaim(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
 	token, err := Create(CreateParams{
@@ -472,10 +473,12 @@ func TestVerifyAutomaticFederationRegistrationRejectsSubjectClaim(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	policy := basePolicy(now)
-	policy.AutomaticFederationRegistration = true
-	if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, ErrUnexpectedSubject) {
-		t.Fatalf("Verify(sub present, AutomaticFederationRegistration) = %v, want ErrUnexpectedSubject", err)
+	for _, federation := range []bool{false, true} {
+		policy := basePolicy(now)
+		policy.AutomaticFederationRegistration = federation
+		if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, ErrUnexpectedSubject) {
+			t.Fatalf("Verify(sub present, AutomaticFederationRegistration=%v) = %v, want ErrUnexpectedSubject", federation, err)
+		}
 	}
 }
 

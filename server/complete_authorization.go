@@ -100,7 +100,13 @@ func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthoriz
 	if err != nil {
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "pushed authorization request is missing redirect_uri", err)), nil
 	}
-	state, _ := jsonString(request.Parameters, "state")
+	// PAR refused a state, nonce or dpop_jkt that isn't a string
+	// (authorizationParameterTypes); one here would be read as absent,
+	// dropping the protection the client asked for, so it fails closed.
+	state, err := optionalJSONString(request.Parameters, "state")
+	if err != nil {
+		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "pushed authorization request has a malformed state", err)), nil
+	}
 
 	switch result := req.Result.(type) {
 	case authorizeResult:
@@ -144,8 +150,14 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 	if err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "failed to generate authorization code", err)), nil
 	}
-	nonce, _ := jsonString(request.Parameters, "nonce")
-	dpopJKT, _ := jsonString(request.Parameters, "dpop_jkt") // optional, RFC 9449 §10
+	nonce, err := optionalJSONString(request.Parameters, "nonce")
+	if err != nil {
+		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "pushed authorization request has a malformed nonce", err)), nil
+	}
+	dpopJKT, err := optionalJSONString(request.Parameters, "dpop_jkt") // optional, RFC 9449 §10
+	if err != nil {
+		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "pushed authorization request has a malformed dpop_jkt", err)), nil
+	}
 
 	now := s.deps.Clock.Now()
 	grant, err := s.encodeGrantRecord(grantRecord{

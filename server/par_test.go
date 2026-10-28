@@ -141,19 +141,26 @@ func (f *fakeTransactionStore) Capabilities() storage.Capabilities {
 	return storage.Capabilities{Durable: true, AtomicConsume: true, SerializableRedemption: true, CrossInstanceConsistent: true, EncryptedAtRest: true}
 }
 
+// fakeReplayStore keys its records by namespace and digest, as
+// storage.ReplayStore requires, so a test sees exactly which uses the
+// server's namespaces keep apart and which they share.
 type fakeReplayStore struct {
 	mu   sync.Mutex
-	seen map[[32]byte]bool
+	seen map[fakeReplayKey]bool
+}
+
+type fakeReplayKey struct {
+	namespace storage.ReplayNamespace
+	digest    [32]byte
 }
 
 func (f *fakeReplayStore) UseOnce(_ context.Context, use storage.ReplayUse) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.seen == nil {
-		f.seen = make(map[[32]byte]bool)
+		f.seen = make(map[fakeReplayKey]bool)
 	}
-	key := [32]byte{}
-	copy(key[:], use.Digest[:])
+	key := fakeReplayKey{namespace: use.Namespace, digest: use.Digest}
 	if f.seen[key] {
 		return fmt.Errorf("replay detected")
 	}

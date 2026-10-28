@@ -32,6 +32,20 @@ not a substitute for them; see
 specifically for how certification evidence itself is captured and
 submitted.
 
+What the certified 0.25.0 configuration was, and wasn't:
+`cmd/conformance-as` ran under `server.AssuranceDevelopment` (its
+in-memory stores don't pass production's checks), and every mTLS
+client-authentication profile used `self_signed_tls_client_auth`: the
+PKI-based `tls_client_auth` method (`server.TrustedClientCAs`, CRLs,
+subject DN and SAN matching) has never been certified or run against
+the suite. The Message Signing runs used a `MaxRequestObjectLifetime` of
+600 seconds, set by a message-signing-only override in
+`cmd/conformance-as`, since the suite signs request objects valid for
+300 seconds and the recommendation was then 60 seconds;
+`server.RecommendedLimits()` now uses 600 seconds itself, so the
+override is gone (see
+[`server/oidf-config/README.md`](server/oidf-config/README.md)).
+
 Reflects the latest scheduled/manually-triggered run of
 [`scripts/run-all.sh`](scripts/run-all.sh) in CI (see
 [`../.github/workflows/conformance.yml`](../.github/workflows/conformance.yml))
@@ -172,10 +186,11 @@ has no resource owner at all (RFC 9396 §6's own "client's policy"
 framing). None of the three fields' absence is permissive — an
 unconfigured policy refuses any `authorization_details`, the same
 stance an unconfigured `Config.RAR` itself takes (see ARCHITECTURE.md's
-own RAR section for the full detail). Unlike CIBA,
-the OIDF suite has no dedicated RAR conformance plan at all, so this is
-deliberately outside the automated live-suite loop entirely, verified
-instead by `extension/rar_test.go`, `server/rar_test.go`
+own RAR section for the full detail). The OIDF FAPI 2.0 Security
+Profile and Message Signing plans have an `authorization_request_type=rar`
+variant, but no leg in [`scripts/run-all.sh`](scripts/run-all.sh)
+selects it yet, so RAR is outside the automated live-suite loop,
+verified instead by `extension/rar_test.go`, `server/rar_test.go`
 (narrowing-grant validation, full Authorization Code/CIBA/client_credentials
 end-to-end flows, rejection of ungranted/over-scoped
 `authorization_details`, every `RARPolicy` field's own rejection and
@@ -226,8 +241,8 @@ Authorization Code and CIBA grants' own
 `Dependencies.AuthorizationCodeRARPolicy`/`CIBARARPolicy`) grants
 everything requested, the same stand-in-for-a-real-consent-UI role
 `approvedAuthorizationDetails` already plays for those two grants.
-Since the suite has no plan variant that
-exercises `authorization_details` at all, this is verified by
+Since no leg selects the suite's `authorization_request_type=rar`
+variant, this is verified by
 `server/client_credentials_test.go` and
 `TestSmokeClientCredentialsGrantFlowWithAuthorizationDetails`, not the
 live suite.

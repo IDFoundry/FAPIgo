@@ -40,7 +40,7 @@ implemented. `server` only ever accepts `response_type=code`, and
 `ClientAuthMethod` is a closed enum of `private_key_jwt`, the mTLS
 variants and OAuth 2.0 attestation-based client authentication.
 
-- FAPI 2.0 Security Profile Final + Message Signing Final (signed requests with JAR, signed responses with JARM; signed introspection responses aren't implemented)
+- FAPI 2.0 Security Profile Final + Message Signing Final (signed requests with JAR, signed responses with JARM; token introspection, RFC 7662, isn't implemented, so neither are Message Signing's signed introspection responses)
 - PAR (RFC 9126) · DPoP (RFC 9449) · mTLS client auth & cert-bound tokens (RFC 8705), with CRL revocation checking
 - private_key_jwt client authentication
 - OAuth 2.0 Attestation-Based Client Authentication, including HAIP 1.0 x5c attester certificate chains, optionally binding each trust anchor to the attesters it may vouch for
@@ -51,7 +51,7 @@ variants and OAuth 2.0 attestation-based client authentication.
 - Native apps (RFC 8252): private-use URI scheme and any-port loopback redirect URIs, for clients registered as native
 - Grants you serve yourself at the token endpoint (OpenID4VCI's `pre-authorized_code`, say), with the server's own attestation-based client authentication and DPoP/mTLS checks
 - OpenID Federation 1.0 (trust chains, automatic client registration, trust marks)
-- OpenID Certified™ for OP, RP and FAPI-CIBA OP conformance profiles — see below
+- OpenID Certified™ for OP, RP and FAPI-CIBA OP conformance profiles, as tested for FAPIgo 0.25.0 — see below
 
 [![OpenID Certified](assets/openid-certified-badge.png)](https://openid.net/certification/)
 
@@ -179,6 +179,11 @@ default, `server.JWTAccessTokens`/`resource.JWTAccessTokens`) or as
 opaque, storage-backed values (`server.OpaqueAccessTokens`/
 `resource.OpaqueAccessTokens`) — FAPI 2.0 doesn't mandate a format, so
 this is a deployment's own choice, not something the library imposes.
+There is no token introspection endpoint (RFC 7662): a resource server
+verifying opaque tokens reads the same `storage.AccessTokenStore` the
+authorization server writes to, so it must share that store (in the
+same process, or a shared database). A resource server that can't
+should use JWT access tokens instead.
 
 OpenID Connect identity (an ID token) is likewise optional, not
 assumed: `server` issues one alongside the access token exactly when
@@ -211,17 +216,29 @@ role is tested against the OpenID Foundation conformance suite.
 > Foundation conformance suite's FAPI2 baseline and message-signing test
 > plans, run under `server`'s default JWT access-token format and again
 > under mTLS-bound access tokens (RFC 8705 §3); both roles have also been
-> run clean against `tls_client_auth`/`self_signed_tls_client_auth`
-> client authentication (RFC 8705 §2) and against CIBA (OpenID Connect
+> run clean against `self_signed_tls_client_auth` client authentication
+> (RFC 8705 §2) and against CIBA (OpenID Connect
 > CIBA Core 1.0, poll and ping delivery, mTLS-bound tokens, the OIDF
 > `fapi-ciba-id1` plan) — see [conformance/](conformance/README.md) for
-> the full breakdown and pass counts per plan. Rich Authorization
+> the full breakdown and pass counts per plan. The PKI-based
+> `tls_client_auth` method — `server.TrustedClientCAs`, CRL checking,
+> subject DN and SAN matching, certificates verified upstream — is not
+> exercised by any conformance run (`cmd/conformance-as` registers only
+> self-signed clients, with `server.NoClientCertificateChainTrust{}`):
+> it's covered by this repo's unit and integration tests only. The
+> conformance runs use `server.AssuranceDevelopment` (their in-memory
+> stores wouldn't pass production's checks), and the Message Signing
+> runs, including the 0.25.0 certification, used a
+> `MaxRequestObjectLifetime` of 600 seconds, above the suite's
+> 300-second request objects; that is now `server.RecommendedLimits()`'s
+> own value. Rich Authorization
 > Requests (RFC 9396) are implemented end-to-end across the PAR-fed
 > authorization-code flow, CIBA, and the client_credentials grant (RFC
 > 9396 §6), including a per-type narrowing hook so a resource owner can
-> grant less than what a client requested on the first two — the OIDF
-> suite has no dedicated RAR conformance plan, so this is validated by
-> this repo's own unit, integration and end-to-end tests instead — see
+> grant less than what a client requested on the first two. The OIDF
+> FAPI 2.0 plans have an `authorization_request_type=rar` variant, but
+> this repo's conformance runs don't select it yet, so this is validated
+> by this repo's own unit, integration and end-to-end tests instead — see
 > [conformance/](conformance/README.md#rar). The opaque access-token
 > alternative is covered by unit/integration tests and
 > `cmd/conformance-as`'s own smoke test under both formats, not by a
@@ -244,8 +261,10 @@ role is tested against the OpenID Foundation conformance suite.
 > requested scope everywhere (PAR, CIBA, client_credentials alike), no
 > ID token is ever issued, and `Metadata` omits every OIDC-only field
 > (`subject_types_supported`, `id_token_signing_alg_values_supported`)
-> — covered by unit tests and a real-HTTP `fapitest` round trip, not an
-> OIDF plan (the suite has no bare-OAuth2 FAPI2 plan to run against).
+> — covered by unit tests and a real-HTTP `fapitest` round trip. The
+> OIDF FAPI 2.0 plans have an `openid=plain_oauth` variant, but this
+> repo's runs select it only for the client_credentials legs, not for an
+> `OAuthOnly` authorization-code flow.
 >
 > The `federation` package adds OpenID Federation 1.0 (Final) support:
 > Trust Chain resolution (`Resolver`, §10, enforcing every `constraints`
@@ -279,6 +298,39 @@ role is tested against the OpenID Foundation conformance suite.
 > exact scope of every capability above.
 
 </details>
+
+## Exclusions and deliberate deviations
+
+Not implemented, by design:
+
+- the implicit and hybrid flows, `client_secret_basic`/`client_secret_post`
+  and public clients (FAPI 2.0 requires confidential clients);
+- RS256: FAPI 2.0 permits only PS256, ES256 and EdDSA, so RS256 is
+  refused wherever an algorithm is chosen, although RFC 9068 §2.1, OpenID
+  Connect Core §15.1 and Discovery §3 make it the default or require
+  support for it;
+- token introspection (RFC 7662), and so Message Signing's signed
+  introspection responses;
+- dynamic client registration, and OpenID Federation's Explicit
+  Registration (§12.2).
+
+Where FAPIgo departs from a specification on purpose:
+
+- A client assertion's `aud` must be the issuer, as a single string: an
+  array, or the token endpoint URL, is refused, although RFC 7523 §3
+  allows both. FAPI 2.0 Final requires the issuer. A client registered
+  for CIBA may still use the token or revocation endpoint URL as `aud`
+  at the refresh and revocation endpoints.
+- FAPI-CIBA §7.10 allows only PS256 and ES256. FAPIgo also allows EdDSA
+  for CIBA, since FAPI 2.0 permits it and FAPI-CIBA (Implementer's Draft
+  1) predates FAPI 2.0.
+- A client attestation's `iat` is optional, for compatibility with draft
+  07 of OAuth 2.0 Attestation-Based Client Authentication.
+- A `claims` request parameter member spelled in another case than its
+  defined name (`ID_TOKEN`, `Essential`) is refused rather than ignored.
+- RFC 7009 revocation of a token issued to another client is answered
+  with 200 and changes nothing, so the endpoint can't be used to learn
+  which tokens exist.
 
 ## Relevant specifications
 

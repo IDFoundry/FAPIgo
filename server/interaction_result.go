@@ -71,7 +71,10 @@ type denyLocallyResult struct {
 }
 
 // Discriminator for InteractionResult — deliberately empty.
-func (denyLocallyResult) interactionResult() {}
+func (denyLocallyResult) interactionResult() {
+	// Marks denyLocallyResult as an InteractionResult; it has no
+	// behaviour of its own.
+}
 
 // DenyLocally records that the request was declined before anyone
 // authenticated — the user declined or abandoned the sign-in page, say

@@ -311,16 +311,8 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
 		return
 	}
-	c, signedIn := customerByName(r.PostForm.Get("username"))
-	signedIn = signedIn && hmac.Equal([]byte(c.pin), []byte(r.PostForm.Get("pin")))
-	// A customer who cancels before signing in isn't sent back to the
-	// app: the bank redirects only once it knows who it's talking to
-	// (RFC 9700 §4.11.2), so the app can't use it to bounce anyone to a
-	// page of its choosing. Signed in, the refusal goes back to the app.
-	result := server.DenyLocally("you cancelled before signing in")
-	if signedIn {
-		result = server.Deny("the customer declined")
-	}
+	c, signedIn := signIn(r)
+	result := refusal(signedIn)
 	if r.PostForm.Get("decision") == "approve" {
 		if !signedIn {
 			b.w.render(w, "consent", b.consentPage(in, tag, "That username and PIN don't match."))
@@ -357,6 +349,25 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 		}
 		b.w.renderError(w, bankHost, o.Error.HTTPStatus(), approvalFailed, string(o.Error.Code())+": "+o.Error.PublicDescription())
 	}
+}
+
+// signIn checks the form's username and PIN, reporting whether they
+// name a customer.
+func signIn(r *http.Request) (customer, bool) {
+	c, ok := customerByName(r.PostForm.Get("username"))
+	return c, ok && hmac.Equal([]byte(c.pin), []byte(r.PostForm.Get("pin")))
+}
+
+// refusal is how a cancellation ends. A customer who cancels before
+// signing in isn't sent back to the app: the bank redirects only once
+// it knows who it's talking to (RFC 9700 §4.11.2), so the app can't use
+// it to bounce anyone to a page of its choosing. Signed in, the refusal
+// goes back to the app.
+func refusal(signedIn bool) server.InteractionResult {
+	if signedIn {
+		return server.Deny("the customer declined")
+	}
+	return server.DenyLocally("you cancelled before signing in")
 }
 
 // approve grants c's chosen accounts to the app, naming the grant so

@@ -94,6 +94,11 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 //     always send one. It only ever raises the enforcement bar, never
 //     lowers a value the caller explicitly set; plain New still requires
 //     the caller to set this field, since there is no default.
+//  5. cfg.Algorithms.IDToken, if zero for a client that can receive ID
+//     tokens, is set to the issuer's ID token signing algorithm when it
+//     advertises exactly one this module supports. When it advertises
+//     several, the one it uses for this client is a matter of the
+//     client's registration, so it's left zero and New asks for it.
 //
 // A DiscoveredMetadata assembled by hand (Issuer() zero) skips step 1:
 // cfg.Issuer must then be set, exactly as for New.
@@ -115,6 +120,9 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 		if cfg.RedirectURI == "" {
 			cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}
 		}
+	}
+	if cfg.Algorithms.IDToken == 0 && idTokensPossible(cfg) && len(discovered.IDTokenAlgorithms) == 1 {
+		cfg.Algorithms.IDToken = discovered.IDTokenAlgorithms[0]
 	}
 	if err := discovered.SupportsAlgorithms(cfg.Algorithms); err != nil {
 		return nil, err

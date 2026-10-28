@@ -1180,7 +1180,7 @@ the reason this section exists at all. Pick the side matching your AS:
 issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, asJWKSURL, 10*time.Minute)
 accessTokens, err := resource.NewJWTAccessTokens(
 	issuerKeys, asIssuer, asIssuer.String(), // audience: the AS's issuer, unless clients name this resource server (see below)
-	fapi.ES256, 5*time.Minute, // must be >= the AS's own Limits.AccessTokenLifetime
+	fapi.ES256, 10*time.Minute, // MaxTokenLifetime: at least the AS's Limits.AccessTokenLifetime (10 minutes in server.RecommendedLimits)
 	8, // max candidate keys tried per token — size to your AS's own key-rotation overlap, not a library default
 )
 
@@ -1640,7 +1640,12 @@ if err != nil {
 
 `NewFromDiscovery` fills in the issuer and endpoints from the discovered
 metadata and checks them against your `Config`; `New` takes them
-explicitly instead.
+explicitly instead. It also fills in `Algorithms.IDToken` when the
+authorization server advertises exactly one ID token signing algorithm
+(a FAPIgo server does); for one advertising several, set the one your
+client is registered for. `client.RecommendedLimits()` accepts ID tokens
+valid for up to an hour (`MaxIDTokenLifetime`): lower it to your
+provider's own lifetime if you know it.
 
 Under `AssuranceProduction`, `New` holds `Limits` to bounds
 `RecommendedLimits` meets — `MaxClockSkew` from 10 to 60 seconds,

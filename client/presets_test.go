@@ -11,10 +11,10 @@ import (
 // TestRecommendedPresetsProduceAWorkingClient is the real end-to-end
 // check that RecommendedLimits/RecommendedAlgorithms aren't just
 // individually-plausible values: combined with each other, plus the
-// two fields this module can't recommend in the abstract
-// (MaxIDTokenLifetime, IDToken — both properties of whatever specific
-// authorization server this client is configured against), client.New
-// must actually accept the result.
+// one field this module can't recommend in the abstract (IDToken, a
+// property of whatever specific authorization server this client is
+// configured against, which NewFromDiscovery fills in when the server
+// advertises only one), client.New must actually accept the result.
 func TestRecommendedPresetsProduceAWorkingClient(t *testing.T) {
 	issuer, err := fapi.ParseIssuerURL(testIssuer)
 	if err != nil {
@@ -37,7 +37,6 @@ func TestRecommendedPresetsProduceAWorkingClient(t *testing.T) {
 	algorithms.IDToken = fapi.ES256 // the one algorithm field this preset can't guess
 
 	limits := client.RecommendedLimits()
-	limits.MaxIDTokenLifetime = 5 * time.Minute // the one limit this preset can't guess
 
 	cfg := client.Config{
 		Issuer:                         issuer,
@@ -56,19 +55,15 @@ func TestRecommendedPresetsProduceAWorkingClient(t *testing.T) {
 	}
 }
 
-// TestRecommendedLimitsRejectsWithoutMaxIDTokenLifetime confirms
-// RecommendedLimits deliberately leaves MaxIDTokenLifetime at zero —
-// New must still reject it until a caller sets that one field.
-func TestRecommendedLimitsRejectsWithoutMaxIDTokenLifetime(t *testing.T) {
-	limits := client.RecommendedLimits()
-	if limits.MaxIDTokenLifetime != 0 {
-		t.Fatalf("RecommendedLimits().MaxIDTokenLifetime = %v, want 0 (deliberately left for the caller)", limits.MaxIDTokenLifetime)
-	}
-
-	cfg := validConfig(t)
-	cfg.Limits = limits
-	if _, err := client.New(cfg, validDependencies(t)); err == nil {
-		t.Fatal("New(RecommendedLimits, MaxIDTokenLifetime unset) = nil error, want error")
+// TestRecommendedLimitsBoundIDTokenLifetime: RecommendedLimits sets a
+// MaxIDTokenLifetime, so a client built from it can receive ID tokens
+// without another limit to set, and the value admits both
+// server.RecommendedLimits' 10-minute ID tokens and the hour OpenID
+// Providers commonly issue, within production's 24-hour ceiling.
+func TestRecommendedLimitsBoundIDTokenLifetime(t *testing.T) {
+	got := client.RecommendedLimits().MaxIDTokenLifetime
+	if got < time.Hour || got > 24*time.Hour {
+		t.Fatalf("RecommendedLimits().MaxIDTokenLifetime = %v, want from an hour to 24 hours", got)
 	}
 }
 

@@ -160,7 +160,9 @@ timeouts and a bounded response read) — or `server.New` refuses it.
 `backchannelhttp.New` declares it only when its `Config.Transport` grants
 no loopback exception (`AllowsLoopback`). `Dependencies.BackchannelHints`
 can refuse a hint naming nobody (`unknown_user_id`) before the request is
-stored. A hint only says whose device to ask: the user's approval there
+stored. Without it, hints aren't checked at all: the request is stored
+and acknowledged whatever its hint names, and your application finds
+out only when it tries to reach that user. A hint only says whose device to ask: the user's approval there
 is what authenticates them. The binding message is free text the client
 wrote, so show it as such, beside what you describe from the request
 itself.
@@ -175,6 +177,24 @@ accepts a request without `binding_message`. If yours can't be told
 apart otherwise, set `Config.RequireBindingMessage`: a request without
 one is then refused with `invalid_request` before it's stored or shown
 to anyone.
+
+## Algorithms and TLS
+
+The signed request and client assertions are verified against
+`Config.Algorithms.BackchannelAuthenticationRequest` and
+`Config.Algorithms.ClientAssertion`. `server.RecommendedAlgorithmSet()`
+includes EdDSA (Ed25519) alongside PS256 and ES256, and FAPIgo
+deliberately allows it for CIBA too: FAPI 2.0 permits it, and FAPI-CIBA
+ID1 §7.10, which names only PS256 and ES256, predates it. A deployment
+that must match §7.10 exactly sets both allow-lists to
+`server.AlgorithmSet{fapi.PS256, fapi.ES256}`; the metadata then
+advertises only those.
+
+`server.FAPIRWTLSCipherSuites` and `fapihttp`'s client transport offer
+the ECDHE AES-GCM TLS 1.2 suites. FAPI-CIBA §7.9 lists the RSA ones;
+the ECDSA ones are there for ECDSA certificates, as FAPI 2.0's BCP 195
+baseline permits, and a server with an RSA certificate never
+negotiates them.
 
 ## See it running
 

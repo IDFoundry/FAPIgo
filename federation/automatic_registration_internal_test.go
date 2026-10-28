@@ -58,7 +58,7 @@ func call(t *testing.T, repo *AutomaticClientRepository, raw string) (storage.Re
 
 // testSelfSignedCert generates a fresh, real self-signed X.509
 // certificate for key — genuinely valid DER, not stand-in bytes, since
-// certificateThumbprintFromJWKS actually parses each x5c entry with
+// certificateThumbprintsFromJWKS actually parses each x5c entry with
 // x509.ParseCertificate before computing its thumbprint.
 func testSelfSignedCert(t *testing.T, key *ecdsa.PrivateKey) *x509.Certificate {
 	t.Helper()

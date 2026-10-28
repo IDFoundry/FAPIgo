@@ -164,6 +164,23 @@ type AutomaticRegistrationConfig struct {
 	// defaults too, as it does token_endpoint_auth_signing_alg_values_supported.
 	ClientAssertionAlgorithms []fapi.SignatureAlgorithm
 
+	// IDTokenSigningAlgorithm is the one algorithm the server signs ID
+	// tokens with (server.New sets it from Config.Algorithms.IDToken). An
+	// RP whose metadata names an id_token_signed_response_alg other than
+	// it isn't registered: OpenID Connect Core §10.1 has the ID token
+	// signed with the algorithm the RP registered, and the RP would
+	// otherwise get, and refuse, tokens signed with another. Zero, for a
+	// server issuing no ID tokens, leaves the parameter unchecked.
+	IDTokenSigningAlgorithm fapi.SignatureAlgorithm
+
+	// UserInfoSigningAlgorithm is the one algorithm the server signs
+	// UserInfo responses with (server.New sets it from
+	// Config.Algorithms.UserInfo), zero when it signs none. An RP whose
+	// metadata names a userinfo_signed_response_alg other than it, or
+	// any when it is zero, isn't registered, for the reason
+	// IDTokenSigningAlgorithm gives.
+	UserInfoSigningAlgorithm fapi.SignatureAlgorithm
+
 	// SubjectTypes is the kinds of sub this OP gives an automatically
 	// registered client's end users (OpenID Connect Core §8): the
 	// subject_types_supported it advertises. A Relying Party whose
@@ -746,6 +763,8 @@ type relyingPartyMetadata struct {
 	JWKS                                       json.RawMessage `json:"jwks"`
 	JWKSURI                                    string          `json:"jwks_uri"`
 	TLSClientCertificateBoundAccessTokens      bool            `json:"tls_client_certificate_bound_access_tokens"`
+	IDTokenSignedResponseAlg                   string          `json:"id_token_signed_response_alg"`
+	UserinfoSignedResponseAlg                  string          `json:"userinfo_signed_response_alg"`
 	IDTokenEncryptedResponseAlg                *string         `json:"id_token_encrypted_response_alg"`
 	IDTokenEncryptedResponseEnc                *string         `json:"id_token_encrypted_response_enc"`
 	UserinfoEncryptedResponseAlg               *string         `json:"userinfo_encrypted_response_alg"`
@@ -822,6 +841,10 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 	}
 	if (len(m.JWKS) > 0) == (m.JWKSURI != "") {
 		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("%s metadata must declare exactly one of jwks or jwks_uri", relyingPartyEntityType)
+	}
+
+	if err := a.checkSignedResponseAlgorithms(m); err != nil {
+		return storage.RegisteredClientConfig{}, nil, err
 	}
 
 	declared, err := a.declaredClientAuthMethods(m, limits.authMethods)
@@ -1009,6 +1032,29 @@ func applyPKIClientAuthFields(cfg *storage.RegisteredClientConfig, authMethod st
 		// same defensive-completeness reason a switch over a closed enum
 		// gets one elsewhere in this module.
 		return fmt.Errorf("token_endpoint_auth_method %q is not supported", m.TokenEndpointAuthMethod)
+	}
+	return nil
+}
+
+// checkSignedResponseAlgorithms refuses an RP asking for its ID tokens
+// or UserInfo responses to be signed with an algorithm the server won't
+// use: the server signs each with one algorithm for every client, and
+// registering the RP anyway would drop its choice silently (OpenID
+// Connect Core §10.1: the ID token is signed "using the algorithm
+// specified" at registration; Dynamic Client Registration 1.0 §2:
+// userinfo_signed_response_alg makes the response a signed JWT).
+func (a *AutomaticClientRepository) checkSignedResponseAlgorithms(m relyingPartyMetadata) error {
+	if m.IDTokenSignedResponseAlg != "" && a.cfg.IDTokenSigningAlgorithm.IsValid() && m.IDTokenSignedResponseAlg != a.cfg.IDTokenSigningAlgorithm.String() {
+		return fmt.Errorf("id_token_signed_response_alg %q is not %s, the only algorithm this OP signs ID tokens with", m.IDTokenSignedResponseAlg, a.cfg.IDTokenSigningAlgorithm)
+	}
+	if m.UserinfoSignedResponseAlg == "" {
+		return nil
+	}
+	if !a.cfg.UserInfoSigningAlgorithm.IsValid() {
+		return fmt.Errorf("userinfo_signed_response_alg %q is requested, but this OP doesn't sign UserInfo responses", m.UserinfoSignedResponseAlg)
+	}
+	if m.UserinfoSignedResponseAlg != a.cfg.UserInfoSigningAlgorithm.String() {
+		return fmt.Errorf("userinfo_signed_response_alg %q is not %s, the only algorithm this OP signs UserInfo responses with", m.UserinfoSignedResponseAlg, a.cfg.UserInfoSigningAlgorithm)
 	}
 	return nil
 }

@@ -730,6 +730,40 @@ cfg.AutomaticRegistration.AllowedClientAuthMethods = []storage.ClientAuthMethod{
 }
 ```
 
+### A federation RP asking for a signing algorithm the OP doesn't use isn't registered (federation, server)
+
+**Affects:** automatic registration of a Relying Party whose resolved
+`openid_relying_party` metadata names an `id_token_signed_response_alg`
+other than the server's `Config.Algorithms.IDToken`, or a
+`userinfo_signed_response_alg` other than `Config.Algorithms.UserInfo`
+(or any, when that is zero). A `federation.AutomaticClientRepository`
+built directly, with the new `IDTokenSigningAlgorithm` and
+`UserInfoSigningAlgorithm` left zero, refuses every RP naming a
+`userinfo_signed_response_alg`, and doesn't check
+`id_token_signed_response_alg`.
+
+**Why:** OpenID Connect Core §10.1 has the ID token signed with the
+algorithm the RP registered, and `userinfo_signed_response_alg` asks
+for a signed UserInfo JWT. The server signs each with one algorithm for
+every client, and automatic registration ignored both parameters, so
+such an RP was registered and then got tokens it refuses.
+
+**What fails:** the RP's registration, as for any metadata the OP
+can't honour: the request is answered `invalid_client` and
+`OnResolutionFailure` receives an error naming the parameter.
+
+**What to change:** a federation RP names the OP's algorithms, or
+leaves the parameters out. An embedder building the repository itself
+passes the server's algorithms:
+
+```go
+federation.AutomaticRegistrationConfig{
+	// ...
+	IDTokenSigningAlgorithm:  srvCfg.Algorithms.IDToken,
+	UserInfoSigningAlgorithm: srvCfg.Algorithms.UserInfo,
+}
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

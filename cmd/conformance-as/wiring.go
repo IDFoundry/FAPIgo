@@ -277,6 +277,8 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 			AllowedScopes:             resolved.Federation.AllowedScopes,
 			MaxCacheAge:               federationMaxCacheAge,
 			ClientAssertionAlgorithms: srvCfg.Algorithms.ClientAssertion,
+			IDTokenSigningAlgorithm:   srvCfg.Algorithms.IDToken,
+			UserInfoSigningAlgorithm:  srvCfg.Algorithms.UserInfo,
 		}
 		if !federationTrustAnchorAdmin {
 			srvCfg.AutomaticRegistration = server.AutomaticRegistrationConfig{

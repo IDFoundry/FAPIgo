@@ -96,6 +96,8 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 			AllowedClientAuthMethods:     automaticAuthMethods,
 			OnResolutionFailure:          cfg.AutomaticRegistration.OnResolutionFailure,
 			ClientAssertionAlgorithms:    cfg.Algorithms.ClientAssertion,
+			IDTokenSigningAlgorithm:      automaticIDTokenAlgorithm(cfg),
+			UserInfoSigningAlgorithm:     cfg.Algorithms.UserInfo,
 			SubjectTypes:                 automaticSubjectTypes,
 			DefaultSubjectType:           automaticDefaultSubjectType,
 		}, deps.Clock)
@@ -895,4 +897,14 @@ func declinedRevocation(revocation RevocationSink) bool {
 		return true
 	}
 	return false
+}
+
+// automaticIDTokenAlgorithm is the algorithm automatic registration
+// holds a Relying Party's id_token_signed_response_alg to: the one this
+// server signs ID tokens with, or zero (unchecked) when it issues none.
+func automaticIDTokenAlgorithm(cfg Config) fapi.SignatureAlgorithm {
+	if cfg.OAuthOnly {
+		return 0
+	}
+	return cfg.Algorithms.IDToken
 }

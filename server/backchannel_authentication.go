@@ -296,11 +296,17 @@ type verifiedBackchannelRequest struct {
 // request object was sent: that is a property of the client, not the
 // request, and §13 gives it its own code — unauthorized_client, "The
 // Client is not authorized to use this authentication flow" (§13's own
-// example response is exactly this case).
+// example response is exactly this case). A client registered for ping
+// delivery while Dependencies.BackchannelNotifier declines
+// notifications gets the same code: its notification would never be
+// sent.
 func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context, params map[string]string, client storage.RegisteredClient) (verifiedBackchannelRequest, *Error) {
 	alg, permitted := client.BackchannelAuthenticationRequestAlgorithm()
 	if !permitted {
 		return verifiedBackchannelRequest{}, newError(ErrorUnauthorizedClient, 400, "client is not permitted to use CIBA", nil)
+	}
+	if client.BackchannelTokenDeliveryMode() == storage.BackchannelTokenDeliveryModePing && !s.backchannelPingSupported() {
+		return verifiedBackchannelRequest{}, newError(ErrorUnauthorizedClient, 400, "client is registered for ping delivery, which this server doesn't support", nil)
 	}
 
 	requestParam, ok := params["request"]

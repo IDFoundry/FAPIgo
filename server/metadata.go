@@ -313,15 +313,18 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 
 	if !s.cfg.Endpoints.BackchannelAuthentication.IsZero() {
 		md.BackchannelAuthenticationEndpoint = urlOrNil(s.cfg.Endpoints.BackchannelAuthentication)
-		// Both poll (CIBA §10.1) and ping (CIBA §10.2) — push is not
+		// Poll (CIBA §10.1), and ping (CIBA §10.2) unless
+		// Dependencies.BackchannelNotifier declines it — push is not
 		// implemented (storage.BackchannelTokenDeliveryMode has no value
 		// for it). Unconditional on any specific client's own
 		// registration, the same way TokenEndpointAuthMethodsSupported's
 		// two RFC 8705 §2 entries are unconditional on Config.MTLSEndpoints
 		// alone: this is a server-wide capability declaration, not a
 		// per-client one.
-		md.BackchannelTokenDeliveryModesSupported = []string{
-			storage.BackchannelTokenDeliveryModePoll.String(), storage.BackchannelTokenDeliveryModePing.String(),
+		md.BackchannelTokenDeliveryModesSupported = []string{storage.BackchannelTokenDeliveryModePoll.String()}
+		if s.backchannelPingSupported() {
+			md.BackchannelTokenDeliveryModesSupported = append(md.BackchannelTokenDeliveryModesSupported,
+				storage.BackchannelTokenDeliveryModePing.String())
 		}
 		md.BackchannelAuthenticationRequestSigningAlgValuesSupported = s.cfg.Algorithms.BackchannelAuthenticationRequest.Strings()
 		md.GrantTypesSupported = append(md.GrantTypesSupported, CIBAGrantType)

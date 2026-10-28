@@ -314,6 +314,32 @@ cfg.Limits.BackchannelAuthenticationPollInterval = 2 * time.Second
 cfg.Limits.BackchannelAuthenticationRequestLifetime = 3 * time.Minute
 ```
 
+### A ping client is refused under `NoBackchannelNotifications` (server)
+
+**Affects:** a CIBA server whose `Dependencies.BackchannelNotifier` is
+`server.NoBackchannelNotifications{}` and which has a client registered
+with `BackchannelTokenDeliveryMode: storage.BackchannelTokenDeliveryModePing`.
+
+**Why:** the metadata advertised ping, and a ping client's request was
+accepted, although `NoBackchannelNotifications` drops every
+notification: the client waited for a ping that never came. The
+metadata now lists only `poll` in
+`backchannel_token_delivery_modes_supported`, and
+`BeginBackchannelAuthentication` refuses a ping client with
+`unauthorized_client`.
+
+**What fails:** nothing at startup, since clients live in the
+`ClientRepository`. A ping client's backchannel authentication request
+gets `unauthorized_client`, and `Server.CheckClientRegistration` returns
+an error naming ping for it.
+
+**What to change:** register the client for poll, or send pings with a
+real notifier:
+
+```go
+deps.BackchannelNotifier, err = backchannelhttp.New(backchannelhttp.Config{ /* ... */ })
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

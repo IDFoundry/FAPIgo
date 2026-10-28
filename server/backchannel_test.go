@@ -1875,9 +1875,6 @@ func TestMetadataAdvertisesBackchannelAuthenticationWhenConfigured(t *testing.T)
 	if !containsString(md.BackchannelTokenDeliveryModesSupported, "poll") {
 		t.Fatalf("BackchannelTokenDeliveryModesSupported = %v, want to contain poll", md.BackchannelTokenDeliveryModesSupported)
 	}
-	if !containsString(md.BackchannelTokenDeliveryModesSupported, "ping") {
-		t.Fatalf("BackchannelTokenDeliveryModesSupported = %v, want to contain ping", md.BackchannelTokenDeliveryModesSupported)
-	}
 	if !containsString(md.BackchannelAuthenticationRequestSigningAlgValuesSupported, "ES256") {
 		t.Fatalf("BackchannelAuthenticationRequestSigningAlgValuesSupported = %v, want to contain ES256", md.BackchannelAuthenticationRequestSigningAlgValuesSupported)
 	}

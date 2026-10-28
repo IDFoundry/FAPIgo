@@ -144,7 +144,10 @@ func backchannelAuthentication(w http.ResponseWriter, r *http.Request) {
 Set `Dependencies.Backchannel` (`memstore.NewBackchannelAuthenticationStore()`
 to start) and `Dependencies.BackchannelNotifier`: `backchannelhttp.New`
 sends pings through a hardened HTTP client, and `NoBackchannelNotifications{}`
-declines them for a poll-only deployment. The notification endpoint is
+declines them for a poll-only deployment: the metadata then advertises
+only `poll`, and a client registered for ping is refused with
+`unauthorized_client` (`Server.CheckClientRegistration` reports one when
+you register it). The notification endpoint is
 whatever the client registered, so under `AssuranceProduction` a
 notifier of your own must implement `server.BackchannelNotifierAssurance`
 and declare `OutboundHardened` — a promise to send as `backchannelhttp`

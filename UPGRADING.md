@@ -274,6 +274,25 @@ claims["sub"], _ = json.Marshal(authz.ClientSubject)
 signed, srvErr := srv.SignUserInfoResponse(ctx, client, claims)
 ```
 
+### `Limits.PushedRequestLifetime` must be at least a second (server)
+
+**Affects:** a server whose `Config.Limits.PushedRequestLifetime` is
+positive but under one second.
+
+**Why:** RFC 9126 §2.2 reports the lifetime as the PAR response's
+`expires_in`, a positive whole number of seconds. A shorter lifetime was
+sent as `expires_in: 0`.
+
+**What fails:** `server.New` returns an error naming
+`limits.pushed_request_lifetime`.
+
+**What to change:** set a lifetime of a second or more; the presets'
+90 seconds suits most deployments:
+
+```go
+cfg.Limits.PushedRequestLifetime = 90 * time.Second
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

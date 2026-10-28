@@ -3,6 +3,7 @@ package jose
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -70,6 +71,11 @@ func marshalHeader(h Header) ([]byte, error) {
 func parseHeader(data []byte) (Header, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var raw rawHeader
+	// RFC 8725 §3.7: refuse a header encoding/json would decode with
+	// U+FFFD in place of invalid UTF-8 or a lone surrogate escape.
+	if !strictjson.DecodesLosslessly(data) {
+		return Header{}, errors.New("jose: parse header: not valid UTF-8, or an unpaired surrogate escape")
+	}
 	if err := strictjson.CheckFieldCase(data, &raw); err != nil {
 		return Header{}, fmt.Errorf("jose: parse header: %w", err)
 	}

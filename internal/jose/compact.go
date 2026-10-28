@@ -9,6 +9,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/strictb64"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // DefaultMaxCompactBytes bounds how large a compact serialization
@@ -30,13 +31,20 @@ const DefaultMaxCompactBytes = 16 * 1024
 // any empty segment (including an empty payload's ""), so Sign refuses
 // to produce a token its own sibling function can't parse back — every
 // caller in this module already marshals a real claims struct (at
-// minimum "{}"), so this never triggers in practice.
+// minimum "{}"), so this never triggers in practice. For the same reason
+// it refuses a payload that isn't valid UTF-8 or carries an unpaired
+// surrogate escape, which ParseCompact refuses (RFC 8725 §3.7): an
+// application-supplied claim value is the one way such a payload can
+// arise.
 func Sign(signer crypto.Signer, header Header, payload []byte) (string, error) {
 	if signer == nil {
 		return "", fmt.Errorf("jose: signer is nil")
 	}
 	if len(payload) == 0 {
 		return "", fmt.Errorf("jose: payload is empty")
+	}
+	if !strictjson.DecodesLosslessly(payload) {
+		return "", fmt.Errorf("jose: payload is not valid UTF-8, or has an unpaired surrogate escape")
 	}
 	if !header.Algorithm.IsValid() {
 		return "", fmt.Errorf("jose: invalid algorithm %v", header.Algorithm)
@@ -119,6 +127,13 @@ func ParseCompactMax(s string, maxBytes int) (Compact, error) {
 	payload, err := strictb64.URL(payloadB64)
 	if err != nil {
 		return Compact{}, fmt.Errorf("%w: payload: %v", ErrMalformed, err)
+	}
+	// RFC 7519 §7.2 and RFC 8725 §3.7: a JWT's claims set must be valid
+	// UTF-8. encoding/json would read invalid UTF-8, and a lone
+	// surrogate escape, as U+FFFD, so two different signed payloads
+	// would decode to the same claims.
+	if !strictjson.DecodesLosslessly(payload) {
+		return Compact{}, fmt.Errorf("%w: payload: not valid UTF-8, or an unpaired surrogate escape", ErrMalformed)
 	}
 	sig, err := strictb64.URL(sigB64)
 	if err != nil {

@@ -341,9 +341,24 @@ func (s *Server) validateAuthorizationRequest(ctx context.Context, params map[st
 // interchangeably. Pass nil for both when the calling endpoint accepts
 // no endpoint-URL audience at all (PAR — see
 // PushAuthorizationRequest's own call site).
+//
+// RFC 6749 §2.3: a client "MUST NOT use more than one authentication
+// method in each request", so a request carrying both attestation
+// headers and a client_assertion/client_assertion_type is refused with
+// invalid_request rather than authenticated by whichever one is checked
+// first. A peer certificate alone is not a second method: an mTLS
+// connection presents one on every request, including a
+// private_key_jwt or attestation client's in an mTLS-sender-constrained
+// deployment, and it authenticates the client only when neither of the
+// other two is present.
 func (s *Server) authenticateClient(ctx context.Context, params map[string]string, peerCert *x509.Certificate, attestation, attestationPoP string, endpoints, mtlsEndpoints []fapi.URL) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
+	carriesAttestation := attestation != "" || attestationPoP != ""
+	carriesAssertion := params["client_assertion"] != "" || params["client_assertion_type"] != ""
 	switch {
-	case attestation != "" || attestationPoP != "":
+	case carriesAttestation && carriesAssertion:
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
+			newError(ErrorInvalidRequest, 400, "the request uses more than one client authentication method", nil)
+	case carriesAttestation:
 		return s.authenticateClientViaAttestation(ctx, params["client_id"], attestation, attestationPoP)
 	case params["client_assertion"] != "":
 		return s.authenticateClientViaAssertion(ctx, params, endpoints, mtlsEndpoints)

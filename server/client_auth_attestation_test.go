@@ -868,3 +868,56 @@ func TestRequestClientCredentialsToken_AttestationRejectsDisallowedPoPAlgorithm(
 		t.Fatalf("RequestClientCredentialsToken accepted a PoP signed with a disallowed algorithm")
 	}
 }
+
+// TestAttestationWithClientAssertionRefused covers RFC 6749 §2.3's one
+// client authentication method per request: attestation headers plus a
+// client_assertion (or just its client_assertion_type) are refused with
+// invalid_request, rather than authenticated as the attested client
+// with the assertion ignored.
+func TestAttestationWithClientAssertionRefused(t *testing.T) {
+	for name, extra := range map[string][]server.FormParameter{
+		"assertion and type": {
+			formParam("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"),
+			formParam("client_assertion", "x.y.z"),
+		},
+		"assertion only": {formParam("client_assertion", "x.y.z")},
+		"type only":      {formParam("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			attesterKey := generateKey(t)
+			instanceKey := generateKey(t)
+			h := newHarnessWithAttestationClientCredentials(t, attesterKey)
+			attestation := createAttestationHeader(t, attesterKey, testClientID.String(), &instanceKey.PublicKey, h.now, time.Hour)
+			pop := createAttestationPoPHeader(t, instanceKey, testClientID.String(), testIssuer, "jti-1", h.now)
+			_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+				HTTP:                  server.FormRequest{Parameters: append(attestationClientCredentialsFormParams("accounts"), extra...)},
+				ClientAttestations:    []string{attestation},
+				ClientAttestationPoPs: []string{pop},
+				DPoPProofs:            []string{createDPoPProof(t, generateKey(t), h.now)},
+			})
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+				t.Fatalf("RequestClientCredentialsToken code %q, want invalid_request", code)
+			}
+		})
+	}
+}
+
+// TestAuthenticateAttestedClientWithClientAssertionRefused is
+// TestAttestationWithClientAssertionRefused for AuthenticateAttestedClient,
+// given a request from TokenEndpointRequest.AttestedClientAuthentication.
+func TestAuthenticateAttestedClientWithClientAssertionRefused(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newHarnessWithAttestationClientCredentials(t, attesterKey)
+	instance := generateKey(t)
+	header := dpopHeader(dpopProofAt(t, generateKey(t), testTokenEndpoint, "", h.now))
+	header.Set("OAuth-Client-Attestation", draft12Attestation(t, attesterKey, nil, &instance.PublicKey, h.now, time.Hour))
+	header.Set("OAuth-Client-Attestation-PoP", draft12PoP(t, instance, testIssuer, h.now, nil))
+	form := preAuthorizedForm()
+	form.Set("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
+	form.Set("client_assertion", "x.y.z")
+	req := extensionTokenRequest(t, form, header, nil)
+	_, err := h.server.AuthenticateAttestedClient(context.Background(), req.AttestedClientAuthentication())
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("AuthenticateAttestedClient code %q, want invalid_request", code)
+	}
+}

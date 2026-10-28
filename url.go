@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/url"
 	"strings"
+
+	"github.com/idfoundry/fapigo/internal/canonical"
 )
 
 // URL is a validated, security-sensitive URL — an issuer identifier, an
@@ -13,8 +15,9 @@ import (
 // ParseIssuerURL, ParseEndpointURL or ParseRedirectURL, which enforce:
 // absolute, HTTPS (except an explicitly enabled loopback exception, or a
 // native app's private-use scheme for a redirect), no embedded
-// credentials, no fragment, and a normalized (lowercased) scheme and
-// host.
+// credentials, no fragment, a host in ASCII (an internationalized
+// domain name given as its xn-- A-label), and a normalized scheme and
+// host (their ASCII letters lowercased).
 type URL struct {
 	value url.URL
 }
@@ -159,6 +162,16 @@ func parseSecureURL(raw string, opts []URLOption) (URL, error) {
 	if parsed.Host == "" {
 		return URL{}, fmt.Errorf("URL must have a host (scheme %q)", parsed.Scheme)
 	}
+	// Host names compare case-insensitively in ASCII only. A non-ASCII
+	// host is refused rather than lowercased: Unicode case mapping
+	// folds some non-ASCII letters onto ASCII ones ("İ" to "i"), while
+	// net/http dials the host through IDNA as another DNS name
+	// altogether ("İbank.example" is "xn--ibank-7fd.example", not
+	// "ibank.example"), so no lowercased spelling of it names where
+	// requests go.
+	if !canonical.IsASCII(parsed.Host) {
+		return URL{}, fmt.Errorf("URL host %q is not ASCII: give an internationalized domain name in its xn-- A-label form", parsed.Host)
+	}
 	if parsed.User != nil {
 		return URL{}, fmt.Errorf("URL must not contain embedded credentials")
 	}
@@ -176,8 +189,8 @@ func parseSecureURL(raw string, opts []URLOption) (URL, error) {
 		return URL{}, fmt.Errorf("URL scheme must be https, got %q", parsed.Scheme)
 	}
 
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	parsed.Host = strings.ToLower(parsed.Host)
+	parsed.Scheme = canonical.LowerASCII(parsed.Scheme)
+	parsed.Host = canonical.LowerASCII(parsed.Host)
 	return URL{value: *parsed}, nil
 }
 
@@ -186,7 +199,7 @@ func parseSecureURL(raw string, opts []URLOption) (URL, error) {
 // interface. Taking Host instead would miss a bracketed IPv6 literal
 // with no port ("[::1]"), which net.SplitHostPort rejects.
 func isLoopbackHost(hostname string) bool {
-	if strings.EqualFold(hostname, "localhost") {
+	if canonical.EqualFoldASCII(hostname, "localhost") {
 		return true
 	}
 	ip := net.ParseIP(hostname)

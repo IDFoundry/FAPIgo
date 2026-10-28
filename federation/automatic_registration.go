@@ -16,6 +16,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/internal/canonical"
 	intfed "github.com/idfoundry/fapigo/internal/federation"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/mtls"
@@ -1352,10 +1353,14 @@ func entitySector(id fapi.ClientID, redirectURIs []string) (string, error) {
 	if err != nil || entity.Hostname() == "" {
 		return "", fmt.Errorf("pairwise subject_type: the Entity Identifier %q has no host", id)
 	}
-	host := strings.ToLower(entity.Hostname())
+	// The sector is the host lowercased in ASCII only: Unicode case
+	// mapping would fold a non-ASCII host ("İ.example") onto an ASCII
+	// one ("i.example") that is a different DNS name, and so share its
+	// sector. Entity Identifiers here are ASCII already (ValidEntityID).
+	host := canonical.LowerASCII(entity.Hostname())
 	for _, raw := range redirectURIs {
 		u, err := url.Parse(raw)
-		if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Hostname(), host) {
+		if err != nil || u.Scheme != "https" || !canonical.EqualFoldASCII(u.Hostname(), host) {
 			return "", fmt.Errorf("pairwise subject_type: redirect_uris must all be https on the Entity Identifier's host %q", host)
 		}
 	}

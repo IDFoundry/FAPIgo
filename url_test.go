@@ -211,3 +211,83 @@ func TestURLWithQueryReplacesExistingQuery(t *testing.T) {
 		t.Fatalf("WithQuery: String() = %q, want %q", got.String(), want)
 	}
 }
+
+// Non-ASCII letters whose Unicode case mapping lands on, or comes from,
+// an ASCII one. net/http dials a host containing any of them through
+// IDNA, as a DNS name other than its ASCII look-alike ("İbank.example"
+// is "xn--ibank-7fd.example").
+const (
+	dottedCapitalI = "İ" // "İ": strings.ToLower gives "i"
+	kelvinSign     = "K" // "K": strings.ToLower gives "k"
+	longS          = "ſ" // "ſ": strings.EqualFold matches "s"
+	fullwidthB     = "Ｂ" // "Ｂ"
+)
+
+var nonASCIIHostURLs = []string{
+	"https://" + dottedCapitalI + "bank.example",
+	"https://%C4%B0bank.example/token",
+	"https://" + kelvinSign + "ey.example/token",
+	"https://" + fullwidthB + "ank.example/token",
+	"https://bank.example." + dottedCapitalI + "/token",
+}
+
+// parsers is each of ParseIssuerURL, ParseEndpointURL and
+// ParseRedirectURL (the last with every option, so only the host can
+// make it refuse).
+var parsers = map[string]func(string) (URL, error){
+	"ParseIssuerURL":   func(raw string) (URL, error) { return ParseIssuerURL(raw) },
+	"ParseEndpointURL": func(raw string) (URL, error) { return ParseEndpointURL(raw) },
+	"ParseRedirectURL": func(raw string) (URL, error) {
+		return ParseRedirectURL(raw, AllowLoopbackHTTP(), AllowPrivateUseScheme())
+	},
+}
+
+// TestParseURLRefusesNonASCIIHost: a host that isn't ASCII is refused
+// rather than lowercased, which would fold "İbank.example" onto
+// "ibank.example" while requests to it go to "xn--ibank-7fd.example".
+func TestParseURLRefusesNonASCIIHost(t *testing.T) {
+	for name, parse := range parsers {
+		for _, raw := range nonASCIIHostURLs {
+			if u, err := parse(raw); err == nil {
+				t.Errorf("%s(%q) = %q, want an error", name, raw, u.String())
+			}
+		}
+	}
+}
+
+// TestParseURLLowercasesASCIIHost: a mixed-case ASCII host or scheme is
+// lowercased, and an internationalized name in its A-label form is
+// accepted.
+func TestParseURLLowercasesASCIIHost(t *testing.T) {
+	for name, parse := range parsers {
+		for raw, want := range map[string]string{
+			"HtTpS://IBank.EXAMPLE/cb":              "https://ibank.example/cb",
+			"https://XN--IBANK-7FD.example/cb":      "https://xn--ibank-7fd.example/cb",
+			"https://Key.Example:8443/cb?State=Abc": "https://key.example:8443/cb?State=Abc",
+		} {
+			u, err := parse(raw)
+			if err != nil {
+				t.Errorf("%s(%q): %v", name, raw, err)
+				continue
+			}
+			if u.String() != want {
+				t.Errorf("%s(%q) = %q, want %q", name, raw, u.String(), want)
+			}
+		}
+	}
+}
+
+// TestParseURLLoopbackHTTPNeedsASCIILocalhost: only "localhost" in ASCII
+// (any case) is the loopback name AllowLoopbackHTTP admits over http,
+// not a spelling strings.EqualFold matches through a long s.
+func TestParseURLLoopbackHTTPNeedsASCIILocalhost(t *testing.T) {
+	if _, err := ParseIssuerURL("http://LocalHost:8080/", AllowLoopbackHTTP()); err != nil {
+		t.Fatalf("ParseIssuerURL(http://LocalHost:8080/): %v", err)
+	}
+	if !isLoopbackHost("LOCALHOST") || isLoopbackHost("localho"+longS+"t") {
+		t.Fatalf("isLoopbackHost folds beyond ASCII")
+	}
+	if u, err := ParseIssuerURL("http://localho"+longS+"t:8080/", AllowLoopbackHTTP()); err == nil {
+		t.Fatalf("ParseIssuerURL(http://localhoſt:8080/) = %q, want an error", u.String())
+	}
+}

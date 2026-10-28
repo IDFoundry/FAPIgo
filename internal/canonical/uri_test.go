@@ -28,18 +28,20 @@ func TestURI(t *testing.T) {
 		{"keeps a trailing slash", "https://as.example/a/", "https://as.example/a/"},
 		{"drops default port on an IPv6 host", "https://[::1]:443/token", "https://[::1]/token"},
 		{"keeps non-default port on an IPv6 host", "https://[::1]:8443/token", "https://[::1]:8443/token"},
-		// The two cases below were found by FuzzURI, not written by
-		// hand — see URI's own doc comment for why a leading "./" is
-		// inserted. Once Scheme, Host and User have all come out empty,
-		// a Path of "//..." is ambiguous when serialized (RFC 3986
-		// §3.3) and would silently reparse into a different URL; both
-		// example inputs below can only reach that state via a
-		// component URI is supposed to strip (a degenerate host, or
-		// userinfo), so this is a defense-in-depth guard against an
+		// The cases below were found by FuzzURI, not written by hand —
+		// see URI's own comment for why a leading "/." is inserted.
+		// Once Host and User have both come out empty, a Path of
+		// "//..." is ambiguous when serialized (RFC 3986 §3.3) and
+		// would silently reparse into a different URL; each input below
+		// can only reach that state via a component URI is supposed to
+		// strip (a degenerate host, or userinfo) or a removed dot
+		// segment, so this is a defense-in-depth guard against an
 		// already-malformed htu claim, not a real absolute URL ever
 		// taking this path.
-		{"disambiguates a collapsed host colliding with a // path", "//://", ".///"},
-		{"disambiguates stripped userinfo colliding with a // path", "//@//", ".///"},
+		{"disambiguates a collapsed host colliding with a // path", "//://", "/.//"},
+		{"disambiguates stripped userinfo colliding with a // path", "//@//", "/.//"},
+		{"disambiguates a removed dot segment leaving a // path after a scheme", "A:/.//", "a:/.//"},
+		{"keeps a // path after https and no authority a path", "https:/.//x", "https:/.//x"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

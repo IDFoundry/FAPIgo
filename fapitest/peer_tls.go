@@ -4,7 +4,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"strings"
+
+	"github.com/idfoundry/fapigo/internal/canonical"
 )
 
 // PeerTLSConfig builds a *tls.Config for a test harness's own outbound
@@ -46,7 +47,7 @@ func PeerTLSConfig(pool *x509.CertPool, unverifiedHosts []string) *tls.Config {
 		InsecureSkipVerify: true, //nolint:gosec
 		VerifyConnection: func(cs tls.ConnectionState) error {
 			for _, h := range unverifiedHosts {
-				if strings.EqualFold(cs.ServerName, h) {
+				if canonical.EqualFoldASCII(cs.ServerName, h) {
 					return nil
 				}
 			}

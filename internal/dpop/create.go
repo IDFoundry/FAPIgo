@@ -40,7 +40,9 @@ type ProofRequest struct {
 	// form (canonical.HasNormalPath), or CreateProof fails with
 	// ErrURLNotNormal: the request goes out with the path as written, and
 	// an htu naming another path could be replayed at the resource it
-	// names.
+	// names. Its host must be ASCII, or CreateProof fails with
+	// ErrURLHostNotASCII: an internationalized domain name is given in
+	// its xn-- A-label form, the name the request is actually sent to.
 	URL *url.URL
 
 	// AccessToken, if non-empty, is hashed into the proof's "ath" claim
@@ -76,6 +78,9 @@ func CreateProof(req ProofRequest) (string, error) {
 	}
 	if !canonical.HasNormalPath(req.URL) {
 		return "", ErrURLNotNormal
+	}
+	if !canonical.IsASCII(req.URL.Host) {
+		return "", ErrURLHostNotASCII
 	}
 	if req.Now.IsZero() {
 		return "", fmt.Errorf("dpop: now is zero")

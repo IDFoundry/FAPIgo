@@ -125,6 +125,10 @@ func TestIsAllowedPrivateHost(t *testing.T) {
 		{"suffix is not a match", "not-conformance-as-federation", false},
 		{"prefix is not a match", "conformance-as-federation.evil.example.org", false},
 		{"empty allow-list entry never matches a real host", "", false},
+		// strings.EqualFold matches the long s (U+017F) to "s", but
+		// IDNA dials this host as another DNS name, which mustn't
+		// inherit the listed host's private-address exception.
+		{"case-insensitive in ASCII only", "conformance-federation-tru\u017Ft-anchor", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

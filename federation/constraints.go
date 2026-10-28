@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/idfoundry/fapigo/internal/canonical"
 )
 
 // subordinateConstraint is one Subordinate Statement's own
@@ -119,13 +121,15 @@ func entityIDHost(entityID string) (string, error) {
 // additional labels before that suffix, but NOT by the bare domain
 // itself (".example.com" matches "host.example.com", not
 // "example.com") — and a constraint not beginning with "." specifies an
-// exact host. Matched case-insensitively, per normal domain-name
-// comparison.
+// exact host. Matched case-insensitively in ASCII only, per normal
+// domain-name comparison (RFC 4343): strings.EqualFold would also match
+// a non-ASCII host such as "\u212Aey.example" (Kelvin sign) to the
+// constraint "key.example", though IDNA makes it another DNS name.
 func domainNameConstraintMatches(constraint, host string) bool {
 	if strings.HasPrefix(constraint, ".") {
-		return len(host) > len(constraint) && strings.EqualFold(host[len(host)-len(constraint):], constraint)
+		return len(host) > len(constraint) && canonical.EqualFoldASCII(host[len(host)-len(constraint):], constraint)
 	}
-	return strings.EqualFold(constraint, host)
+	return canonical.EqualFoldASCII(constraint, host)
 }
 
 // filterAllowedEntityTypes applies every collected allowed_entity_types

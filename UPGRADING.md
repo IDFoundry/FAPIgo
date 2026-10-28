@@ -68,6 +68,58 @@ with an EC P-256 or Ed25519 key:
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out client.pem
 ```
 
+### A URL's host must be ASCII: give an internationalized domain name as its `xn--` A-label (fapi, server, client, resource, storage, federation, fapihttp)
+
+**Affects:** an issuer, endpoint or redirect URI written with a
+non-ASCII host, such as `https://bücher.example`, and a DPoP proof made
+for, or presented at, such a host, at every assurance level.
+
+**Why:** hosts were lowercased with `strings.ToLower` and compared with
+`strings.EqualFold`, whose Unicode case mapping folds some non-ASCII
+letters onto ASCII ones: `İ` (U+0130) lowercases to `i`, and the Kelvin
+sign `K` (U+212A) folds to `k`. `net/http` dials a non-ASCII host
+through IDNA instead, as a different DNS name (`İbank.example` is
+`xn--ibank-7fd.example`). So `fapi.ParseIssuerURL("https://İbank.example")`
+returned `https://ibank.example`, and a DPoP proof for a request to
+`https://İbank.example/…`, an attacker's host, carried an `htu` that
+verified at `https://ibank.example/…`. Hosts and schemes are now
+lowercased and compared in ASCII only, and a non-ASCII host is refused
+where it used to be folded.
+
+**What fails:**
+- `fapi.ParseIssuerURL`, `ParseEndpointURL` and `ParseRedirectURL`
+  return an error saying the host is not ASCII. The server's pushed
+  authorization request refuses such a `redirect_uri` with
+  `invalid_request`.
+- `client.ResourceClient.Do` refuses a request to a non-ASCII host with
+  `invalid_request` before sending it, whichever sender constraint the
+  client uses.
+- An authorization or resource server refuses, as an `htu` mismatch,
+  every proof whose `htu` has a non-ASCII host, and every proof when
+  its own target URL has one.
+- A pairwise client registered with `storage.NewRegisteredClient` whose
+  redirect URIs have a non-ASCII host derives no sector from them, so
+  it needs `Sector` set.
+- Federation naming constraints, a pairwise Relying Party's
+  redirect-host check, and `fapihttp`'s `AllowedPrivateHosts`,
+  `AllowedLoopbackHosts` and same-origin redirect check no longer match
+  a non-ASCII host to an ASCII one.
+
+**What to change:** write the host in its A-label (punycode) form, the
+name requests are actually sent to. Convert it once, for example with
+`golang.org/x/net/idna`:
+
+```go
+host, err := idna.Lookup.ToASCII("bücher.example") // "xn--bcher-kva.example"
+if err != nil {
+	return err
+}
+issuer, err := fapi.ParseIssuerURL("https://" + host)
+```
+
+ASCII hosts in any letter case are unaffected: `https://AS.Example` is
+still accepted, as `https://as.example`.
+
 ## v0.62.0
 
 ### `X5CAttesterChain.Revocation` is required (server)

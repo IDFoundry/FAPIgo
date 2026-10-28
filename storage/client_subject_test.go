@@ -212,3 +212,27 @@ func TestAttestationClientDerivesNoSector(t *testing.T) {
 		})
 	}
 }
+
+// TestDerivedSectorFoldsASCIIOnly: a sector derived from redirect URIs
+// lowercases their host's ASCII letters alone. A non-ASCII host derives
+// none: Unicode case mapping would fold "İbank.example" onto
+// "ibank.example", a different DNS name from the xn--ibank-7fd.example
+// it is dialed as, and put the two in one sector.
+func TestDerivedSectorFoldsASCIIOnly(t *testing.T) {
+	sectorOf := func(uris ...fapi.RegisteredRedirectURI) string {
+		return derivedSector(RegisteredClientConfig{RedirectURIs: uris})
+	}
+	if got := sectorOf("https://IBank.Example/a", "https://ibank.EXAMPLE/b"); got != "ibank.example" {
+		t.Errorf("mixed-case ASCII hosts derive %q, want ibank.example", got)
+	}
+	for _, uris := range [][]fapi.RegisteredRedirectURI{
+		{"https://İbank.example/cb"},
+		{"https://İbank.example/a", "https://ibank.example/b"},
+		{"https://Key.example/cb"},
+		{"https://Ｂank.example/cb"},
+	} {
+		if got := sectorOf(uris...); got != "" {
+			t.Errorf("redirect URIs %q derive sector %q, want none", uris, got)
+		}
+	}
+}

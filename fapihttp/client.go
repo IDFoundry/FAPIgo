@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/idfoundry/fapigo/internal/canonical"
 	"github.com/idfoundry/fapigo/internal/nofollow"
 )
 
@@ -508,7 +509,7 @@ func isRedirect(status int) bool {
 }
 
 func requestOrigin(u *url.URL) string {
-	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
+	return canonical.LowerASCII(u.Scheme) + "://" + canonical.LowerASCII(u.Host)
 }
 
 func (c *Client) resolveRedirect(ctx context.Context, current *url.URL, location, origin string) (*url.URL, error) {
@@ -578,7 +579,7 @@ func (c *Client) validateFetchURL(ctx context.Context, u *url.URL) error {
 		return fmt.Errorf("fapihttp: url must not contain embedded credentials")
 	}
 	loopback := c.loopback().permits(u.Hostname())
-	switch strings.ToLower(u.Scheme) {
+	switch canonical.LowerASCII(u.Scheme) {
 	case "https":
 		return c.checkHostIPs(ctx, u.Hostname(), loopback)
 	case "http":
@@ -645,7 +646,7 @@ func (p loopbackPolicy) permits(host string) bool {
 // address: "localhost", a name under ".localhost" (RFC 6761), or a
 // loopback IP literal.
 func isLoopbackHost(hostname string) bool {
-	lower := strings.ToLower(hostname)
+	lower := canonical.LowerASCII(hostname)
 	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
 		return true
 	}
@@ -663,7 +664,7 @@ func hostListed(host string, allowed []string) bool {
 		h = hostOnly
 	}
 	for _, a := range allowed {
-		if strings.EqualFold(h, a) {
+		if canonical.EqualFoldASCII(h, a) {
 			return true
 		}
 	}

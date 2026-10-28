@@ -8,7 +8,8 @@ import (
 
 // URI canonicalizes u for use as a DPoP "htu" claim (RFC 9449 §4.2) or
 // any other context that needs to compare URLs by origin-plus-path:
-// scheme and host are lowercased, a default port for the scheme is
+// scheme and host have their ASCII letters lowercased (and nothing
+// else: see LowerASCII), a default port for the scheme is
 // dropped, and any userinfo, query and fragment are stripped. The path
 // gets RFC 3986's syntax-based and scheme-based normalization (§6.2.2,
 // §6.2.3), which RFC 9449 §4.3 has a server apply before comparing htu:
@@ -18,7 +19,7 @@ import (
 // URIs that differ only in them name the same one.
 func URI(u *url.URL) string {
 	out := *u
-	out.Scheme = strings.ToLower(out.Scheme)
+	out.Scheme = LowerASCII(out.Scheme)
 	out.Host = canonicalHost(out.Host, out.Scheme)
 	out.User = nil
 	out.RawQuery = ""
@@ -37,31 +38,30 @@ func URI(u *url.URL) string {
 	// those of EscapedPath, which are.
 	out.Path, _ = url.PathUnescape(path)
 	out.RawPath = path
-	// A path starting with "//", once Scheme, Host and User have all
-	// come out empty, is genuinely ambiguous once serialized: RFC 3986
-	// §3.3 always reads a leading "//" as introducing an authority
-	// component, so url.URL.String() (which only writes "//" itself
-	// ahead of a non-empty Scheme/Host/User — none of which apply here)
-	// just emits the path verbatim, and re-parsing that string reads
-	// part or all of it back as a phantom Host instead of Path —
-	// silently producing a *different* URL than the one just
-	// canonicalized (confirmed by this package's own fuzz corpus: three
-	// distinct shapes of "//"-prefixed path, each swallowed differently
-	// on re-parse depending on what follows). This can only arise when
-	// u's own original Host or User was non-empty to begin with — that
-	// is the only way Path could have ended up starting with "//" in
-	// the first place — so it is inherent to inputs already this
-	// degenerate (no scheme, no real host), never to a well-formed
-	// absolute URL. RFC 3986 §4.2 prescribes exactly this fix for the
-	// analogous "first path segment could be mistaken for something
-	// else" case (a leading "./"); Go's own url.URL.String() already
-	// applies it for a first segment containing ":" — this extends the
-	// same technique to "//", which net/url does not yet guard against
-	// itself.
-	if out.Scheme == "" && out.Host == "" && out.User == nil && strings.HasPrefix(out.Path, "//") {
-		out.Path = "./" + out.Path
+	// A path starting with "//", once Host and User have both come out
+	// empty, is genuinely ambiguous once serialized: RFC 3986 §3.3
+	// always reads a leading "//" as introducing an authority
+	// component. With no scheme, url.URL.String() emits the path
+	// verbatim; with a scheme and an input that had no authority
+	// ("A:/.//", OmitHost set), it writes "scheme:" and then the path
+	// (Go releases before 1.27 do; later ones escape its first "/").
+	// Either way, re-parsing reads part or all of the path back as a
+	// phantom Host — silently producing a *different* URL than the one
+	// just canonicalized (confirmed by this package's own fuzz corpus:
+	// "//://", "//@//" and "A:/.//" are each swallowed differently).
+	// The path can only start with "//" here after dot-segment removal
+	// ("/.//x") or because u's own Host or User was non-empty to begin
+	// with, so this only arises for inputs already this degenerate (no
+	// real host), never for a well-formed absolute URL. Prefixing "/."
+	// keeps the path's meaning (RFC 3986 §5.2.4 removes it again) while
+	// making the first segment "." rather than empty — the technique
+	// §4.2 prescribes, with "./", for a first segment that could be
+	// mistaken for a scheme. URI of the result removes the prefix and
+	// adds it back, so it is idempotent.
+	if out.Host == "" && out.User == nil && strings.HasPrefix(out.Path, "//") {
+		out.Path = "/." + out.Path
 		if out.RawPath != "" {
-			out.RawPath = "./" + out.RawPath
+			out.RawPath = "/." + out.RawPath
 		}
 	}
 	return out.String()
@@ -115,7 +115,7 @@ func canonicalHost(host, scheme string) string {
 		h = host
 		port = ""
 	}
-	h = strings.ToLower(h)
+	h = LowerASCII(h)
 	if port == "" || isDefaultPort(scheme, port) {
 		// Without re-adding what a successful split stripped, a bare
 		// return of h here would hand back an address containing

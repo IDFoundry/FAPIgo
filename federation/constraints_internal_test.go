@@ -22,6 +22,31 @@ func TestDomainNameConstraintMatchesIsCaseInsensitive(t *testing.T) {
 	}
 }
 
+// TestDomainNameConstraintMatchesFoldsASCIIOnly: a non-ASCII host never
+// matches a constraint naming the ASCII host Unicode case mapping folds
+// it onto, nor the other way round; IDNA dials it as another DNS name.
+func TestDomainNameConstraintMatchesFoldsASCIIOnly(t *testing.T) {
+	for _, c := range [][2]string{
+		{"key.example", "\u212Aey.example"},        // Kelvin sign
+		{"\u212Aey.example", "key.example"},        // Kelvin sign
+		{".key.example", "x.\u212Aey.example"},     // subtree, Kelvin sign
+		{".ibank.example", "x.\u0130bank.example"}, // subtree, dotted capital I
+		{"base.example", "ba\u017Fe.example"},      // long s
+		{"bank.example", "\uFF22ank.example"},      // fullwidth B
+		{"\uFF42ank.example", "\uFF22ank.example"}, // fullwidth b vs B
+	} {
+		if domainNameConstraintMatches(c[0], c[1]) {
+			t.Errorf("domainNameConstraintMatches(%q, %q) = true, want false", c[0], c[1])
+		}
+	}
+	if !domainNameConstraintMatches(".Key.EXAMPLE", "x.kEY.example") {
+		t.Errorf("mixed-case ASCII subtree match = false, want true")
+	}
+	if !domainNameConstraintMatches(".example", "x.\u212Aey.example") {
+		t.Errorf("a non-ASCII label under .example = no match, want a match on the ASCII suffix")
+	}
+}
+
 func TestDomainNameConstraintMatchesSubtree(t *testing.T) {
 	if !domainNameConstraintMatches(".example.com", "host.example.com") {
 		t.Errorf(".example.com should match host.example.com")

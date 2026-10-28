@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"net/http"
 	"net/url"
+	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
 )
@@ -26,20 +27,74 @@ type httpRequestParts struct {
 }
 
 // readHTTPRequestParts reads everything from r at once, so an adapter
-// can't forget a header that only some clients send.
+// can't forget a header that only some clients send. A request whose
+// only credential is the Authorization header is refused here
+// (authorizationHeaderOnly).
 func readHTTPRequestParts(r *http.Request) (httpRequestParts, error) {
 	form, err := FormRequestFromHTTP(r)
 	if err != nil {
 		return httpRequestParts{}, err
 	}
 	attestations, pops := ClientAttestationHeadersFromHTTP(r)
-	return httpRequestParts{
+	parts := httpRequestParts{
 		HTTP:                  form,
 		DPoPProofs:            DPoPProofsFromHTTP(r),
 		ClientAttestations:    attestations,
 		ClientAttestationPoPs: pops,
 		PeerCertificate:       PeerCertificateFromHTTP(r),
-	}, nil
+	}
+	if challengeErr := authorizationHeaderOnly(r, parts); challengeErr != nil {
+		return httpRequestParts{}, challengeErr
+	}
+	return parts, nil
+}
+
+// authorizationHeaderOnly refuses a request that tried to authenticate
+// with the Authorization header (client_secret_basic, say) and carries
+// none of the credentials this server authenticates clients by — a
+// client assertion, client attestation headers, a TLS client certificate
+// — so it can only fail as invalid_client. RFC 6749 §5.2: "If the client
+// attempted to authenticate via the "Authorization" request header
+// field, the authorization server MUST respond with an HTTP 401 (Unauthorized)
+// status code and include the WWW-Authenticate response header field
+// matching the authentication scheme used by the client." A request that
+// also carries one of those credentials is authenticated by it as before.
+func authorizationHeaderOnly(r *http.Request, parts httpRequestParts) *Error {
+	header := r.Header.Get("Authorization")
+	if header == "" || parts.PeerCertificate != nil || len(parts.ClientAttestations) > 0 || len(parts.ClientAttestationPoPs) > 0 {
+		return nil
+	}
+	for _, p := range parts.HTTP.Parameters {
+		if p.Name == "client_assertion" || p.Name == "client_assertion_type" {
+			return nil
+		}
+	}
+	scheme, _, _ := strings.Cut(header, " ")
+	if !isAuthScheme(scheme) {
+		scheme = "Basic"
+	}
+	err := newError(ErrorInvalidClient, http.StatusUnauthorized, "client authentication with the Authorization header is not supported", nil)
+	err.challenge = scheme + ` realm="oauth", error="invalid_client"`
+	return err
+}
+
+// isAuthScheme reports whether s is an HTTP authentication scheme name:
+// an RFC 9110 §5.6.2 token.
+func isAuthScheme(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if !isTokenChar(c) {
+			return false
+		}
+	}
+	return true
+}
+
+// isTokenChar reports whether c is an RFC 9110 §5.6.2 tchar.
+func isTokenChar(c rune) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", c)
 }
 
 // PushAuthorizationRequestFromHTTP builds a PushAuthorizationRequest

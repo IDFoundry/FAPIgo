@@ -154,6 +154,10 @@ type Error struct {
 	description string
 	cause       error
 	nonce       string
+
+	// challenge is the WWW-Authenticate value WriteJSON sends, if any:
+	// see Challenge.
+	challenge string
 }
 
 // newError builds the *Error every Server method returns. description
@@ -223,6 +227,14 @@ func (e *Error) PublicDescription() string { return e.description }
 // request isn't challenged first. WriteJSON sends it.
 func (e *Error) Nonce() string { return e.nonce }
 
+// Challenge returns the WWW-Authenticate header value the response
+// carries, "" for none: set on the invalid_client (401) a request gets
+// when it tried to authenticate with the Authorization header, which RFC
+// 6749 §5.2 answers with "the WWW-Authenticate response header field
+// matching the authentication scheme used by the client". WriteJSON
+// sends it.
+func (e *Error) Challenge() string { return e.challenge }
+
 // HTTPStatus returns the HTTP status code an adapter should respond
 // with.
 func (e *Error) HTTPStatus() int { return e.httpStatus }
@@ -242,6 +254,7 @@ func (e *Error) Unwrap() error { return e.cause }
 // WriteJSON writes e as a complete RFC 6749 §5.2 OAuth JSON error
 // response to w: the DPoP-Nonce header when Nonce is non-empty (RFC
 // 9449 §8 — see Nonce's own doc comment for when that is), the
+// WWW-Authenticate header when Challenge is non-empty, the
 // "application/json" Content-Type, e's own HTTPStatus, and a
 // {"error": ..., "error_description": ...} body built from Code and
 // PublicDescription — never Unwrap's cause. Every *Error this
@@ -254,6 +267,9 @@ func (e *Error) Unwrap() error { return e.cause }
 // prior write has already sent the response's status line.
 func (e *Error) WriteJSON(w http.ResponseWriter) {
 	setNoStore(w)
+	if e.challenge != "" {
+		w.Header().Set("WWW-Authenticate", e.challenge)
+	}
 	httperror.WriteJSON(w, e.nonce, "", string(e.code), e.description, e.httpStatus)
 }
 

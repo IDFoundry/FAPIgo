@@ -347,17 +347,25 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		md.ClientAttestationPoPSigningAlgValuesSupported = s.cfg.Algorithms.ClientAttestationPoP.Strings()
 	}
 
-	if !s.cfg.Endpoints.Revocation.IsZero() {
-		md.RevocationEndpoint = urlOrNil(s.cfg.Endpoints.Revocation)
-		// RevokeToken authenticates a client exactly as the token
-		// endpoint does.
-		md.RevocationEndpointAuthMethodsSupported = slices.Clone(md.TokenEndpointAuthMethodsSupported)
-		if slices.Contains(md.RevocationEndpointAuthMethodsSupported, storage.ClientAuthMethodPrivateKeyJWT.String()) {
-			md.RevocationEndpointAuthSigningAlgValuesSupported = slices.Clone(md.TokenEndpointAuthSigningAlgValuesSupported)
-		}
-	}
+	s.addRevocationMetadata(&md)
 
 	return md
+}
+
+// addRevocationMetadata sets the RFC 8414 §2 revocation fields when
+// Config.Endpoints.Revocation is set. RevokeToken authenticates a
+// client exactly as the token endpoint does, so it lists the same
+// methods, and, with private_key_jwt among them, the same signing
+// algorithms, which §2 then requires.
+func (s *Server) addRevocationMetadata(md *Metadata) {
+	if s.cfg.Endpoints.Revocation.IsZero() {
+		return
+	}
+	md.RevocationEndpoint = urlOrNil(s.cfg.Endpoints.Revocation)
+	md.RevocationEndpointAuthMethodsSupported = slices.Clone(md.TokenEndpointAuthMethodsSupported)
+	if slices.Contains(md.RevocationEndpointAuthMethodsSupported, storage.ClientAuthMethodPrivateKeyJWT.String()) {
+		md.RevocationEndpointAuthSigningAlgValuesSupported = slices.Clone(md.TokenEndpointAuthSigningAlgValuesSupported)
+	}
 }
 
 // addOIDCMetadata sets the OpenID Connect Discovery 1.0 fields: the

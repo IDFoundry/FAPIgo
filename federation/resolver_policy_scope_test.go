@@ -37,7 +37,7 @@ func TestPolicyDoesNotRecreateAFilteredEntityType(t *testing.T) {
 		constraints: &intfed.Constraints{AllowedEntityTypes: []string{"openid_provider"}},
 		policy:      rpPolicyCreatingClient(t),
 		leMetadata: map[string]json.RawMessage{
-			"openid_provider":      json.RawMessage(`{"issuer":"https://op.example"}`),
+			"openid_provider":      json.RawMessage(`{"authorization_endpoint":"https://op.example/authorize"}`),
 			"openid_relying_party": json.RawMessage(`{"redirect_uris":["https://le.example/cb"]}`),
 		},
 	})
@@ -62,7 +62,7 @@ func TestPolicyForAnAbsentEntityTypeIsIgnored(t *testing.T) {
 	policy["openid_relying_party"]["contacts"] = intfed.PolicyOperators{"essential": json.RawMessage(`true`)}
 	f := setupConstrainedFederationWith(t, constrainedFederationParams{
 		policy:     policy,
-		leMetadata: map[string]json.RawMessage{"openid_provider": json.RawMessage(`{"issuer":"https://op.example"}`)},
+		leMetadata: map[string]json.RawMessage{"openid_provider": json.RawMessage(`{"authorization_endpoint":"https://op.example/authorize"}`)},
 	})
 	resolved, err := f.newResolver(t).Resolve(context.Background(), f.leID)
 	if err != nil {

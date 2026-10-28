@@ -143,7 +143,7 @@ func setupThreeLevelFederationWith(t *testing.T, opts threeLevelOptions) *threeL
 
 	sign := func(p intfed.CreateParams) string {
 		t.Helper()
-		token, err := intfed.Create(p)
+		token, err := intfed.CreateUncheckedForTesting(p)
 		if err != nil {
 			t.Fatalf("intfed.Create: %v", err)
 		}

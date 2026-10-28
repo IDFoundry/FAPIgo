@@ -204,22 +204,20 @@ func selfAnchoredOpenIDProvider(t *testing.T, buildMetadata func(entityID string
 	t.Cleanup(ts.Close)
 	entityID = ts.URL
 
-	issuer, err := federation.NewSelfIssuer(federation.SelfIssueConfig{
-		EntityID: entityID, Lifetime: time.Hour,
-	}, federation.SelfIssueDependencies{
-		Signer: key, Algorithm: fapi.ES256, KeyID: "as-federation-key",
-		JWKS: jwks, Clock: federation.SystemClock{},
-	})
-	if err != nil {
-		t.Fatalf("NewSelfIssuer: %v", err)
-	}
 	var metadata map[string]json.RawMessage
 	if buildMetadata != nil {
 		metadata = buildMetadata(entityID)
 	}
-	token, err := issuer.EntityConfiguration(metadata)
+	// Unchecked, so a test can publish metadata a conformant issuer
+	// wouldn't (an openid_provider issuer that isn't the Entity ID) and
+	// check the client still refuses it.
+	token, err := intfed.CreateUncheckedForTesting(intfed.CreateParams{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "as-federation-key",
+		Issuer: entityID, Subject: entityID, Now: time.Now(), Lifetime: time.Hour,
+		JWKS: jwks, Metadata: metadata,
+	})
 	if err != nil {
-		t.Fatalf("EntityConfiguration: %v", err)
+		t.Fatalf("intfed.CreateUncheckedForTesting: %v", err)
 	}
 	mux.HandleFunc(federation.WellKnownPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", federation.EntityStatementContentType)

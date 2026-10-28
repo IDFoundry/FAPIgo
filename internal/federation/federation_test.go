@@ -171,8 +171,9 @@ func TestCreateAndParseRoundTripsTrustMarksClaim(t *testing.T) {
 	const entityID = "https://rp.example.org"
 
 	p := entityConfigParams(t, key, entityID, now)
+	mark := createTrustMarkToken(t, key, "test-kid", trustMarkJWTType, validTrustMarkClaims(now))
 	p.TrustMarks = []RawTrustMark{
-		{TrustMarkType: "https://federation.example.org/marks/certified", TrustMark: "opaque-trust-mark-jwt"},
+		{TrustMarkType: "https://federation.example.org/marks/certified", TrustMark: mark},
 	}
 	token, err := Create(p)
 	if err != nil {
@@ -186,7 +187,7 @@ func TestCreateAndParseRoundTripsTrustMarksClaim(t *testing.T) {
 		t.Fatalf("TrustMarks = %v, want 1 entry", stmt.claims.TrustMarks)
 	}
 	got := stmt.claims.TrustMarks[0]
-	if got.TrustMarkType != "https://federation.example.org/marks/certified" || got.TrustMark != "opaque-trust-mark-jwt" {
+	if got.TrustMarkType != "https://federation.example.org/marks/certified" || got.TrustMark != mark {
 		t.Errorf("TrustMarks[0] = %+v", got)
 	}
 }

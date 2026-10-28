@@ -172,7 +172,15 @@ func TestServerEntityConfigurationPublishesTrustMarks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	mark := federation.RawTrustMark{TrustMarkType: "https://federation.example.org/marks/loa-high", TrustMark: "a.b.c"}
+	markJWT, err := intfed.CreateTrustMark(intfed.CreateTrustMarkParams{
+		Signer: generateKey(t), Algorithm: fapi.ES256, KeyID: "tmi",
+		Issuer: "https://tmi.example.org", Subject: "https://as.example.org",
+		TrustMarkType: "https://federation.example.org/marks/loa-high", Now: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("CreateTrustMark: %v", err)
+	}
+	mark := federation.RawTrustMark{TrustMarkType: "https://federation.example.org/marks/loa-high", TrustMark: markJWT}
 	token, err := srv.EntityConfiguration(context.Background(), map[string]json.RawMessage{
 		"openid_provider": json.RawMessage(`{"issuer":"https://as.example.org"}`),
 	}, mark)

@@ -138,9 +138,9 @@ func TestAutomaticRegistrationHoldsMethodChoicesToPolicy(t *testing.T) {
 // TestAutomaticRegistrationRefusesEmptyStringParameters: an empty
 // string is present to a metadata policy, so it meets essential, but
 // would read as left out; every string parameter registration reads
-// refuses it. null is refused before policy is reached: OpenID
-// Federation 1.0 §5 prohibits null as a metadata value, so Parse
-// refuses the Entity Configuration.
+// refuses it. (null never gets this far: OpenID Federation 1.0 §5
+// prohibits it as a metadata value, so the Entity Configuration is
+// refused when parsed.)
 func TestAutomaticRegistrationRefusesEmptyStringParameters(t *testing.T) {
 	base := map[string]any{
 		"redirect_uris":                   []string{"https://rp.example.org/cb"},
@@ -161,14 +161,6 @@ func TestAutomaticRegistrationRefusesEmptyStringParameters(t *testing.T) {
 			_, err := resolveUnderPolicy(t, `{"`+name+`":{"essential":true}}`, with(name, ""))
 			if err == nil || !strings.Contains(err.Error(), name+" must not be empty") {
 				t.Errorf("ResolveClient(%s \"\") = %v, want an empty-value error", name, err)
-			}
-		})
-	}
-	for _, policy := range []string{`{}`, `{"subject_type":{"essential":true}}`} {
-		t.Run("null subject_type under "+policy, func(t *testing.T) {
-			_, err := resolveUnderPolicy(t, policy, with("subject_type", nil))
-			if err == nil || !strings.Contains(err.Error(), "subject_type is null") {
-				t.Errorf("ResolveClient = %v, want the null value refused", err)
 			}
 		})
 	}

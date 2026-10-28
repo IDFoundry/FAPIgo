@@ -40,7 +40,8 @@ func FuzzParseEntityStatement(f *testing.F) {
 	jwksBody := []byte(`{"keys":[` + string(jwkJSON) + `]}`)
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	entityConfig, err := Create(CreateParams{
+	// Unchecked: the corpus seeds a trust_marks entry that isn't a JWT.
+	entityConfig, err := CreateUncheckedForTesting(CreateParams{
 		Signer: key, Algorithm: fapi.ES256, KeyID: "fuzz-kid",
 		Issuer: "https://entity.example", Subject: "https://entity.example",
 		Now: now, Lifetime: time.Hour,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
 
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/keys"
@@ -16,13 +17,17 @@ import (
 // build it yourself, typically a federation_entity object plus an
 // openid_provider object mirroring this server's own Metadata, and pass
 // it here; this method resolves this server's own federation signing
-// key and signs, and derives only one metadata value from Config: when
+// key and signs, and derives only two metadata values from Config: when
 // automatic registration is configured (Config.AutomaticRegistration has
 // TrustAnchors), it sets the openid_provider object's
 // subject_types_supported to AutomaticRegistrationSubjectTypes, what a
 // Relying Party registering through federation may ask for, which can be
 // fewer types than Metadata advertises to statically registered
-// clients. The caller's map is left unchanged. Serve the result verbatim, with Content-Type
+// clients, and adds "automatic" to its
+// client_registration_types_supported (OpenID Federation 1.0 §12.1).
+// The openid_provider issuer, when present, must be
+// Config.Federation.EntityID (§5.1.3). The caller's map is left
+// unchanged. Serve the result verbatim, with Content-Type
 // federation.EntityStatementContentType, at
 // Config.Federation.EntityID+federation.WellKnownPath — this package
 // still doesn't own HTTP transport itself.
@@ -60,19 +65,22 @@ func (s *Server) EntityConfiguration(ctx context.Context, metadata map[string]js
 	if err != nil {
 		return "", fmt.Errorf("server: %w", err)
 	}
-	metadata, err = s.withAutomaticRegistrationSubjectTypes(metadata)
+	metadata, err = s.withAutomaticRegistrationMetadata(metadata)
 	if err != nil {
 		return "", err
 	}
 	return issuer.EntityConfiguration(metadata, trustMarks...)
 }
 
-// withAutomaticRegistrationSubjectTypes returns metadata with its
+// withAutomaticRegistrationMetadata returns metadata with its
 // openid_provider object's subject_types_supported set to
-// AutomaticRegistrationSubjectTypes, when automatic registration is
-// configured and metadata has an openid_provider object; otherwise
-// metadata itself. It copies rather than changing the caller's map.
-func (s *Server) withAutomaticRegistrationSubjectTypes(metadata map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+// AutomaticRegistrationSubjectTypes, and "automatic" added to its
+// client_registration_types_supported (OpenID Federation 1.0 §12.1: "An
+// OP that supports Automatic Registration MUST include the automatic
+// keyword"), when automatic registration is configured and metadata has
+// an openid_provider object; otherwise metadata itself. It copies
+// rather than changing the caller's map.
+func (s *Server) withAutomaticRegistrationMetadata(metadata map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	raw, ok := metadata[openIDProviderEntityType]
 	if !ok || len(s.cfg.AutomaticRegistration.TrustAnchors) == 0 {
 		return metadata, nil
@@ -86,6 +94,11 @@ func (s *Server) withAutomaticRegistrationSubjectTypes(metadata map[string]json.
 		return nil, fmt.Errorf("server: entity configuration: %w", err)
 	}
 	op["subject_types_supported"] = types
+	registrationTypes, err := withAutomaticRegistrationType(op["client_registration_types_supported"])
+	if err != nil {
+		return nil, err
+	}
+	op["client_registration_types_supported"] = registrationTypes
 	rewritten, err := json.Marshal(op)
 	if err != nil {
 		return nil, fmt.Errorf("server: entity configuration: %w", err)
@@ -93,6 +106,22 @@ func (s *Server) withAutomaticRegistrationSubjectTypes(metadata map[string]json.
 	out := maps.Clone(metadata)
 	out[openIDProviderEntityType] = rewritten
 	return out, nil
+}
+
+// withAutomaticRegistrationType returns raw, a
+// client_registration_types_supported value (absent when empty), with
+// "automatic" added if it isn't already listed.
+func withAutomaticRegistrationType(raw json.RawMessage) (json.RawMessage, error) {
+	var types []string
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &types); err != nil {
+			return nil, fmt.Errorf("server: entity configuration: %s client_registration_types_supported must be an array of strings: %w", openIDProviderEntityType, err)
+		}
+	}
+	if !slices.Contains(types, "automatic") {
+		types = append(types, "automatic")
+	}
+	return json.Marshal(types)
 }
 
 // openIDProviderEntityType is the Entity Type identifier an OpenID

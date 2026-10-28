@@ -500,6 +500,49 @@ endpoint, and publish each claim once:
 
 rather than `{"client_name": "Example RP", "logo_uri": null}`.
 
+### Statement builders refuse claims OpenID Federation 1.0 forbids (federation, server)
+
+**Affects:** `federation.SelfIssuer.EntityConfiguration`,
+`federation.SubordinateIssuer.SubordinateStatement` and
+`server.Server.EntityConfiguration` called with any of:
+
+- `SelfIssueConfig.AuthorityHints` or
+  `SubordinateStatementParams.MetadataPolicyCritical` set to an empty,
+  non-nil slice (§3.1.2, §3.1.3);
+- metadata that is `null`, not a JSON object, or has a `null`
+  parameter (§5);
+- `openid_provider` metadata whose `issuer` isn't the Entity
+  Identifier (§5.1.3);
+- a Trust Mark that isn't a JWT, or whose own `trust_mark_type` isn't
+  the type it is listed under (§3.1.2);
+- a `MetadataPolicy` that `ValidatePolicy` refuses, such as `one_of`
+  with `subset_of` (§6.1.3);
+- `Constraints` with a negative `MaxPathLength` (§6.2.1) or
+  `federation_entity` in `AllowedEntityTypes` (§6.2.3);
+- a `SourceEndpoint` that isn't an https URL (§3.2).
+
+**Why:** these were signed and published as given, so a misconfigured
+Trust Anchor or Intermediate broke every Trust Chain through it, with
+the error surfacing at each consumer rather than at the issuer. A
+negative `max_path_length` was refused by this library's own resolver.
+
+**What fails:** the builder returns an error naming the claim, and no
+statement is signed.
+
+**What to change:** leave an optional claim out (nil, not empty), and
+publish only well-formed values. `Server.EntityConfiguration` now adds
+`"automatic"` to `client_registration_types_supported` itself when
+automatic registration is configured (§12.1), so it can be left out of
+the metadata you pass:
+
+```go
+cfg := federation.SelfIssueConfig{
+	EntityID:       "https://rp.example.org",
+	AuthorityHints: nil, // a Trust Anchor: no superiors, not []string{}
+	Lifetime:       24 * time.Hour,
+}
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

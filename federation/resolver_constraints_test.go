@@ -204,7 +204,7 @@ func TestResolveAcceptsNoNamingConstraints(t *testing.T) {
 func TestResolveFiltersDisallowedEntityTypes(t *testing.T) {
 	leMetadata := map[string]json.RawMessage{
 		"openid_relying_party": json.RawMessage(`{"redirect_uris":["https://rp.example/cb"],"response_types":["code"]}`),
-		"openid_provider":      json.RawMessage(`{"issuer":"https://op.example"}`),
+		"openid_provider":      json.RawMessage(`{"authorization_endpoint":"https://op.example/authorize"}`),
 	}
 	f := setupConstrainedFederation(t, &intfed.Constraints{AllowedEntityTypes: []string{"openid_relying_party"}}, leMetadata)
 	r := f.newResolver(t)
@@ -239,7 +239,7 @@ func TestResolveKeepsFederationEntityMetadataDespiteAllowedEntityTypes(t *testin
 func TestResolveAllowsAnyEntityTypeWithoutAllowedEntityTypesConstraint(t *testing.T) {
 	leMetadata := map[string]json.RawMessage{
 		"openid_relying_party": json.RawMessage(`{"redirect_uris":["https://rp.example/cb"],"response_types":["code"]}`),
-		"openid_provider":      json.RawMessage(`{"issuer":"https://op.example"}`),
+		"openid_provider":      json.RawMessage(`{"authorization_endpoint":"https://op.example/authorize"}`),
 	}
 	f := setupConstrainedFederation(t, nil, leMetadata)
 	r := f.newResolver(t)

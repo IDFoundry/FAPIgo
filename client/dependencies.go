@@ -11,7 +11,10 @@ import (
 // Dependencies are this client's injected collaborators. New always
 // requires HTTP, Clock and Random, and each other field when the Config
 // uses what it's for (see each field) — there is no implicit fallback
-// (no default clock, no silently-installed in-memory session store).
+// (no default clock, no silently-installed in-memory session store). It
+// also rejects, in every field, a typed nil: an interface holding a nil
+// pointer (or nil map, slice or func), which isn't == nil but would
+// fail on first use.
 type Dependencies struct {
 	// Sessions persists in-progress authorization-flow state, until
 	// Limits.SessionLifetime. Required when Endpoints.Authorization is
@@ -79,7 +82,8 @@ type Dependencies struct {
 	// rather than replacing the transport.
 	HTTP fapihttp.HTTPClient
 
-	// Clock supplies the current time.
+	// Clock supplies the current time. Under AssuranceProduction it
+	// must declare ClockAssurance, as SystemClock does.
 	Clock Clock
 
 	// Random is the source of randomness for state, nonce and PKCE

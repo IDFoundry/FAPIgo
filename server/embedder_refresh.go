@@ -13,7 +13,10 @@ import (
 type IssueRefreshTokenRequest struct {
 	// GrantType is the grant the embedder served: one of
 	// Config.AdditionalGrantTypes, such as OpenID4VCI's
-	// urn:ietf:params:oauth:grant-type:pre-authorized_code.
+	// urn:ietf:params:oauth:grant-type:pre-authorized_code. It's
+	// recorded with the grant: RefreshAccessToken refuses the refresh
+	// token with unauthorized_client once GrantType is no longer one of
+	// Config.AdditionalGrantTypes.
 	GrantType string
 
 	// Client is the client the token request authenticated as, exactly
@@ -169,6 +172,7 @@ func (s *Server) embedderGrant(ctx context.Context, req embedderGrantRequest) (g
 		AuthorizationDetails: details,
 		Resources:            resources,
 		GrantID:              req.GrantID,
+		GrantType:            req.GrantType,
 	}
 	// A grant already revoked issues nothing more, as a refresh of it
 	// wouldn't: invalid_grant.

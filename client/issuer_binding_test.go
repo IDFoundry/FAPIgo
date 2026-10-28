@@ -258,6 +258,35 @@ func TestMisroutedCallbackLeavesTheSession(t *testing.T) {
 	}
 }
 
+// TestCallbackRefusedByAnotherClientAtTheSameIssuer: a session is bound
+// to the client ID that began it, not just its issuer. A plain-mode
+// callback routed to another Client for the same issuer, over a shared
+// session store, carries nothing naming the client, so it gets as far
+// as the session and is refused there, rather than completed with the
+// other client's PKCE verifier and nonce.
+func TestCallbackRefusedByAnotherClientAtTheSameIssuer(t *testing.T) {
+	ctx := context.Background()
+	sessions := newFakeSessionStore()
+	clientA, asA, _ := newTestClientWith(t, false, func(_ *client.Config, deps *client.Dependencies) { deps.Sessions = sessions })
+	clientB, _, _ := newTestClientWith(t, false, func(cfg *client.Config, deps *client.Dependencies) {
+		deps.Sessions = sessions
+		cfg.ClientID = "other-client-same-issuer"
+	})
+
+	session, err := clientA.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb := client.AuthorizationCallback{
+		RawQuery: asA.callbackFor(t, session.Handle().String(), "code", ""),
+		Session:  session.Handle(),
+	}
+	var cerr *client.Error
+	if res, err := clientB.HandleAuthorizationResponse(ctx, cb); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+		t.Fatalf("another client's HandleAuthorizationResponse = %T, %v; want ErrorInvalidRequest", res, err)
+	}
+}
+
 // TestPollBackchannelAuthenticationRefusesAnotherClientsSession: a
 // BackchannelAuthenticationSession is bound to the Client that began it.
 // Polled through another issuer's Client, its auth_req_id and that

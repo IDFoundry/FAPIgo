@@ -49,7 +49,10 @@ func (t TokenEndpointRequest) Resources() []string {
 // client_id at all (RFC 6749 §3.1), and when Parameters refuses the
 // request — a repeated parameter, an empty client_id repeated included,
 // or too many or too large ones — AuthenticateAttestedClient refuses it
-// too, with the same invalid_request.
+// too, with the same invalid_request. A request that also carries a
+// client_assertion or client_assertion_type is refused with
+// invalid_request as well: RFC 6749 §2.3 allows one client
+// authentication method per request.
 func (t TokenEndpointRequest) AttestedClientAuthentication() AttestedClientAuthenticationRequest {
 	req := AttestedClientAuthenticationRequest{
 		ClientAttestations:    t.parts.ClientAttestations,
@@ -61,6 +64,7 @@ func (t TokenEndpointRequest) AttestedClientAuthentication() AttestedClientAuthe
 		return req
 	}
 	req.ClientID = params["client_id"]
+	req.otherClientAuth = params["client_assertion"] != "" || params["client_assertion_type"] != ""
 	return req
 }
 

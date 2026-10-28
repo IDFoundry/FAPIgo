@@ -161,6 +161,35 @@ func TestIssueRefreshTokenRevokedGrant(t *testing.T) {
 	}
 }
 
+// TestIssueRefreshTokenGrantTypeRemoved covers the grant type recorded
+// with an embedder's grant: once Config.AdditionalGrantTypes no longer
+// lists it, RefreshAccessToken refuses the refresh token with
+// unauthorized_client, as it does a code or CIBA grant once the client
+// is no longer registered for it.
+func TestIssueRefreshTokenGrantTypeRemoved(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newEmbedderRefreshHarness(t, attesterKey)
+	issuing := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	attested, binding := embedderTokenRequest(t, issuing)
+	refreshToken, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
+		GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+		Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"},
+	})
+	if err != nil {
+		t.Fatalf("IssueRefreshToken: %v", err)
+	}
+	cfg := h.cfg
+	cfg.AdditionalGrantTypes = nil
+	srv, err := server.New(cfg, h.deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	issuing.h.server = srv
+	if _, err := issuing.refresh(refreshToken.Reveal()); serverErrorCode(t, err) != server.ErrorUnauthorizedClient {
+		t.Fatalf("refresh after the grant type was removed: err = %v, want unauthorized_client", err)
+	}
+}
+
 // TestIssueRefreshTokenRefusals covers every request IssueRefreshToken
 // refuses, each recorded as a failure.
 func TestIssueRefreshTokenRefusals(t *testing.T) {

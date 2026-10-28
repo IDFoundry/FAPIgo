@@ -15,6 +15,83 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.64.0
+
+### A request carrying two client authentication methods is refused (server)
+
+**Affects:** a client that sends Client Attestation headers
+(`OAuth-Client-Attestation`/`OAuth-Client-Attestation-PoP`) together
+with a `client_assertion` or `client_assertion_type` form parameter, at
+PAR, the token endpoint, CIBA's backchannel authentication endpoint,
+revocation, or an embedder's own grant authenticated through
+`AuthenticateAttestedClient` with a request from
+`TokenEndpointRequest.AttestedClientAuthentication`.
+
+**Why:** RFC 6749 §2.3 says a client "MUST NOT use more than one
+authentication method in each request". The attestation headers used to
+win silently and the assertion was ignored, so a request whose
+`client_assertion` named another client was authenticated as the
+attested client, and logs showed a credential that was never checked.
+A TLS client certificate doesn't count as a second method: an mTLS
+connection presents one on every request, and it authenticates the
+client only when neither attestation headers nor a client assertion are
+present, so `private_key_jwt` over mTLS is unaffected.
+
+**What fails:** the request, with `invalid_request` (400) and the
+description "the request uses more than one client authentication
+method".
+
+**What to change:** send one method. An attestation-authenticated client
+drops `client_assertion` and `client_assertion_type` from its form:
+
+```go
+form := url.Values{"grant_type": {"client_credentials"}, "scope": {"accounts"}}
+// no client_assertion / client_assertion_type alongside the
+// OAuth-Client-Attestation and OAuth-Client-Attestation-PoP headers
+```
+
+### A refresh token from `IssueRefreshToken` stops working once its grant type is removed (server)
+
+**Affects:** a server that issues refresh tokens with
+`Server.IssueRefreshToken` for a grant it serves itself
+(`Config.AdditionalGrantTypes`), and any server still holding refresh
+tokens issued before v0.54.0 for a CIBA grant, or before v0.52.0 for an
+authorization code grant.
+
+**Why:** a refresh token is refused once the client is no longer
+registered for the grant it came from, but `IssueRefreshToken` didn't
+record its `GrantType`, so the check was skipped: an embedder's refresh
+token went on working after its grant type, such as
+`urn:ietf:params:oauth:grant-type:pre-authorized_code`, was removed from
+`Config.AdditionalGrantTypes`. The grant type is now recorded, and
+`RefreshAccessToken` refuses the refresh token with `unauthorized_client`
+once `Config.AdditionalGrantTypes` no longer lists it. A refresh token
+issued by `IssueRefreshToken` before this release has no recorded grant
+type, and neither has a code or CIBA refresh token from before the
+releases above; the server can't tell which grant type such a token
+came from, so it refuses it rather than refreshing past a removal. Code
+and CIBA refresh tokens from v0.54.0 onward are unaffected.
+
+**What fails:** a refresh with a refresh token that has no recorded grant type, with
+`invalid_grant` and the description "refresh_token was issued for a
+grant of unknown type: authorize again"; a refresh with an embedder
+refresh token whose grant type was removed, with `unauthorized_client`.
+
+**What to change:** nothing in code: `IssueRefreshTokenRequest.GrantType`
+was already required. The client obtains a new grant (a new
+pre-authorized code, for example), as it does once a refresh token
+expires:
+
+```go
+rt, err := srv.IssueRefreshToken(ctx, server.IssueRefreshTokenRequest{
+	GrantType: "urn:ietf:params:oauth:grant-type:pre-authorized_code", // now recorded and re-checked
+	Client:    attested,
+	Binding:   binding,
+	Subject:   subject,
+	Scope:     []string{"credential"},
+})
+```
+
 ## v0.63.0
 
 ### RSA keys a caller supplies are limited to 4096 bits, and every parsed RSA JWK to exponent 65537

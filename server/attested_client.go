@@ -34,6 +34,12 @@ type AttestedClientAuthenticationRequest struct {
 	// for a request whose parameters Parameters refuses, so its client_id
 	// can't be read one way here and another way there.
 	malformed bool
+
+	// otherClientAuth is set by
+	// TokenEndpointRequest.AttestedClientAuthentication for a request
+	// that also carries a client_assertion: RFC 6749 §2.3 allows one
+	// client authentication method per request.
+	otherClientAuth bool
 }
 
 // AttestedClient is the client AuthenticateAttestedClient authenticated.
@@ -89,8 +95,10 @@ type AttestedClient struct {
 // be recorded, so an unavailable replay store fails closed — except for
 // an attestation that has expired, which is ErrorUseFreshAttestation
 // (400), a request from TokenEndpointRequest.AttestedClientAuthentication
-// whose parameters TokenEndpointRequest.Parameters refuses, which is
-// ErrorInvalidRequest (400), and a Dependencies.ClientAttestationStatus,
+// whose parameters TokenEndpointRequest.Parameters refuses, or that
+// also carries a client_assertion (RFC 6749 §2.3: one client
+// authentication method per request), which is ErrorInvalidRequest
+// (400), and a Dependencies.ClientAttestationStatus,
 // X5CAttesterChain.Revocation (or client store) that couldn't decide,
 // which is ErrorServerError (500); an attestation that checker reports
 // revoked, or an attester certificate that Revocation reports revoked
@@ -99,6 +107,8 @@ func (s *Server) AuthenticateAttestedClient(ctx context.Context, req AttestedCli
 	attestation, pop, err := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
 	if req.malformed {
 		err = newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", nil)
+	} else if req.otherClientAuth {
+		err = newError(ErrorInvalidRequest, 400, "the request uses more than one client authentication method", nil)
 	} else if err == nil && attestation == "" {
 		err = newError(ErrorInvalidClient, 401, "client authentication is required", nil)
 	}

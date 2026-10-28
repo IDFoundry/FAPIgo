@@ -691,7 +691,7 @@ func (c *Client) newSessionRecord(req BeginAuthorizationRequest, redirectURI, no
 		responseMode = responseModeJARM
 	}
 	record := sessionRecord{
-		Nonce: nonce, PKCEVerifier: verifier, Issuer: c.cfg.Issuer.String(),
+		Nonce: nonce, PKCEVerifier: verifier, Issuer: c.cfg.Issuer.String(), ClientID: c.cfg.ClientID.String(),
 		RedirectURI: redirectURI, ResponseMode: responseMode,
 		OpenID: slices.Contains(req.Scope, "openid"),
 	}

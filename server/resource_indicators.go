@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
-	"unicode/utf16"
-	"unicode/utf8"
 
 	"github.com/idfoundry/fapigo/internal/resourceindicator"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -111,7 +109,11 @@ func (s *Server) resourcesFromParameters(params map[string]json.RawMessage) ([]s
 	if !ok {
 		return nil, nil
 	}
-	if !decodesLosslessly(raw) {
+	// A resource encoding/json altered isn't the one the client signed,
+	// and a token issued for it wouldn't name the resource the client
+	// asked for. The JWS parser already refuses such claims; this keeps
+	// the guard where the resource is read.
+	if !strictjson.DecodesLosslessly(raw) {
 		return nil, newError(ErrorInvalidTarget, 400, "resource must be valid UTF-8, without unpaired surrogate escapes", nil)
 	}
 	var one string
@@ -123,67 +125,6 @@ func (s *Server) resourcesFromParameters(params map[string]json.RawMessage) ([]s
 		return nil, newError(ErrorInvalidTarget, 400, "resource must be a string or a non-empty array of strings", err)
 	}
 	return many, nil
-}
-
-// decodesLosslessly reports whether raw, a JSON value, decodes without
-// encoding/json altering any string in it. encoding/json doesn't refuse
-// invalid UTF-8 or a \u escape of an unpaired UTF-16 surrogate: it
-// replaces each with U+FFFD. A resource decoded that way isn't the one
-// the client signed, and a token issued for it wouldn't name the
-// resource the client asked for, so it's refused instead. raw must
-// already be valid JSON.
-func decodesLosslessly(raw []byte) bool {
-	if !utf8.Valid(raw) {
-		return false
-	}
-	for i := 0; i < len(raw); i++ {
-		if raw[i] != '\\' {
-			continue
-		}
-		i++ // the escaped character
-		if i >= len(raw) || raw[i] != 'u' {
-			continue
-		}
-		n, ok := unicodeEscapeLength(raw, i-1)
-		if !ok {
-			return false
-		}
-		i += n - 2 // past the escape (or surrogate pair); the loop adds one
-	}
-	return true
-}
-
-// unicodeEscapeLength returns the length of the \u escape starting at
-// raw[i] (its backslash), or of the surrogate pair it starts, and
-// whether it decodes as written: a high surrogate must be followed
-// directly by an escaped low one, and a low one can't stand alone.
-func unicodeEscapeLength(raw []byte, i int) (int, bool) {
-	r, ok := hexRune(raw, i+2)
-	switch {
-	case !ok:
-		return 0, false
-	case !utf16.IsSurrogate(r):
-		return 6, true
-	case r >= 0xdc00:
-		return 0, false // a low surrogate on its own
-	}
-	low, ok := hexRune(raw, i+8)
-	if !ok || raw[i+6] != '\\' || raw[i+7] != 'u' || low < 0xdc00 || low > 0xdfff {
-		return 0, false
-	}
-	return 12, true
-}
-
-// hexRune reads the four hex digits of a \u escape starting at raw[i].
-func hexRune(raw []byte, i int) (rune, bool) {
-	if i < 0 || i+4 > len(raw) {
-		return 0, false
-	}
-	n, err := strconv.ParseUint(string(raw[i:i+4]), 16, 16)
-	if err != nil {
-		return 0, false
-	}
-	return rune(n), true
 }
 
 // checkRequestedResources validates the resource indicators client

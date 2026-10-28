@@ -640,7 +640,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object must contain client_id", nil)
 	}
 	if err := checkParameterTypes(verified.Parameters, authorizationParameterTypes); err != nil {
-		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, err.Error(), nil)
+		return nil, nil, nil, requestError(ErrorInvalidRequestObject, err)
 	}
 	resources, resourceErr := s.resourcesFromParameters(verified.Parameters)
 	if resourceErr != nil {
@@ -789,13 +789,13 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 		return nil, newError(ErrorInvalidRequest, 400, "max_age must be a non-negative whole number of seconds", err)
 	}
 	if _, err := requestedPrompt(params); err != nil {
-		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+		return nil, requestError(ErrorInvalidRequest, err)
 	}
 	if err := validateClaimsParameter(params); err != nil {
-		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+		return nil, requestError(ErrorInvalidRequest, err)
 	}
 	if _, err := essentialACRValues(params); err != nil {
-		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+		return nil, requestError(ErrorInvalidRequest, err)
 	}
 
 	if scopeRaw, ok := params["scope"]; ok {

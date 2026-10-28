@@ -322,6 +322,7 @@ func New(t *testing.T, cfg Config) *Harness {
 			AccessTokenLifetime:        5 * time.Minute,
 			IDTokenLifetime:            5 * time.Minute,
 			MaxIDTokenClaimsBytes:      4096,
+			MaxAccessTokenClaimsBytes:  6144,
 			RefreshTokenLifetime:       5 * time.Minute,
 			MaxDPoPProofAge:            time.Minute,
 			MaxClockSkew:               5 * time.Second,

@@ -22,7 +22,8 @@ func TestParse(t *testing.T) {
 		{"1.7e9", 1700000000},
 		{"1.7E+9", 1700000000},
 		{"-1.5", -2},
-		{"9223372036854775807", math.MaxInt64},
+		{"253402300799", Max},
+		{"253402300799.5", Max},
 		{"-9223372036854775808", math.MinInt64},
 		{"-9223372036854775808.0", math.MinInt64},
 	} {
@@ -36,7 +37,7 @@ func TestParse(t *testing.T) {
 func TestParseRefuses(t *testing.T) {
 	for _, raw := range []string{
 		``, ` `, "0\f", "\v1", `"1700000000"`, `"1.5"`, `true`, `{}`, `[1]`, `01`, `1.`, `.5`, `-`, `+1`,
-		`NaN`, `Infinity`, `9223372036854775808`, `1e19`, `-1e19`, `1e400`, `1700000000x`,
+		`NaN`, `Infinity`, `9223372036854775808`, `9223372036854775807`, `4611686018427387904`, `9.2233720368547e18`, `253402300800`, `2.534023008e11`, `1e19`, `-1e19`, `1e400`, `1700000000x`,
 	} {
 		if got, err := Parse([]byte(raw)); !errors.Is(err, ErrInvalid) {
 			t.Errorf("Parse(%q) = %d, %v; want ErrInvalid", raw, got, err)

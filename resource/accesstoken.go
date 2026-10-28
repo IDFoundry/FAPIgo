@@ -190,7 +190,21 @@ type JWTAccessTokens struct {
 	// response packed with many keys turns one token verification into
 	// unbounded signature-verification work.
 	MaxKeyCandidates int
+
+	// MaxTokenBytes bounds the size of a compact access token
+	// ResolveAccessToken parses; a larger one is invalid_token. Optional:
+	// zero means 16 KiB (DefaultMaxAccessTokenBytes). A FAPIgo
+	// authorization server never issues a token over its own
+	// server.Limits.MaxAccessTokenBytes, which is 16 KiB unless
+	// Limits.MaxAccessTokenClaimsBytes is raised past
+	// RecommendedLimits'; set this to it then. serverresource.NewVerifier
+	// does so itself.
+	MaxTokenBytes int
 }
+
+// DefaultMaxAccessTokenBytes is the size of compact access token
+// JWTAccessTokens parses when MaxTokenBytes is zero: 16 KiB.
+const DefaultMaxAccessTokenBytes = 16 << 10
 
 // NewJWTAccessTokens validates every field and returns a
 // JWTAccessTokens. Not required — a caller confident its values are
@@ -228,13 +242,19 @@ func (j JWTAccessTokens) validate() error {
 		return errors.New("max token lifetime must be positive")
 	case j.MaxKeyCandidates <= 0:
 		return errors.New("max key candidates must be positive")
+	case j.MaxTokenBytes < 0:
+		return errors.New("max token bytes must not be negative")
 	}
 	return nil
 }
 
 // ResolveAccessToken implements AccessTokenResolver.
 func (j JWTAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveAccessTokenRequest) (ResolvedAccessToken, error) {
-	parsed, err := token.ParseAccessToken(req.Raw)
+	maxBytes := j.MaxTokenBytes
+	if maxBytes == 0 {
+		maxBytes = DefaultMaxAccessTokenBytes
+	}
+	parsed, err := token.ParseAccessTokenMax(req.Raw, maxBytes)
 	if err != nil {
 		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, "access token is malformed", err)
 	}

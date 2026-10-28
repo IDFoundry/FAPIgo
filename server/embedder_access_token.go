@@ -93,14 +93,13 @@ func (s *Server) IssueAccessToken(ctx context.Context, req IssueAccessTokenReque
 	}
 	sub, internal := grant.accessTokenSubjects()
 	audience, audiences := s.accessTokenAudience(grant.Resources)
-	accessToken, _, issueErr := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
+	accessToken, _, err := s.issueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: sub, InternalSubject: internal, Scope: grant.Scope,
 		Thumbprint: req.Binding.Thumbprint, SenderConstrain: client.SenderConstrain(), Claims: claims,
 		Issuer: s.cfg.Issuer.String(), Audience: audience, Audiences: audiences,
 		Now: s.deps.Clock.Now(), Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
-	if issueErr != nil {
-		err := newError(ErrorServerError, 500, "failed to issue access token", issueErr)
+	if err != nil {
 		s.audit(ctx, AuditEventIssueAccessToken, client.ID(), AuditOutcomeFailure, string(err.Code()))
 		return TokenResult{}, err
 	}

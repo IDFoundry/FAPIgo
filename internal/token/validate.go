@@ -29,9 +29,15 @@ type AccessToken struct {
 }
 
 // ParseAccessToken parses a JWT access token without verifying its
-// signature.
+// signature, refusing one longer than jose.DefaultMaxCompactBytes.
 func ParseAccessToken(tok string) (AccessToken, error) {
-	compact, err := jose.ParseCompact(tok)
+	return ParseAccessTokenMax(tok, jose.DefaultMaxCompactBytes)
+}
+
+// ParseAccessTokenMax is ParseAccessToken with an explicit size
+// ceiling, in bytes, instead of jose.DefaultMaxCompactBytes.
+func ParseAccessTokenMax(tok string, maxBytes int) (AccessToken, error) {
+	compact, err := jose.ParseCompactMax(tok, maxBytes)
 	if err != nil {
 		return AccessToken{}, fmt.Errorf("token: %w", err)
 	}

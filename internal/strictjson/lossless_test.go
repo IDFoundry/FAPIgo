@@ -1,0 +1,34 @@
+package strictjson
+
+import "testing"
+
+// TestDecodesLosslessly covers what encoding/json would silently alter
+// in JOSE and JWT JSON: invalid UTF-8 and unpaired
+// surrogate escapes, which it replaces with U+FFFD.
+func TestDecodesLosslessly(t *testing.T) {
+	for name, tc := range map[string]struct {
+		raw  string
+		want bool
+	}{
+		"plain string":            {`"https://rs.example"`, true},
+		"array":                   {`["https://a.example","https://b.example"]`, true},
+		"escaped non-ASCII":       {`"https://rs.example/\u00e9"`, true},
+		"escaped U+FFFD":          {`"https://rs.example/\ufffd"`, true},
+		"surrogate pair":          {`"https://rs.example/\ud83d\ude00"`, true},
+		"escaped backslash and u": {`"https://rs.example/\\ud800"`, true},
+		"invalid UTF-8":           {"\"https://rs.example/\xff\"", false},
+		"lone high surrogate":     {`"https://rs.example/\ud800"`, false},
+		"lone low surrogate":      {`"https://rs.example/\udc00"`, false},
+		"high then plain":         {`"https://rs.example/\ud83dx"`, false},
+		"high then non-low":       {`"https://rs.example/\ud83dA"`, false},
+		"high then high":          {`"https://rs.example/\ud83d\ud83d"`, false},
+		"truncated escape":        {`"\u00"`, false},
+		"non-hex escape":          {`"\uzzzz"`, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := DecodesLosslessly([]byte(tc.raw)); got != tc.want {
+				t.Errorf("DecodesLosslessly(%q) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}

@@ -145,14 +145,14 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	// against; that tracking is specific to authorization-code reuse
 	// (see ExchangeAuthorizationCode).
 	sub, internal := grant.accessTokenSubjects()
-	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
+	accessToken, _, issueErr := s.issueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: sub, InternalSubject: internal, Scope: scope,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
 		Issuer: s.cfg.Issuer.String(), Audience: audience, Audiences: audiences,
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
-	if err != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
+	if issueErr != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), issueErr)
 	}
 
 	result := TokenResult{

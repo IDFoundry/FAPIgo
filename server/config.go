@@ -291,6 +291,23 @@ type Limits struct {
 	// Required unless Config.OAuthOnly is true.
 	MaxIDTokenClaimsBytes int
 
+	// MaxAccessTokenClaimsBytes bounds the total size of the
+	// non-standard claims handed to Dependencies.AccessTokens for an
+	// access token — authorization_details, extension parameters
+	// registered with ReturnInTokenClaims, and the requested userinfo
+	// claim names (RequestedUserinfoClaimsKey) — measured, as
+	// MaxIDTokenClaimsBytes is, as each claim name's length plus its
+	// JSON-encoded value's. Nothing else bounds them: an
+	// authorization_details registry and an extension definition each
+	// cap only their own part. Every access token issuance (code
+	// exchange, refresh, CIBA, client credentials, IssueAccessToken)
+	// refuses claims over it with server_error rather than issue a token
+	// a resource server would refuse; see MaxAccessTokenBytes for the
+	// size of token that guarantees.
+	//
+	// Required.
+	MaxAccessTokenClaimsBytes int
+
 	// RefreshTokenLifetime bounds how long a newly issued refresh token
 	// remains redeemable. Refreshing doesn't extend it: the token isn't
 	// rotated (see RefreshAccessToken), so it expires this long after it
@@ -739,4 +756,30 @@ type FederationConfig struct {
 	// federation identity key is never reused as a protocol key.
 	// Required when EntityID is set.
 	Algorithm fapi.SignatureAlgorithm
+}
+
+// maxAccessTokenFixedBytes is what MaxAccessTokenBytes allows for an
+// access token's header, signature and standard claims (iss, sub, aud,
+// client_id, scope, cnf, exp, iat, jti and the like): 8 KiB, several
+// times what they take with a long scope and several resource
+// indicators.
+const maxAccessTokenFixedBytes = 8 << 10
+
+// defaultMaxAccessTokenBytes is the size of compact JWT access token
+// resource.JWTAccessTokens parses by default (jose.DefaultMaxCompactBytes).
+const defaultMaxAccessTokenBytes = 16 << 10
+
+// MaxAccessTokenBytes is the largest access token this server issues
+// under l: 8 KiB for the header, signature and standard claims plus the
+// base64url encoding of MaxAccessTokenClaimsBytes, and never less than
+// 16 KiB, the size resource.JWTAccessTokens accepts by default. With
+// RecommendedLimits' MaxAccessTokenClaimsBytes it is exactly 16 KiB, so
+// any resource server's default accepts every token. Issuance refuses a
+// token over it with server_error. serverresource.NewVerifier sets its
+// resource.JWTAccessTokens.MaxTokenBytes to it; a resource server
+// elsewhere should set its own to at least this when
+// MaxAccessTokenClaimsBytes is raised.
+func (l Limits) MaxAccessTokenBytes() int {
+	encoded := (l.MaxAccessTokenClaimsBytes*4 + 2) / 3
+	return max(defaultMaxAccessTokenBytes, maxAccessTokenFixedBytes+encoded)
 }

@@ -162,6 +162,7 @@ func newAttestationServer(t *testing.T, now time.Time, registeredKey *ecdsa.Priv
 			AccessTokenLifetime:          5 * time.Minute,
 			IDTokenLifetime:              5 * time.Minute,
 			MaxIDTokenClaimsBytes:        4096,
+			MaxAccessTokenClaimsBytes:    6144,
 			RefreshTokenLifetime:         5 * time.Minute,
 			MaxDPoPProofAge:              time.Minute,
 			MaxClockSkew:                 5 * time.Second,
@@ -296,7 +297,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsWhenDisabled(t *testing
 		Limits: server.Limits{
 			PushedRequestLifetime: 90 * time.Second, MaxClientAssertionLifetime: time.Minute, MaxRequestObjectLifetime: time.Minute,
 			InteractionLifetime: 5 * time.Minute, AuthorizationCodeLifetime: time.Minute, JARMResponseLifetime: time.Minute,
-			AccessTokenLifetime: 5 * time.Minute, IDTokenLifetime: 5 * time.Minute, MaxIDTokenClaimsBytes: 4096, RefreshTokenLifetime: 5 * time.Minute,
+			AccessTokenLifetime: 5 * time.Minute, IDTokenLifetime: 5 * time.Minute, MaxIDTokenClaimsBytes: 4096, MaxAccessTokenClaimsBytes: 6144, RefreshTokenLifetime: 5 * time.Minute,
 			MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second,
 		},
 		Assurance: server.AssuranceDevelopment, ClientCredentialsGrant: true,
@@ -619,7 +620,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsClientNotRegisteredForI
 		Limits: server.Limits{
 			PushedRequestLifetime: 90 * time.Second, MaxClientAssertionLifetime: time.Minute, MaxRequestObjectLifetime: time.Minute,
 			InteractionLifetime: 5 * time.Minute, AuthorizationCodeLifetime: time.Minute, JARMResponseLifetime: time.Minute,
-			AccessTokenLifetime: 5 * time.Minute, IDTokenLifetime: 5 * time.Minute, MaxIDTokenClaimsBytes: 4096, RefreshTokenLifetime: 5 * time.Minute,
+			AccessTokenLifetime: 5 * time.Minute, IDTokenLifetime: 5 * time.Minute, MaxIDTokenClaimsBytes: 4096, MaxAccessTokenClaimsBytes: 6144, RefreshTokenLifetime: 5 * time.Minute,
 			MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second,
 			MaxClientAttestationLifetime: time.Hour, MaxClientAttestationPoPAge: time.Minute,
 		},
@@ -694,7 +695,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsDisallowedAttestationAl
 		Limits: server.Limits{
 			PushedRequestLifetime: 90 * time.Second, MaxClientAssertionLifetime: time.Minute, MaxRequestObjectLifetime: time.Minute,
 			InteractionLifetime: 5 * time.Minute, AuthorizationCodeLifetime: time.Minute, JARMResponseLifetime: time.Minute,
-			AccessTokenLifetime: 5 * time.Minute, IDTokenLifetime: 5 * time.Minute, MaxIDTokenClaimsBytes: 4096, RefreshTokenLifetime: 5 * time.Minute,
+			AccessTokenLifetime: 5 * time.Minute, IDTokenLifetime: 5 * time.Minute, MaxIDTokenClaimsBytes: 4096, MaxAccessTokenClaimsBytes: 6144, RefreshTokenLifetime: 5 * time.Minute,
 			MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second,
 			MaxClientAttestationLifetime: time.Hour, MaxClientAttestationPoPAge: time.Minute,
 		},
@@ -792,7 +793,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsNoAttesterKeyRegistered
 		Limits: server.Limits{
 			PushedRequestLifetime: 90 * time.Second, MaxClientAssertionLifetime: time.Minute, MaxRequestObjectLifetime: time.Minute,
 			InteractionLifetime: 5 * time.Minute, AuthorizationCodeLifetime: time.Minute, JARMResponseLifetime: time.Minute,
-			AccessTokenLifetime: 5 * time.Minute, IDTokenLifetime: 5 * time.Minute, MaxIDTokenClaimsBytes: 4096, RefreshTokenLifetime: 5 * time.Minute,
+			AccessTokenLifetime: 5 * time.Minute, IDTokenLifetime: 5 * time.Minute, MaxIDTokenClaimsBytes: 4096, MaxAccessTokenClaimsBytes: 6144, RefreshTokenLifetime: 5 * time.Minute,
 			MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second,
 			MaxClientAttestationLifetime: time.Hour, MaxClientAttestationPoPAge: time.Minute,
 		},

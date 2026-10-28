@@ -49,6 +49,12 @@ func TestAccessTokenValidateBoundsFutureIssuedAtAndNotBefore(t *testing.T) {
 		{"exp at MaxLifetime plus the skew", map[string]any{"exp": now.Add(130 * time.Second).Unix(), "iat": iat}, nil},
 		{"exp past MaxLifetime plus the skew", map[string]any{"exp": now.Add(131 * time.Second).Unix(), "iat": iat}, ErrLifetimeExceeded},
 		{"fractional dates", map[string]any{"exp": json.Number("1800000060.5"), "iat": json.Number("1800000000.5"), "nbf": json.Number("1800000000.9")}, nil},
+		// time.Unix overflows for a value this close to 2^63, which would
+		// make the far future compare as the past: refused as malformed.
+		{"nbf at 2^62", map[string]any{"exp": exp, "iat": iat, "nbf": json.Number("4611686018427387904")}, ErrMalformedClaims},
+		{"nbf at 2^63-1", map[string]any{"exp": exp, "iat": iat, "nbf": json.Number("9223372036854775807")}, ErrMalformedClaims},
+		{"nbf near 2^63 as a fraction", map[string]any{"exp": exp, "iat": iat, "nbf": json.Number("9.2233720368547e18")}, ErrMalformedClaims},
+		{"iat at 2^63-1", map[string]any{"exp": exp, "iat": json.Number("9223372036854775807")}, ErrMalformedClaims},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := validateAccessTokenClaimsAt(t, now, tc.claims)

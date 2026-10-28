@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/idfoundry/fapigo/internal/claimnames"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // isServerManagedIDTokenClaim reports whether name is a claim the server
@@ -46,6 +47,12 @@ func validateGrantedIDTokenClaims(claims map[string]json.RawMessage, maxBytes in
 		}
 		if !json.Valid(value) {
 			return fmt.Errorf("ID token claim %q is not valid JSON", name)
+		}
+		// Relying parties, this module's client included, refuse an ID
+		// token whose claims aren't valid UTF-8 or carry a lone
+		// surrogate escape (RFC 8725 §3.7), which json.Valid accepts.
+		if !strictjson.DecodesLosslessly(value) {
+			return fmt.Errorf("ID token claim %q is not valid UTF-8, or has an unpaired surrogate escape", name)
 		}
 	}
 	return nil

@@ -346,7 +346,7 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 	// CIBA Core §13 has no invalid_request_object: a malformed member of
 	// the signed request is invalid_request, as everywhere on this path.
 	if err := checkParameterTypes(verified.Parameters, backchannelParameterTypes); err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+		return verifiedBackchannelRequest{}, requestError(ErrorInvalidRequest, err)
 	}
 	resources, resourceErr := s.resourcesFromParameters(verified.Parameters)
 	if resourceErr != nil {
@@ -433,10 +433,10 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 		return verifiedBackchannelRequest{}, validateErr
 	}
 	if err := validateClaimsParameter(params); err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+		return verifiedBackchannelRequest{}, requestError(ErrorInvalidRequest, err)
 	}
 	if _, err := essentialACRValues(params); err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+		return verifiedBackchannelRequest{}, requestError(ErrorInvalidRequest, err)
 	}
 
 	if bindingErr := validateBindingMessage(params); bindingErr != nil {

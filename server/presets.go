@@ -96,6 +96,15 @@ func RecommendedLimits() Limits {
 		// 1 KiB. Raise it only alongside your relying parties' limits.
 		MaxIDTokenClaimsBytes: 4096,
 
+		// Not spec-mandated — no spec bounds access token size, but
+		// resource servers do: resource.JWTAccessTokens rejects a
+		// compact token over 16 KiB by default. 6 KiB of non-standard
+		// claims (authorization_details and extension claims) encodes
+		// to 8 KiB, leaving 8 KiB for the header, signature and
+		// standard claims, so Limits.MaxAccessTokenBytes is exactly 16
+		// KiB. Raise it only alongside your resource servers' limits.
+		MaxAccessTokenClaimsBytes: 6144,
+
 		// Not spec-mandated — this is a session-length choice, not a
 		// protocol requirement. 24 hours is a reasonable "valid for
 		// the day" default; adjust to your own session policy.

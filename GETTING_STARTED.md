@@ -362,13 +362,18 @@ by `hmac_vectors.py` beside it). Sources: as above.
 Under `ProfileFAPISecurityWithMessageSigning`, `Algorithms.JARM` is
 required too.
 
-Most `Limits` fields are lifetimes and clock tolerances. One is a size:
+Most `Limits` fields are lifetimes and clock tolerances. Two are sizes:
 `Limits.MaxIDTokenClaimsBytes` (4096 in `RecommendedLimits()`) caps the
 total size of the non-standard claims in an ID token, so the server
 never issues one larger than relying parties accept — this module's own
 client rejects a compact token over 16 KiB by default. See [Adding
 claims to tokens](#adding-claims-to-tokens) for what counts against it,
 and raise it only alongside your relying parties' own limits.
+`Limits.MaxAccessTokenClaimsBytes` (6144) does the same for an access
+token's non-standard claims, such as `authorization_details`, against the
+16 KiB `resource.JWTAccessTokens` accepts by default; raise it only
+alongside your resource servers' `MaxTokenBytes`
+(`serverresource.NewVerifier` follows it on its own).
 
 ## 3. Register at least one client
 

@@ -51,8 +51,8 @@ const (
 	// module considers necessary for a real deployment:
 	// Dependencies.Audit, and a storage.StoreAssurance declaration for
 	// every store this package's own operations actually touch: Clients,
-	// Transactions, Grants, Replay, Nonces (when configured — it's
-	// otherwise a genuinely optional dependency, not a gap), the
+	// Transactions, Grants, Replay, Nonces (unless it's the explicit
+	// NoDPoPNonces{} decline: AssuranceProduction refuses a nil one), the
 	// opaque-token store (when Dependencies.AccessTokens is
 	// OpaqueAccessTokens — a JWTAccessTokens issuer has no separate
 	// store to check), Revocation (unless it's the explicit NoRevocation{}

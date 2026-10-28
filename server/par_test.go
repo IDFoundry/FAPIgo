@@ -649,6 +649,7 @@ func newHarnessWithApplicationType(t *testing.T, profile server.Profile, allowRe
 	}
 	if assurance == server.AssuranceProduction {
 		deps.ClientCertificateTrust = server.ClientCertificateChainVerifiedUpstream{}
+		deps.Nonces = server.NoDPoPNonces{}
 	}
 
 	srv, err := server.New(cfg, deps)

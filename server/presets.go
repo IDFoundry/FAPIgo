@@ -16,7 +16,7 @@ import (
 // It covers the limits every server needs. The ones only an optional
 // feature needs are left zero, and New refuses that zero once the
 // feature is enabled, so set them yourself: DPoPNonceLifetime
-// (Dependencies.Nonces), the three BackchannelAuthentication limits
+// (Dependencies.Nonces, unless it's NoDPoPNonces{}), the three BackchannelAuthentication limits
 // (Endpoints.BackchannelAuthentication), and MaxClientAttestationLifetime
 // and MaxClientAttestationPoPAge
 // (Config.AttestationBasedClientAuthentication).

@@ -337,9 +337,13 @@ type Limits struct {
 	// DPoPNonceLifetime bounds how long an issued DPoP nonce remains
 	// valid, for any number of proofs (RFC 9449 §8.2); the next nonce
 	// is handed out once half of it has passed, so a client holding the
-	// previous one keeps at least half of it. Required only when Dependencies.Nonces is non-nil — see
-	// its own doc comment; New rejects a zero value in that case, but
-	// leaves it unvalidated when nonce-challenge support is disabled.
+	// previous one keeps at least half of it. Required when
+	// Dependencies.Nonces is a nonce store — see its own doc comment;
+	// New rejects a zero value in that case, but leaves it unvalidated
+	// when nonce challenges are declined (nil, or NoDPoPNonces{}).
+	// A few minutes is typical: a shorter lifetime rotates more often,
+	// costing clients a retry each time, and a longer one widens the
+	// window a proof made with a captured nonce stays usable in.
 	// Under AssuranceProduction it must be at most 15 minutes, set or
 	// not.
 	DPoPNonceLifetime time.Duration

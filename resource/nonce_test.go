@@ -147,6 +147,22 @@ func TestVerifyNonceDisabledByDefault(t *testing.T) {
 	}
 }
 
+// TestNoDPoPNoncesDisablesNonceChallenges covers NoDPoPNonces, by value
+// or pointer, declining nonces as nil does: a proof without a nonce is
+// accepted, and none is handed out.
+func TestNoDPoPNoncesDisablesNonceChallenges(t *testing.T) {
+	for _, nonces := range []storage.NonceStore{resource.NoDPoPNonces{}, &resource.NoDPoPNonces{}} {
+		f := newNonceFixture(t, "", nonces)
+		authz, err := f.verify(t)
+		if err != nil || authz.NextDPoPNonce != "" {
+			t.Fatalf("Verify(%T) = nonce %q, %v; want no nonce, no error", nonces, authz.NextDPoPNonce, err)
+		}
+		if nonce, err := f.verifier.IssueDPoPNonce(context.Background()); nonce != "" || err != nil {
+			t.Errorf("IssueDPoPNonce(%T) = %q, %v; want none and no error", nonces, nonce, err)
+		}
+	}
+}
+
 func TestVerifyChallengesMissingNonce(t *testing.T) {
 	f := newNonceFixture(t, "", nil)
 

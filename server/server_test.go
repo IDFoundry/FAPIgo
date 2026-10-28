@@ -88,6 +88,7 @@ func validDependencies() server.Dependencies {
 		AttesterTrust:          server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{}},
 		Clock:                  fixedClock{now: time.Now()},
 		Random:                 rand.Reader,
+		Nonces:                 server.NoDPoPNonces{},
 	}
 }
 

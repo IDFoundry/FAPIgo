@@ -168,8 +168,9 @@ type AuthorizationContext struct {
 	// should set as this response's own DPoP-Nonce header, so its next
 	// call already carries a valid one instead of needing its own
 	// challenge/retry round trip (RFC 9449 §9): SetDPoPNonce does that.
-	// Always "" when Dependencies.Nonces is nil (nonce-challenge support
-	// disabled); otherwise always populated on a successful Verify.
+	// Always "" when nonce challenges are declined (Dependencies.Nonces
+	// nil or NoDPoPNonces{}), and for a token that isn't DPoP-bound;
+	// otherwise always populated on a successful Verify.
 	NextDPoPNonce string
 
 	// usedDPoP records that the request presented its token with the

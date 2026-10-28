@@ -10,13 +10,11 @@ import (
 // Dependencies are this verifier's injected collaborators. NewVerifier
 // rejects a nil value for any field required unconditionally — there is
 // no implicit fallback (no default clock, no silently-installed
-// in-memory replay store). Nonces/Random are the one exception: unlike
-// every other field, DPoP nonce-challenge support (RFC 9449 §8, §9) is
-// genuinely optional protocol behavior, not a security check this
-// module considers non-negotiable — leaving Nonces nil disables it
-// entirely, with no visible-opt-out sentinel needed the way
-// Revocation's NoRevocation{} is, because declining it is the normal,
-// fully spec-compliant default, not a choice that needs to be visible.
+// in-memory replay store). Nonces and Random are required only as
+// noted on each: under AssuranceDevelopment a nil Nonces disables DPoP
+// nonce challenges (RFC 9449 §9), while AssuranceProduction requires a
+// nonce store or the explicit NoDPoPNonces{} decline, the way
+// Revocation requires NoRevocation{} to decline.
 // NewVerifier also rejects, in every field, a typed nil: an interface
 // holding a nil pointer (or nil map, slice or func), which isn't == nil
 // but would fail on the first call.
@@ -41,15 +39,31 @@ type Dependencies struct {
 	// must declare ClockAssurance, as SystemClock does.
 	Clock Clock
 
-	// Nonces persists DPoP nonces this verifier issues and checks.
-	// Nil disables DPoP nonce-challenge support entirely — Verify never
-	// requires or checks a nonce, exactly like today. Set it (and
-	// Random, and Config.Limits.DPoPNonceLifetime) to have Verify
-	// challenge a request whose proof carries no valid nonce, and hand
-	// out its current nonce on every successful call. A nonce stays
-	// valid until it expires, for any number of proofs (see
-	// storage.NonceStore); the Verifier stores a new one only when half
-	// of Config.Limits.DPoPNonceLifetime has passed.
+	// Nonces persists DPoP nonces this verifier issues and checks. Set
+	// it (and Random, and Config.Limits.DPoPNonceLifetime) to have
+	// Verify challenge a request whose proof carries no valid nonce
+	// with use_dpop_nonce, and hand out its current nonce on every
+	// successful call. A nonce stays valid until it expires, for any
+	// number of proofs (see storage.NonceStore); the Verifier stores a
+	// new one only when half of Config.Limits.DPoPNonceLifetime has
+	// passed.
+	//
+	// A nonce is what keeps a DPoP proof from being made ahead of time:
+	// without one, a proof's freshness rests on the "iat" the client
+	// chose, so an attacker able to have a client generate proofs for
+	// later, or to capture them, can use one until it ages out (RFC 9449
+	// §11, the FAPI 2.0 attacker model's A5). The cost is one extra round
+	// trip per client on first use, and again each time the nonce
+	// rotates: the client retries once with the nonce the challenge
+	// carried.
+	//
+	// Required under AssuranceProduction: pass a store — shared by
+	// every instance serving the same resource URLs, since a nonce one
+	// instance issues must be valid at the next, and declaring
+	// storage.StoreAssurance (Durable, and CrossInstanceConsistent with
+	// DeploymentHorizontallyScaled) — or NoDPoPNonces{} to explicitly
+	// decline. Under AssuranceDevelopment nil also declines, and Verify
+	// never requires or checks a nonce.
 	//
 	// Never pass an authorization server's own Dependencies.Nonces: a
 	// nonce store is keyed by the nonce alone, so a nonce one role issued
@@ -60,7 +74,8 @@ type Dependencies struct {
 	Nonces storage.NonceStore
 
 	// Random is the source of randomness for DPoP nonce generation.
-	// Required only when Nonces is non-nil — NewVerifier rejects nil
+	// Required only when Nonces is a nonce store (not nil or
+	// NoDPoPNonces{}) — NewVerifier rejects nil
 	// Random in that case, matching server.Dependencies.Random's own
 	// "no implicit fallback" rule.
 	Random io.Reader

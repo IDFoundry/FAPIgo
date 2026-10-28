@@ -105,7 +105,8 @@ type TokenResult struct {
 	// PAR or token request already carries a valid one instead of
 	// needing its own challenge/retry round trip (RFC 9449 §8's own
 	// proactive-refresh recommendation). Always "" when
-	// Dependencies.Nonces is nil (nonce-challenge support disabled);
+	// nonce challenges are declined (Dependencies.Nonces nil or
+	// NoDPoPNonces{});
 	// otherwise always populated on success.
 	NextDPoPNonce string
 }

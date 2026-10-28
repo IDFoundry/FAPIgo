@@ -166,9 +166,14 @@ func TestNewVerifierProductionAccepts(t *testing.T) {
 		{"declared clock 5s behind", func(_ *resource.Config, d *resource.Dependencies) {
 			d.Clock = fixedClock{now: time.Now().Add(-5 * time.Second)}
 		}},
-		{"no nonces, any random", func(_ *resource.Config, d *resource.Dependencies) {
-			d.Nonces = nil
+		{"NoDPoPNonces, any random, no nonce lifetime", func(c *resource.Config, d *resource.Dependencies) {
+			d.Nonces = resource.NoDPoPNonces{}
 			d.Random = bytes.NewReader(nil)
+			c.Limits.DPoPNonceLifetime = 0
+		}},
+		{"*NoDPoPNonces, no random", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Nonces = &resource.NoDPoPNonces{}
+			d.Random = nil
 		}},
 		{"single instance without CrossInstanceConsistent", func(c *resource.Config, d *resource.Dependencies) {
 			c.Deployment = resource.DeploymentSingleInstance
@@ -234,6 +239,12 @@ func TestNewVerifierProductionRefuses(t *testing.T) {
 		{"opaque pointer without an audience", func(_ *resource.Config, d *resource.Dependencies) {
 			d.AccessTokens = &resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}}
 		}, "OpaqueAccessTokens.Audience is required"},
+		{"no nonces", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Nonces = nil
+		}, "nonces is required under AssuranceProduction (pass a storage.NonceStore, with Random and Limits.DPoPNonceLifetime, to challenge DPoP proofs for a nonce, or NoDPoPNonces{} to explicitly decline)"},
+		{"nil *NoDPoPNonces", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Nonces = (*resource.NoDPoPNonces)(nil)
+		}, "nonces is a nil *NoDPoPNonces"},
 		{"nil jwt pointer", func(_ *resource.Config, d *resource.Dependencies) {
 			d.AccessTokens = (*resource.JWTAccessTokens)(nil)
 		}, "nil *JWTAccessTokens"},

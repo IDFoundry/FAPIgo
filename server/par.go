@@ -182,8 +182,8 @@ type PushAuthorizationResult struct {
 	// unconditionally
 	// once Dependencies.Nonces is configured, regardless of whether this
 	// particular PAR call itself presented a DPoP proof, so a client can
-	// pick one up as early as PAR. Always "" when Dependencies.Nonces is
-	// nil.
+	// pick one up as early as PAR. Always "" when nonce challenges are
+	// declined (Dependencies.Nonces nil or NoDPoPNonces{}).
 	NextDPoPNonce string
 }
 

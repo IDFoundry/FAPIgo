@@ -90,21 +90,35 @@ type Dependencies struct {
 	IdentityClaims IdentityClaimsSource
 
 	// Nonces persists DPoP nonces this server issues and checks for
-	// requests to the PAR and token endpoints. Nil disables DPoP
-	// nonce-challenge support entirely (RFC 9449 §8) — like
-	// IdentityClaims, this is a genuinely optional field, not a
-	// security check this module treats as non-negotiable the way
-	// Revocation is: declining it is the normal, fully spec-compliant
-	// default. One shared store covers both endpoints — a nonce issued
-	// from a PAR response is valid at the token endpoint and vice
+	// requests to the PAR, token and backchannel authentication
+	// endpoints (RFC 9449 §8). Set it (and Config.Limits.DPoPNonceLifetime)
+	// to have this server challenge a DPoP proof carrying no valid
+	// nonce with use_dpop_nonce, and hand out its current nonce on every
+	// successful call. One shared store covers every endpoint — a nonce
+	// issued from a PAR response is valid at the token endpoint and vice
 	// versa, the same way resource.Dependencies.Nonces covers every
 	// protected-resource endpoint uniformly rather than one store per
-	// endpoint. Set it (and Config.Limits.DPoPNonceLifetime) to have
-	// this server challenge a DPoP proof carrying no valid nonce, and
-	// hand out its current nonce on every successful call. A nonce
-	// stays valid until it expires, for any number of proofs (see
-	// storage.NonceStore); the server stores a new one only when half
-	// of Config.Limits.DPoPNonceLifetime has passed.
+	// endpoint. A nonce stays valid until it expires, for any number of
+	// proofs (see storage.NonceStore); the server stores a new one only
+	// when half of Config.Limits.DPoPNonceLifetime has passed.
+	//
+	// A server nonce is what keeps a DPoP proof from being made ahead of
+	// time: without one, a proof's freshness rests on the "iat" the
+	// client chose, so an attacker able to have a client generate proofs
+	// for later, or to capture them, can use one until it ages out (RFC
+	// 9449 §11, the FAPI 2.0 attacker model's A5). The cost is one extra
+	// round trip per client per endpoint on first use, and again each
+	// time the nonce rotates: the client retries once with the nonce the
+	// challenge carried.
+	//
+	// Required under AssuranceProduction: pass a store — shared by every
+	// instance behind the same issuer, since a nonce one instance issues
+	// must be valid at the next, and declaring storage.StoreAssurance
+	// (Durable, and CrossInstanceConsistent with
+	// DeploymentHorizontallyScaled) — or NoDPoPNonces{} to explicitly
+	// decline. Under AssuranceDevelopment nil also declines. Never share
+	// it with a resource server's resource.Dependencies.Nonces (see
+	// that field's own doc comment).
 	Nonces storage.NonceStore
 
 	// Backchannel persists CIBA backchannel authentication requests.

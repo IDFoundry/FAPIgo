@@ -1,11 +1,5 @@
 {
-	"key": {
-		"kty": "EC",
-		"crv": "P-256",
-		"x": "v56FyXbwfI__7leeZ_NCPqEHcyd9waGOaL4Vdfoi3ZM",
-		"y": "kRzXjJgUpLdAd4YXww_b5AxUpGBq_zDH0snOy7-85y0",
-		"d": "QC0E2xT7S2Q8a_Mh3QiDS-r5lN9AA0fKuac7DsA4vq0"
-	},
+	"recipient_p256_scalar_hex": "402d04db14fb4b643c6bf321dd08834beaf994df400347cab9a73b0ec038bead",
 	"vectors": [
 		{
 			"name": "go-jose-encrypter",

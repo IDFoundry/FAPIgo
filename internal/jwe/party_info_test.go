@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ecdh"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"testing"
@@ -19,10 +20,10 @@ import (
 // over headers carrying "apu"/"apv", and go-jose decrypts every one —
 // so they are independent of this package's KDF.
 type gojoseVectors struct {
-	Key struct {
-		D string `json:"d"`
-	} `json:"key"`
-	Vectors []struct {
+	// RecipientScalar is the test-only recipient P-256 private scalar,
+	// hex-encoded.
+	RecipientScalar string `json:"recipient_p256_scalar_hex"`
+	Vectors         []struct {
 		Name    string `json:"name"`
 		Compact string `json:"compact"`
 	} `json:"vectors"`
@@ -38,9 +39,9 @@ func loadGoJoseVectors(t *testing.T) (*ecdh.PrivateKey, gojoseVectors) {
 	if err := json.Unmarshal(b, &v); err != nil {
 		t.Fatalf("parse vectors: %v", err)
 	}
-	d, err := base64.RawURLEncoding.DecodeString(v.Key.D)
+	d, err := hex.DecodeString(v.RecipientScalar)
 	if err != nil {
-		t.Fatalf("decode d: %v", err)
+		t.Fatalf("decode recipient scalar: %v", err)
 	}
 	priv, err := ecdh.P256().NewPrivateKey(d)
 	if err != nil {

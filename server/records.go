@@ -113,6 +113,16 @@ func (r requestRecord) requiredSubjectForApplication() string {
 	return r.RequiredSubject
 }
 
+// grantKind is which of the three artefacts a grantRecord was written
+// for (grantRecord.Kind).
+type grantKind string
+
+const (
+	grantKindAuthorizationCode grantKind = "authorization_code"
+	grantKindRefreshToken      grantKind = "refresh_token"
+	grantKindBackchannel       grantKind = "backchannel_authentication"
+)
+
 // grantRecord is what an authorization code, refresh token or approved
 // CIBA request persists as its opaque Grant: the complete authorization
 // every token issued from it is built from. One type serves all three,
@@ -120,6 +130,14 @@ func (r requestRecord) requiredSubjectForApplication() string {
 // storage record type — and never requires a store change.
 type grantRecord struct {
 	Version int `json:"v"`
+
+	// Kind is the artefact the record was written for. Each redemption
+	// accepts only its own kind (see isKind), so a store that returns
+	// one kind's record for another's handle — codes and refresh tokens
+	// kept in one table keyed by hash, say — can't turn an authorization
+	// code into a refresh token, or the reverse. Empty in a record
+	// written before it existed.
+	Kind grantKind `json:"kind,omitempty"`
 
 	// Issuer is the issuer of the server that wrote the record (see
 	// Server.ownsRecord). Empty in a record written before v0.58.0, which
@@ -255,6 +273,7 @@ type refreshBinding struct {
 // without the code-exchange-only fields, recording binding, and issued
 // at issuedAt.
 func (g grantRecord) forRefreshToken(binding refreshBinding, issuedAt time.Time) grantRecord {
+	g.Kind = grantKindRefreshToken
 	g.RedirectURI = ""
 	g.CodeChallenge = ""
 	g.Nonce = ""
@@ -262,6 +281,23 @@ func (g grantRecord) forRefreshToken(binding refreshBinding, issuedAt time.Time)
 	g.ClientInstanceKey = binding.InstanceKey
 	g.IssuedAt = &issuedAt
 	return g
+}
+
+// isKind reports whether g may be redeemed as kind. A record with
+// another Kind never may. One written before Kind existed has none: an
+// authorization code is never accepted without it (a code lives
+// Limits.AuthorizationCodeLifetime, at most a minute, and is stored
+// under a digest authorizationCodeHash no longer computes, so none
+// survives an upgrade), and a refresh token or decided CIBA request is
+// accepted only when it carries none of a code's own fields. Every
+// authorization code record has a redirect_uri and a PKCE challenge,
+// which forRefreshToken clears and a CIBA grant never has, so a
+// kind-less code record is still refused as either.
+func (g grantRecord) isKind(kind grantKind) bool {
+	if g.Kind != "" {
+		return g.Kind == kind
+	}
+	return kind != grantKindAuthorizationCode && g.RedirectURI == "" && g.CodeChallenge == "" && g.Nonce == ""
 }
 
 // clientSubject returns the sub the client was given: ClientSubject, or

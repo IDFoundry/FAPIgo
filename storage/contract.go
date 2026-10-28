@@ -45,7 +45,9 @@ func runConcurrently(attempts int, fn func() bool) int {
 
 // TestGrantStoreContract exercises factory()'s behavior against the
 // guarantees GrantStore's documentation promises: atomic single-use
-// redemption of authorization codes and refresh tokens, faithful
+// redemption of authorization codes and refresh tokens, codes and
+// refresh tokens kept apart (neither redemption returns the other's
+// record under the same digest), faithful
 // round-tripping of stored fields, and exactly one winner under
 // concurrent redemption of the same code or token. factory must return
 // a fresh, empty GrantStore each call — its subtests share nothing
@@ -73,6 +75,12 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 	t.Run("RedeemUnknownRefreshTokenFails", func(t *testing.T) { testGrantStoreRedeemUnknownRefreshTokenFails(t, factory) })
 	t.Run("ConcurrentRedeemRefreshTokenAllSucceed", func(t *testing.T) { testGrantStoreConcurrentRedeemRefreshTokenAllSucceed(t, factory) })
 	t.Run("RevokeRefreshTokenPreventsRedemption", func(t *testing.T) { testGrantStoreRevokeRefreshTokenPreventsRedemption(t, factory) })
+	t.Run("RedeemRefreshTokenDoesNotReturnAuthorizationCode", func(t *testing.T) {
+		testGrantStoreRedeemRefreshTokenDoesNotReturnAuthorizationCode(t, factory)
+	})
+	t.Run("RedeemAuthorizationCodeDoesNotReturnRefreshToken", func(t *testing.T) {
+		testGrantStoreRedeemAuthorizationCodeDoesNotReturnRefreshToken(t, factory)
+	})
 }
 
 func testGrantStoreCreateAndRedeemAuthorizationCode(t *testing.T, factory func() GrantStore) {
@@ -1708,4 +1716,44 @@ func testPairwiseSubjectStoreExactness(t *testing.T, factory func() PairwiseSubj
 	// A differently spelled subject is a different user.
 	mustGetOrCreate(t, s, contractPairwiseKey("User-1"), "body-2", "body-2")
 	mustLookup(t, s, contractPairwiseIssuer, contractPairwiseSector, "body-2", "User-1")
+}
+
+// testGrantStoreRedeemRefreshTokenDoesNotReturnAuthorizationCode and
+// testGrantStoreRedeemAuthorizationCodeDoesNotReturnRefreshToken cover
+// GrantStore's two kinds of record staying apart: a store keeping both
+// in one table keyed by digest alone would redeem an authorization code
+// as a refresh token (skipping the code exchange's PKCE, redirect_uri,
+// DPoP binding and single use) were the two digests ever equal.
+func testGrantStoreRedeemRefreshTokenDoesNotReturnAuthorizationCode(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("code-not-refresh"))
+	if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
+		CodeHash: hash, ClientID: "client-1", Grant: contractPayload, ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateAuthorizationCode: %v", err)
+	}
+	if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err == nil {
+		t.Fatalf("RedeemRefreshToken(an authorization code's digest) = nil error, want error")
+	}
+	if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err != nil {
+		t.Fatalf("RedeemAuthorizationCode after the refused RedeemRefreshToken: %v", err)
+	}
+}
+
+func testGrantStoreRedeemAuthorizationCodeDoesNotReturnRefreshToken(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("refresh-not-code"))
+	if err := store.CreateRefreshToken(ctx, NewRefreshToken{
+		TokenHash: hash, ClientID: "client-1", Grant: contractPayload, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateRefreshToken: %v", err)
+	}
+	if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err == nil {
+		t.Fatalf("RedeemAuthorizationCode(a refresh token's digest) = nil error, want error")
+	}
+	if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err != nil {
+		t.Fatalf("RedeemRefreshToken after the refused RedeemAuthorizationCode: %v", err)
+	}
 }

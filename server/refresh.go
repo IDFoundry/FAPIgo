@@ -220,6 +220,11 @@ func checkGrantTypeStillAllowed(client storage.RegisteredClient, grant grantReco
 	return nil
 }
 
+// refreshTokenUnknownDescription is the error_description of the
+// invalid_grant for a refresh token this server doesn't know, doesn't
+// own (Server.ownsRecord), or whose record isn't a refresh token's.
+const refreshTokenUnknownDescription = "refresh_token is invalid, expired, or already used"
+
 // redeemRefreshGrant looks up the grant rawToken, a refresh token
 // presented by clientID, was issued from, refusing one that has expired,
 // was issued to another client or another client instance, or whose
@@ -233,7 +238,7 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 		TokenHash: sha256.Sum256([]byte(rawToken)),
 	})
 	if err != nil {
-		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token is invalid, expired, or already used", err)
+		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, refreshTokenUnknownDescription, err)
 	}
 
 	now := s.deps.Clock.Now()
@@ -245,7 +250,12 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 	}
 	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
 	if err != nil {
-		return grantRecord{}, time.Time{}, recordFailure(err, newError(ErrorInvalidGrant, 400, "refresh_token is invalid, expired, or already used", nil), "refresh token grant")
+		return grantRecord{}, time.Time{}, recordFailure(err, newError(ErrorInvalidGrant, 400, refreshTokenUnknownDescription, nil), "refresh token grant")
+	}
+	if !grant.isKind(grantKindRefreshToken) {
+		// Another artefact's record — an authorization code's, from a
+		// store keeping both in one table — is as unknown as no record.
+		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, refreshTokenUnknownDescription, nil)
 	}
 	if !issuedWithin(grant.IssuedAt, s.cfg.Limits.RefreshTokenLifetime, now) {
 		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token has expired", nil)

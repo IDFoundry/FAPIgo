@@ -149,6 +149,7 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 
 	now := s.deps.Clock.Now()
 	grant, err := s.encodeGrantRecord(grantRecord{
+		Kind:                    grantKindAuthorizationCode,
 		IssuedAt:                &now,
 		RedirectURI:             redirectURI,
 		CodeChallenge:           codeChallenge,

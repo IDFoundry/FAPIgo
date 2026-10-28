@@ -201,6 +201,9 @@ func (s *Server) approvedBackchannelGrant(polled storage.PolledBackchannelAuthen
 	if err != nil {
 		return grantRecord{}, recordFailure(err, newError(ErrorInvalidGrant, 400, authReqIDUnknownDescription, nil), "backchannel authentication grant")
 	}
+	if !grant.isKind(grantKindBackchannel) {
+		return grantRecord{}, newError(ErrorInvalidGrant, 400, authReqIDUnknownDescription, nil)
+	}
 	return grant, nil
 }
 

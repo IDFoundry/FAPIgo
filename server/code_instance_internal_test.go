@@ -8,14 +8,21 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// TestAuthorizationCodeHash covers the digest a code is stored under: a
-// plain SHA-256 for a client not authenticated by Client Attestation,
-// and one per client instance otherwise, so another instance of the
-// same client finds no code.
+// TestAuthorizationCodeHash covers the digest a code is stored under:
+// never the plain SHA-256 a refresh token with the same value is stored
+// under, and one per client instance for a client authenticated by
+// Client Attestation, so another instance of the same client finds no
+// code.
 func TestAuthorizationCodeHash(t *testing.T) {
 	const code = "code-value"
-	if got, want := authorizationCodeHash(code, ""), sha256.Sum256([]byte(code)); got != want {
-		t.Error("authorizationCodeHash without an instance isn't the code's SHA-256")
+	if authorizationCodeHash(code, "") == sha256.Sum256([]byte(code)) {
+		t.Error("authorizationCodeHash without an instance is a refresh token's digest of the same value")
+	}
+	if got, want := authorizationCodeHash(code, ""), sha256.Sum256([]byte(codeHashPrefix+code)); got != want {
+		t.Error("authorizationCodeHash without an instance isn't the SHA-256 of the prefixed code")
+	}
+	if authorizationCodeHash(code, "instance-a") == sha256.Sum256([]byte(code)) {
+		t.Error("authorizationCodeHash with an instance is a refresh token's digest of the same value")
 	}
 	a, b := authorizationCodeHash(code, "instance-a"), authorizationCodeHash(code, "instance-b")
 	if a == b || a == authorizationCodeHash(code, "") {

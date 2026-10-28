@@ -211,6 +211,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 	}
 	decidedAt := s.deps.Clock.Now()
 	grant, encodeErr := s.encodeGrantRecord(grantRecord{
+		Kind:                    grantKindBackchannel,
 		IssuedAt:                &decidedAt,
 		DPoPJKT:                 request.DPoPJKT,
 		Subject:                 result.subject.ID().String(),

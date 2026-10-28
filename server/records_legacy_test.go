@@ -86,6 +86,43 @@ func refuseRefreshTokenWithoutIssuer(t *testing.T) {
 	}
 }
 
+// withoutKind is record as a server wrote it before records carried
+// their kind.
+func withoutKind(t *testing.T, record json.RawMessage) json.RawMessage {
+	t.Helper()
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(record, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fields["kind"]; !ok {
+		t.Fatalf("record %s has no kind to remove", record)
+	}
+	delete(fields, "kind")
+	stripped, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stripped
+}
+
+// TestRefreshTokenWithoutAKindStillRefreshes covers a refresh token
+// stored before records carried their kind: it carries none of an
+// authorization code's fields, so it is still redeemed as a refresh
+// token, rather than every live refresh token being orphaned on upgrade.
+func TestRefreshTokenWithoutAKindStillRefreshes(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	tokens, _ := exchangeForTokensWithOfflineAccess(t, h)
+	h.grants.mu.Lock()
+	for hash, rec := range h.grants.refreshByHash {
+		rec.Grant = withoutKind(t, rec.Grant)
+		h.grants.refreshByHash[hash] = rec
+	}
+	h.grants.mu.Unlock()
+	if _, err := refreshWith(t, h, tokens.RefreshToken.Reveal(), ""); err != nil {
+		t.Fatalf("refreshing a refresh token without a kind: %v", err)
+	}
+}
+
 func refuseRequestURIWithoutIssuer(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, server.ProfileFAPISecurity, true)

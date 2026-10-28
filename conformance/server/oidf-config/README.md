@@ -38,18 +38,22 @@ FAPI 2.0 variant gets its own config file here:
   pushes it further out (70 minutes, via
   `AddExpValueIs70MinutesInFutureToRequestObject`), specifically to
   check an AS enforces *some* cap. `server.RecommendedLimits()`'s
-  general default (60s) rejects the suite's own normal happy-path
-  request objects outright under this profile — set comfortably above
-  300s and well under 4200s (600s is what's used).
+  `MaxRequestObjectLifetime` is 10 minutes (600s): comfortably above
+  300s and well under 4200s, so the suite's happy-path request objects
+  pass and the 70-minute negative test still fails as it should.
 
   This isn't a JSON config value — algorithms/limits aren't
   configurable from either file in this directory at all (see
   `cmd/conformance-as/config.go`'s `Config` doc comment: conformance
   testing runs on `server.RecommendedAlgorithms()`/
   `server.RecommendedLimits()` unconditionally, not a hand-tunable
-  value that can drift from them). This one exception is a hardcoded,
-  profile-conditional override in `Config.Resolve()` — a test-harness
-  accommodation, not a relaxation of what FAPI2 itself requires.
+  value that can drift from them). Until the recommendation was raised
+  from 60s to 10 minutes, `Config.Resolve()` carried a hardcoded,
+  message-signing-only override to 600s, and the FAPIgo 0.25.0
+  certification ran with it: the certified message-signing
+  configuration used `MaxRequestObjectLifetime = 600s`, not the
+  then-recommended 60s. The recommendation now matches it, so there is
+  no override any more.
 
 Both plans also need variants `client_auth_type=private_key_jwt`,
 `sender_constrain=dpop`, `fapi_profile=plain_fapi`,

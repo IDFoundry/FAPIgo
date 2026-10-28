@@ -1310,10 +1310,10 @@ official OpenID Foundation certification for FAPI 2.0 OP, FAPI 2.0 RP
 see [`conformance/README.md#oidf-certification`](conformance/README.md#oidf-certification)
 for the full list and links to each listing.
 
-Rich Authorization Requests (RFC 9396) has no OIDF conformance plan at
-all, unlike CIBA (which at least has `fapi-ciba-id1` to eventually
-re-attempt) — so it's deliberately outside this automated live-suite
-loop entirely, not a temporary gap, and is instead validated by
+Rich Authorization Requests (RFC 9396) has no plan of its own, but the
+FAPI 2.0 Security Profile and Message Signing plans have an
+`authorization_request_type=rar` variant. No leg of the automated
+live-suite loop selects it yet, so RAR is validated instead by
 `extension/rar_test.go`, `server/rar_test.go` and `cmd/conformance-as`'s
 own end-to-end smoke tests (`conformance/README.md#rar`).
 

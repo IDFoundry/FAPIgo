@@ -10,6 +10,8 @@ is a complete, working reference implementing every piece described
 here (step 6 shows a minimal HTTP surface — PAR, authorize, token,
 JWKS, metadata — and it has the full one); read it alongside this doc,
 or just study it directly and treat this as the map.
+[docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md) collects
+what a production deployment must do on one page, linking back here.
 
 ## 1. Dependencies: use the reference implementations to start
 
@@ -104,6 +106,17 @@ cfg := server.Config{
 	// Deployment: server.DeploymentSingleInstance, // required under AssuranceProduction: or DeploymentHorizontallyScaled for a fleet
 }
 ```
+
+**`AssuranceDevelopment` is not FAPI 2.0 conformant**, although the
+server's metadata looks exactly the same under either level, so a client
+can't tell. Development accepts an authorization code lifetime over 60
+seconds, a pushed request lifetime of 600 seconds or more, a clock skew
+under 10 seconds (0 refuses JWTs a few seconds in the future, which FAPI
+2.0 says to accept) or over 60, request object and CIBA request lifetimes
+over 60 minutes, loopback http redirect URIs for web clients, loopback
+http issuer and endpoint URLs, and any `Random` reader, and it skips the
+storage, key custody and audit checks. Use it for local development and
+tests; run anything clients rely on under `AssuranceProduction`.
 
 `AssuranceProduction` holds the limits FAPI 2.0 fixes (authorization
 code and pushed request lifetimes, clock skew, request object and CIBA
@@ -1180,7 +1193,7 @@ the reason this section exists at all. Pick the side matching your AS:
 issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, asJWKSURL, 10*time.Minute)
 accessTokens, err := resource.NewJWTAccessTokens(
 	issuerKeys, asIssuer, asIssuer.String(), // audience: the AS's issuer, unless clients name this resource server (see below)
-	fapi.ES256, 5*time.Minute, // must be >= the AS's own Limits.AccessTokenLifetime
+	fapi.ES256, 10*time.Minute, // MaxTokenLifetime: at least the AS's Limits.AccessTokenLifetime (10 minutes in server.RecommendedLimits)
 	8, // max candidate keys tried per token — size to your AS's own key-rotation overlap, not a library default
 )
 
@@ -1640,7 +1653,12 @@ if err != nil {
 
 `NewFromDiscovery` fills in the issuer and endpoints from the discovered
 metadata and checks them against your `Config`; `New` takes them
-explicitly instead.
+explicitly instead. It also fills in `Algorithms.IDToken` when the
+authorization server advertises exactly one ID token signing algorithm
+(a FAPIgo server does); for one advertising several, set the one your
+client is registered for. `client.RecommendedLimits()` accepts ID tokens
+valid for up to an hour (`MaxIDTokenLifetime`): lower it to your
+provider's own lifetime if you know it.
 
 Under `AssuranceProduction`, `New` holds `Limits` to bounds
 `RecommendedLimits` meets — `MaxClockSkew` from 10 to 60 seconds,

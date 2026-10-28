@@ -80,6 +80,9 @@ func TestParseIssuerURLRejects(t *testing.T) {
 		"https://user:pass@as.example", // embedded credentials
 		"https://as.example#fragment",  // fragment
 		"ftp://as.example",             // wrong scheme
+		"https://as.example?tenant=a",  // query (RFC 8414 §2, OIDC Core §2)
+		"https://as.example/?",         // empty query
+		"https://as.example?",          // empty query, no path
 	}
 	for _, c := range cases {
 		if _, err := ParseIssuerURL(c); err == nil {
@@ -261,9 +264,9 @@ func TestParseURLRefusesNonASCIIHost(t *testing.T) {
 func TestParseURLLowercasesASCIIHost(t *testing.T) {
 	for name, parse := range parsers {
 		for raw, want := range map[string]string{
-			"HtTpS://IBank.EXAMPLE/cb":              "https://ibank.example/cb",
-			"https://XN--IBANK-7FD.example/cb":      "https://xn--ibank-7fd.example/cb",
-			"https://Key.Example:8443/cb?State=Abc": "https://key.example:8443/cb?State=Abc",
+			"HtTpS://IBank.EXAMPLE/cb":         "https://ibank.example/cb",
+			"https://XN--IBANK-7FD.example/cb": "https://xn--ibank-7fd.example/cb",
+			"https://Key.Example:8443/Cb":      "https://key.example:8443/Cb",
 		} {
 			u, err := parse(raw)
 			if err != nil {
@@ -289,5 +292,17 @@ func TestParseURLLoopbackHTTPNeedsASCIILocalhost(t *testing.T) {
 	}
 	if u, err := ParseIssuerURL("http://localho"+longS+"t:8080/", AllowLoopbackHTTP()); err == nil {
 		t.Fatalf("ParseIssuerURL(http://localhoſt:8080/) = %q, want an error", u.String())
+	}
+}
+
+// TestParseEndpointURLAllowsQuery pins that only an issuer refuses a
+// query: RFC 6749 §3.1 and §3.2 let an endpoint URL carry one.
+func TestParseEndpointURLAllowsQuery(t *testing.T) {
+	u, err := ParseEndpointURL("https://Key.Example:8443/cb?State=Abc")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL with a query: %v, want nil", err)
+	}
+	if want := "https://key.example:8443/cb?State=Abc"; u.String() != want {
+		t.Fatalf("String() = %q, want %q", u.String(), want)
 	}
 }

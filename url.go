@@ -125,11 +125,19 @@ func isLabelRune(r rune) bool {
 	return 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || r == '-'
 }
 
-// ParseIssuerURL parses and validates raw as an issuer identifier.
+// ParseIssuerURL parses and validates raw as an issuer identifier. On
+// top of what ParseEndpointURL checks, it refuses a query component,
+// even an empty one ("https://as.example/?"): RFC 8414 §2 and OpenID
+// Connect Core §2 define the issuer as a URL with no query or fragment,
+// and RFC 9207 and Discovery §3 compare it as an exact string, so a
+// query would only give one issuer a second spelling.
 func ParseIssuerURL(raw string, opts ...URLOption) (URL, error) {
 	u, err := parseSecureURL(raw, opts)
 	if err != nil {
 		return URL{}, fmt.Errorf("fapi: parse issuer URL: %w", err)
+	}
+	if u.value.RawQuery != "" || u.value.ForceQuery {
+		return URL{}, fmt.Errorf("fapi: parse issuer URL: URL must not contain a query")
 	}
 	return u, nil
 }

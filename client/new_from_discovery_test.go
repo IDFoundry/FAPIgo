@@ -405,3 +405,48 @@ func TestNewFromDiscoveryUsesMTLSAliasesForAnMTLSClient(t *testing.T) {
 		}
 	}
 }
+
+// TestNewFromDiscoveryDefaultsIDTokenAlgorithm: with Algorithms.IDToken
+// left zero, NewFromDiscovery takes the issuer's ID token signing
+// algorithm when it advertises exactly one, and leaves the choice to
+// the caller (New refuses the zero) when it advertises several.
+func TestNewFromDiscoveryDefaultsIDTokenAlgorithm(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Algorithms.IDToken = 0
+
+	one := client.DiscoveredMetadata{Endpoints: cfg.Endpoints, IDTokenAlgorithms: []fapi.SignatureAlgorithm{fapi.PS256}}
+	if _, err := client.NewFromDiscovery(one, cfg, validDependencies(t)); err != nil {
+		t.Fatalf("NewFromDiscovery(one advertised ID token algorithm, IDToken zero): %v", err)
+	}
+
+	several := client.DiscoveredMetadata{Endpoints: cfg.Endpoints, IDTokenAlgorithms: []fapi.SignatureAlgorithm{fapi.ES256, fapi.PS256}}
+	_, err := client.NewFromDiscovery(several, cfg, validDependencies(t))
+	if err == nil || !strings.Contains(err.Error(), "id_token") {
+		t.Fatalf("NewFromDiscovery(several advertised ID token algorithms, IDToken zero) = %v, want an error naming id_token", err)
+	}
+}
+
+// TestGettingStartedStep10Snippet builds the client exactly as
+// GETTING_STARTED.md step 10 does — RecommendedAlgorithms and
+// RecommendedLimits, nothing added — against a discovered issuer
+// advertising one ID token algorithm, and requires NewFromDiscovery to
+// accept it. Development assurance stands in for production, which
+// would refuse this test's fake dependencies.
+func TestGettingStartedStep10Snippet(t *testing.T) {
+	discovered := discoverWithIssParameterSupport(t, true)
+	deps := validDependencies(t)
+	_, err := client.NewFromDiscovery(discovered, client.Config{
+		ClientID:                       testClientID,
+		RedirectURI:                    testRedirect,
+		Profile:                        client.ProfileFAPISecurity,
+		Algorithms:                     client.RecommendedAlgorithms(),
+		Limits:                         client.RecommendedLimits(),
+		Assurance:                      client.AssuranceDevelopment,
+		AuthorizationResponseIssPolicy: client.RequireAuthorizationResponseIss,
+		SenderConstrain:                storage.SenderConstrainDPoP,
+		ClientAuthMethod:               storage.ClientAuthMethodPrivateKeyJWT,
+	}, deps)
+	if err != nil {
+		t.Fatalf("NewFromDiscovery(GETTING_STARTED step 10 config): %v", err)
+	}
+}

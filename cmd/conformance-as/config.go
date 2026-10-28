@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
@@ -300,21 +299,13 @@ func (cfg Config) Resolve(allowLoopbackHTTP bool, accessTokenFormat AccessTokenF
 	// JSON-driven path required.
 	out.Algorithms = server.RecommendedAlgorithms()
 	out.Limits = server.RecommendedLimits()
-	if out.Profile == server.ProfileFAPISecurityWithMessageSigning {
-		// The one deliberate, code-level exception to "conformance
-		// runs on the unmodified recommended defaults" — a test-
-		// harness accommodation, not a relaxation of what FAPI2
-		// itself requires. The OIDF suite's own AddExpToRequestObject
-		// condition hardcodes a 300s exp-nbf window on every ordinary
-		// (non-negative-test) module's request object; the
-		// recommended default (60s) is fine under the baseline
-		// profile, where a request object is never actually sent
-		// (fapi_request_method=unsigned), but message-signing
-		// requires one on every request and needs real headroom above
-		// the suite's own window. See oidf-config/README.md for the
-		// full rationale, including why 600s specifically.
-		out.Limits.MaxRequestObjectLifetime = 600 * time.Second
-	}
+	// The OIDF suite's AddExpToRequestObject condition hardcodes a
+	// 300s exp-nbf window on every ordinary module's request object
+	// under message signing. RecommendedLimits' MaxRequestObjectLifetime
+	// (10 minutes) already has headroom above that, so no profile-
+	// specific override is needed; FAPIgo 0.25.0's certification ran
+	// with this same 600s value as an explicit override, from when the
+	// recommendation was 60s. See oidf-config/README.md.
 
 	if len(cfg.Clients) == 0 {
 		return ResolvedConfig{}, fmt.Errorf("clients: at least one registered client is required")

@@ -15,17 +15,9 @@ import (
 // own conservative operational choices honestly labeled as such, not
 // dressed up as mandates the spec doesn't actually make.
 //
-// MaxIDTokenLifetime is left at zero deliberately: unlike every other
-// field here, it depends on the specific authorization server this
-// client talks to (how long that server actually makes its ID tokens
-// valid for), not on anything this module can recommend in the
-// abstract. New still rejects a zero MaxIDTokenLifetime for a client
-// that can receive ID tokens (the browser flow or CIBA, without
-// Config.OAuthOnly), so such a caller must set this one field
-// themselves; a client_credentials-only or OAuthOnly client can leave
-// it zero. BackchannelAuthenticationRequestLifetime is left at zero
-// too: a CIBA client (Endpoints.BackchannelAuthentication set) must set
-// it, and every other client can leave it zero.
+// BackchannelAuthenticationRequestLifetime is left at zero: a CIBA
+// client (Endpoints.BackchannelAuthentication set) must set it, and
+// every other client can leave it zero.
 func RecommendedLimits() Limits {
 	return Limits{
 		// Not spec-mandated — mirrors server.RecommendedLimits'
@@ -36,14 +28,24 @@ func RecommendedLimits() Limits {
 		// little value.
 		ClientAssertionLifetime: 60 * time.Second,
 
-		// Not spec-mandated — mirrors server.RecommendedLimits'
-		// MaxRequestObjectLifetime for the same reason.
+		// Not spec-mandated — the same short-lived-artifact principle
+		// as ClientAssertionLifetime. It fits within
+		// server.RecommendedLimits' MaxRequestObjectLifetime (10
+		// minutes), and within the 60 seconds a stricter
+		// authorization server might allow.
 		RequestObjectLifetime: 60 * time.Second,
 
 		// Not spec-mandated — a UX budget for how long a user has to
 		// complete login/consent, not a protocol requirement. Mirrors
 		// server.RecommendedLimits' InteractionLifetime.
 		SessionLifetime: 5 * time.Minute,
+
+		// Not spec-mandated — how long an ID token may be valid for
+		// depends on the authorization server: server.RecommendedLimits
+		// issues 10-minute ID tokens, and OpenID Providers commonly
+		// issue them for an hour. An hour admits both; lower it to
+		// your provider's own lifetime when you know it.
+		MaxIDTokenLifetime: time.Hour,
 
 		// Spec: JARM §2.1 — "a maximum JWT lifetime of 10 minutes is
 		// RECOMMENDED", which is also AssuranceProduction's ceiling. A
@@ -91,7 +93,9 @@ func RecommendedLimits() Limits {
 // only ever verifies, never produces, so which one to expect is a
 // property of the specific authorization server it's configured
 // against — discovered via Discover, not something this module can
-// recommend independent of who it's talking to. RequestObject,
+// recommend independent of who it's talking to. NewFromDiscovery fills
+// IDToken in when the server advertises exactly one ID token signing
+// algorithm; with New, or a server advertising several, set it. RequestObject,
 // BackchannelAuthenticationRequest and ClientAttestationPoP are ones
 // this client signs with, but only for a request object, CIBA or
 // attestation-based client authentication, so a client using one sets

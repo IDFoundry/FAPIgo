@@ -124,9 +124,13 @@ type Metadata struct {
 	// RevocationEndpoint (RFC 8414 §2) is set only when
 	// Config.Endpoints.Revocation is: RevokeToken serves it.
 	// RevocationEndpointAuthMethodsSupported then lists the same client
-	// authentication methods as TokenEndpointAuthMethodsSupported.
-	RevocationEndpoint                     *fapi.URL `json:"revocation_endpoint,omitempty"`
-	RevocationEndpointAuthMethodsSupported []string  `json:"revocation_endpoint_auth_methods_supported,omitempty"`
+	// authentication methods as TokenEndpointAuthMethodsSupported, and
+	// RevocationEndpointAuthSigningAlgValuesSupported the same client
+	// assertion algorithms as TokenEndpointAuthSigningAlgValuesSupported:
+	// RFC 8414 §2 requires it whenever private_key_jwt is listed.
+	RevocationEndpoint                              *fapi.URL `json:"revocation_endpoint,omitempty"`
+	RevocationEndpointAuthMethodsSupported          []string  `json:"revocation_endpoint_auth_methods_supported,omitempty"`
+	RevocationEndpointAuthSigningAlgValuesSupported []string  `json:"revocation_endpoint_auth_signing_alg_values_supported,omitempty"`
 
 	// MTLSEndpointAliases (RFC 8705 §5) is set only when
 	// Config.MTLSEndpoints is non-zero — most deployments never offer
@@ -343,14 +347,25 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		md.ClientAttestationPoPSigningAlgValuesSupported = s.cfg.Algorithms.ClientAttestationPoP.Strings()
 	}
 
-	if !s.cfg.Endpoints.Revocation.IsZero() {
-		md.RevocationEndpoint = urlOrNil(s.cfg.Endpoints.Revocation)
-		// RevokeToken authenticates a client exactly as the token
-		// endpoint does.
-		md.RevocationEndpointAuthMethodsSupported = slices.Clone(md.TokenEndpointAuthMethodsSupported)
-	}
+	s.addRevocationMetadata(&md)
 
 	return md
+}
+
+// addRevocationMetadata sets the RFC 8414 §2 revocation fields when
+// Config.Endpoints.Revocation is set. RevokeToken authenticates a
+// client exactly as the token endpoint does, so it lists the same
+// methods, and, with private_key_jwt among them, the same signing
+// algorithms, which §2 then requires.
+func (s *Server) addRevocationMetadata(md *Metadata) {
+	if s.cfg.Endpoints.Revocation.IsZero() {
+		return
+	}
+	md.RevocationEndpoint = urlOrNil(s.cfg.Endpoints.Revocation)
+	md.RevocationEndpointAuthMethodsSupported = slices.Clone(md.TokenEndpointAuthMethodsSupported)
+	if slices.Contains(md.RevocationEndpointAuthMethodsSupported, storage.ClientAuthMethodPrivateKeyJWT.String()) {
+		md.RevocationEndpointAuthSigningAlgValuesSupported = slices.Clone(md.TokenEndpointAuthSigningAlgValuesSupported)
+	}
 }
 
 // addOIDCMetadata sets the OpenID Connect Discovery 1.0 fields: the

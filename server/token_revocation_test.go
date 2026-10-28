@@ -199,8 +199,8 @@ func TestRevokeTokenNeedsTheEndpointConfigured(t *testing.T) {
 		t.Fatalf("RevokeToken without the endpoint: code %q, want server_error", code)
 	}
 	md := h.server.Metadata(context.Background())
-	if md.RevocationEndpoint != nil || md.RevocationEndpointAuthMethodsSupported != nil {
-		t.Errorf("Metadata advertises revocation without the endpoint: %v %v", md.RevocationEndpoint, md.RevocationEndpointAuthMethodsSupported)
+	if md.RevocationEndpoint != nil || md.RevocationEndpointAuthMethodsSupported != nil || md.RevocationEndpointAuthSigningAlgValuesSupported != nil {
+		t.Errorf("Metadata advertises revocation without the endpoint: %v %v %v", md.RevocationEndpoint, md.RevocationEndpointAuthMethodsSupported, md.RevocationEndpointAuthSigningAlgValuesSupported)
 	}
 }
 
@@ -214,6 +214,8 @@ func TestMetadataAdvertisesRevocationEndpoint(t *testing.T) {
 		RevocationEndpoint string   `json:"revocation_endpoint"`
 		AuthMethods        []string `json:"revocation_endpoint_auth_methods_supported"`
 		TokenAuthMethods   []string `json:"token_endpoint_auth_methods_supported"`
+		SigningAlgs        []string `json:"revocation_endpoint_auth_signing_alg_values_supported"`
+		TokenSigningAlgs   []string `json:"token_endpoint_auth_signing_alg_values_supported"`
 	}
 	if err := json.Unmarshal(raw, &md); err != nil {
 		t.Fatal(err)
@@ -223,6 +225,11 @@ func TestMetadataAdvertisesRevocationEndpoint(t *testing.T) {
 	}
 	if strings.Join(md.AuthMethods, " ") != strings.Join(md.TokenAuthMethods, " ") || !strings.Contains(strings.Join(md.AuthMethods, " "), "attest_jwt_client_auth") {
 		t.Errorf("revocation_endpoint_auth_methods_supported = %v, want the token endpoint's %v", md.AuthMethods, md.TokenAuthMethods)
+	}
+	// RFC 8414 §2: required when private_key_jwt is listed for the
+	// revocation endpoint.
+	if len(md.SigningAlgs) == 0 || strings.Join(md.SigningAlgs, " ") != strings.Join(md.TokenSigningAlgs, " ") {
+		t.Errorf("revocation_endpoint_auth_signing_alg_values_supported = %v, want the token endpoint's %v", md.SigningAlgs, md.TokenSigningAlgs)
 	}
 }
 

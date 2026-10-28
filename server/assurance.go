@@ -26,6 +26,25 @@ const (
 	// AssuranceProduction refuses at the pushed authorization request. A
 	// client registered as storage.ApplicationTypeNative may use loopback
 	// http, and a private-use scheme, under either level.
+	//
+	// A server under AssuranceDevelopment is not FAPI 2.0 conformant,
+	// even though its Metadata is identical to a production server's:
+	// nothing in the published metadata tells a client which level is in
+	// force. It accepts Limits outside the profile's fixed numbers — an
+	// AuthorizationCodeLifetime over 60 seconds (Security Profile
+	// §5.3.2.1 item 11), a PushedRequestLifetime of 600 seconds or more
+	// (§5.3.2.2 item 12), a MaxClockSkew under 10 seconds, including 0,
+	// which refuses the JWTs up to 10 seconds in the future that
+	// §5.3.2.1 item 13 says to accept, or over 60 seconds, a
+	// MaxRequestObjectLifetime over 60 minutes (Message Signing §5.3.1),
+	// and, with CIBA, a MaxBackchannelAuthenticationRequestLifetime over
+	// 60 minutes (FAPI-CIBA §5.2.2). It also accepts web clients'
+	// loopback http redirect URIs (§5.3.2.2 item 8), an issuer and
+	// endpoints over loopback http (§5.2.1) when they were parsed with
+	// fapi.AllowLoopbackHTTP, and any Dependencies.Random, and it skips
+	// every other check AssuranceProduction lists below. Use it for local
+	// development and tests only, never for a deployment clients rely on
+	// for FAPI's guarantees.
 	AssuranceDevelopment
 
 	// AssuranceProduction rejects a configuration missing anything this

@@ -51,10 +51,17 @@ func RecommendedLimits() Limits {
 		// specifically.
 		MaxClientAssertionLifetime: 60 * time.Second,
 
-		// Same reasoning as MaxClientAssertionLifetime — not directly
-		// spec-numbered, same short-lived-artifact principle applied
-		// for consistency.
-		MaxRequestObjectLifetime: 60 * time.Second,
+		// Not directly spec-numbered as a recommendation: FAPI 2.0
+		// Message Signing §5.3.1 only caps a request object's exp at
+		// 60 minutes after its nbf (Assurance Production enforces that
+		// ceiling). 10 minutes leaves headroom for conformant clients
+		// that sign request objects with a window of a few minutes —
+		// the OIDF conformance suite's own request objects use
+		// exp - nbf = 300s, which a 60s limit would refuse — while
+		// staying well inside the spec's ceiling. A FAPIgo client signs
+		// with client.RecommendedLimits' shorter RequestObjectLifetime,
+		// which fits within this.
+		MaxRequestObjectLifetime: 10 * time.Minute,
 
 		// Not spec-mandated at all — how long a user has to complete
 		// login/consent is a UX budget, not a protocol requirement.

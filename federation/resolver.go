@@ -94,6 +94,26 @@ type Limits struct {
 	// and extends how long past exp a statement is still accepted.
 	// Zero means no tolerance.
 	MaxClockSkew time.Duration
+
+	// MaxTrustMarkStatusAge bounds how long before Dependencies.Clock's
+	// time a Trust Mark Status Response's iat may be for
+	// CheckTrustMarkStatus to accept it (OpenID Federation 1.0 §8.4.2
+	// gives the response no exp). Zero means
+	// DefaultMaxTrustMarkStatusAge; negative is refused.
+	MaxTrustMarkStatusAge time.Duration
+}
+
+// DefaultMaxTrustMarkStatusAge is the Limits.MaxTrustMarkStatusAge used
+// when it is zero: a status response is fetched for each check, so it
+// should have been issued moments before.
+const DefaultMaxTrustMarkStatusAge = 5 * time.Minute
+
+// maxTrustMarkStatusAge is Limits.MaxTrustMarkStatusAge, or its default.
+func (r *Resolver) maxTrustMarkStatusAge() time.Duration {
+	if r.cfg.Limits.MaxTrustMarkStatusAge > 0 {
+		return r.cfg.Limits.MaxTrustMarkStatusAge
+	}
+	return DefaultMaxTrustMarkStatusAge
 }
 
 // Config is this Resolver's immutable configuration. It is copied by
@@ -176,6 +196,9 @@ func NewResolver(cfg Config, deps Dependencies) (*Resolver, error) {
 	}
 	if cfg.Limits.MaxClockSkew < 0 {
 		return nil, fmt.Errorf("federation: config: limits.max_clock_skew must not be negative")
+	}
+	if cfg.Limits.MaxTrustMarkStatusAge < 0 {
+		return nil, fmt.Errorf("federation: config: limits.max_trust_mark_status_age must not be negative")
 	}
 	if deps.HTTP == nil {
 		return nil, fmt.Errorf("federation: dependencies: http is required")
@@ -270,6 +293,14 @@ type ResolvedEntity struct {
 	// intfed.PermittedStrings). Nil for a Trust Anchor resolved as
 	// itself, whose metadata no policy applies to.
 	policy MetadataPolicy
+
+	// configurationMetadata is the "metadata" claim of EntityID's own
+	// Entity Configuration, verified with the rest of the chain but
+	// before any superior's metadata or policy: where a parameter OpenID
+	// Federation 1.0 says to publish "directly in Entity Configuration
+	// metadata and not in Subordinate Statements" is read from
+	// (federation_trust_mark_status_endpoint, §8.4).
+	configurationMetadata map[string]json.RawMessage
 }
 
 // chainWalkState is Resolve's own mutable state as it walks upward from
@@ -656,8 +687,9 @@ func (r *Resolver) resolveSelfAsTrustAnchor(subjectID string, leafStmt intfed.St
 		EntityID: subjectID, TrustAnchor: subjectID, Chain: []string{subjectID},
 		Metadata: leafClaims.Metadata, ExpiresAt: leafClaims.ExpiresAt,
 		JWKS: anchor.JWKS, TrustMarks: leafClaims.TrustMarks, TrustMarkOwners: leafClaims.TrustMarkOwners,
-		TrustMarkIssuers: leafClaims.TrustMarkIssuers,
-		Tokens:           []string{leafToken},
+		TrustMarkIssuers:      leafClaims.TrustMarkIssuers,
+		Tokens:                []string{leafToken},
+		configurationMetadata: leafClaims.Metadata,
 	}, nil
 }
 
@@ -756,9 +788,10 @@ func (r *Resolver) finalizeTrustChain(st *chainWalkState, hop int, sup hopSuperi
 		EntityID: st.subjectID, TrustAnchor: sup.id, Chain: st.chain,
 		Metadata: resolvedMetadata, ExpiresAt: st.minExpiry,
 		JWKS: st.subjectJWKS, TrustMarks: st.leafClaims.TrustMarks, TrustMarkOwners: st.leafClaims.TrustMarkOwners,
-		TrustMarkIssuers: st.leafClaims.TrustMarkIssuers,
-		Tokens:           append(st.tokens, sup.token),
-		policy:           policy,
+		TrustMarkIssuers:      st.leafClaims.TrustMarkIssuers,
+		Tokens:                append(st.tokens, sup.token),
+		policy:                policy,
+		configurationMetadata: st.leafClaims.Metadata,
 	}, nil
 }
 

@@ -667,6 +667,44 @@ publishing these JWTs puts its signing key's `kid` in each header:
 {"alg": "ES256", "typ": "trust-mark+jwt", "kid": "tm-signing-2026"}
 ```
 
+### `CheckTrustMarkStatus` uses the issuer's own endpoint and refuses old answers (federation)
+
+**Affects:** `federation.Resolver.CheckTrustMarkStatus` against a Trust
+Mark Issuer that signs its status responses ahead of time and serves
+them for more than five minutes, or one whose status endpoint was set
+only by a superior's Subordinate Statement metadata. Also anything that
+parses `federation.WriteError`'s fallback body as plain text.
+
+**Why:** OpenID Federation 1.0 §8.4 says the status endpoint "MUST be
+published directly in Entity Configuration metadata and not in
+Subordinate Statements", but it was read from Resolved Metadata, so the
+issuer's immediate superior could redirect the queries. A status
+response carries no `exp` (§8.4.2), and only a future `iat` was
+refused, so an old signed "active" answer could be replayed after the
+Trust Mark was revoked. §8.9 makes `error_description` REQUIRED and
+says the body SHOULD be JSON; `WriteError` answered an unknown error
+with a text/plain body, and an `*Error` built with no description
+omitted the member.
+
+**What fails:** `CheckTrustMarkStatus` for a response whose `iat` is
+older than `Limits.MaxTrustMarkStatusAge` (default
+`DefaultMaxTrustMarkStatusAge`, five minutes), with an error wrapping
+the internal "too old" error, and for an issuer whose own Entity
+Configuration publishes no `federation_trust_mark_status_endpoint`.
+
+**What to change:** raise the bound if your federation's issuers cache
+their responses:
+
+```go
+cfg.Limits.MaxTrustMarkStatusAge = time.Hour
+```
+
+A Trust Mark Issuer publishes its status endpoint in its own Entity
+Configuration's `federation_entity` metadata. `WriteError` now always
+writes `{"error": ..., "error_description": ...}` as
+`application/json`; the new `ErrorCode` constants cover every §8.9
+code.
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

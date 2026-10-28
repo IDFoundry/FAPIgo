@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -19,8 +20,8 @@ const (
 	// both use this for a missing/malformed "sub".
 	ErrorInvalidRequest ErrorCode = "invalid_request"
 
-	// ErrorNotFound is §8.9's "the endpoint cannot serve the requested
-	// subject" code — HTTP 404. Only ever built with NewError: whether a
+	// ErrorNotFound is §8.9's "the requested Entity Identifier cannot
+	// be found" code — HTTP 404. Only ever built with NewError: whether a
 	// "sub" is actually a known subordinate (Fetch, §8.1.2), or actually
 	// holds the requested Trust Mark (§8.6.2's own "If the specified
 	// Entity does not have the specified Trust Mark... MUST use the HTTP
@@ -33,7 +34,70 @@ const (
 	// trust_mark_type, intermediate) the responder doesn't support —
 	// HTTP 400. RejectUnsupportedListingFilters returns this.
 	ErrorUnsupportedParameter ErrorCode = "unsupported_parameter"
+
+	// ErrorServerError is §8.9's "the server encountered an unexpected
+	// condition" code — an HTTP 5xx, usually 500. WriteError answers
+	// with it for an error that isn't an *Error.
+	ErrorServerError ErrorCode = "server_error"
+
+	// ErrorTemporarilyUnavailable is §8.9's code for a server "unable to
+	// handle the request due to temporary overloading or maintenance" —
+	// HTTP 503.
+	ErrorTemporarilyUnavailable ErrorCode = "temporarily_unavailable"
+
+	// ErrorInvalidClient is §8.9's "the Client cannot be authorized or
+	// is not a valid participant of the federation" code — HTTP 401.
+	ErrorInvalidClient ErrorCode = "invalid_client"
+
+	// ErrorInvalidIssuer is §8.9's "the endpoint cannot serve the
+	// requested issuer" code — HTTP 404.
+	ErrorInvalidIssuer ErrorCode = "invalid_issuer"
+
+	// ErrorInvalidSubject is §8.9's "the endpoint cannot serve the
+	// requested subject" code — HTTP 404.
+	ErrorInvalidSubject ErrorCode = "invalid_subject"
+
+	// ErrorInvalidTrustAnchor is §8.9's "the Trust Anchor cannot be
+	// found or used" code — HTTP 404.
+	ErrorInvalidTrustAnchor ErrorCode = "invalid_trust_anchor"
+
+	// ErrorInvalidTrustChain is §8.9's "the Trust Chain cannot be
+	// validated" code — HTTP 400.
+	ErrorInvalidTrustChain ErrorCode = "invalid_trust_chain"
+
+	// ErrorInvalidMetadata is §8.9's "Metadata or Metadata Policy values
+	// are invalid or conflict" code — HTTP 400.
+	ErrorInvalidMetadata ErrorCode = "invalid_metadata"
 )
+
+// defaultDescription is the error_description used for code when an
+// *Error is built without one: §8.9 makes error_description REQUIRED.
+func defaultDescription(code ErrorCode) string {
+	switch code {
+	case ErrorInvalidRequest:
+		return "the request is incomplete or does not comply with current specifications"
+	case ErrorNotFound:
+		return "the requested Entity Identifier cannot be found"
+	case ErrorUnsupportedParameter:
+		return "the server does not support the requested parameter"
+	case ErrorTemporarilyUnavailable:
+		return "the server is temporarily unable to handle the request"
+	case ErrorInvalidClient:
+		return "the client cannot be authorized or is not a valid participant of the federation"
+	case ErrorInvalidIssuer:
+		return "the endpoint cannot serve the requested issuer"
+	case ErrorInvalidSubject:
+		return "the endpoint cannot serve the requested subject"
+	case ErrorInvalidTrustAnchor:
+		return "the Trust Anchor cannot be found or used"
+	case ErrorInvalidTrustChain:
+		return "the Trust Chain cannot be validated"
+	case ErrorInvalidMetadata:
+		return "metadata or metadata policy values are invalid or conflict"
+	default:
+		return "the server encountered an unexpected condition"
+	}
+}
 
 // Error is the error type this package's own HTTP-adjacent helpers
 // (SubjectFromFetchRequest, RejectUnsupportedListingFilters,
@@ -48,15 +112,20 @@ type Error struct {
 }
 
 func newError(code ErrorCode, httpStatus int, description string, cause error) *Error {
+	if description == "" {
+		description = defaultDescription(code)
+	}
 	return &Error{code: code, httpStatus: httpStatus, description: description, cause: cause}
 }
 
 // NewError builds an *Error for a caller reporting an OpenID Federation
 // §8.9-shaped failure it detected itself — most notably ErrorNotFound,
 // which only the caller's own subordinate lookup can determine (see
-// ErrorNotFound's own doc comment). Mirrors server.NewError.
+// ErrorNotFound's own doc comment). Mirrors server.NewError. An empty
+// description is replaced with a generic one for code, since §8.9 makes
+// error_description REQUIRED.
 func NewError(code ErrorCode, httpStatus int, description string) *Error {
-	return &Error{code: code, httpStatus: httpStatus, description: description}
+	return newError(code, httpStatus, description, nil)
 }
 
 // Code returns the OpenID Federation error code.
@@ -90,12 +159,32 @@ func (e *Error) Unwrap() error { return e.cause }
 // http.ResponseWriter header/status call, it has no effect once a
 // prior write has already sent the response's status line.
 func (e *Error) WriteJSON(w http.ResponseWriter) {
-	httperror.WriteJSON(w, "", "", string(e.code), e.description, e.httpStatus)
+	code, description := e.code, e.description
+	if code == "" { // a zero *Error, built without NewError
+		code = ErrorServerError
+	}
+	if description == "" {
+		description = defaultDescription(code)
+	}
+	writeErrorJSON(w, string(code), description, httperror.Status(e.httpStatus))
+}
+
+// writeErrorJSON writes a §8.9 error response: both members are
+// REQUIRED, so error_description is never omitted.
+func writeErrorJSON(w http.ResponseWriter, code, description string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	// Encoding two plain strings cannot fail.
+	_ = json.NewEncoder(w).Encode(struct {
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
+	}{Error: code, ErrorDescription: description})
 }
 
 // WriteError writes err to w: err's own WriteJSON if err is a *Error
 // (as every error this package's own HTTP-adjacent helpers return is),
-// or a generic 500 otherwise. Saves every HTTP adapter from
+// or a §8.9 JSON server_error (500) otherwise, never exposing err
+// itself. Saves every HTTP adapter from
 // reimplementing this same errors.As-or-fallback dance itself — see
 // cmd/conformance-federation-trust-anchor's own history for exactly
 // this boilerplate, repeated inline at every one of its endpoints
@@ -106,5 +195,5 @@ func WriteError(w http.ResponseWriter, err error) {
 		fedErr.WriteJSON(w)
 		return
 	}
-	http.Error(w, "server_error", http.StatusInternalServerError)
+	writeErrorJSON(w, string(ErrorServerError), defaultDescription(ErrorServerError), http.StatusInternalServerError)
 }

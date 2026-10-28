@@ -39,7 +39,7 @@ func validTrustMarkStatusResponseClaims(now time.Time) map[string]any {
 func trustMarkStatusResponseVerifyPolicy(now time.Time) TrustMarkStatusResponseVerifyPolicy {
 	return TrustMarkStatusResponseVerifyPolicy{
 		ExpectedIssuer: "https://issuer.example.org", ExpectedTrustMark: "a.b.c",
-		Algorithm: fapi.ES256, Now: now,
+		Algorithm: fapi.ES256, Now: now, MaxAge: time.Minute,
 	}
 }
 
@@ -229,7 +229,7 @@ func TestCreateTrustMarkStatusResponseRoundTripsThroughParseAndVerify(t *testing
 	}
 	claims, err := r.Verify(&key.PublicKey, TrustMarkStatusResponseVerifyPolicy{
 		ExpectedIssuer: "https://issuer.example.org", ExpectedTrustMark: "a.b.c",
-		Algorithm: fapi.ES256, Now: now,
+		Algorithm: fapi.ES256, Now: now, MaxAge: time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
@@ -264,5 +264,30 @@ func TestCreateTrustMarkStatusResponseRejectsInvalidParams(t *testing.T) {
 				t.Fatalf("CreateTrustMarkStatusResponse(%s) = nil error, want error", name)
 			}
 		})
+	}
+}
+
+// TestVerifyTrustMarkStatusResponseRejectsTooOld: the response has no
+// exp, so Verify bounds its iat's age by MaxAge (plus MaxClockSkew), and
+// requires MaxAge.
+func TestVerifyTrustMarkStatusResponseRejectsTooOld(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	token := createTrustMarkStatusResponseToken(t, key, "issuer-kid", trustMarkStatusResponseJWTType, validTrustMarkStatusResponseClaims(now.Add(-2*time.Minute)))
+	r, err := ParseTrustMarkStatusResponse(token)
+	if err != nil {
+		t.Fatalf("ParseTrustMarkStatusResponse: %v", err)
+	}
+	policy := trustMarkStatusResponseVerifyPolicy(now)
+	if _, err := r.Verify(&key.PublicKey, policy); !errors.Is(err, ErrTrustMarkStatusResponseTooOld) {
+		t.Errorf("Verify(2 minutes old, MaxAge 1 minute) = %v, want ErrTrustMarkStatusResponseTooOld", err)
+	}
+	policy.MaxClockSkew = 2 * time.Minute
+	if _, err := r.Verify(&key.PublicKey, policy); err != nil {
+		t.Errorf("Verify(within MaxAge plus skew) = %v", err)
+	}
+	policy.MaxAge = 0
+	if _, err := r.Verify(&key.PublicKey, policy); err == nil {
+		t.Error("Verify(MaxAge 0) = nil error, want MaxAge required")
 	}
 }

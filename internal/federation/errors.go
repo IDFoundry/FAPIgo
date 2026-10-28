@@ -132,6 +132,11 @@ var (
 	// claim is in the future beyond the configured clock-skew tolerance.
 	ErrTrustMarkStatusResponseNotYetValid = errors.New("federation: trust mark status response is not yet valid")
 
+	// ErrTrustMarkStatusResponseTooOld indicates the response's iat
+	// claim is further in the past than the configured maximum age
+	// (TrustMarkStatusResponseVerifyPolicy.MaxAge) allows.
+	ErrTrustMarkStatusResponseTooOld = errors.New("federation: trust mark status response is too old")
+
 	// ErrResolveResponseWrongType indicates a Resolve Response JWT's
 	// "typ" header was not "resolve-response+jwt" (OpenID Federation 1.0
 	// §8.3.2's own "Resolve responses without a typ header parameter or

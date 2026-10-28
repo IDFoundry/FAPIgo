@@ -256,7 +256,7 @@ func TestStatusResponseRoundTrips(t *testing.T) {
 	}
 	claims, err := r.Verify(&key.PublicKey, intfed.TrustMarkStatusResponseVerifyPolicy{
 		ExpectedIssuer: "https://issuer.example.org", ExpectedTrustMark: "a.b.c",
-		Algorithm: fapi.ES256, Now: now,
+		Algorithm: fapi.ES256, Now: now, MaxAge: time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)

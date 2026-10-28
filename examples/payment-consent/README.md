@@ -8,7 +8,8 @@ Message Signing redirect flow:
 - a consent screen describing the payment from its Rich Authorization
   Request (RFC 9396);
 - a signed authorization response (JARM);
-- a DPoP-bound access token (RFC 9449).
+- a DPoP-bound access token (RFC 9449), with server nonces at the bank
+  and its API.
 
 An **attack lab** tries to break each of those, and every order page
 shows a protocol trace of what was signed, bound and checked.
@@ -86,7 +87,12 @@ with the payee's name from the bank's own records. The shop's own text
 (the reference) is marked as unchecked. The bank answers with a signed
 JARM response, and the shop redeems the code for a DPoP-bound token and
 charges exactly the approved payment. The order page's **protocol trace**
-shows each request and response, with the signed parts decoded.
+shows each request and response, with the signed parts decoded. The
+bank's PAR endpoint and the payments API each answer the shop's first
+DPoP proof with a `use_dpop_nonce` challenge carrying a `DPoP-Nonce`;
+the shop's client retries once with that nonce in its proof, and keeps
+using it until the server hands out the next. A proof made ahead of
+time, or captured, carries no current nonce and is refused.
 
 **2. Misuse the approval.** On the paid order, each attack button is
 refused:
@@ -115,8 +121,8 @@ Everything here uses FAPIgo's public API only.
 
 | Piece | FAPIgo |
 |---|---|
-| Alder Bank | `server.Server` with `ProfileFAPISecurityWithMessageSigning` and `Config.RAR`; the shop registered with `AuthorizationDetailsTypes` for payments only, and `Dependencies.AuthorizationCodeRARPolicy` set to `server.AllowRequestedAuthorizationDetails`; the consent page's state in an encrypted cookie (`server/interactioncookie`) |
-| The payments API | `serverresource.NewVerifier`, built from the bank's own server configuration; the granted details from the access token's `authorization_details` claim (`extension.ParseGrantedRAR`, `RARGet`); `resource.NewInsufficientScopeError` for anything else |
+| Alder Bank | `server.Server` with `ProfileFAPISecurityWithMessageSigning` and `Config.RAR`; DPoP server nonces (`Dependencies.Nonces`, `Limits.DPoPNonceLifetime`); the shop registered with `AuthorizationDetailsTypes` for payments only, and `Dependencies.AuthorizationCodeRARPolicy` set to `server.AllowRequestedAuthorizationDetails`; the consent page's state in an encrypted cookie (`server/interactioncookie`) |
+| The payments API | `serverresource.NewVerifier`, built from the bank's own server configuration, with its own nonce store (`Options.Nonces`); the granted details from the access token's `authorization_details` claim (`extension.ParseGrantedRAR`, `RARGet`); `resource.NewInsufficientScopeError` for anything else |
 | Northgate Outfitters | `client.Discover`, `client.NewFromDiscovery` with `ProfileFAPISecurityWithMessageSigning`; `BeginAuthorization` with `AuthorizationDetails`; `HandleAuthorizationResponse` and `ExchangeCode`; `ProtectedResource` for the DPoP-bound API call |
 
 The code:

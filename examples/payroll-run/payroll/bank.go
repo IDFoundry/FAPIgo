@@ -144,6 +144,11 @@ func (w *World) newBank(certs certificates) (*bank, error) {
 		Keys:         manager,
 		AccessTokens: accessTokens,
 		Revocation:   memstore.NewRevocationStore(),
+		// Every client is sender-constrained by mTLS, so no DPoP proof
+		// ever arrives: decline DPoP server nonces explicitly, as a
+		// production server.New requires. The payroll API's verifier
+		// (serverresource.NewVerifier) follows this decline.
+		Nonces: server.NoDPoPNonces{},
 		// The bank checks every client certificate itself: that it
 		// chains to its root CA, and that neither the certificate nor the
 		// issuing CA has been revoked. The issuing CAs go in

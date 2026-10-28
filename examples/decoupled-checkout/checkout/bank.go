@@ -119,6 +119,9 @@ func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
 	limits.BackchannelAuthenticationRequestLifetime = requestLifetime
 	limits.MaxBackchannelAuthenticationRequestLifetime = 10 * time.Minute
 	limits.BackchannelAuthenticationPollInterval = pollInterval
+	// RecommendedLimits leaves the nonce lifetime to whoever enables
+	// nonces (Dependencies.Nonces below).
+	limits.DPoPNonceLifetime = 5 * time.Minute
 	algorithms := server.RecommendedAlgorithms()
 	algorithms.BackchannelAuthenticationRequest = server.RecommendedAlgorithmSet()
 
@@ -138,6 +141,14 @@ func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
 		Keys:         manager,
 		AccessTokens: accessTokens,
 		Revocation:   memstore.NewRevocationStore(),
+		// DPoP server nonces (RFC 9449 §8): a DPoP proof at the
+		// backchannel authentication or token endpoint must carry a
+		// nonce the bank handed out, so a proof made ahead of time, or
+		// captured, is refused. A client's first call is answered
+		// use_dpop_nonce with one; it retries once and reuses it, polls
+		// included. (A production server.New requires this, or
+		// server.NoDPoPNonces{} to decline.)
+		Nonces: memstore.NewNonceStore(),
 		// No client authenticates with a CA-issued certificate
 		// (tls_client_auth), so refuse that method outright.
 		ClientCertificateTrust: server.NoPKIClientAuthentication{},

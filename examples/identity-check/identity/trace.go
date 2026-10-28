@@ -118,7 +118,7 @@ func (c tracingClient) Do(req *http.Request) (*http.Response, error) {
 	}
 	res.Body = io.NopCloser(bytes.NewReader(resBody))
 	res.ContentLength = int64(len(resBody))
-	opts.trace.add(title, fmt.Sprintf("%s\n\n→ %s\n%s", detail, res.Status, describeResponse(resBody)))
+	opts.trace.add(title, fmt.Sprintf("%s\n\n→ %s\n%s%s", detail, res.Status, describeResponseHeaders(res.Header), describeResponse(resBody)))
 	return res, nil
 }
 
@@ -317,4 +317,18 @@ func randomCode(n int) string {
 		b[i] = alphabet[int(b[i])%len(alphabet)]
 	}
 	return string(b)
+}
+
+// describeResponseHeaders shows the response headers a DPoP nonce
+// challenge and its reuse turn on: the nonce to use next, and a
+// protected resource's WWW-Authenticate challenge.
+func describeResponseHeaders(h http.Header) string {
+	var b strings.Builder
+	if challenge := h.Get("WWW-Authenticate"); challenge != "" {
+		fmt.Fprintf(&b, "WWW-Authenticate: %s\n", challenge)
+	}
+	if nonce := h.Get("DPoP-Nonce"); nonce != "" {
+		fmt.Fprintf(&b, "DPoP-Nonce: %s\n", nonce)
+	}
+	return b.String()
 }

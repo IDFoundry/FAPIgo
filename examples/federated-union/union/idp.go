@@ -113,6 +113,10 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 		return nil, err
 	}
 
+	// RecommendedLimits leaves the nonce lifetime to whoever enables
+	// nonces (Dependencies.Nonces below).
+	limits := server.RecommendedLimits()
+	limits.DPoPNonceLifetime = 5 * time.Minute
 	cfg := server.Config{
 		// Pairwise by default, which also offers federation services
 		// pairwise subs alone: one asking for public is refused
@@ -122,7 +126,7 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 		Endpoints:  endpoints,
 		Profile:    server.ProfileFAPISecurity,
 		Algorithms: server.RecommendedAlgorithms(),
-		Limits:     server.RecommendedLimits(),
+		Limits:     limits,
 		Assurance:  server.AssuranceDevelopment,
 		Federation: server.FederationConfig{
 			EntityID: id, AuthorityHints: []string{ta.id}, Lifetime: statementLifetime, Algorithm: fapi.ES256,
@@ -162,6 +166,14 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 		Keys:         manager,
 		AccessTokens: accessTokens,
 		Revocation:   memstore.NewRevocationStore(),
+		// DPoP server nonces (RFC 9449 §8): a service's DPoP proof at
+		// PAR or the token endpoint must carry a nonce this identity
+		// provider handed out, so a proof made ahead of time, or
+		// captured, is refused. A service's first call is answered
+		// use_dpop_nonce with one; it retries once and reuses it. (A
+		// production server.New requires this, or server.NoDPoPNonces{}
+		// to decline.)
+		Nonces: memstore.NewNonceStore(),
 		// No client authenticates with a CA-issued certificate
 		// (tls_client_auth), so refuse that method outright.
 		ClientCertificateTrust: server.NoPKIClientAuthentication{},

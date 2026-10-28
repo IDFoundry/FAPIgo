@@ -129,6 +129,9 @@ func (w *World) newBank(apps apps) (*bank, error) {
 	// that long, and isn't rotated (FAPI 2.0), so the consent ends when it
 	// does.
 	limits.RefreshTokenLifetime = consentLifetime
+	// RecommendedLimits leaves the nonce lifetime to whoever enables
+	// nonces (Dependencies.Nonces below).
+	limits.DPoPNonceLifetime = 5 * time.Minute
 
 	b := &bank{w: w, interaction: interaction, connections: map[string]*connection{}}
 	b.cfg = server.Config{
@@ -148,6 +151,13 @@ func (w *World) newBank(apps apps) (*bank, error) {
 		// The revocation store the bank and its API share: RevokeGrant
 		// writes to it, and both read it.
 		Revocation: memstore.NewRevocationStore(),
+		// DPoP server nonces (RFC 9449 §8): a DPoP proof at PAR or the
+		// token endpoint must carry a nonce the bank handed out, so a
+		// proof made ahead of time, or captured, is refused. A client's
+		// first call is answered use_dpop_nonce with one; it retries
+		// once and reuses it. (A production server.New requires this, or
+		// server.NoDPoPNonces{} to decline.)
+		Nonces: memstore.NewNonceStore(),
 		// No client authenticates with a CA-issued certificate
 		// (tls_client_auth), so refuse that method outright.
 		ClientCertificateTrust: server.NoPKIClientAuthentication{},

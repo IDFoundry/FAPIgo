@@ -121,7 +121,14 @@ func (w *World) userinfoVerifier(cfg server.Config, deps server.Dependencies) (*
 	if err != nil {
 		return nil, err
 	}
-	return serverresource.NewVerifier(cfg, deps, serverresource.Options{ResourceURLs: []fapi.URL{userinfoURL}})
+	// It challenges for DPoP nonces too (RFC 9449 §9), from a store of
+	// its own: a nonce the bank's token endpoint handed out isn't valid
+	// here, nor the other way round.
+	return serverresource.NewVerifier(cfg, deps, serverresource.Options{
+		ResourceURLs:  []fapi.URL{userinfoURL},
+		Nonces:        memstore.NewNonceStore(),
+		NonceLifetime: cfg.Limits.DPoPNonceLifetime,
+	})
 }
 
 func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
@@ -189,6 +196,11 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	algs.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.ECDHESA256KW}
 	algs.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
 
+	// RecommendedLimits leaves the nonce lifetime to whoever enables
+	// nonces (Dependencies.Nonces below).
+	limits := server.RecommendedLimits()
+	limits.DPoPNonceLifetime = 5 * time.Minute
+
 	b := &bank{w: w, clients: memstore.NewClientRepository(registered), interaction: interaction}
 	cfg := server.Config{
 		// Every client gets its own sub for each customer (OIDC Core §8):
@@ -198,7 +210,7 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 		// none here is.
 		Subjects: server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Prefix: prefix},
 		Issuer:   issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
-		Algorithms: algs, Limits: server.RecommendedLimits(), Assurance: server.AssuranceDevelopment,
+		Algorithms: algs, Limits: limits, Assurance: server.AssuranceDevelopment,
 	}
 	deps := server.Dependencies{
 		Clients:      b.clients,
@@ -213,6 +225,13 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 		Keys:                 manager,
 		AccessTokens:         accessTokens,
 		Revocation:           memstore.NewRevocationStore(),
+		// DPoP server nonces (RFC 9449 §8): a DPoP proof at PAR or the
+		// token endpoint must carry a nonce the bank handed out, so a
+		// proof made ahead of time, or captured, is refused. A client's
+		// first call is answered use_dpop_nonce with one; it retries
+		// once and reuses it. (A production server.New requires this, or
+		// server.NoDPoPNonces{} to decline.)
+		Nonces: memstore.NewNonceStore(),
 		// No client authenticates with a CA-issued certificate
 		// (tls_client_auth), so refuse that method outright.
 		ClientCertificateTrust: server.NoPKIClientAuthentication{},

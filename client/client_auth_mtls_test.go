@@ -23,6 +23,9 @@ import (
 // an orthogonal concern from ClientAuthMethod.
 type fakeCertAuthAS struct {
 	t *testing.T
+	// pollPending answers the token endpoint authorization_pending, for
+	// a CIBA poll: its openid request would need an ID token otherwise.
+	pollPending bool
 
 	lastPARForm   url.Values
 	lastTokenForm url.Values
@@ -73,6 +76,10 @@ func (a *fakeCertAuthAS) handleToken(w http.ResponseWriter, r *http.Request) {
 	a.checkCertAuthShape(a.t, r.PostForm, "token")
 
 	w.Header().Set("Content-Type", "application/json")
+	if a.pollPending {
+		writePendingResponse(w)
+		return
+	}
 	// ClientAuthMethod and SenderConstrain are independent — these test
 	// clients leave SenderConstrain at its default (DPoP), so the
 	// expected token_type is "DPoP", not "Bearer" (RFC 8705 §3's
@@ -176,7 +183,7 @@ func TestExchangeCodeTLSClientAuthSendsClientIDNoAssertion(t *testing.T) {
 // client authenticates), but the surrounding form must carry client_id,
 // not client_assertion.
 func TestBeginBackchannelAuthenticationSelfSignedTLSClientAuthSendsClientIDNoAssertion(t *testing.T) {
-	as := &fakeCertAuthAS{t: t}
+	as := &fakeCertAuthAS{t: t, pollPending: true}
 	ts := httptest.NewServer(as.handler())
 	defer ts.Close()
 
@@ -208,7 +215,7 @@ func TestBeginBackchannelAuthenticationSelfSignedTLSClientAuthSendsClientIDNoAss
 
 	ctx := context.Background()
 	session, err := c.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAuthenticationRequest{
-		Scope: []string{"accounts"} /* no openid: this fixture returns no ID token */, LoginHint: "user@example.com",
+		Scope: []string{"openid", "accounts"}, LoginHint: "user@example.com",
 	})
 	if err != nil {
 		t.Fatalf("BeginBackchannelAuthentication: %v", err)

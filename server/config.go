@@ -345,7 +345,10 @@ type Limits struct {
 	// BackchannelAuthenticationRequestLifetime bounds how long a
 	// pending CIBA request remains pollable — reported to the client as
 	// expires_in, mirroring PushedRequestLifetime's role for PAR.
-	// Required only when Endpoints.BackchannelAuthentication is set.
+	// Required only when Endpoints.BackchannelAuthentication is set,
+	// and then New requires a whole number of seconds, at least one:
+	// expires_in is an integer (CIBA §7.3), so any other value would be
+	// advertised truncated.
 	BackchannelAuthenticationRequestLifetime time.Duration
 
 	// MaxBackchannelAuthenticationRequestLifetime bounds how far in the
@@ -360,7 +363,10 @@ type Limits struct {
 	// must wait between two polls of the same auth_req_id — reported to
 	// the client as "interval", and enforced server-side (a poll sooner
 	// than this fails with ErrorSlowDown). Required only when
-	// Endpoints.BackchannelAuthentication is set.
+	// Endpoints.BackchannelAuthentication is set, and then New requires
+	// a whole number of seconds, at least one: interval is an integer
+	// (CIBA §7.3), and a truncated value would tell the client to poll
+	// sooner than this enforces.
 	BackchannelAuthenticationPollInterval time.Duration
 
 	// MaxClientAttestationLifetime bounds how far in the future a
@@ -484,6 +490,19 @@ type Config struct {
 	// enabling it here does not implicitly permit every registered
 	// client to use it.
 	ClientCredentialsGrant bool
+
+	// RequireBindingMessage makes BeginBackchannelAuthentication refuse
+	// a CIBA request without a binding_message, with ErrorInvalidRequest
+	// (CIBA Core §13: a required parameter is missing), before anything
+	// is stored or shown to the user. FAPI-CIBA §5.2.2 requires that the
+	// user can tell which request they're approving: either each request
+	// carries a unique authorization context you show them, or a binding
+	// message the consumption device shows too. Set this when your
+	// requests can't be told apart otherwise. False (the default)
+	// accepts a request without one, leaving that decision to the
+	// application. Only meaningful when Endpoints.BackchannelAuthentication
+	// is set.
+	RequireBindingMessage bool
 
 	// AdditionalGrantTypes are grant types the embedder serves itself at
 	// Endpoints.Token, routing requests by grant_type — such as

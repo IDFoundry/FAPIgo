@@ -92,6 +92,9 @@ func mustConfirmationJWK(t *testing.T, pub crypto.PublicKey) []byte {
 type fakeAttestationAuthAS struct {
 	t               *testing.T
 	confirmationJWK []byte
+	// pollPending answers the token endpoint authorization_pending, for
+	// a CIBA poll: its openid request would need an ID token otherwise.
+	pollPending bool
 
 	lastPARForm, lastTokenForm, lastBCForm          url.Values
 	lastPARHeaders, lastTokenHeaders, lastBCHeaders http.Header
@@ -176,6 +179,10 @@ func (a *fakeAttestationAuthAS) handleToken(w http.ResponseWriter, r *http.Reque
 	a.checkAttestationAuthShape(a.t, r.PostForm, r.Header, "token")
 
 	w.Header().Set("Content-Type", "application/json")
+	if a.pollPending {
+		writePendingResponse(w)
+		return
+	}
 	// SenderConstrain stays the default (DPoP) in every test below, so
 	// the expected token_type is "DPoP" — ClientAuthMethod and
 	// SenderConstrain are independent concerns, mirroring
@@ -431,7 +438,7 @@ func TestBeginBackchannelAuthenticationAndPollAttestationSendsHeaders(t *testing
 		t.Fatalf("PublicKey(ClientAttestationPoPSigning): %v", err)
 	}
 
-	as := &fakeAttestationAuthAS{t: t, confirmationJWK: mustConfirmationJWK(t, info.PublicKey)}
+	as := &fakeAttestationAuthAS{t: t, confirmationJWK: mustConfirmationJWK(t, info.PublicKey), pollPending: true}
 	ts := httptest.NewServer(as.handler())
 	defer ts.Close()
 
@@ -465,7 +472,7 @@ func TestBeginBackchannelAuthenticationAndPollAttestationSendsHeaders(t *testing
 
 	ctx := context.Background()
 	session, err := c.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAuthenticationRequest{
-		Scope: []string{"accounts"} /* no openid: this fixture returns no ID token */, LoginHint: "user@example.com",
+		Scope: []string{"openid", "accounts"}, LoginHint: "user@example.com",
 	})
 	if err != nil {
 		t.Fatalf("BeginBackchannelAuthentication: %v", err)

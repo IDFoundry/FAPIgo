@@ -279,6 +279,18 @@ func TestExchangeCodePropagatesTransportFailureMTLS(t *testing.T) {
 // fakeCIBAAS (backchannel_test.go), which 11 other tests share.
 func TestBeginBackchannelAuthenticationAndPollMTLSSendNoDPoPHeader(t *testing.T) {
 	var sawBCDPoPHeader, sawPollDPoPHeader bool
+	idKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idToken, err := token.IssueIDToken(token.IDTokenParams{
+		Signer: idKey, Algorithm: fapi.ES256, KeyID: "as-id-kid",
+		Issuer: testIssuer, Subject: "end-user-1", Audience: testClientID,
+		Now: time.Now(), Lifetime: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/backchannel-authenticate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("DPoP") != "" {
@@ -301,6 +313,7 @@ func TestBeginBackchannelAuthenticationAndPollMTLSSendNoDPoPHeader(t *testing.T)
 			"token_type":   "Bearer",
 			"expires_in":   300,
 			"scope":        "openid accounts",
+			"id_token":     idToken,
 		})
 	})
 	ts := httptest.NewServer(mux)
@@ -325,6 +338,7 @@ func TestBeginBackchannelAuthenticationAndPollMTLSSendNoDPoPHeader(t *testing.T)
 	deps := validDependencies(t)
 	deps.HTTP = ts.Client()
 	deps.Keys = newFakeKeyManager(t, keys.ClientAuthentication, keys.BackchannelAuthenticationRequestSigning)
+	deps.IssuerKeys = &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{keys.IDTokenVerification: &idKey.PublicKey}}
 
 	c, err := client.New(cfg, deps)
 	if err != nil {
@@ -333,7 +347,7 @@ func TestBeginBackchannelAuthenticationAndPollMTLSSendNoDPoPHeader(t *testing.T)
 
 	ctx := context.Background()
 	session, err := c.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAuthenticationRequest{
-		Scope: []string{"accounts"} /* no openid: this fixture returns no ID token */, LoginHint: "user@example.com",
+		Scope: []string{"openid", "accounts"}, LoginHint: "user@example.com",
 	})
 	if err != nil {
 		t.Fatalf("BeginBackchannelAuthentication: %v", err)

@@ -120,7 +120,7 @@ func newHarnessWithBackchannelOptions(t *testing.T, backchannel storage.Backchan
 			MaxClockSkew:                                5 * time.Second,
 			BackchannelAuthenticationRequestLifetime:    2 * time.Minute,
 			MaxBackchannelAuthenticationRequestLifetime: time.Minute,
-			BackchannelAuthenticationPollInterval:       time.Millisecond,
+			BackchannelAuthenticationPollInterval:       time.Second,
 		},
 		Assurance: server.AssuranceDevelopment,
 	}
@@ -213,7 +213,7 @@ func newBackchannelOAuthOnlyServer(t *testing.T) error {
 			MaxClockSkew:                                5 * time.Second,
 			BackchannelAuthenticationRequestLifetime:    2 * time.Minute,
 			MaxBackchannelAuthenticationRequestLifetime: time.Minute,
-			BackchannelAuthenticationPollInterval:       time.Millisecond,
+			BackchannelAuthenticationPollInterval:       time.Second,
 		},
 		Assurance: server.AssuranceDevelopment,
 		OAuthOnly: true,
@@ -308,7 +308,7 @@ func newHarnessWithBackchannelMTLS(t *testing.T) harness {
 			MaxClockSkew:                                5 * time.Second,
 			BackchannelAuthenticationRequestLifetime:    2 * time.Minute,
 			MaxBackchannelAuthenticationRequestLifetime: time.Minute,
-			BackchannelAuthenticationPollInterval:       time.Millisecond,
+			BackchannelAuthenticationPollInterval:       time.Second,
 		},
 		Assurance: server.AssuranceDevelopment,
 	}
@@ -436,7 +436,7 @@ func newHarnessWithBackchannelPing(t *testing.T) (harness, *memstore.Backchannel
 			MaxClockSkew:                                5 * time.Second,
 			BackchannelAuthenticationRequestLifetime:    2 * time.Minute,
 			MaxBackchannelAuthenticationRequestLifetime: time.Minute,
-			BackchannelAuthenticationPollInterval:       time.Millisecond,
+			BackchannelAuthenticationPollInterval:       time.Second,
 		},
 		Assurance: server.AssuranceDevelopment,
 	}
@@ -1874,9 +1874,6 @@ func TestMetadataAdvertisesBackchannelAuthenticationWhenConfigured(t *testing.T)
 	}
 	if !containsString(md.BackchannelTokenDeliveryModesSupported, "poll") {
 		t.Fatalf("BackchannelTokenDeliveryModesSupported = %v, want to contain poll", md.BackchannelTokenDeliveryModesSupported)
-	}
-	if !containsString(md.BackchannelTokenDeliveryModesSupported, "ping") {
-		t.Fatalf("BackchannelTokenDeliveryModesSupported = %v, want to contain ping", md.BackchannelTokenDeliveryModesSupported)
 	}
 	if !containsString(md.BackchannelAuthenticationRequestSigningAlgValuesSupported, "ES256") {
 		t.Fatalf("BackchannelAuthenticationRequestSigningAlgValuesSupported = %v, want to contain ES256", md.BackchannelAuthenticationRequestSigningAlgValuesSupported)

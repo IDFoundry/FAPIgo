@@ -340,7 +340,8 @@ type Limits struct {
 	// client's own signed CIBA backchannel authentication request
 	// remains valid for (exp = Now + BackchannelAuthenticationRequestLifetime),
 	// mirroring RequestObjectLifetime's role for PAR. Required only
-	// when Endpoints.BackchannelAuthentication is set.
+	// when Endpoints.BackchannelAuthentication is set, and then at most
+	// 60 minutes (FAPI-CIBA §5.2.3, via FAPI 1.0 Advanced §5.2.3).
 	BackchannelAuthenticationRequestLifetime time.Duration
 
 	// MaxIDTokenLifetime bounds how far in the future an ID token's exp

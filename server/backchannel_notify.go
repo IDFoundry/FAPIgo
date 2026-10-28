@@ -87,6 +87,11 @@ func NewBackchannelNotificationRequest(ctx context.Context, notification Backcha
 // NoBackchannelNotifications is an explicit no-op BackchannelNotifier
 // for a deployment that has decided not to support CIBA ping delivery —
 // every client it registers must stay BackchannelTokenDeliveryModePoll.
+// With it, Server.Metadata advertises only "poll" in
+// backchannel_token_delivery_modes_supported,
+// BeginBackchannelAuthentication refuses a client registered for ping
+// with ErrorUnauthorizedClient, and Server.CheckClientRegistration
+// reports one.
 // There is no implicit default here (see server/dependencies.go and
 // ARCHITECTURE.md: "no silently-installed in-memory store") — New
 // rejects a nil Dependencies.BackchannelNotifier the same way it
@@ -95,6 +100,18 @@ func NewBackchannelNotificationRequest(ctx context.Context, notification Backcha
 // visible line of code (BackchannelNotifier: server.NoBackchannelNotifications{})
 // instead of an easily-forgotten omission.
 type NoBackchannelNotifications struct{}
+
+// backchannelPingSupported reports whether this server can deliver a
+// CIBA §10.2 ping: false when Dependencies.BackchannelNotifier is
+// NoBackchannelNotifications, which declines it. Metadata then
+// advertises poll alone, and a client registered for ping is refused.
+func (s *Server) backchannelPingSupported() bool {
+	switch s.deps.BackchannelNotifier.(type) {
+	case NoBackchannelNotifications, *NoBackchannelNotifications:
+		return false
+	}
+	return true
+}
 
 // Notify implements BackchannelNotifier by doing nothing.
 func (NoBackchannelNotifications) Notify(context.Context, BackchannelNotification) error {

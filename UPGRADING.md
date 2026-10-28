@@ -291,6 +291,104 @@ sent as `expires_in: 0`.
 
 ```go
 cfg.Limits.PushedRequestLifetime = 90 * time.Second
+### CIBA's poll interval and request lifetime must be whole seconds (server)
+
+**Affects:** a server with `Endpoints.BackchannelAuthentication` set whose
+`Limits.BackchannelAuthenticationPollInterval` or
+`Limits.BackchannelAuthenticationRequestLifetime` is under one second or
+not a whole number of seconds, at every assurance level.
+
+**Why:** CIBA §7.3 sends `interval` and `expires_in` as integer seconds,
+and the acknowledgement truncated them. A 1.5 s interval was advertised
+as 1, so a client that waited exactly the advertised interval got
+`slow_down`; a sub-second interval or lifetime was advertised as 0.
+
+**What fails:** `server.New` returns an error naming
+`limits.backchannel_authentication_poll_interval` or
+`limits.backchannel_authentication_request_lifetime`.
+
+**What to change:** use a whole number of seconds, at least one:
+
+```go
+cfg.Limits.BackchannelAuthenticationPollInterval = 2 * time.Second
+cfg.Limits.BackchannelAuthenticationRequestLifetime = 3 * time.Minute
+```
+
+### A ping client is refused under `NoBackchannelNotifications` (server)
+
+**Affects:** a CIBA server whose `Dependencies.BackchannelNotifier` is
+`server.NoBackchannelNotifications{}` and which has a client registered
+with `BackchannelTokenDeliveryMode: storage.BackchannelTokenDeliveryModePing`.
+
+**Why:** the metadata advertised ping, and a ping client's request was
+accepted, although `NoBackchannelNotifications` drops every
+notification: the client waited for a ping that never came. The
+metadata now lists only `poll` in
+`backchannel_token_delivery_modes_supported`, and
+`BeginBackchannelAuthentication` refuses a ping client with
+`unauthorized_client`.
+
+**What fails:** nothing at startup, since clients live in the
+`ClientRepository`. A ping client's backchannel authentication request
+gets `unauthorized_client`, and `Server.CheckClientRegistration` returns
+an error naming ping for it.
+
+**What to change:** register the client for poll, or send pings with a
+real notifier:
+
+```go
+deps.BackchannelNotifier, err = backchannelhttp.New(backchannelhttp.Config{ /* ... */ })
+```
+
+### The client's CIBA request lifetime is capped at 60 minutes (client)
+
+**Affects:** a client with `Endpoints.BackchannelAuthentication` set and
+`Limits.BackchannelAuthenticationRequestLifetime` over 60 minutes, at
+every assurance level.
+
+**Why:** FAPI-CIBA §5.2.3 applies FAPI 1.0 Advanced §5.2.3's client
+rules to the signed authentication request, so its `exp` may be at most
+60 minutes after its `nbf`. The client signed a request with any
+lifetime, which a conforming server refuses; `client.New` already capped
+PAR's request object the same way.
+
+**What fails:** `client.New` returns an error naming
+`limits.backchannel_authentication_request_lifetime`.
+
+**What to change:** use 60 minutes or less; the request is sent at once,
+so a minute is plenty:
+
+```go
+cfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+```
+
+### `BackchannelAuthenticationPending` carries the session to poll with (client)
+
+**Affects:** code that compares a `client.BackchannelAuthenticationPending`
+with `==`, or a `BackchannelAuthenticationResult` holding one with `==`,
+and code that builds one with an unkeyed literal.
+
+**Why:** CIBA §11 says that after `slow_down` the poll interval "MUST be
+increased by at least 5 seconds for this and all subsequent requests",
+but the session's `Interval()` never changed, so a client polling at
+`Interval()` kept being slowed down. `BackchannelAuthenticationPending`
+now has a `Session` field: the session to poll with from now on, whose
+`Interval()` is 5 seconds longer after each `slow_down`. A sealed copy
+of it keeps the longer interval. The new field holds slices, so the
+struct is no longer comparable.
+
+**What fails:** `==` on the struct doesn't compile; `==` on a
+`BackchannelAuthenticationResult` holding one panics at run time.
+
+**What to change:** switch on the type and read `SlowDown`, and poll
+(and seal) `Session` from then on:
+
+```go
+switch r := result.(type) {
+case client.BackchannelAuthenticationPending:
+	session = r.Session
+	retryAfter(session.Interval())
+}
 ```
 
 ## v0.64.0

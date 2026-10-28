@@ -36,6 +36,9 @@ type challengingAS struct {
 	rotate    bool
 	always    bool
 	dpopNonce string // also sent on the challenge error, if set
+	// pollPending answers the token endpoint authorization_pending, for
+	// a CIBA poll: its openid request would need an ID token otherwise.
+	pollPending bool
 
 	requests   int
 	challenges []string // each request's PoP challenge claim, in order
@@ -110,6 +113,11 @@ func proofNonce(t *testing.T, compact string) string {
 	return claims.Nonce
 }
 
+func writePendingResponse(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusBadRequest)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "authorization_pending"})
+}
+
 func writeTokenResponse(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"access_token": "opaque-access-token", "token_type": "DPoP", "expires_in": 300, "scope": "accounts",
@@ -144,6 +152,9 @@ func newChallengedClient(t *testing.T, as *challengingAS, source client.Attestat
 	}
 	if cfg.SenderConstrain == storage.SenderConstrainMTLS {
 		tokenResponse = writeMTLSTokenResponse
+	}
+	if as.pollPending {
+		tokenResponse = writePendingResponse
 	}
 	mux.HandleFunc("/token", as.handler(tokenResponse))
 	mux.HandleFunc("/par", as.handler(writePARResponse))
@@ -295,7 +306,7 @@ func TestAttestationChallengeAtEveryEndpoint(t *testing.T) {
 
 func beginBackchannel(c *client.Client) error {
 	_, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
-		Scope: []string{"accounts"}, LoginHint: "user@example.com",
+		Scope: []string{"openid", "accounts"}, LoginHint: "user@example.com",
 	})
 	return err
 }
@@ -308,10 +319,10 @@ func TestAttestationChallengeAtCIBAPoll(t *testing.T) {
 		"mTLS": func(cfg *client.Config) { cfg.SenderConstrain = storage.SenderConstrainMTLS },
 	} {
 		t.Run(name, func(t *testing.T) {
-			as := &challengingAS{t: t}
+			as := &challengingAS{t: t, pollPending: true}
 			c := newChallengedClient(t, as, fakeAttestationSource{attestation: testAttestationJWT}, tweak)
 			session, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
-				Scope: []string{"accounts"}, LoginHint: "user@example.com",
+				Scope: []string{"openid", "accounts"}, LoginHint: "user@example.com",
 			})
 			if err != nil {
 				t.Fatalf("BeginBackchannelAuthentication: %v", err)

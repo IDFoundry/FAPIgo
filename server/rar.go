@@ -290,12 +290,14 @@ func unknownRARTypes(registry *extension.RARRegistry, types []string) []string {
 // CheckClientRegistration reports what in client's registration this
 // server can't honour: Rich Authorization Request types
 // (storage.RegisteredClientConfig.AuthorizationDetailsTypes) Config.RAR
-// doesn't register — usually a typo — and AllowedResources
+// doesn't register (usually a typo), AllowedResources
 // (storage.RegisteredClientConfig.AllowedResources) while this server
 // accepts no resource indicators (neither Config.Resources nor a
 // ResourcePolicy), whose every request is then refused with
-// server_error rather than given tokens addressed to the issuer.
-// Nothing else reports either before a request is refused, since
+// server_error rather than given tokens addressed to the issuer, and
+// CIBA ping delivery (storage.BackchannelTokenDeliveryModePing) when
+// Dependencies.BackchannelNotifier is NoBackchannelNotifications.
+// Nothing else reports any of these before a request is refused, since
 // clients live in the ClientRepository, out of New's sight. Call it
 // when registering a client, or over every client at startup; nil
 // means nothing found.
@@ -305,6 +307,9 @@ func (s *Server) CheckClientRegistration(client storage.RegisteredClient) error 
 	}
 	if len(client.AllowedResources()) > 0 && !s.resourceIndicatorsEnabled() {
 		return fmt.Errorf("server: client %q: %w", client.ID(), errConfinedWithoutResourceIndicators)
+	}
+	if client.BackchannelTokenDeliveryMode() == storage.BackchannelTokenDeliveryModePing && !s.backchannelPingSupported() {
+		return fmt.Errorf("server: client %q: backchannel_token_delivery_mode ping needs a BackchannelNotifier, not NoBackchannelNotifications", client.ID())
 	}
 	return nil
 }

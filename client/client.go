@@ -512,6 +512,13 @@ func validateCIBAConfig(cfg Config, cibaConfigured bool) error {
 	if cfg.Limits.BackchannelAuthenticationRequestLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.backchannel_authentication_request_lifetime must be positive when endpoints.backchannel_authentication is set")
 	}
+	// FAPI-CIBA §5.2.3 applies FAPI 1.0 Advanced §5.2.3's client rules
+	// to the signed authentication request, among them item 13: an exp
+	// "no longer than 60 minutes after the nbf claim" — the same bound
+	// maxRequestObjectLifetime puts on PAR's request object.
+	if cfg.Limits.BackchannelAuthenticationRequestLifetime > maxRequestObjectLifetime {
+		return fmt.Errorf("client: config: limits.backchannel_authentication_request_lifetime must be at most 60 minutes (FAPI-CIBA §5.2.3, FAPI 1.0 Advanced §5.2.3)")
+	}
 	return nil
 }
 

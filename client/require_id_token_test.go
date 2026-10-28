@@ -62,8 +62,9 @@ func TestPollBackchannelAuthenticationRequiresIDTokenForOpenID(t *testing.T) {
 		scope   []string
 		wantErr bool
 	}{
-		"openid":    {[]string{"openid", "accounts"}, true},
-		"no openid": {[]string{"accounts"}, false},
+		"openid": {[]string{"openid", "accounts"}, true},
+		// A request without "openid" is refused before it's sent:
+		// TestBeginBackchannelAuthenticationRequiresOpenID.
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, as, _ := newTestClientWithCIBA(t)

@@ -26,7 +26,8 @@ session, err := c.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAut
 result, err := c.PollBackchannelAuthentication(ctx, session)
 switch r := result.(type) {
 case client.BackchannelAuthenticationPending:
-	retryLater(r.SlowDown) // SlowDown: the last poll came too soon, so back off
+	session = r.Session // after slow_down (r.SlowDown), Interval() is 5 s longer
+	retryLater(session.Interval())
 case client.BackchannelAuthenticationApproved:
 	useTokens(r.Tokens)
 case client.BackchannelAuthenticationDenied:
@@ -42,7 +43,10 @@ signs the request, authenticates as the client and sends it, after
 checking locally that exactly one hint is set. `PollBackchannelAuthentication`
 makes exactly one attempt, so you poll on your own schedule (a job
 queue, a ticker) rather than blocking a goroutine while a person
-decides. The session survives restarts: seal it with a
+decides. Keep polling with the pending result's `Session`: after
+`slow_down` its `Interval()` is 5 seconds longer, for that poll and
+every later one, as CIBA §11 requires, and if you store sessions, store
+that one. The session survives restarts: seal it with a
 `client.BackchannelSessionSealer` (`NewBackchannelSessionSealer(c, keys)`,
 then `Seal(session, owner)`), store the result keyed by its `AuthReqID`,
 and `Open(sealed, owner)` it on any instance. The sealing is AES-256-GCM,
@@ -144,7 +148,10 @@ func backchannelAuthentication(w http.ResponseWriter, r *http.Request) {
 Set `Dependencies.Backchannel` (`memstore.NewBackchannelAuthenticationStore()`
 to start) and `Dependencies.BackchannelNotifier`: `backchannelhttp.New`
 sends pings through a hardened HTTP client, and `NoBackchannelNotifications{}`
-declines them for a poll-only deployment. The notification endpoint is
+declines them for a poll-only deployment: the metadata then advertises
+only `poll`, and a client registered for ping is refused with
+`unauthorized_client` (`Server.CheckClientRegistration` reports one when
+you register it). The notification endpoint is
 whatever the client registered, so under `AssuranceProduction` a
 notifier of your own must implement `server.BackchannelNotifierAssurance`
 and declare `OutboundHardened` — a promise to send as `backchannelhttp`
@@ -153,7 +160,9 @@ timeouts and a bounded response read) — or `server.New` refuses it.
 `backchannelhttp.New` declares it only when its `Config.Transport` grants
 no loopback exception (`AllowsLoopback`). `Dependencies.BackchannelHints`
 can refuse a hint naming nobody (`unknown_user_id`) before the request is
-stored. A hint only says whose device to ask: the user's approval there
+stored. Without it, hints aren't checked at all: the request is stored
+and acknowledged whatever its hint names, and your application finds
+out only when it tries to reach that user. A hint only says whose device to ask: the user's approval there
 is what authenticates them. The binding message is free text the client
 wrote, so show it as such, beside what you describe from the request
 itself.
@@ -163,10 +172,29 @@ tell which request they're approving. Either each request carries a
 unique authorization context you show them (a payment's amount and
 payee in its authorization details, say), or you require a binding
 message, which the consumption device shows too. This package can't
-tell whether a request's details are unique to it, so it accepts a
-request without `binding_message`. If yours can't be told apart
-otherwise, complete one with an empty `a.Interaction.BindingMessage` as
-`server.AuthenticationFailed(...)` before asking the user anything.
+tell whether a request's details are unique to it, so by default it
+accepts a request without `binding_message`. If yours can't be told
+apart otherwise, set `Config.RequireBindingMessage`: a request without
+one is then refused with `invalid_request` before it's stored or shown
+to anyone.
+
+## Algorithms and TLS
+
+The signed request and client assertions are verified against
+`Config.Algorithms.BackchannelAuthenticationRequest` and
+`Config.Algorithms.ClientAssertion`. `server.RecommendedAlgorithmSet()`
+includes EdDSA (Ed25519) alongside PS256 and ES256, and FAPIgo
+deliberately allows it for CIBA too: FAPI 2.0 permits it, and FAPI-CIBA
+ID1 §7.10, which names only PS256 and ES256, predates it. A deployment
+that must match §7.10 exactly sets both allow-lists to
+`server.AlgorithmSet{fapi.PS256, fapi.ES256}`; the metadata then
+advertises only those.
+
+`server.FAPIRWTLSCipherSuites` and `fapihttp`'s client transport offer
+the ECDHE AES-GCM TLS 1.2 suites. FAPI-CIBA §7.9 lists the RSA ones;
+the ECDSA ones are there for ECDSA certificates, as FAPI 2.0's BCP 195
+baseline permits, and a server with an RSA certificate never
+negotiates them.
 
 ## See it running
 

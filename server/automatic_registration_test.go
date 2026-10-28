@@ -646,7 +646,7 @@ func TestNewWiresAutomaticRegistrationIntoBeginBackchannelAuthentication(t *test
 		cfg.Algorithms.BackchannelAuthenticationRequest = server.AlgorithmSet{fapi.ES256}
 		cfg.Limits.BackchannelAuthenticationRequestLifetime = 2 * time.Minute
 		cfg.Limits.MaxBackchannelAuthenticationRequestLifetime = time.Minute
-		cfg.Limits.BackchannelAuthenticationPollInterval = time.Millisecond
+		cfg.Limits.BackchannelAuthenticationPollInterval = time.Second
 		deps.Backchannel = memstore.NewBackchannelAuthenticationStore()
 		deps.BackchannelNotifier = server.NoBackchannelNotifications{}
 	}

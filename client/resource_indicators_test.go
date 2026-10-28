@@ -342,7 +342,7 @@ func TestBackchannelAuthenticationSendsResources(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c, as, _ := newTestClientWithCIBA(t)
 			session, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
-				Scope: []string{"accounts"}, LoginHint: "user@example.com", Resource: tc.resources,
+				Scope: []string{"openid", "accounts"}, LoginHint: "user@example.com", Resource: tc.resources,
 			})
 			if err != nil {
 				t.Fatalf("BeginBackchannelAuthentication: %v", err)
@@ -351,7 +351,8 @@ func TestBackchannelAuthenticationSendsResources(t *testing.T) {
 				t.Errorf("request object resource = %s, want %s", got, tc.want)
 			}
 			as.tokenResponses = []cibaTokenResponse{{status: http.StatusOK, body: map[string]any{
-				"access_token": "opaque-access-token", "token_type": "DPoP", "expires_in": 300, "scope": "accounts",
+				"access_token": "opaque-access-token", "token_type": "DPoP", "expires_in": 300, "scope": "openid accounts",
+				"id_token": newCIBAIDToken(t, as),
 			}}}
 			result, err := c.PollBackchannelAuthentication(context.Background(), resealBackchannelSession(t, c, session))
 			if err != nil {

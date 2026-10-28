@@ -417,10 +417,14 @@ func isZero(b []byte) bool {
 }
 
 // tls12CipherSuites are the only TLS 1.2 cipher suites NewClient's
-// transport offers: the ECDHE AES-GCM ones FAPI-CIBA §7.9 (as FAPI 1.0
-// Part 2 §8.5) permits under TLS 1.2. Go has no DHE suites, the other
-// two that list names. TLS 1.3, whose suites Go doesn't let a
-// configuration choose, is unaffected.
+// transport offers: ECDHE with AES-GCM. The two RSA ones are the ECDHE
+// suites FAPI-CIBA §7.9 (as FAPI 1.0 Part 2 §8.5) permits under TLS
+// 1.2; Go has no DHE suites, the other two that list names. §7.9 doesn't
+// list the two ECDSA ones: they're here for servers with ECDSA
+// certificates, and are permitted by the BCP 195 recommendations FAPI
+// 2.0 Security Profile §5.2.2 follows. A deployment that must offer
+// exactly §7.9's list sets its own transport. TLS 1.3, whose suites Go
+// doesn't let a configuration choose, is unaffected.
 var tls12CipherSuites = []uint16{
 	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,

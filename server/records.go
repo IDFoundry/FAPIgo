@@ -242,11 +242,12 @@ type grantRecord struct {
 
 	// GrantType is the grant the authorization was made under:
 	// "authorization_code", or CIBAGrantType for an approved CIBA
-	// request. A refresh token keeps it, so a refresh is refused once the
-	// client is no longer registered for that grant (see
-	// checkGrantTypeStillAllowed). Empty for grants the embedder served
-	// (IssueRefreshToken), and in records written before it existed;
-	// neither is checked.
+	// request, or the embedder's grant type for a grant it served
+	// (IssueRefreshToken). A refresh token keeps it, so a refresh is
+	// refused once the client is no longer registered for that grant, or
+	// the embedder's grant type is no longer one of
+	// Config.AdditionalGrantTypes (see checkGrantTypeStillAllowed). Empty
+	// in records written before it existed, which that function covers.
 	GrantType string `json:"grant_type,omitempty"`
 
 	// IssuedAt is when this record was issued: an authorization code,

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,7 +78,11 @@ type RefreshTokenRequest struct {
 // invalid_grant, and the client must authorize again. A client no
 // longer registered for the grant the refresh token came from — the
 // authorization code grant, or CIBA — is refused with
-// ErrorUnauthorizedClient.
+// ErrorUnauthorizedClient, and so is a refresh token from
+// IssueRefreshToken once its grant type is no longer one of
+// Config.AdditionalGrantTypes. A refresh token whose grant type was
+// never recorded (see checkGrantTypeStillAllowed) is refused with
+// invalid_grant.
 func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest) (_ TokenResult, retErr error) {
 	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
 	params, err := formParametersToMap(formParams)
@@ -193,20 +198,27 @@ func (s *Server) redeemRefreshGrantFor(ctx context.Context, client storage.Regis
 	if err != nil {
 		return grantRecord{}, time.Time{}, err
 	}
-	if typeErr := checkGrantTypeStillAllowed(client, grant); typeErr != nil {
+	if typeErr := s.checkGrantTypeStillAllowed(client, grant); typeErr != nil {
 		return grantRecord{}, time.Time{}, typeErr
 	}
 	return grant, now, nil
 }
 
 // checkGrantTypeStillAllowed refuses a refresh of a grant made under a
-// grant type the client's current registration no longer allows: an
-// authorization code grant once the client has no redirect URI, or a
-// CIBA grant once it may no longer use CIBA — the same checks the
-// authorization code exchange and the CIBA token exchange make. A grant
-// without GrantType (the embedder's, or one recorded before it existed)
-// isn't checked.
-func checkGrantTypeStillAllowed(client storage.RegisteredClient, grant grantRecord) *Error {
+// grant type the client's current registration, or the server's
+// configuration, no longer allows: an authorization code grant once the
+// client has no redirect URI, a CIBA grant once it may no longer use
+// CIBA — the same checks the authorization code exchange and the CIBA
+// token exchange make — or a grant the embedder served
+// (IssueRefreshToken) once its grant type is no longer one of
+// Config.AdditionalGrantTypes.
+//
+// A grant without GrantType was recorded before it was: one with a
+// CodeGrantID is an authorization code or CIBA grant and isn't checked,
+// as before; one without is an embedder's (or a code grant from before
+// CodeGrantID existed), whose grant type can't be known, so it's
+// refused rather than refreshed past a grant type's removal.
+func (s *Server) checkGrantTypeStillAllowed(client storage.RegisteredClient, grant grantRecord) *Error {
 	switch grant.GrantType {
 	case "authorization_code":
 		if !client.AllowsAuthorizationCodeGrant() {
@@ -215,6 +227,14 @@ func checkGrantTypeStillAllowed(client storage.RegisteredClient, grant grantReco
 	case CIBAGrantType:
 		if _, permitted := client.BackchannelAuthenticationRequestAlgorithm(); !permitted {
 			return newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for CIBA", nil)
+		}
+	case "":
+		if grant.CodeGrantID == "" {
+			return newError(ErrorInvalidGrant, 400, "refresh_token was issued for a grant of unknown type: authorize again", nil)
+		}
+	default:
+		if !slices.Contains(s.cfg.AdditionalGrantTypes, grant.GrantType) {
+			return newError(ErrorUnauthorizedClient, 400, "the grant type is no longer served", nil)
 		}
 	}
 	return nil

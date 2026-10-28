@@ -75,21 +75,34 @@ func TestCheckGrantTypeStillAllowed(t *testing.T) {
 	})
 	neither := newClient(storage.RegisteredClientConfig{AllowsClientCredentialsGrant: true})
 
+	const preAuthorized = "urn:ietf:params:oauth:grant-type:pre-authorized_code"
+	srv := &Server{cfg: Config{AdditionalGrantTypes: []string{preAuthorized}}}
 	for _, tc := range []struct {
-		name      string
-		client    storage.RegisteredClient
-		grantType string
-		ok        bool
+		name   string
+		grant  grantRecord
+		code   ErrorCode // "" when the refresh is allowed
+		client storage.RegisteredClient
 	}{
-		{"code grant, code client", codeClient, "authorization_code", true},
-		{"code grant, code removed", cibaClient, "authorization_code", false},
-		{"CIBA grant, CIBA client", cibaClient, CIBAGrantType, true},
-		{"CIBA grant, CIBA removed", codeClient, CIBAGrantType, false},
-		{"embedder grant", neither, "", true},
+		{"code grant, code client", grantRecord{GrantType: "authorization_code"}, "", codeClient},
+		{"code grant, code removed", grantRecord{GrantType: "authorization_code"}, ErrorUnauthorizedClient, cibaClient},
+		{"CIBA grant, CIBA client", grantRecord{GrantType: CIBAGrantType}, "", cibaClient},
+		{"CIBA grant, CIBA removed", grantRecord{GrantType: CIBAGrantType}, ErrorUnauthorizedClient, codeClient},
+		{"embedder grant, type served", grantRecord{GrantType: preAuthorized}, "", neither},
+		{"embedder grant, type removed", grantRecord{GrantType: "urn:example:removed"}, ErrorUnauthorizedClient, neither},
+		{"legacy code or CIBA grant", grantRecord{CodeGrantID: "code-grant"}, "", neither},
+		{"legacy embedder grant", grantRecord{}, ErrorInvalidGrant, neither},
 	} {
-		err := checkGrantTypeStillAllowed(tc.client, grantRecord{GrantType: tc.grantType})
-		if (err == nil) != tc.ok || (err != nil && err.Code() != ErrorUnauthorizedClient) {
-			t.Errorf("%s: checkGrantTypeStillAllowed = %v, want ok=%v", tc.name, err, tc.ok)
+		err := srv.checkGrantTypeStillAllowed(tc.client, tc.grant)
+		if got := errorCodeOf(err); got != tc.code {
+			t.Errorf("%s: checkGrantTypeStillAllowed code %q, want %q", tc.name, got, tc.code)
 		}
 	}
+}
+
+// errorCodeOf is err's code, or "" for no error.
+func errorCodeOf(err *Error) ErrorCode {
+	if err == nil {
+		return ""
+	}
+	return err.Code()
 }

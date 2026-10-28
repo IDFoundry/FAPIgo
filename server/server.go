@@ -45,7 +45,7 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 	}
 	// NoDPoPNonces declines nonces as nil does; every nonce check below
 	// New tests deps.Nonces against nil.
-	deps.Nonces = dpopNonceStore(deps.Nonces)
+	deps.Nonces = dpopnonce.Active[NoDPoPNonces](deps.Nonces)
 	// Copied, so a caller changing its slice later changes nothing here.
 	cfg.Resources = slices.Clone(cfg.Resources)
 	if cfg.Extensions == nil {
@@ -695,7 +695,7 @@ func validateConditionalDependencies(cfg Config, deps Dependencies) error {
 	if err := validateEncryptionDependencies(cfg, deps); err != nil {
 		return err
 	}
-	if dpopNonceStore(deps.Nonces) != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
+	if dpopnonce.Active[NoDPoPNonces](deps.Nonces) != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.dpop_nonce_lifetime must be positive when dependencies.nonces is set")
 	}
 	cibaEnabled := !cfg.Endpoints.BackchannelAuthentication.IsZero()
@@ -881,7 +881,7 @@ func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) []e
 	switch {
 	case deps.Nonces == nil:
 		errs = append(errs, errProductionNoncesRequired)
-	case !declinedDPoPNonces(deps.Nonces):
+	case !dpopnonce.Declined[NoDPoPNonces](deps.Nonces):
 		errs = append(errs, checkStoreAssurance("nonces", deps.Nonces, false, scaled))
 	}
 	return errs

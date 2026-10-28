@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/idfoundry/fapigo/internal/depcheck"
+	"github.com/idfoundry/fapigo/internal/dpopnonce"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -184,7 +185,7 @@ func checkProductionNonces(deps Dependencies, scaled bool) []error {
 	switch {
 	case deps.Nonces == nil:
 		return []error{errors.New("resource: dependencies: nonces is required under AssuranceProduction (pass a storage.NonceStore, with Random and Limits.DPoPNonceLifetime, to challenge DPoP proofs for a nonce, or NoDPoPNonces{} to explicitly decline)")}
-	case declinedDPoPNonces(deps.Nonces):
+	case dpopnonce.Declined[NoDPoPNonces](deps.Nonces):
 		return nil
 	}
 	return []error{checkStoreAssurance("nonces", deps.Nonces, false, scaled), checkRandom(deps.Random)}

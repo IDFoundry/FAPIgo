@@ -584,3 +584,15 @@ func TestTokenErrorAfterAValidNonceCarriesTheNext(t *testing.T) {
 		t.Fatalf("ExchangeAuthorizationCode(with the nonce from the error) = %v", err)
 	}
 }
+
+// TestNoDPoPNoncesStoresNothing covers NoDPoPNonces used as a store
+// somewhere its constructor doesn't turn it into nil: both methods fail.
+func TestNoDPoPNoncesStoresNothing(t *testing.T) {
+	ctx := context.Background()
+	if err := (server.NoDPoPNonces{}).Issue(ctx, storage.NonceIssuance{Nonce: "n"}); err == nil {
+		t.Error("Issue = nil, want an error")
+	}
+	if _, err := (server.NoDPoPNonces{}).Lookup(ctx, storage.NonceLookup{Nonce: "n"}); err == nil {
+		t.Error("Lookup = nil error, want one")
+	}
+}

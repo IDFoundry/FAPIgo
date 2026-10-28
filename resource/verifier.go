@@ -37,7 +37,7 @@ func NewVerifier(cfg Config, deps Dependencies) (*Verifier, error) {
 	}
 	// NoDPoPNonces declines nonces as nil does; Verify tests
 	// deps.Nonces against nil.
-	deps.Nonces = dpopNonceStore(deps.Nonces)
+	deps.Nonces = dpopnonce.Active[NoDPoPNonces](deps.Nonces)
 	resourceURLs, err := prepareResourceURLs(cfg)
 	if err != nil {
 		return nil, err
@@ -53,7 +53,7 @@ func validateConfig(cfg Config, deps Dependencies) error {
 	if cfg.Limits.MaxClockSkew < 0 {
 		return fmt.Errorf("resource: config: limits.max_clock_skew must not be negative")
 	}
-	if dpopNonceStore(deps.Nonces) != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
+	if dpopnonce.Active[NoDPoPNonces](deps.Nonces) != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
 		return fmt.Errorf("resource: config: limits.dpop_nonce_lifetime must be positive when dependencies.nonces is set")
 	}
 	if (deps.PairwiseSubjects != nil) != cfg.PairwisePrefix.IsSet() {
@@ -100,7 +100,7 @@ func validateDependencies(deps Dependencies) error {
 	if deps.Clock == nil {
 		return fmt.Errorf("resource: dependencies: clock is required")
 	}
-	if dpopNonceStore(deps.Nonces) != nil && deps.Random == nil {
+	if dpopnonce.Active[NoDPoPNonces](deps.Nonces) != nil && deps.Random == nil {
 		return fmt.Errorf("resource: dependencies: random is required when nonces is set")
 	}
 	return nil

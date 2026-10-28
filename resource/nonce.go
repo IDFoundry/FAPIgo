@@ -2,7 +2,6 @@ package resource
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -30,36 +29,16 @@ import (
 // and Lookup fail.
 type NoDPoPNonces struct{}
 
-// errNoDPoPNonces is what NoDPoPNonces' own methods return.
-var errNoDPoPNonces = errors.New("resource: NoDPoPNonces stores no DPoP nonces")
-
 // Issue implements storage.NonceStore by failing: NoDPoPNonces stores
 // nothing.
-func (NoDPoPNonces) Issue(context.Context, storage.NonceIssuance) error { return errNoDPoPNonces }
+func (NoDPoPNonces) Issue(context.Context, storage.NonceIssuance) error {
+	return fmt.Errorf("resource: %w", dpopnonce.ErrDeclined)
+}
 
 // Lookup implements storage.NonceStore by failing: NoDPoPNonces stores
 // nothing.
 func (NoDPoPNonces) Lookup(context.Context, storage.NonceLookup) (storage.NonceRecord, error) {
-	return storage.NonceRecord{}, errNoDPoPNonces
-}
-
-// declinedDPoPNonces reports whether nonces is NoDPoPNonces, by value
-// or pointer.
-func declinedDPoPNonces(nonces storage.NonceStore) bool {
-	switch nonces.(type) {
-	case NoDPoPNonces, *NoDPoPNonces:
-		return true
-	}
-	return false
-}
-
-// dpopNonceStore returns the store DPoP nonces are issued from and
-// checked against: nonces, or nil when it's nil or NoDPoPNonces.
-func dpopNonceStore(nonces storage.NonceStore) storage.NonceStore {
-	if declinedDPoPNonces(nonces) {
-		return nil
-	}
-	return nonces
+	return storage.NonceRecord{}, fmt.Errorf("resource: %w", dpopnonce.ErrDeclined)
 }
 
 // IssueDPoPNonce returns a DPoP nonce this Verifier will accept, for a

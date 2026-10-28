@@ -306,3 +306,15 @@ func TestIssueDPoPNonce(t *testing.T) {
 		t.Errorf("IssueDPoPNonce without Nonces = %q, %v; want none and no error", nonce, err)
 	}
 }
+
+// TestNoDPoPNoncesStoresNothing covers NoDPoPNonces used as a store
+// somewhere its constructor doesn't turn it into nil: both methods fail.
+func TestNoDPoPNoncesStoresNothing(t *testing.T) {
+	ctx := context.Background()
+	if err := (resource.NoDPoPNonces{}).Issue(ctx, storage.NonceIssuance{Nonce: "n"}); err == nil {
+		t.Error("Issue = nil, want an error")
+	}
+	if _, err := (resource.NoDPoPNonces{}).Lookup(ctx, storage.NonceLookup{Nonce: "n"}); err == nil {
+		t.Error("Lookup = nil error, want one")
+	}
+}

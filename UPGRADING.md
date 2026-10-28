@@ -431,6 +431,34 @@ Or, when your backend can return the raw shared secret, implement
 `keys.ECDHAgreer` and wrap it with `keys.NewDecrypter`, which applies
 the KDF, `apu`/`apv` included, for you.
 
+### `VerifyIssuerJWS` refuses an explicitly typed JWS (client)
+
+**Affects:** a caller of `client.Client.VerifyIssuerJWS` that verifies
+a JWS whose header `typ` is something other than absent or `JWT`.
+`FetchUserInfo` already refused those and is unchanged.
+
+**Why:** an issuer may sign several kinds of JWT with one key (ID
+tokens, JWT access tokens, logout tokens), and `VerifyIssuerJWS`
+returned the payload of any of them. A caller expecting a generic
+artifact, a signed UserInfo response most commonly, could be handed an
+access token or a logout token signed with the same key and take it for
+one (RFC 8725 §3.11). It now accepts only a generic JWS, as
+`FetchUserInfo` does: a `typ` that is absent or `JWT` (`jwt` and
+`application/jwt` too).
+
+**What fails:** `VerifyIssuerJWS` returns a `*client.Error` with code
+`ErrorInvalidResponse` for a JWS whose `typ` is, for example, `at+jwt`,
+`logout+jwt` or `dc+sd-jwt`.
+
+**What to change:** nothing for a signed UserInfo response or another
+generic JWS. An explicitly typed artifact needs a validator for that
+kind, one that checks its own `typ` and claims, rather than
+`VerifyIssuerJWS`:
+
+```go
+payload, err := c.VerifyIssuerJWS(ctx, signedUserInfo) // typ absent or "JWT"
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

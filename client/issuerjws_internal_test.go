@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -166,4 +167,33 @@ type multiKeyIssuerKeys struct{ keys []keys.IssuerKey }
 
 func (m multiKeyIssuerKeys) ResolveIssuerKeys(_ context.Context, _ keys.IssuerKeyRequest) (keys.IssuerKeySet, error) {
 	return keys.IssuerKeySet{Keys: m.keys}, nil
+}
+
+// TestVerifyIssuerJWSAcceptsOnlyAGenericType: an issuer signing several
+// kinds of JWT with one key must not have an explicitly typed one (a
+// JWT access token, a logout token) taken for the generic artifact a
+// caller expects (RFC 8725 §3.11).
+func TestVerifyIssuerJWSAcceptsOnlyAGenericType(t *testing.T) {
+	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate signing key: %v", err)
+	}
+	c := issuerJWSTestClient(t, fakeUserInfoIssuerKeys{pub: &signingKey.PublicKey})
+	for typ, wantOK := range map[string]bool{
+		"": true, "JWT": true, "jwt": true, "application/jwt": true,
+		"at+jwt": false, "logout+jwt": false, "dc+sd-jwt": false, "application/at+jwt": false, "something-new+jwt": false,
+	} {
+		compact, err := jose.Sign(signingKey, jose.Header{Algorithm: fapi.ES256, KeyID: "as-userinfo-kid", Type: typ}, []byte(`{"sub":"end-user-1"}`))
+		if err != nil {
+			t.Fatalf("jose.Sign: %v", err)
+		}
+		_, err = c.VerifyIssuerJWS(context.Background(), compact)
+		if (err == nil) != wantOK {
+			t.Errorf("VerifyIssuerJWS(typ %q) = %v, want ok %v", typ, err, wantOK)
+		}
+		var cerr *Error
+		if err != nil && (!errors.As(err, &cerr) || cerr.Code() != ErrorInvalidResponse) {
+			t.Errorf("VerifyIssuerJWS(typ %q) error = %v, want %s", typ, err, ErrorInvalidResponse)
+		}
+	}
 }

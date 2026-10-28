@@ -65,9 +65,11 @@ are things no constructor can check.
   suites (at the proxy, if one terminates TLS), HSTS on browser-facing
   endpoints, and no CORS on the authorization endpoint.
   [Step 6](../GETTING_STARTED.md#6-the-rest-of-the-http-surface)
-- [ ] *(yours)* **Client certificates behind a proxy:** take a forwarded
-  certificate only from your own proxy, over a hop clients can't reach,
-  and have the proxy strip any copy of the header a client sent.
+- [ ] *(yours)* **Client certificates behind a proxy:** read a forwarded
+  certificate with `fapihttp.ForwardedClientCertificate` (RFC 9440
+  `Client-Cert`), passing a `trusted` check such as
+  `fapihttp.RemoteAddrIn` that accepts only your own proxy, and have the
+  proxy strip any copy of the header a client sent.
   [Step 7](../GETTING_STARTED.md#verify-a-request)
 - [ ] **Subjects:** decide between public and pairwise subjects before
   clients store any `sub`.
@@ -87,15 +89,16 @@ are things no constructor can check.
   authorization server writes to, since there is no introspection
   endpoint.
   [Wire `Dependencies`](../GETTING_STARTED.md#wire-dependencies)
-- [ ] **The same revocation store as the authorization server**, or a
-  deliberate decision not to check revocation.
+- [ ] **The same revocation store as the authorization server**, or
+  `resource.NoRevocationUntilExpiry{MaxTokenLifetime: ...}` (at most 15
+  minutes) to decline checking it; production refuses `NoRevocation{}`.
   [Wire `Dependencies`](../GETTING_STARTED.md#wire-dependencies)
-- [ ] *(yours)* **Check `AuthorizationContext.SubjectKind`** before
-  authorizing by `InternalSubject` (a client credentials token's subject
-  is a client), and use `ClientSubject` for anything returned to a
-  client. [Pairwise subjects at a resource server](../GETTING_STARTED.md#pairwise-subjects-at-a-resource-server)
+- [ ] *(yours)* **Authorize anything a user owns by
+  `AuthorizationContext.EndUser()`**, never by `InternalSubject` alone (a
+  client credentials token's subject is a client), and use
+  `ClientSubject` for anything returned to a client. [Pairwise subjects at a resource server](../GETTING_STARTED.md#pairwise-subjects-at-a-resource-server)
 - [ ] *(yours)* **`PeerCertificate` behind a proxy:** the same rule as
-  the authorization server's.
+  the authorization server's, with `fapihttp.ForwardedClientCertificate`.
   [Verify a request](../GETTING_STARTED.md#verify-a-request)
 
 ## Client (`client`)

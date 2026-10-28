@@ -261,12 +261,16 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, refreshTokenUnknownDescription, err)
 	}
 
+	// Another client's refresh token is as unknown as no token, and
+	// checked before expiry: telling the presenting client it "was not
+	// issued to this client", or "has expired", would tell it that the
+	// token exists, as revocation (RevokeToken) deliberately doesn't.
+	if redeemed.ClientID != clientID {
+		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, refreshTokenUnknownDescription, nil)
+	}
 	now := s.deps.Clock.Now()
 	if !now.Before(redeemed.ExpiresAt) {
 		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token has expired", nil)
-	}
-	if redeemed.ClientID != clientID {
-		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token was not issued to this client", nil)
 	}
 	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
 	if err != nil {

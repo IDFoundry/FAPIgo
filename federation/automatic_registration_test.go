@@ -292,6 +292,13 @@ func TestNewAutomaticClientRepositoryRejectsInvalidConfig(t *testing.T) {
 			cfg.FailureCacheAge = -time.Second
 			return alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now}
 		},
+		// attest_jwt_client_auth binds a client to an attester only an
+		// operator can name: no RP metadata could ever register it.
+		"attestation allowed": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
+			cfg := validAutomaticRegistrationConfig()
+			cfg.AllowedClientAuthMethods = []storage.ClientAuthMethod{storage.ClientAuthMethodPrivateKeyJWT, storage.ClientAuthMethodAttestation}
+			return alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now}
+		},
 		"relative allowed resource": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
 			cfg := validAutomaticRegistrationConfig()
 			cfg.AllowedResources = []string{"/api"}

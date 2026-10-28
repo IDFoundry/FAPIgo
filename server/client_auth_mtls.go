@@ -202,7 +202,6 @@ func automaticClientAuthMethods(allowed []storage.ClientAuthMethod, trust Client
 		return []storage.ClientAuthMethod{
 			storage.ClientAuthMethodPrivateKeyJWT,
 			storage.ClientAuthMethodSelfSignedTLSClientAuth,
-			storage.ClientAuthMethodAttestation,
 		}, nil
 	}
 	if _, noPKI := trust.(NoPKIClientAuthentication); !noPKI {

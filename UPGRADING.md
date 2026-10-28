@@ -705,6 +705,31 @@ writes `{"error": ..., "error_description": ...}` as
 `application/json`; the new `ErrorCode` constants cover every §8.9
 code.
 
+### `attest_jwt_client_auth` can't be allowed for automatic registration (federation, server)
+
+**Affects:** a `federation.AutomaticRegistrationConfig` or
+`server.AutomaticRegistrationConfig` whose `AllowedClientAuthMethods`
+lists `storage.ClientAuthMethodAttestation`.
+
+**Why:** an attestation-authenticated client is bound to a trusted
+Attester (`RegisteredClientConfig.ExpectedAttesterIssuer`), a grant only
+an operator can make, so automatic registration has never been able to
+register one: an RP declaring the method failed to resolve whatever this
+list said. Listing it suggested otherwise.
+
+**What fails:** `federation.NewAutomaticClientRepository`, and so
+`server.New`, with an error naming `allowed_client_auth_methods`.
+
+**What to change:** drop the method from the list. Register clients
+that authenticate by attestation statically:
+
+```go
+cfg.AutomaticRegistration.AllowedClientAuthMethods = []storage.ClientAuthMethod{
+	storage.ClientAuthMethodPrivateKeyJWT,
+	storage.ClientAuthMethodSelfSignedTLSClientAuth,
+}
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

@@ -142,7 +142,10 @@ type AutomaticRegistrationConfig struct {
 	// operator wants federation RPs held to a narrower set than its
 	// statically registered clients (e.g. only
 	// storage.ClientAuthMethodPrivateKeyJWT, even though some static
-	// clients use mTLS). Every entry must be a valid ClientAuthMethod.
+	// clients use mTLS). Every entry must be a valid ClientAuthMethod
+	// other than storage.ClientAuthMethodAttestation, which binds a
+	// client to an attester only an operator can name, so automatic
+	// registration never registers it.
 	// server.New narrows an empty list to leave out tls_client_auth and
 	// its SAN* siblings unless its ClientCertificateTrust verifies
 	// certificate chains (see server.AutomaticRegistrationConfig).
@@ -385,6 +388,13 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	for _, method := range cfg.AllowedClientAuthMethods {
 		if !method.IsValid() {
 			return nil, fmt.Errorf("federation: config: allowed_client_auth_methods: invalid client auth method %v", method)
+		}
+		if method == storage.ClientAuthMethodAttestation {
+			// A client authenticated by attestation is bound to a trusted
+			// Attester (RegisteredClientConfig.ExpectedAttesterIssuer), a
+			// capability grant no RP metadata can make, so no RP could
+			// ever register with it.
+			return nil, fmt.Errorf("federation: config: allowed_client_auth_methods: %v can't be registered automatically: its attester is an operator's grant, not RP metadata", method)
 		}
 	}
 	for _, alg := range cfg.ClientAssertionAlgorithms {

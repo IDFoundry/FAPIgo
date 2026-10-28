@@ -717,6 +717,9 @@ type AutomaticRegistrationConfig struct {
 	// NoClientCertificateChainTrust{}), naming one of those methods here
 	// registers it: do that only when your TLS termination verifies the
 	// chain. Under NoPKIClientAuthentication{}, naming one is refused.
+	// Naming storage.ClientAuthMethodAttestation is refused too: an
+	// attestation-authenticated client is bound to an attester only an
+	// operator can name, so no RP registers with it automatically.
 	// Statically registered clients are unaffected.
 	AllowedClientAuthMethods []storage.ClientAuthMethod
 

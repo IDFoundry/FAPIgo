@@ -67,6 +67,13 @@ func TestRecommendedPresetsProduceAWorkingServer(t *testing.T) {
 		t.Fatalf("New(RecommendedLimits, RecommendedAlgorithms): %v", err)
 	}
 
+	// RecommendedLimits carries a DPoPNonceLifetime, so adding a nonce
+	// store needs no other limit.
+	deps.Nonces = memstore.NewNonceStore()
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(RecommendedLimits) with a nonce store: %v", err)
+	}
+
 	md := srv.Metadata(context.Background())
 	assertContains(t, md.TokenEndpointAuthSigningAlgValuesSupported, "ES256", "PS256")
 	assertContains(t, md.RequestObjectSigningAlgValuesSupported, "ES256", "PS256")
@@ -190,5 +197,15 @@ func TestRecommendedLimitsAcceptMessageSigningRequestObjectWindows(t *testing.T)
 		if (err != nil) != c.wantErr {
 			t.Errorf("request object with exp - nbf = %v: err = %v, want error %v", c.lifetime, err, c.wantErr)
 		}
+	}
+}
+
+// TestRecommendedLimitsDPoPNonceLifetimeFitsProduction checks
+// RecommendedLimits' DPoPNonceLifetime is set and within
+// AssuranceProduction's 15-minute ceiling.
+func TestRecommendedLimitsDPoPNonceLifetimeFitsProduction(t *testing.T) {
+	got := server.RecommendedLimits().DPoPNonceLifetime
+	if got <= 0 || got > 15*time.Minute {
+		t.Fatalf("RecommendedLimits().DPoPNonceLifetime = %v, want within (0, 15m]", got)
 	}
 }

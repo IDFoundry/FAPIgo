@@ -114,7 +114,7 @@ func TestParseResolveResponseRejectsMalformedCompact(t *testing.T) {
 
 func TestParseResolveResponseRejectsNonJSONPayload(t *testing.T) {
 	key := generateKey(t)
-	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: resolveResponseJWTType}, []byte("not json"))
+	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: resolveResponseJWTType, KeyID: "k"}, []byte("not json"))
 	if err != nil {
 		t.Fatalf("jose.Sign: %v", err)
 	}

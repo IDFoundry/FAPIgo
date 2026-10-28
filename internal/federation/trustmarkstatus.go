@@ -66,6 +66,11 @@ func ParseTrustMarkStatusResponse(token string) (TrustMarkStatusResponse, error)
 	if !jose.TypeIs(compact.Header.Type, trustMarkStatusResponseJWTType) {
 		return TrustMarkStatusResponse{}, ErrTrustMarkStatusResponseWrongType
 	}
+	if compact.Header.KeyID == "" {
+		// OpenID Federation 1.0 §8.4.2: Trust Mark Status Response JWTs "MUST include the kid
+		// (Key ID) header parameter".
+		return TrustMarkStatusResponse{}, ErrMissingKeyID
+	}
 	claims, err := parseTrustMarkStatusResponseClaims(compact.Payload)
 	if err != nil {
 		return TrustMarkStatusResponse{}, err
@@ -73,7 +78,7 @@ func ParseTrustMarkStatusResponse(token string) (TrustMarkStatusResponse, error)
 	return TrustMarkStatusResponse{compact: compact, claims: claims}, nil
 }
 
-// KeyID returns the response header's "kid", or "" if absent.
+// KeyID returns the response header's "kid" — never empty, since parsing refuses a JWT without one.
 // Untrusted until Verify succeeds; use only to select which of the
 // issuer's published keys to verify against.
 func (r TrustMarkStatusResponse) KeyID() string { return r.compact.Header.KeyID }

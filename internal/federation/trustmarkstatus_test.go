@@ -103,7 +103,7 @@ func TestParseTrustMarkStatusResponseRejectsMalformedCompact(t *testing.T) {
 
 func TestParseTrustMarkStatusResponseRejectsNonJSONPayload(t *testing.T) {
 	key := generateKey(t)
-	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: trustMarkStatusResponseJWTType}, []byte("not json"))
+	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: trustMarkStatusResponseJWTType, KeyID: "k"}, []byte("not json"))
 	if err != nil {
 		t.Fatalf("jose.Sign: %v", err)
 	}

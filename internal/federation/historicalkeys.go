@@ -115,6 +115,11 @@ func ParseHistoricalKeysResponse(token string) (HistoricalKeysResponse, error) {
 	if !jose.TypeIs(compact.Header.Type, historicalKeysJWTType) {
 		return HistoricalKeysResponse{}, ErrHistoricalKeysWrongType
 	}
+	if compact.Header.KeyID == "" {
+		// OpenID Federation 1.0 §8.7.2: historical keys JWTs "MUST include the kid
+		// (Key ID) header parameter".
+		return HistoricalKeysResponse{}, ErrMissingKeyID
+	}
 	claims, err := parseHistoricalKeysClaims(compact.Payload)
 	if err != nil {
 		return HistoricalKeysResponse{}, err
@@ -122,8 +127,8 @@ func ParseHistoricalKeysResponse(token string) (HistoricalKeysResponse, error) {
 	return HistoricalKeysResponse{compact: compact, claims: claims}, nil
 }
 
-// KeyID returns the response header's "kid", or "" if absent —
-// identifying the signing key used for this response itself, never one
+// KeyID returns the response header's "kid" — never empty, since
+// parsing refuses a JWT without one — identifying the signing key used for this response itself, never one
 // of the historical keys named inside its own "keys" claim. Untrusted
 // until Verify succeeds; use only to select which of the issuer's
 // currently published keys to verify against.
@@ -206,8 +211,8 @@ type rawHistoricalKey struct {
 	EXP     *numericdate.Value `json:"exp"`
 	NBF     *numericdate.Value `json:"nbf"`
 	Revoked *struct {
-		RevokedAt numericdate.Value `json:"revoked_at"`
-		Reason    string            `json:"reason"`
+		RevokedAt *numericdate.Value `json:"revoked_at"`
+		Reason    string             `json:"reason"`
 	} `json:"revoked"`
 }
 
@@ -248,7 +253,8 @@ func parseHistoricalKeysClaims(payload []byte) (HistoricalKeysClaims, error) {
 
 // parseHistoricalKeyEntry parses one "keys" array entry, reporting ok
 // false for anything that doesn't yield a usable HistoricalKey (an
-// unsupported/malformed JWK, or a missing REQUIRED "exp") — see
+// unsupported/malformed JWK, or a missing REQUIRED "kid", "exp" or
+// "revoked_at") — see
 // HistoricalKeysClaims.Keys's own doc comment for why that's a skip,
 // not a hard failure of the whole response.
 func parseHistoricalKeyEntry(entry json.RawMessage) (HistoricalKey, bool) {
@@ -265,7 +271,9 @@ func parseHistoricalKeyEntry(entry json.RawMessage) (HistoricalKey, bool) {
 	if err := json.Unmarshal(entry, &extra); err != nil {
 		return HistoricalKey{}, false
 	}
-	if extra.EXP == nil {
+	// §8.7.2: each key's kid and exp are REQUIRED, and so is a
+	// revocation's revoked_at.
+	if extra.EXP == nil || parsed[0].KeyID == "" || (extra.Revoked != nil && extra.Revoked.RevokedAt == nil) {
 		return HistoricalKey{}, false
 	}
 

@@ -27,9 +27,12 @@ var (
 	// §4.3, §4.4).
 	ErrForbiddenHeader = errors.New("federation: entity statement header carries a forbidden parameter")
 
-	// ErrMissingKeyID indicates the statement's JWS header had no "kid"
-	// (OpenID Federation 1.0 §3.2 step 11: it "MUST be a non-zero length
-	// string").
+	// ErrMissingKeyID indicates the JWS header had no "kid": an Entity
+	// Statement's (OpenID Federation 1.0 §3.2 step 11: it "MUST be a
+	// non-zero length string"), or a Trust Mark's (§7), Trust Mark
+	// delegation's (§7.2.1), Resolve Response's (§8.3.2), Trust Mark
+	// Status Response's (§8.4.2) or historical keys JWT's (§8.7.2), each
+	// of which "MUST include the kid (Key ID) header parameter".
 	ErrMissingKeyID = errors.New("federation: header kid is missing")
 
 	// ErrUnsupportedCriticalClaim indicates the statement's "crit" claim

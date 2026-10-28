@@ -64,11 +64,8 @@ func (r *Resolver) VerifyTrustMark(ctx context.Context, subject ResolvedEntity, 
 	if err != nil {
 		return TrustMarkClaims{}, fmt.Errorf("federation: parse trust mark: %w", err)
 	}
-	// OpenID Federation 1.0 §7: a Trust Mark MUST carry the kid of its
-	// signing key.
-	if tm.KeyID() == "" {
-		return TrustMarkClaims{}, fmt.Errorf("federation: trust mark has no kid header")
-	}
+	// intfed.ParseTrustMark refuses a Trust Mark without the kid of its
+	// signing key (OpenID Federation 1.0 §7).
 
 	// Resolved through subject's Trust Anchor alone, so the issuer's
 	// chain, and the accreditation read below, are that federation's.
@@ -173,7 +170,9 @@ func (r *Resolver) checkTrustMarkDelegation(trustAnchor ResolvedEntity, tm intfe
 }
 
 // verifyAgainstCandidateKeys resolves jwksRaw's own keys matching
-// algorithm (and kid, if non-empty), calling verify with each
+// algorithm and kid — never empty, since the parser of each of these
+// token types refuses one without (OpenID Federation 1.0 §7, §7.2.1, §8.3.2,
+// §8.4.2, §8.7.2) — calling verify with each
 // candidate's public key until one succeeds. Shared by every "parsed
 // token type + its own Verify(pub, policy) signature" this file checks
 // against a resolved JWKS (TrustMark, TrustMarkDelegation,
@@ -193,7 +192,7 @@ func verifyAgainstCandidateKeys[C any](jwksRaw json.RawMessage, kid string, algo
 		if c.Algorithm != algorithm {
 			continue
 		}
-		if kid != "" && c.KeyID != kid {
+		if c.KeyID != kid {
 			continue
 		}
 		tried = true

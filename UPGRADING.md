@@ -640,6 +640,33 @@ time.AfterFunc(time.Until(expiresAt)-time.Minute, func() {
 })
 ```
 
+### Federation JWTs without a `kid` are refused (federation)
+
+**Affects:** a federation peer that signs a Trust Mark, Trust Mark
+delegation, Resolve Response, Trust Mark Status Response or historical
+keys JWT without a `kid` header, and a historical keys response whose
+entries lack `kid`, or a `revoked` object without `revoked_at`. This
+library's own builders always set them.
+
+**Why:** OpenID Federation 1.0 §7, §7.2.1, §8.3.2, §8.4.2 and §8.7.2
+each say the JWT "MUST include the kid (Key ID) header parameter", and
+§8.7.2 makes each historical key's `kid` and each revocation's
+`revoked_at` REQUIRED. A JWT without a `kid` was verified against every
+key of the issuer that matched its algorithm.
+
+**What fails:** `VerifyTrustMark`, `CheckTrustMarkStatus`,
+`ResolveViaEndpoint` and `FetchHistoricalKeys`, with an error naming
+the missing `kid`. A historical key entry missing `kid` or
+`revoked_at` is left out of `HistoricalKeysClaims.Keys`, as an entry
+without `exp` already was.
+
+**What to change:** nothing in code using this library. A peer
+publishing these JWTs puts its signing key's `kid` in each header:
+
+```json
+{"alg": "ES256", "typ": "trust-mark+jwt", "kid": "tm-signing-2026"}
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

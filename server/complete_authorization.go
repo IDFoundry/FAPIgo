@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/claimvalues"
 	"github.com/idfoundry/fapigo/internal/httperror"
 	"github.com/idfoundry/fapigo/internal/querystring"
 	"github.com/idfoundry/fapigo/storage"
@@ -176,29 +177,31 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 
 	now := s.deps.Clock.Now()
 	grant, err := s.encodeGrantRecord(grantRecord{
-		Kind:                    grantKindAuthorizationCode,
-		IssuedAt:                &now,
-		RedirectURI:             redirectURI,
-		CodeChallenge:           codeChallenge,
-		Nonce:                   nonce,
-		DPoPJKT:                 dpopJKT,
-		Subject:                 result.subject.ID().String(),
-		ClientSubject:           distinctClientSubject(clientSub, result.subject.ID().String()),
-		PairwiseSector:          sector,
-		PairwisePrefix:          pairwisePrefixOf(s.cfg, sector),
-		Scope:                   result.grant.Scope,
-		AuthTime:                result.auth.authTime,
-		ACR:                     result.auth.acr,
-		AMR:                     result.auth.amr,
-		AuthorizationDetails:    approved.authorizationDetails,
-		Resources:               approved.resources,
-		TokenClaims:             request.TokenClaims,
-		RequestedIDTokenClaims:  approved.idTokenClaims,
-		RequestedUserinfoClaims: approved.userinfoClaims,
-		IDTokenClaims:           result.grant.IDTokenClaims,
-		GrantID:                 result.grant.GrantID,
-		ClientInstanceKey:       request.ClientInstanceKey,
-		GrantType:               "authorization_code",
+		Kind:                         grantKindAuthorizationCode,
+		IssuedAt:                     &now,
+		RedirectURI:                  redirectURI,
+		CodeChallenge:                codeChallenge,
+		Nonce:                        nonce,
+		DPoPJKT:                      dpopJKT,
+		Subject:                      result.subject.ID().String(),
+		ClientSubject:                distinctClientSubject(clientSub, result.subject.ID().String()),
+		PairwiseSector:               sector,
+		PairwisePrefix:               pairwisePrefixOf(s.cfg, sector),
+		Scope:                        result.grant.Scope,
+		AuthTime:                     result.auth.authTime,
+		ACR:                          result.auth.acr,
+		AMR:                          result.auth.amr,
+		AuthorizationDetails:         approved.authorizationDetails,
+		Resources:                    approved.resources,
+		TokenClaims:                  request.TokenClaims,
+		RequestedIDTokenClaims:       approved.idTokenClaims,
+		RequestedUserinfoClaims:      approved.userinfoClaims,
+		RequestedIDTokenClaimValues:  approved.idTokenClaimValues,
+		RequestedUserinfoClaimValues: approved.userinfoClaimValues,
+		IDTokenClaims:                result.grant.IDTokenClaims,
+		GrantID:                      result.grant.GrantID,
+		ClientInstanceKey:            request.ClientInstanceKey,
+		GrantType:                    "authorization_code",
 	})
 	if err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "failed to encode authorization code grant", err)), nil
@@ -268,9 +271,10 @@ func (s *Server) loginRequiredProblem(request requestRecord, auth Authentication
 // approvedGrant is what an application's GrantedAuthorization approves
 // of a pending authorization request, checked against it.
 type approvedGrant struct {
-	authorizationDetails          json.RawMessage
-	resources                     []string
-	idTokenClaims, userinfoClaims []string
+	authorizationDetails                    json.RawMessage
+	resources                               []string
+	idTokenClaims, userinfoClaims           []string
+	idTokenClaimValues, userinfoClaimValues claimvalues.Acceptable
 }
 
 // checkApprovedGrant checks grant against request, what the client
@@ -300,7 +304,11 @@ func (s *Server) checkApprovedGrant(request requestRecord, grant GrantedAuthoriz
 	if err != nil {
 		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "approved identity claims exceed what was requested", err)
 	}
-	return approvedGrant{authorizationDetails: details, resources: resources, idTokenClaims: idTokenClaims, userinfoClaims: userinfoClaims}, nil
+	return approvedGrant{
+		authorizationDetails: details, resources: resources, idTokenClaims: idTokenClaims, userinfoClaims: userinfoClaims,
+		idTokenClaimValues:  requestedClaimValues(request.Parameters, "id_token", idTokenClaims),
+		userinfoClaimValues: requestedClaimValues(request.Parameters, "userinfo", userinfoClaims),
+	}, nil
 }
 
 func (s *Server) completeErrorRedirect(ctx context.Context, clientID fapi.ClientID, redirectURI, state, errorCode, description string, outcome AuditOutcome) (AuthorizationResult, error) {

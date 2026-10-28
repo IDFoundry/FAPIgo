@@ -10,6 +10,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/claimnames"
+	"github.com/idfoundry/fapigo/internal/claimvalues"
 	"github.com/idfoundry/fapigo/internal/resourceerr"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
@@ -28,7 +29,10 @@ import (
 //     source, which isn't asked at all when none were — never every
 //     claim source knows;
 //   - a claim source returns that wasn't requested is dropped, whatever
-//     source does, and so is one a signed UserInfo response may never
+//     source does, and so is one whose value isn't one the request asked
+//     for with "value" or "values" (OIDC Core §5.5.1, carried in the
+//     token as server.RequestedUserinfoClaimValuesKey), and one a signed
+//     UserInfo response may never
 //     carry, which server.Server.SignUserInfoResponse would refuse
 //     ("iss", "aud", "events", "code" and the like);
 //   - "sub" is the sub the client was given for the user
@@ -52,11 +56,9 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 	if authz.SubjectKind == resource.SubjectClient {
 		return nil, resource.NewInsufficientScopeError(authz, "the access token wasn't issued for an end user")
 	}
-	var names []string
-	if raw, ok := authz.Claims[server.RequestedUserinfoClaimsKey]; ok {
-		if err := json.Unmarshal(raw, &names); err != nil {
-			return nil, fmt.Errorf("serverresource: the access token's requested UserInfo claims are malformed: %w", err)
-		}
+	names, values, err := requestedUserInfoClaims(authz)
+	if err != nil {
+		return nil, err
 	}
 	claims := map[string]json.RawMessage{}
 	if len(names) > 0 {
@@ -71,7 +73,7 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 			return nil, fmt.Errorf("serverresource: resolving UserInfo claims: %w", err)
 		}
 		for name, value := range resolved {
-			if slices.Contains(names, name) && !claimnames.Reserved(claimnames.UserInfo, claimnames.Embedder, name) {
+			if slices.Contains(names, name) && !claimnames.Reserved(claimnames.UserInfo, claimnames.Embedder, name) && values.Allows(name, value) {
 				claims[name] = value
 			}
 		}
@@ -79,6 +81,26 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 	// A string always encodes.
 	claims["sub"], _ = json.Marshal(clientSubjectOf(authz))
 	return claims, nil
+}
+
+// requestedUserInfoClaims reads the claim names authz's access token
+// says were requested and approved for UserInfo
+// (server.RequestedUserinfoClaimsKey), and the values requested of them
+// (server.RequestedUserinfoClaimValuesKey).
+func requestedUserInfoClaims(authz resource.AuthorizationContext) ([]string, claimvalues.Acceptable, error) {
+	var names []string
+	if raw, ok := authz.Claims[server.RequestedUserinfoClaimsKey]; ok {
+		if err := json.Unmarshal(raw, &names); err != nil {
+			return nil, nil, fmt.Errorf("serverresource: the access token's requested UserInfo claims are malformed: %w", err)
+		}
+	}
+	var values claimvalues.Acceptable
+	if raw, ok := authz.Claims[server.RequestedUserinfoClaimValuesKey]; ok {
+		if err := json.Unmarshal(raw, &values); err != nil {
+			return nil, nil, fmt.Errorf("serverresource: the access token's requested UserInfo claim values are malformed: %w", err)
+		}
+	}
+	return names, values, nil
 }
 
 // clientSubjectOf is authz's ClientSubject, or, in an

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/claimvalues"
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/mtls"
@@ -687,8 +688,12 @@ func verifyDPoPAtEitherEndpoint(ctx context.Context, req dpop.VerifyRequest, pri
 // token itself (isServerManagedIDTokenClaim: "sub", "acr", "auth_time"
 // and the like, which a client may ask for through the "claims"
 // parameter, OIDC Core §5.5.1.1) keeps the server's value: the source's
-// is dropped rather than failing issuance or overriding it.
-func (s *Server) withIdentityClaims(ctx context.Context, subject string, names []string, base map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+// is dropped rather than failing issuance or overriding it. So is a value
+// values doesn't allow — one other than the "value" or "values" the
+// request asked the claim to have (OIDC Core §5.5.1: "When the Claim
+// value does not match the requested value, the Claim is not included in
+// the response").
+func (s *Server) withIdentityClaims(ctx context.Context, subject string, names []string, values claimvalues.Acceptable, base map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	if s.deps.IdentityClaims == nil || len(names) == 0 {
 		return base, nil
 	}
@@ -704,7 +709,7 @@ func (s *Server) withIdentityClaims(ctx context.Context, subject string, names [
 		merged[k] = v
 	}
 	for k, v := range identity {
-		if slices.Contains(names, k) && !isServerManagedIDTokenClaim(k) {
+		if slices.Contains(names, k) && !isServerManagedIDTokenClaim(k) && values.Allows(k, v) {
 			merged[k] = v
 		}
 	}
@@ -715,10 +720,11 @@ func (s *Server) withIdentityClaims(ctx context.Context, subject string, names [
 // RequestedUserinfoClaimsKey into base, for the access token only — an
 // embedder's own UserInfo endpoint has no other way to learn which
 // claims the original authorization request asked for (see
-// RequestedUserinfoClaimsKey's doc comment). A nil/empty names leaves
-// base untouched: no claims were requested, so there is nothing to
-// record.
-func withRequestedUserinfoClaims(names []string, base map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+// RequestedUserinfoClaimsKey's doc comment) — and values, the values
+// requested of them, under RequestedUserinfoClaimValuesKey when there
+// are any. A nil/empty names leaves base untouched: no claims were
+// requested, so there is nothing to record.
+func withRequestedUserinfoClaims(names []string, values claimvalues.Acceptable, base map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	if len(names) == 0 {
 		return base, nil
 	}
@@ -726,11 +732,18 @@ func withRequestedUserinfoClaims(names []string, base map[string]json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	merged := make(map[string]json.RawMessage, len(base)+1)
+	merged := make(map[string]json.RawMessage, len(base)+2)
 	for k, v := range base {
 		merged[k] = v
 	}
 	merged[RequestedUserinfoClaimsKey] = encoded
+	if len(values) > 0 {
+		encodedValues, err := json.Marshal(values)
+		if err != nil {
+			return nil, err
+		}
+		merged[RequestedUserinfoClaimValuesKey] = encodedValues
+	}
 	return merged, nil
 }
 
@@ -745,7 +758,7 @@ func withRequestedUserinfoClaims(names []string, base map[string]json.RawMessage
 // party would reject. nonce is grant.Nonce for the first ID token issued
 // from an authorization code, "" otherwise.
 func (s *Server) issueIDTokenForGrant(ctx context.Context, client storage.RegisteredClient, grant grantRecord, nonce, accessToken string) (string, *Error) {
-	claims, err := s.withIdentityClaims(ctx, grant.Subject, grant.RequestedIDTokenClaims, grant.TokenClaims)
+	claims, err := s.withIdentityClaims(ctx, grant.Subject, grant.RequestedIDTokenClaims, grant.RequestedIDTokenClaimValues, grant.TokenClaims)
 	if err != nil {
 		return "", newError(ErrorServerError, 500, "failed to resolve identity claims", err)
 	}

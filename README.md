@@ -113,7 +113,9 @@ gets wrong in the same ways:
 
 See [GETTING_STARTED.md](GETTING_STARTED.md) for a full walkthrough of
 standing up an authorization server, resource server and client end to
-end, including a runnable configuration you can start from.
+end, including a runnable configuration you can start from, and
+[docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md) for the
+one-page list of what a production deployment must do.
 
 For one mechanism at a time, [docs/guides](docs/guides/README.md) has
 short guides to [DPoP](docs/guides/dpop.md), [mutual

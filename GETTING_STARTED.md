@@ -10,6 +10,8 @@ is a complete, working reference implementing every piece described
 here (step 6 shows a minimal HTTP surface — PAR, authorize, token,
 JWKS, metadata — and it has the full one); read it alongside this doc,
 or just study it directly and treat this as the map.
+[docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md) collects
+what a production deployment must do on one page, linking back here.
 
 ## 1. Dependencies: use the reference implementations to start
 

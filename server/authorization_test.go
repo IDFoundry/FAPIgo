@@ -3,12 +3,14 @@ package server_test
 import (
 	"context"
 	"crypto/rand"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -147,6 +149,59 @@ func TestBeginAuthorizationRejectsClientIDMismatch(t *testing.T) {
 	}
 	if localErr.Error.Code() != server.ErrorInvalidRequestURI {
 		t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequestURI)
+	}
+	wantNoInteractionRecords(t, h.transactions)
+}
+
+// wantNoInteractionRecords checks store minted no interaction: a
+// refused BeginAuthorization leaves nothing behind, so a request_uri
+// presented with the wrong client_id, or once expired, can't fill the
+// store however often it's presented.
+func wantNoInteractionRecords(t *testing.T, store *fakeTransactionStore) {
+	t.Helper()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if n := len(store.byHandle); n != 0 {
+		t.Fatalf("a refused BeginAuthorization left %d interaction records, want 0", n)
+	}
+}
+
+// The store never sees a live request_uri reference or interaction
+// handle, only digests of them, as it sees only digests of codes and
+// refresh tokens: a read of it yields nothing a browser could present.
+func TestBeginAuthorizationStoresDigestsNotBearerValues(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	action, err := h.server.BeginAuthorization(context.Background(), server.BeginAuthorizationRequest{
+		RequestURI: pushResult.RequestURI.String(), ClientID: testClientID,
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	required, ok := action.(server.InteractionRequired)
+	if !ok {
+		t.Fatalf("action = %T, want server.InteractionRequired", action)
+	}
+	reference, _ := par.SplitRequestURI(pushResult.RequestURI.String())
+	h.transactions.mu.Lock()
+	defer h.transactions.mu.Unlock()
+	for key := range h.transactions.byReference {
+		if strings.Contains(key, reference) {
+			t.Errorf("pushed request stored under %q, which carries the request_uri reference %q", key, reference)
+		}
+	}
+	for key := range h.transactions.byHandle {
+		if strings.Contains(key, required.Handle.String()) {
+			t.Errorf("interaction stored under %q, which carries the interaction handle %q", key, required.Handle.String())
+		}
+	}
+	if len(h.transactions.byReference) != 1 || len(h.transactions.byHandle) != 1 {
+		t.Fatalf("store holds %d pushed requests and %d interactions, want 1 each", len(h.transactions.byReference), len(h.transactions.byHandle))
 	}
 }
 
@@ -304,6 +359,7 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 	}
 	clock := &stepClock{now: time.Now()}
 	serverKeyManager := &fakeKeyManager{key: generateKey(t), keyID: "as-key-1"}
+	transactions := &fakeTransactionStore{}
 
 	srv, err := server.New(server.Config{
 		Subjects:  server.PublicSubjects(),
@@ -332,7 +388,7 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 		Assurance: server.AssuranceDevelopment,
 	}, server.Dependencies{
 		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions: &fakeTransactionStore{},
+		Transactions: transactions,
 		Grants:       &fakeGrantStore{},
 		Replay:       &fakeReplayStore{},
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
@@ -380,6 +436,7 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 	if localErr.Error.Code() != server.ErrorInvalidRequestURI {
 		t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequestURI)
 	}
+	wantNoInteractionRecords(t, transactions)
 }
 
 // TestBuildAuthorizationErrorRedirect covers the escape hatch a caller

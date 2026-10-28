@@ -95,6 +95,9 @@ func (f *fakeTransactionStore) BeginAuthorization(_ context.Context, txn storage
 	if !ok {
 		return storage.PushedAuthorizationRequest{}, fmt.Errorf("no such request_uri")
 	}
+	if !txn.Now.Before(record.ExpiresAt) {
+		return storage.PushedAuthorizationRequest{}, fmt.Errorf("request_uri has expired")
+	}
 
 	if f.byHandle == nil {
 		f.byHandle = make(map[string]fakePendingInteraction)

@@ -279,7 +279,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode pushed authorization request", err))
 	}
 	if err := s.deps.Transactions.CreatePAR(ctx, storage.NewPARRecord{
-		Reference: reference,
+		Reference: parReferenceKey(client.ID(), reference),
 		ClientID:  client.ID(),
 		Request:   request,
 		ExpiresAt: expiresAt,

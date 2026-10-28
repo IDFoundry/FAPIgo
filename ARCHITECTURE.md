@@ -738,7 +738,10 @@ sender-binding against what it returns. A store given the presenting
 client's ID (`AuthorizationCodeRedemption.ClientID`, and likewise
 `PollBackchannelAuthentication.ClientID` for CIBA) refuses another
 client's record without consuming it, so a leaked code or `auth_req_id`
-can't be spent by someone else. A store only understands the
+can't be spent by someone else. A pushed request and an interaction are
+likewise stored under digests (`NewPARRecord.Reference`, bound to the
+client that pushed it, and `BeginAuthorizationTransaction.Handle`),
+never the `request_uri` or interaction handle themselves. A store only understands the
 fields it acts on (lookup hash, `ClientID`, `ExpiresAt`, and CIBA's
 decision and delivery state): everything else `server` needs later —
 the request's parameters, the granted scope, subject, authentication

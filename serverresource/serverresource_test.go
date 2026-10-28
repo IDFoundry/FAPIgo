@@ -45,6 +45,11 @@ func withURLs(t testing.TB, opts serverresource.Options) serverresource.Options 
 	return opts
 }
 
+// ReadsSystemTime declares resource.ClockAssurance, so the tests running
+// under AssuranceProduction with a fixedClock pinned at time.Now get
+// past NewVerifier's clock check.
+func (fixedClock) ReadsSystemTime() bool { return true }
+
 func serverConfig(t *testing.T) server.Config {
 	t.Helper()
 	issuer, err := fapi.ParseIssuerURL("https://as.example.com")
@@ -263,6 +268,21 @@ func TestNewVerifierInheritsAssurance(t *testing.T) {
 		deps.Revocation = server.NoRevocation{}
 		if _, err := serverresource.NewVerifier(production, deps, withURLs(t, serverresource.Options{})); err != nil {
 			t.Fatalf("NewVerifier = %v, want accepted", err)
+		}
+	})
+	t.Run("production declining revocation needs short access tokens", func(t *testing.T) {
+		deps := serverDependencies(t, jwt, now)
+		deps.Replay = declaredReplay{memstore.NewReplayStore()}
+		deps.Revocation = server.NoRevocation{}
+		long := production
+		long.Limits.AccessTokenLifetime = 16 * time.Minute
+		_, err := serverresource.NewVerifier(long, deps, withURLs(t, serverresource.Options{}))
+		if err == nil || !strings.Contains(err.Error(), "NoRevocationUntilExpiry.MaxTokenLifetime must be at most") {
+			t.Fatalf("NewVerifier(AccessTokenLifetime 16m) = %v, want the unrevocable lifetime refused", err)
+		}
+		long.Assurance = server.AssuranceDevelopment
+		if _, err := serverresource.NewVerifier(long, deps, withURLs(t, serverresource.Options{})); err != nil {
+			t.Fatalf("NewVerifier(development, AccessTokenLifetime 16m) = %v, want accepted", err)
 		}
 	})
 	t.Run("production with DeploymentHorizontallyScaled requires CrossInstanceConsistent", func(t *testing.T) {

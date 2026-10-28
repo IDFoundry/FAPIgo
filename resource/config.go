@@ -16,7 +16,8 @@ import (
 // Dependencies.Nonces is set.
 type Limits struct {
 	// MaxDPoPProofAge bounds how old (relative to verification time) a
-	// DPoP proof's iat claim may be.
+	// DPoP proof's iat claim may be. At most 5 minutes under
+	// AssuranceProduction (RFC 9449 §11.1).
 	MaxDPoPProofAge time.Duration
 
 	// MaxClockSkew bounds how far in the future an iat claim may be, and
@@ -30,7 +31,8 @@ type Limits struct {
 	// valid. Required only when Dependencies.Nonces is non-nil — see
 	// its own doc comment; NewVerifier rejects a zero value in that
 	// case, exactly like MaxDPoPProofAge above, but leaves it
-	// unvalidated when nonce-challenge support is disabled.
+	// unvalidated when nonce-challenge support is disabled. At most 15
+	// minutes under AssuranceProduction, set or not.
 	DPoPNonceLifetime time.Duration
 }
 

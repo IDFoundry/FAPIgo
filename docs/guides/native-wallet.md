@@ -115,8 +115,10 @@ c, err := client.New(client.Config{
 - **Production.** Under `client.AssuranceProduction`, `client.New`
   requires the session store to declare `Durable` and `AtomicConsume`,
   the keys to declare custody (`DeclareCustody`, as above), a hardened
-  `IssuerKeys`, `Random` to be `crypto/rand.Reader`, and an https issuer
-  and endpoints. A loopback redirect URI is still fine; a plain-http
+  `IssuerKeys`, `Random` to be `crypto/rand.Reader`, `Clock` to be
+  `client.SystemClock{}` (or declare `client.ClockAssurance`), `Limits`
+  within its bounds (`RecommendedLimits` is), and an https issuer and
+  endpoints. A loopback redirect URI is still fine; a plain-http
   loopback authorization server, as in local testing, is not.
   `CallbackBindingDeviceLocalStore` is accepted only with a native app's
   redirect URI — a private-use scheme, or loopback http to `127.0.0.1`

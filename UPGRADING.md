@@ -226,6 +226,130 @@ such a proof with `invalid_dpop_proof`.
 **What to change:** nothing for a FAPIgo client. Send standard
 upper-case methods (`http.MethodGet` and the rest) from any other.
 
+### Production bounds the DPoP, JARM, interaction and client lifetimes (server, client, resource, *production only*)
+
+**Affects:** a server, client or resource verifier at
+`AssuranceProduction` whose `Limits` go past the new bounds.
+`server.RecommendedLimits()` and `resource`'s documented values are
+within them; `client.RecommendedLimits()` is too, now that its
+`MaxJARMResponseLifetime` is 10 minutes (it was 15, and that changes
+development clients using it as well).
+
+**Why:** production held only the numbers FAPI 2.0 fixes (authorization
+code and pushed request lifetimes, the server's clock skew) and accepted
+any value for the windows those numbers rely on: a DPoP proof could be
+accepted for a month, and a client could tolerate a day of clock skew
+past an ID token's or JARM response's `exp`, which also stretches
+`max_age` by as much. These are now bounded:
+
+| Package | Limit | Bound |
+| --- | --- | --- |
+| server, resource | `MaxDPoPProofAge` | at most 5 minutes (RFC 9449 §11.1) |
+| server, resource | `DPoPNonceLifetime` | at most 15 minutes, set or not |
+| server | `JARMResponseLifetime` | at most 10 minutes (JARM §2.1) |
+| server | `InteractionLifetime` | at most an hour |
+| client | `MaxClockSkew` | 10 to 60 seconds (FAPI 2.0 §5.3.2.1, as the server and resource server already required) |
+| client | `SessionLifetime` | at most an hour |
+| client | `ClientAssertionLifetime` | at most 5 minutes |
+| client | `MaxIDTokenLifetime` | at most 24 hours |
+| client | `MaxJARMResponseLifetime` | at most 10 minutes, with `MaxClockSkew` allowed on top |
+
+The ID token bound is loose on purpose: no spec bounds an ID token's
+lifetime, and OpenID Providers commonly issue them for an hour, some
+for several, so a day refuses none of them while still refusing a
+year.
+
+**What fails:** `server.New`, `client.New` or `resource.NewVerifier`
+returns an error naming each limit out of bounds, all at once.
+
+**What to change:** bring each limit within its bound. A client whose
+`MaxClockSkew` was below 10 seconds raises it:
+
+```go
+cfg.Limits = client.RecommendedLimits() // MaxClockSkew 10s, MaxJARMResponseLifetime 10m
+cfg.Limits.MaxIDTokenLifetime = time.Hour // your OpenID Provider's ID token lifetime
+```
+
+### Production requires a `Clock` that reads the system time (server, client, resource, *production only*)
+
+**Affects:** a server, client or resource verifier at
+`AssuranceProduction` whose `Dependencies.Clock` isn't that package's
+`SystemClock{}`.
+
+**Why:** every expiry the library enforces is only as sound as the
+clock's reading, and production accepted any `Clock`: a fixed clock
+left over from tests made nothing expire. Production now requires the
+clock to declare that it reads the system's time, through the new
+`ClockAssurance` interface (`ReadsSystemTime() bool`), which every
+`SystemClock` implements. The method is the same in `server`, `client`
+and `resource`, so one clock type of your own can declare it for all
+three. `New` (and `NewVerifier`) also check, at any declaration, that
+the clock reads within `Limits.MaxClockSkew` of `time.Now()`.
+
+**What fails:** `New` returns an error saying the clock must be
+`SystemClock` or declare `ClockAssurance`, or that it reads too far
+from the system's time.
+
+**What to change:** pass `SystemClock{}`, or, for a clock of your own
+that does return the current time (one adding tracing, say), declare
+it:
+
+```go
+func (c tracingClock) ReadsSystemTime() bool { return true }
+```
+
+### A typed-nil dependency is refused (server, client, resource)
+
+**Affects:** a `Dependencies` field holding an interface whose value is
+a nil pointer (or nil map, slice or func), such as a `*memstore.GrantStore`
+variable never assigned, at every assurance level.
+
+**Why:** such a value isn't `== nil`, so it passed `New`'s required-field
+checks and then panicked on the first request, or inside `New` for a
+nil `KeyManager`.
+
+**What fails:** `server.New`, `client.New` or `resource.NewVerifier`
+returns an error naming the field and type, such as
+`server: dependencies: grants is a nil *memstore.GrantStore`.
+
+**What to change:** pass a constructed value, or leave an optional
+field as a plain `nil`.
+
+### `resource.NoRevocation{}` is refused in production (resource, *production only*)
+
+**Affects:** a resource verifier at `AssuranceProduction` whose
+`Dependencies.Revocation` is `resource.NoRevocation{}`, and
+`serverresource.NewVerifier` for a production server whose
+`Dependencies.Revocation` is `server.NoRevocation{}` and whose
+`Limits.AccessTokenLifetime` is over 15 minutes.
+
+**Why:** with `NoRevocation`, a token the authorization server revoked
+(on authorization-code reuse, `RevokeGrant`, or a revoked refresh
+token's grant) stays usable at the resource server until it expires,
+however long it was issued for, which falls short of FAPI 2.0 Security
+Profile §5.3.4. Declining revocation now has to state how long that
+lasts: the new `resource.NoRevocationUntilExpiry` carries a
+`MaxTokenLifetime`, and `Verify` refuses any token expiring further
+ahead than that (plus `MaxClockSkew`), whatever resolved it. Production
+accepts it with a `MaxTokenLifetime` of at most 15 minutes, and refuses
+`NoRevocation`. `serverresource.NewVerifier` now maps
+`server.NoRevocation` to `NoRevocationUntilExpiry` with the server's
+`AccessTokenLifetime`.
+
+**What fails:** `resource.NewVerifier` (or `serverresource.NewVerifier`)
+returns an error naming `NoRevocation`, or saying
+`NoRevocationUntilExpiry.MaxTokenLifetime` must be at most 15 minutes.
+At any assurance level, a `NoRevocationUntilExpiry` without a positive
+`MaxTokenLifetime` is refused.
+
+**What to change:** check the authorization server's revocation store
+(`serverresource.NewVerifier` wires it for you), or decline with a
+bound at least the authorization server's access token lifetime:
+
+```go
+deps.Revocation = resource.NoRevocationUntilExpiry{MaxTokenLifetime: 10 * time.Minute}
+```
+
 ## v0.63.0
 
 ### RSA keys a caller supplies are limited to 4096 bits, and every parsed RSA JWK to exponent 65537

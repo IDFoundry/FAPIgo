@@ -17,6 +17,9 @@ import (
 // entirely, with no visible-opt-out sentinel needed the way
 // Revocation's NoRevocation{} is, because declining it is the normal,
 // fully spec-compliant default, not a choice that needs to be visible.
+// NewVerifier also rejects, in every field, a typed nil: an interface
+// holding a nil pointer (or nil map, slice or func), which isn't == nil
+// but would fail on the first call.
 type Dependencies struct {
 	// AccessTokens resolves a presented access token's claims — see
 	// AccessTokenResolver. Required — pass JWTAccessTokens{...} (the
@@ -30,10 +33,12 @@ type Dependencies struct {
 	// the issuing authorization server (RFC 6749 §4.1.2). Required,
 	// like every field above — pass a real RevocationChecker, or
 	// NoRevocation{} to explicitly decline (see NoRevocation's own doc
-	// comment for why).
+	// comment for why). Under AssuranceProduction, decline with
+	// NoRevocationUntilExpiry instead: NoRevocation is refused there.
 	Revocation RevocationChecker
 
-	// Clock supplies the current time.
+	// Clock supplies the current time. Under AssuranceProduction it
+	// must declare ClockAssurance, as SystemClock does.
 	Clock Clock
 
 	// Nonces persists DPoP nonces this verifier issues and consumes.

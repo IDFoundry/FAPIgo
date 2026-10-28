@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/depcheck"
 )
 
 // Verifier is a FAPI 2.0 resource-server engine: it verifies incoming
@@ -68,6 +69,11 @@ func validatePairwiseResolution(cfg Config, deps Dependencies) error {
 }
 
 func validateDependencies(deps Dependencies) error {
+	// A typed nil (a nil *memstore.ReplayStore, say) isn't == nil, so it
+	// would pass every check below and fail only on the first request.
+	if found, ok := depcheck.FindTypedNil(deps, nil); ok {
+		return fmt.Errorf("resource: dependencies: %s is a nil %s", found.Name, found.Type)
+	}
 	if deps.AccessTokens == nil {
 		return fmt.Errorf("resource: dependencies: access tokens is required (pass JWTAccessTokens{...} or OpaqueAccessTokens{...})")
 	}
@@ -78,7 +84,10 @@ func validateDependencies(deps Dependencies) error {
 		return fmt.Errorf("resource: dependencies: replay is required")
 	}
 	if deps.Revocation == nil {
-		return fmt.Errorf("resource: dependencies: revocation is required (pass NoRevocation{} to explicitly decline)")
+		return fmt.Errorf("resource: dependencies: revocation is required (pass NoRevocation{} to explicitly decline, or NoRevocationUntilExpiry under AssuranceProduction)")
+	}
+	if lifetime, ok := unrevocableLifetime(deps.Revocation); ok && lifetime <= 0 {
+		return fmt.Errorf("resource: dependencies: revocation's NoRevocationUntilExpiry.MaxTokenLifetime must be positive")
 	}
 	if deps.Clock == nil {
 		return fmt.Errorf("resource: dependencies: clock is required")

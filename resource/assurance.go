@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/idfoundry/fapigo/internal/depcheck"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -44,13 +45,22 @@ const (
 	//     AtomicConsume: a DPoP proof or nonce used twice is only
 	//     refused if the store records each use atomically and keeps it.
 	//   - Dependencies.Revocation must implement storage.StoreAssurance
-	//     and declare Durable, unless it is NoRevocation, the explicit
-	//     decline.
+	//     and declare Durable, or be NoRevocationUntilExpiry with a
+	//     MaxTokenLifetime of at most 15 minutes. NoRevocation is refused:
+	//     a token the authorization server revoked would stay usable here
+	//     for however long it was issued for (FAPI 2.0 Security Profile
+	//     §5.3.4).
+	//   - Dependencies.Clock must declare ClockAssurance (SystemClock
+	//     does), and read within Limits.MaxClockSkew of time.Now when
+	//     NewVerifier runs: a fixed or offset test clock would accept
+	//     tokens and proofs long expired.
 	//   - Dependencies.Random, when Nonces is set, must be
 	//     crypto/rand.Reader itself: every DPoP nonce this verifier
 	//     issues is only as unguessable as that reader.
 	//   - Limits.MaxClockSkew must be between 10 and 60 seconds, as
-	//     server.New requires (FAPI 2.0 Security Profile §5.3.2.1).
+	//     server.New requires (FAPI 2.0 Security Profile §5.3.2.1);
+	//     MaxDPoPProofAge at most 5 minutes (RFC 9449 §11.1's "seconds or
+	//     minutes"); and DPoPNonceLifetime at most 15 minutes.
 	//
 	// Config.Deployment is required: with DeploymentHorizontallyScaled,
 	// every store checked above must also declare CrossInstanceConsistent. As with server.New, a store
@@ -118,6 +128,15 @@ const (
 	fapiMaxClockSkew = 60 * time.Second
 )
 
+// The DPoP windows AssuranceProduction bounds, as server.New does: RFC
+// 9449 §11.1 has a proof accepted "only for a relatively brief period on
+// the order of seconds or minutes", and a nonce, which RFC 9449 gives no
+// number, limits how long a proof made for it stays usable.
+const (
+	fapiMaxDPoPProofAge      = 5 * time.Minute
+	fapiMaxDPoPNonceLifetime = 15 * time.Minute
+)
+
 // validateAssurance checks the assurance level is one of the two
 // defined, and applies AssuranceProduction's checks — reporting every
 // dependency that falls short, joined (errors.Join), rather than only
@@ -141,16 +160,13 @@ func validateAssurance(cfg Config, deps Dependencies) error {
 	}
 	scaled := cfg.Deployment == DeploymentHorizontallyScaled
 	errs := checkProductionAccessTokens(deps.AccessTokens, scaled)
-	if cfg.Limits.MaxClockSkew < fapiMinClockSkew || cfg.Limits.MaxClockSkew > fapiMaxClockSkew {
-		errs = append(errs, fmt.Errorf("resource: config: limits.max_clock_skew must be between %v and %v under AssuranceProduction (FAPI 2.0 §5.3.2.1)", fapiMinClockSkew, fapiMaxClockSkew))
-	}
+	errs = append(errs, productionLimitErrors(cfg.Limits)...)
+	errs = append(errs, checkClock(deps.Clock, cfg.Limits.MaxClockSkew))
 	errs = append(errs, checkStoreAssurance("replay", deps.Replay, true, scaled))
 	if deps.Nonces != nil {
 		errs = append(errs, checkStoreAssurance("nonces", deps.Nonces, true, scaled), checkRandom(deps.Random))
 	}
-	if !declinedRevocation(deps.Revocation) {
-		errs = append(errs, checkStoreAssurance("revocation", deps.Revocation, false, scaled))
-	}
+	errs = append(errs, checkProductionRevocation(deps.Revocation, scaled))
 	if deps.PairwiseSubjects != nil {
 		errs = append(errs, checkKeyCustody("pairwise_subjects", deps.PairwiseSubjects, scaled))
 	}
@@ -158,6 +174,50 @@ func validateAssurance(cfg Config, deps Dependencies) error {
 		errs = append(errs, checkKeyCustody("subject_resolver", deps.PairwiseSubjectResolver, scaled))
 	}
 	return errors.Join(errs...)
+}
+
+// productionLimitErrors checks Limits against AssuranceProduction's
+// bounds, reporting every one exceeded.
+func productionLimitErrors(l Limits) []error {
+	var errs []error
+	if l.MaxClockSkew < fapiMinClockSkew || l.MaxClockSkew > fapiMaxClockSkew {
+		errs = append(errs, fmt.Errorf("resource: config: limits.max_clock_skew must be between %v and %v under AssuranceProduction (FAPI 2.0 §5.3.2.1)", fapiMinClockSkew, fapiMaxClockSkew))
+	}
+	if l.MaxDPoPProofAge > fapiMaxDPoPProofAge {
+		errs = append(errs, fmt.Errorf("resource: config: limits.max_dpop_proof_age must be at most %v under AssuranceProduction (RFC 9449 §11.1)", fapiMaxDPoPProofAge))
+	}
+	if l.DPoPNonceLifetime > fapiMaxDPoPNonceLifetime {
+		errs = append(errs, fmt.Errorf("resource: config: limits.dpop_nonce_lifetime must be at most %v under AssuranceProduction", fapiMaxDPoPNonceLifetime))
+	}
+	return errs
+}
+
+// checkClock requires clock to declare ClockAssurance, and its reading
+// to be within skew of the system's time now.
+func checkClock(clock Clock, skew time.Duration) error {
+	if !depcheck.ReadsSystemTime(clock) {
+		return fmt.Errorf("resource: dependencies: clock must be SystemClock, or declare resource.ClockAssurance, under AssuranceProduction")
+	}
+	if offset := depcheck.ClockOffset(clock.Now()); offset > skew {
+		return fmt.Errorf("resource: dependencies: clock reads %v away from the system's time, more than limits.max_clock_skew (%v), under AssuranceProduction", offset.Round(time.Second), skew)
+	}
+	return nil
+}
+
+// checkProductionRevocation refuses NoRevocation, accepts
+// NoRevocationUntilExpiry declaring at most 15 minutes, and otherwise
+// requires the checker's store to declare Durable.
+func checkProductionRevocation(revocation RevocationChecker, scaled bool) error {
+	if declinedRevocation(revocation) {
+		return fmt.Errorf("resource: dependencies: revocation is NoRevocation, which AssuranceProduction refuses (FAPI 2.0 §5.3.4): check the authorization server's revocation store, or decline with NoRevocationUntilExpiry and a MaxTokenLifetime of at most %v", maxUnrevocableTokenLifetime)
+	}
+	if lifetime, ok := unrevocableLifetime(revocation); ok {
+		if lifetime > maxUnrevocableTokenLifetime {
+			return fmt.Errorf("resource: dependencies: revocation's NoRevocationUntilExpiry.MaxTokenLifetime must be at most %v under AssuranceProduction", maxUnrevocableTokenLifetime)
+		}
+		return nil
+	}
+	return checkStoreAssurance("revocation", revocation, false, scaled)
 }
 
 // checkProductionAccessTokens checks what resolver relies on: the

@@ -113,7 +113,10 @@ type Options struct {
 //     server recorded.
 //   - Revocation: deps.Revocation, which must also implement
 //     resource.RevocationChecker (as memstore.RevocationStore does);
-//     server.NoRevocation becomes resource.NoRevocation.
+//     server.NoRevocation becomes resource.NoRevocationUntilExpiry with
+//     cfg.Limits.AccessTokenLifetime as its MaxTokenLifetime, so a
+//     production server declining revocation needs an
+//     AccessTokenLifetime of at most 15 minutes to build a verifier.
 //   - deps.Replay, deps.Clock, and cfg.Limits.MaxDPoPProofAge and
 //     MaxClockSkew, as they are.
 //   - Options.ResourceURLs, as the verifier's
@@ -143,7 +146,7 @@ func NewVerifier(cfg server.Config, deps server.Dependencies, opts Options) (*re
 	if err != nil {
 		return nil, err
 	}
-	revocation, err := revocationChecker(deps.Revocation)
+	revocation, err := revocationChecker(deps.Revocation, cfg.Limits.AccessTokenLifetime)
 	if err != nil {
 		return nil, err
 	}
@@ -270,10 +273,10 @@ func opaqueAccessTokens(cfg server.Config, t server.OpaqueAccessTokens, aud audi
 	return resolver, nil
 }
 
-func revocationChecker(sink server.RevocationSink) (resource.RevocationChecker, error) {
+func revocationChecker(sink server.RevocationSink, accessTokenLifetime time.Duration) (resource.RevocationChecker, error) {
 	switch sink.(type) {
 	case server.NoRevocation, *server.NoRevocation:
-		return resource.NoRevocation{}, nil
+		return resource.NoRevocationUntilExpiry{MaxTokenLifetime: accessTokenLifetime}, nil
 	}
 	checker, ok := sink.(resource.RevocationChecker)
 	if !ok {

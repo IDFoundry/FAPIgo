@@ -424,7 +424,19 @@ func (v *Verifier) checkBinding(resolved ResolvedAccessToken, senderConstrain st
 	if now.After(resolved.ExpiresAt.Add(v.cfg.Limits.MaxClockSkew)) {
 		return newError(ErrorInvalidToken, 401, "access token has expired", nil)
 	}
-	return nil
+	return v.checkUnrevocableLifetime(resolved, now)
+}
+
+// checkUnrevocableLifetime refuses, when Dependencies.Revocation is
+// NoRevocationUntilExpiry, a token expiring further ahead than its
+// MaxTokenLifetime (plus MaxClockSkew): revocation isn't checked, so
+// that window is all that bounds a revoked token's use here.
+func (v *Verifier) checkUnrevocableLifetime(resolved ResolvedAccessToken, now time.Time) *Error {
+	lifetime, ok := unrevocableLifetime(v.deps.Revocation)
+	if !ok || resolved.ExpiresAt.Sub(now) <= timeutil.SaturatingAdd(lifetime, v.cfg.Limits.MaxClockSkew) {
+		return nil
+	}
+	return newError(ErrorInvalidToken, 401, accessTokenInvalidDescription, errors.New("access token expires later than NoRevocationUntilExpiry.MaxTokenLifetime allows"))
 }
 
 // checkNotRevoked checks that neither resolved itself nor the grant it

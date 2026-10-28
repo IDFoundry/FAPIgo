@@ -2,7 +2,7 @@ package server
 
 // InteractionResult is a closed sum type describing how an interaction
 // concluded. It can only be constructed via Authorize, Deny,
-// AuthenticationFailed or InteractionNeeded — never assembled
+// DenyLocally, AuthenticationFailed or InteractionNeeded — never assembled
 // field-by-field — so an invalid
 // combination (e.g. a granted authorization without an authenticated
 // subject) cannot be represented at all.
@@ -50,8 +50,44 @@ func (denyResult) interactionResult() {}
 // diagnostic detail, and may be surfaced to the client as
 // error_description, which allows only printable ASCII other than '"'
 // and '\' (RFC 6749 §4.1.2.1); a reason outside that is dropped.
+//
+// CompleteAuthorization answers Deny with a redirect to the client
+// (access_denied), so use it only once the user has authenticated: RFC
+// 9700 §4.11.2 says the authorization server "MUST always authenticate
+// the user first ... before redirecting the user", because a client
+// can register a redirect URI of its own choosing — a phishing page —
+// and send users to the authorization server just to be bounced there,
+// under the server's name, whatever they choose. For a user who
+// declines, closes or abandons the page before signing in, complete
+// with DenyLocally instead, and render the outcome yourself.
+// CompleteBackchannelAuthentication never redirects, so this doesn't
+// apply there.
 func Deny(reason string) InteractionResult {
 	return denyResult{reason: reason}
+}
+
+type denyLocallyResult struct {
+	reason string
+}
+
+// Discriminator for InteractionResult — deliberately empty.
+func (denyLocallyResult) interactionResult() {}
+
+// DenyLocally records that the request was declined before anyone
+// authenticated — the user declined or abandoned the sign-in page, say
+// — without sending the browser back to the client. RFC 9700 §4.11.2
+// forbids redirecting before the user has authenticated (see Deny), so
+// CompleteAuthorization ends the interaction (its handle is used up,
+// as for any other result) and returns AuthorizationLocalError with
+// ErrorAccessDenied, which the application renders as a page of its
+// own. The client hears nothing: its authorization request simply
+// expires. reason is the application's own explanation, its
+// PublicDescription when it is RFC 6749 §4.1.2.1 error text.
+//
+// CompleteBackchannelAuthentication, which never redirects, records it
+// exactly as Deny.
+func DenyLocally(reason string) InteractionResult {
+	return denyLocallyResult{reason: reason}
 }
 
 type authenticationFailedResult struct {
@@ -66,6 +102,19 @@ func (authenticationFailedResult) interactionResult() {}
 // declining to authorize). reason is an optional, human-readable
 // explanation the caller controls, sent as error_description under
 // Deny's rule.
+//
+// CompleteAuthorization answers it with a redirect to the client
+// (login_required), which RFC 9700 §4.11.2 permits only once the user
+// has authenticated (see Deny): use it for a user who signed in but
+// can't meet the request — the wrong account for its RequiredSubject, a
+// method weaker than its essential acr — never to end a sign-in page
+// on which nobody authenticated, such as one whose password the user
+// got wrong or gave up on. Let the user try again, or complete with
+// DenyLocally. (A request whose Prompt has PromptNone is the
+// exception RFC 9700 §4.11.2 makes for silent authentication: answer
+// it with InteractionNeeded, which redirects.) In a backchannel
+// authentication, which never redirects, it applies without that
+// restriction.
 func AuthenticationFailed(reason string) InteractionResult {
 	return authenticationFailedResult{reason: reason}
 }

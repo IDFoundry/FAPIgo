@@ -182,6 +182,12 @@ func (s *Server) interactionRequestFrom(clientID fapi.ClientID, params map[strin
 	maxAge, hasMaxAge, _ := requestedMaxAge(params)
 	prompt, _ := requestedPrompt(params)
 	essentialACR, _ := essentialACRValues(params)
+	// Validated against the client's registration at the pushed
+	// authorization request; parsed here only for display.
+	var redirectURI fapi.URL
+	if raw, err := jsonString(params, "redirect_uri"); err == nil {
+		redirectURI, _ = fapi.ParseRedirectURL(raw, fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme())
+	}
 
 	return InteractionRequest{
 		ClientID:             clientID,
@@ -197,6 +203,7 @@ func (s *Server) interactionRequestFrom(clientID fapi.ClientID, params map[strin
 		Display:              requestedDisplay(params),
 		AuthorizationDetails: rarValuesFromStoredParameters(s.cfg.RAR, params),
 		RequestedClaims:      requestedClaimsFrom(params),
+		RedirectURI:          redirectURI,
 	}
 }
 
@@ -263,4 +270,14 @@ func (s *Server) BuildAuthorizationErrorRedirect(ctx context.Context, client sto
 	}
 	s.audit(ctx, AuditEventBeginAuthorization, client.ID(), AuditOutcomeFailure, errorCode)
 	return dest, nil
+}
+
+// localDenial is DenyLocally's outcome: access_denied, rendered by the
+// application, with reason as its public description when it is RFC
+// 6749 error text.
+func localDenial(reason string) *Error {
+	if reason == "" || !httperror.IsErrorText(reason) {
+		reason = "the request was declined"
+	}
+	return newError(ErrorAccessDenied, 403, reason, nil)
 }

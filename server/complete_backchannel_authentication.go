@@ -85,6 +85,10 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 	case denyResult:
 		decision.Status = storage.BackchannelAuthenticationDenied
 		decision.Reason = result.reason
+	case denyLocallyResult:
+		// Nothing redirects here, so it is Deny.
+		decision.Status = storage.BackchannelAuthenticationDenied
+		decision.Reason = result.reason
 	case authenticationFailedResult:
 		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
 		decision.Reason = result.reason

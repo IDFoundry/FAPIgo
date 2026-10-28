@@ -33,8 +33,10 @@ func newRouter(srv *server.Server, consent *consentHandler, backchannel *backcha
 	}
 	mux.HandleFunc("GET /jwks", jwksHandler(srv))
 	mux.HandleFunc("POST /par", parHandler(srv))
-	mux.HandleFunc("GET /authorize", consent.handleBegin)
-	mux.HandleFunc("POST /authorize/decision", consent.handleDecision)
+	// Pages a browser shows: not to be framed, cached or leaked in a
+	// Referer (server.AuthorizationPageHeaders).
+	mux.Handle("GET /authorize", server.AuthorizationPageHeaders(http.HandlerFunc(consent.handleBegin)))
+	mux.Handle("POST /authorize/decision", server.AuthorizationPageHeaders(http.HandlerFunc(consent.handleDecision)))
 	mux.HandleFunc("POST /token", tokenHandler(srv))
 	mux.HandleFunc("/userinfo", userinfoHandler(srv, resourceVerifier, userinfoURL, identityClaims, clients, userinfoSigning))
 	// See accountsHandler's own doc comment (resource.go) for why this
@@ -52,8 +54,8 @@ func newRouter(srv *server.Server, consent *consentHandler, backchannel *backcha
 	// configured — off by default, matching -ciba/-client-credentials-grant's
 	// own "off unless explicitly enabled" convention.
 	if cibaApprovalUIToken != "" {
-		mux.HandleFunc("GET /ciba-approve", cibaApproveFormHandler(cibaApprovalUIToken))
-		mux.HandleFunc("POST /ciba-approve", cibaApproveSubmitHandler(backchannel, cibaApprovalUIToken))
+		mux.Handle("GET /ciba-approve", server.AuthorizationPageHeaders(cibaApproveFormHandler(cibaApprovalUIToken)))
+		mux.Handle("POST /ciba-approve", server.AuthorizationPageHeaders(cibaApproveSubmitHandler(backchannel, cibaApprovalUIToken)))
 	}
 	// Only registered when -federation-trust-anchor-admin was passed
 	// (dynFederationClients non-nil then, see wiring.go) — see

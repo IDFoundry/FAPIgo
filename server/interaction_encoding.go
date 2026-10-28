@@ -39,6 +39,7 @@ type encodedInteractionRequest struct {
 	LogoURI              string              `json:"logo_uri,omitempty"`
 	PolicyURI            string              `json:"policy_uri,omitempty"`
 	TermsOfServiceURI    string              `json:"tos_uri,omitempty"`
+	RedirectURI          string              `json:"redirect_uri,omitempty"`
 	AuthorizationDetails extension.RARValues `json:"authorization_details"`
 	Resources            []string            `json:"resources,omitempty"`
 	IDTokenClaims        []string            `json:"id_token_claims,omitempty"`
@@ -78,6 +79,7 @@ func (r InteractionRequest) MarshalText() ([]byte, error) {
 		UILocales: r.UILocales, ClaimsLocales: r.ClaimsLocales, Display: r.Display,
 		ClientName: r.ClientDisplay.Name, LogoURI: urlString(r.ClientDisplay.LogoURI),
 		PolicyURI: urlString(r.ClientDisplay.PolicyURI), TermsOfServiceURI: urlString(r.ClientDisplay.TermsOfServiceURI),
+		RedirectURI:          urlString(r.RedirectURI),
 		AuthorizationDetails: r.AuthorizationDetails, Resources: r.Resources,
 		IDTokenClaims: r.RequestedClaims.IDToken, UserInfoClaims: r.RequestedClaims.UserInfo,
 		Extensions: r.Extensions,
@@ -153,6 +155,13 @@ func ParseInteractionRequest(text string) (InteractionRequest, error) {
 		Resources:       e.Resources,
 		RequestedClaims: RequestedClaims{IDToken: e.IDTokenClaims, UserInfo: e.UserInfoClaims},
 		Extensions:      e.Extensions,
+	}
+	if e.RedirectURI != "" {
+		// Any form a pushed request could have carried: the client's
+		// registration, not this encoding, decided which it may use.
+		if r.RedirectURI, err = fapi.ParseRedirectURL(e.RedirectURI, fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme()); err != nil {
+			return invalid(err)
+		}
 	}
 	if e.MaxAgeSeconds != nil {
 		if *e.MaxAgeSeconds < 0 || *e.MaxAgeSeconds > maxMaxAge {

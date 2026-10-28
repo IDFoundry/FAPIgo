@@ -60,6 +60,8 @@ type consentPage struct {
 	Scope                        []string
 	Citizens                     []citizen
 	Claims                       []claimRow
+	// ReturnTo is the host of the redirect URI the service pushed.
+	ReturnTo string
 }
 
 // Citizen fields for the consent template, which can't reach
@@ -199,6 +201,7 @@ var pageTemplates = map[string]string{
 <div class="card">
 <p><strong>{{.ClientName}}</strong> wants you to sign in with {{.Provider}}.</p>
 <p class="muted"><code>{{.Client}}</code> — registered automatically through its Trust Chain, with no onboarding beforehand.</p>
+{{if .ReturnTo}}<p class="muted">Once you sign in, you'll be sent back to <code>{{.ReturnTo}}</code>.</p>{{end}}
 <form method="post" action="/authorize"><input type="hidden" name="interaction" value="{{.Interaction}}">
 <h2>Who are you?</h2>
 {{range $i, $c := .Citizens}}<label class="row"><input type="radio" name="citizen" value="{{$c.Sub}}" {{if eq $i 0}}checked{{end}}> {{$c.Name}} <span class="muted">({{$c.Sub}})</span></label>{{end}}

@@ -876,6 +876,14 @@ func (c RegisteredClient) ID() fapi.ClientID { return c.id }
 // A client registered only for CIBA or client credentials has none.
 func (c RegisteredClient) AllowsAuthorizationCodeGrant() bool { return len(c.redirectURIs) > 0 }
 
+// RedirectURIs returns a copy of the client's registered redirect URIs,
+// in registration order — see RegisteredClientConfig.RedirectURIs. Use
+// HasRedirectURI to check a candidate: it also admits a native app's
+// loopback redirect URI on any port.
+func (c RegisteredClient) RedirectURIs() []fapi.RegisteredRedirectURI {
+	return slices.Clone(c.redirectURIs)
+}
+
 // HasRedirectURI reports whether candidate is exactly one of this
 // client's registered redirect URIs (RegisteredRedirectURI.Equal
 // semantics — exact match, no normalization), but for a native client's

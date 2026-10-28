@@ -22,6 +22,8 @@ type demo struct {
 	http  *http.Client
 	// interaction is the last consent form's interactioncookie tag.
 	interaction string
+	// header is the last page's response header.
+	header http.Header
 }
 
 func start(t *testing.T) *demo {
@@ -72,6 +74,7 @@ var interactionField = regexp.MustCompile(`name="interaction" value="([^"]*)"`)
 // page reads res's body, remembering any consent form's tag in it.
 func (d *demo) page(res *http.Response) string {
 	body := readBody(d.t, res)
+	d.header = res.Header
 	if m := interactionField.FindStringSubmatch(body); m != nil {
 		d.interaction = m[1]
 	}
@@ -156,11 +159,51 @@ func TestPayByBank(t *testing.T) {
 	mustContain(t, "the attacks", page, "approve paying EUR 1290.00", "has been made", "invalid_grant", "revoked")
 }
 
+// TestCancelAtTheBank: a customer who cancels before signing in stays
+// at the bank (RFC 9700 §4.11.2: no redirect before authentication);
+// one who signs in and then cancels is sent back to the shop with
+// access_denied.
 func TestCancelAtTheBank(t *testing.T) {
 	d := start(t)
 	d.checkout()
-	order, _ := d.post("bank.localhost", "/authorize", url.Values{"decision": {"deny"}})
+	page, at := d.post("bank.localhost", "/authorize", url.Values{"decision": {"deny"}})
+	if !strings.Contains(at, "bank.localhost") {
+		t.Fatalf("cancelling before signing in landed on %s, want to stay at Alder Bank", at)
+	}
+	mustContain(t, "the bank's page", page, "Payment cancelled", "sent nothing back to the shop")
+
+	d = start(t)
+	d.checkout()
+	order, at := d.post("bank.localhost", "/authorize", url.Values{"username": {"sam"}, "pin": {"2468"}, "decision": {"deny"}})
+	if !strings.Contains(at, "shop.localhost") {
+		t.Fatalf("cancelling after signing in landed on %s, want the shop", at)
+	}
 	mustContain(t, "the order", order, "declined", "access_denied")
+}
+
+// TestBankPagesRefuseFraming: the bank's sign-in and consent page, and
+// what its submission renders, can't be framed, cached or leaked in a
+// Referer (server.AuthorizationPageHeaders).
+func TestBankPagesRefuseFraming(t *testing.T) {
+	d := start(t)
+	d.checkout()
+	requireAuthorizationPageHeaders(t, "the consent page", d.header)
+	d.post("bank.localhost", "/authorize", url.Values{"decision": {"deny"}})
+	requireAuthorizationPageHeaders(t, "the cancellation page", d.header)
+}
+
+func requireAuthorizationPageHeaders(t *testing.T, where string, header http.Header) {
+	t.Helper()
+	for name, want := range map[string]string{
+		"Content-Security-Policy": "frame-ancestors 'none'",
+		"X-Frame-Options":         "DENY",
+		"Referrer-Policy":         "no-referrer",
+		"Cache-Control":           "no-store",
+	} {
+		if got := header.Get(name); got != want {
+			t.Errorf("%s: %s = %q, want %q", where, name, got, want)
+		}
+	}
 }
 
 func TestAttacksBeforePayment(t *testing.T) {

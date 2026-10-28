@@ -192,12 +192,14 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 	mux := idp.entity.mux
 	mux.HandleFunc("GET /jwks", idp.jwks)
 	mux.HandleFunc("POST /par", idp.par)
-	mux.HandleFunc("GET "+authorizePath, idp.authorize)
+	// The sign-in page: never framed (clickjacking), cached, or leaked in
+	// a Referer (server.AuthorizationPageHeaders).
+	mux.Handle("GET "+authorizePath, server.AuthorizationPageHeaders(http.HandlerFunc(idp.authorize)))
 	// The interaction handle cookie is SameSite, but a sibling host on the
 	// same site (bank.southport.localhost next to id.southport.localhost)
 	// still sends it. Refusing cross-origin POSTs is the CSRF defence
 	// server.InteractionHandle's doc comment asks for.
-	mux.Handle("POST "+authorizePath, http.NewCrossOriginProtection().Handler(http.HandlerFunc(idp.decide)))
+	mux.Handle("POST "+authorizePath, server.AuthorizationPageHeaders(http.NewCrossOriginProtection().Handler(http.HandlerFunc(idp.decide))))
 	mux.HandleFunc("POST /token", idp.token)
 	return idp, nil
 }
@@ -361,6 +363,9 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 			Client: string(a.Interaction.ClientID), ClientName: clientName(a.Interaction),
 			Scope: a.Interaction.Scope, Citizens: p.country.citizens,
 			Claims: claimRows(a.Interaction.RequestedClaims),
+			// Where the citizen will be sent: a service registered
+			// automatically chose it, so the page says so.
+			ReturnTo: a.Interaction.RedirectURI.URL().Host,
 		})
 	case server.RedirectResponse:
 		http.Redirect(w, r, a.Destination.String(), http.StatusFound)
@@ -387,7 +392,12 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 	var approvedSubject server.AuthenticatedSubject
 	var approvedCitizen citizen
 	if r.PostForm.Get("decision") != "approve" {
-		result = server.Deny("the citizen declined")
+		// Nobody has signed in, so the citizen isn't sent back to the
+		// service: a provider redirects only once it knows who it's
+		// talking to (RFC 9700 §4.11.2). Any Trust Chain member is
+		// registered automatically, so otherwise any of them could
+		// bounce citizens through this provider to a page of its own.
+		result = server.DenyLocally("you cancelled before signing in")
 	} else {
 		sub := r.PostForm.Get("citizen")
 		i := slices.IndexFunc(p.country.citizens, func(c citizen) bool { return c.sub == sub })
@@ -436,6 +446,10 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Redirect(w, r, o.Destination().String(), http.StatusSeeOther) // after a form POST: never 307
 	case server.AuthorizationLocalError:
+		if o.Error.Code() == server.ErrorAccessDenied {
+			p.w.renderError(w, o.Error.HTTPStatus(), "Sign-in declined", "Nothing was shared, and "+p.country.idpName+" sent nothing back to "+clientName(interaction)+": you cancelled before signing in. You can close this page.")
+			return
+		}
 		p.w.renderError(w, o.Error.HTTPStatus(), signInFailed, string(o.Error.Code())+": "+o.Error.PublicDescription())
 	}
 }

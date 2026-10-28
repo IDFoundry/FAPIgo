@@ -18,7 +18,7 @@ import (
 const httpFetchTimeout = 10 * time.Second
 
 // dpopNonceLifetime bounds how long a DPoP nonce issued under
-// -dpop-nonce-challenge remains valid.
+// -dpop-nonce-challenge (on by default) remains valid.
 const dpopNonceLifetime = time.Minute
 
 // backchannelAuthenticationRequestLifetime, maxBackchannelAuthenticationRequestLifetime
@@ -48,7 +48,7 @@ func main() {
 	keyOverride := flag.String("key", "", "override tls.key_file from the config file")
 	insecureHTTP := flag.Bool("insecure-http", false, "serve plaintext HTTP instead of TLS (loopback listen_addr only)")
 	accessTokenFormat := flag.String("access-token-format", string(AccessTokenFormatJWT), "access token format to issue/verify: jwt or opaque")
-	dpopNonceChallenge := flag.Bool("dpop-nonce-challenge", false, "require and rotate a DPoP nonce on /par, /token and /userinfo (RFC 9449 §8/§9) — off by default, since the OIDF suite's own driver may not retry on the challenge")
+	dpopNonceChallenge := flag.Bool("dpop-nonce-challenge", true, "require and rotate a DPoP nonce on /par, /token and /userinfo (RFC 9449 §8/§9) — on by default, as a production server.New requires a nonce store unless declined; the OIDF suite's FAPI2 AS-plan client retries on the use_dpop_nonce challenge. -dpop-nonce-challenge=false turns it off")
 	userinfoSigning := flag.Bool("userinfo-signing", false, "sign /userinfo responses as a JWS (OIDC Core §5.3.2), using the same algorithm as ID tokens — off by default; the FAPI 2.0 Security Profile doesn't require this")
 	ciba := flag.Bool("ciba", false, "enable the CIBA backchannel authentication endpoint (poll and ping delivery) — off by default; not part of the FAPI 2.0 Security Profile itself")
 	clientCredentialsGrant := flag.Bool("client-credentials-grant", false, "enable the RFC 6749 §4.4 client_credentials grant at the token endpoint — off by default; not part of the FAPI 2.0 Security Profile itself. Only clients registered allows_client_credentials_grant may use it.")

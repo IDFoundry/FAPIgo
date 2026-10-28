@@ -160,6 +160,21 @@ one suite requirement. Add this to the suite's plan config:
 (swap the hostname for `conformance-as-message-signing` on the
 message-signing run).
 
+## DPoP server nonces (on by default)
+
+`conformance-as` challenges every DPoP proof at `/par`, `/token`,
+`/userinfo` and `/accounts` for a server nonce (RFC 9449 §8, §9) unless
+started with `-dpop-nonce-challenge=false`, mirroring a production
+`server.New`, which requires `Dependencies.Nonces` or an explicit
+`server.NoDPoPNonces{}`. The AS and the protected endpoints keep
+separate nonce stores, so a nonce from one is refused by the other. The
+suite's FAPI2 AS-plan client (`AbstractFAPI2SPFinalServerTestModule`'s
+`callSenderConstrainedTokenEndpoint`, its PAR call and
+`CallProtectedResourceAllowingDpopNonceError`) retries once on
+`use_dpop_nonce` with the nonce from the challenge's `DPoP-Nonce`
+header, so every DPoP leg exercises the challenge and the retry; the
+mTLS-sender-constrained legs never present a proof and are unaffected.
+
 ## The `browser` and `override` blocks (suite plan config only)
 
 Every module needs the suite's scripted browser to click through this

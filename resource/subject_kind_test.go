@@ -14,7 +14,8 @@ import (
 
 // TestVerifySubjectKind: a client credentials token, which carries
 // grant_type, reports SubjectClient; any other token SubjectEndUser; and
-// a grant_type the server never sets fails closed.
+// a grant_type the server never sets fails closed. EndUser reports the
+// subject only for the end user's token.
 func TestVerifySubjectKind(t *testing.T) {
 	now := time.Now()
 	cert := selfSignedTestClientCert(t, "client-1")
@@ -23,14 +24,15 @@ func TestVerifySubjectKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, tc := range map[string]struct {
-		claims  map[string]json.RawMessage
-		want    resource.SubjectKind
-		wantErr resource.ErrorCode
+		claims      map[string]json.RawMessage
+		want        resource.SubjectKind
+		wantEndUser bool
+		wantErr     resource.ErrorCode
 	}{
-		"end user":           {nil, resource.SubjectEndUser, ""},
-		"client credentials": {map[string]json.RawMessage{"grant_type": json.RawMessage(`"client_credentials"`)}, resource.SubjectClient, ""},
-		"other grant type":   {map[string]json.RawMessage{"grant_type": json.RawMessage(`"authorization_code"`)}, 0, resource.ErrorInvalidToken},
-		"not a string":       {map[string]json.RawMessage{"grant_type": json.RawMessage(`1`)}, 0, resource.ErrorInvalidToken},
+		"end user":           {nil, resource.SubjectEndUser, true, ""},
+		"client credentials": {map[string]json.RawMessage{"grant_type": json.RawMessage(`"client_credentials"`)}, resource.SubjectClient, false, ""},
+		"other grant type":   {map[string]json.RawMessage{"grant_type": json.RawMessage(`"authorization_code"`)}, 0, false, resource.ErrorInvalidToken},
+		"not a string":       {map[string]json.RawMessage{"grant_type": json.RawMessage(`1`)}, 0, false, resource.ErrorInvalidToken},
 	} {
 		t.Run(name, func(t *testing.T) {
 			v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{
@@ -55,6 +57,32 @@ func TestVerifySubjectKind(t *testing.T) {
 			}
 			if authz.SubjectKind != tc.want {
 				t.Fatalf("SubjectKind = %v, want %v", authz.SubjectKind, tc.want)
+			}
+			if sub, ok := authz.EndUser(); ok != tc.wantEndUser || (ok && sub != authz.InternalSubject) {
+				t.Fatalf("EndUser = %q, %v; want ok %v", sub, ok, tc.wantEndUser)
+			}
+		})
+	}
+}
+
+// TestEndUser: only a token issued for an end user names one; a client
+// credentials token for a client whose client_id equals a user's
+// identifier doesn't, nor does a hand-built context with no SubjectKind
+// or one with no InternalSubject.
+func TestEndUser(t *testing.T) {
+	for name, tc := range map[string]struct {
+		authz resource.AuthorizationContext
+		want  string
+		ok    bool
+	}{
+		"end user":              {resource.AuthorizationContext{SubjectKind: resource.SubjectEndUser, InternalSubject: "alice", ClientSubject: "alice"}, "alice", true},
+		"client named as alice": {resource.AuthorizationContext{SubjectKind: resource.SubjectClient, InternalSubject: "alice", ClientSubject: "alice", ClientID: "alice"}, "", false},
+		"no subject kind":       {resource.AuthorizationContext{InternalSubject: "alice"}, "", false},
+		"pairwise, not mapped":  {resource.AuthorizationContext{SubjectKind: resource.SubjectEndUser, ClientSubject: "pairwise-1"}, "", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got, ok := tc.authz.EndUser(); got != tc.want || ok != tc.ok {
+				t.Fatalf("EndUser = %q, %v; want %q, %v", got, ok, tc.want, tc.ok)
 			}
 		})
 	}

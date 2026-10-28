@@ -47,7 +47,9 @@
 // For a client with pairwise subjects (OpenID Connect Core §8),
 // AuthorizationContext.InternalSubject is the end user's internal
 // subject and ClientSubject the pairwise sub the client knows them by:
-// authorize by InternalSubject, but compare and return anything
+// authorize by InternalSubject (through EndUser, which refuses a client
+// credentials token: its subject is the client's own client_id, which
+// may equal a user's identifier), but compare and return anything
 // client-facing with ClientSubject. A self-contained access token's
 // pairwise sub is mapped back through Dependencies.PairwiseSubjects (the
 // authorization server's reversible deriver: pairwise.NewReversible,

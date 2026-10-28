@@ -116,10 +116,11 @@ type AuthorizationContext struct {
 	// Core §8) it's exactly what the client's pairwise sub hides. It is
 	// left out of this struct's JSON encoding for the same reason.
 	//
-	// Check SubjectKind before authorizing by InternalSubject: a client
-	// registered with a client_id it chose (automatically through OpenID
-	// Federation, for one) could otherwise present a client credentials
-	// token whose subject equals an end user's (RFC 9068 §5). Under
+	// Authorize a user's resources by EndUser, which checks SubjectKind,
+	// not by InternalSubject alone: a client registered with a client_id
+	// it chose (automatically through OpenID Federation, for one) could
+	// otherwise present a client credentials token whose subject equals
+	// an end user's (RFC 9068 §5). Under
 	// Config.PairwiseResolution PairwiseClientSubjectsOnly it is "" for a
 	// pairwise sub, which the verifier then doesn't map back.
 	InternalSubject string `json:"-"`
@@ -207,6 +208,25 @@ func (a AuthorizationContext) GrantID() string {
 // falling back to Key.
 func (a AuthorizationContext) CodeGrantID() string {
 	return stringClaim(a.Claims, grantrevocation.CodeClaim)
+}
+
+// EndUser returns InternalSubject when the token was issued for an end
+// user (SubjectEndUser), and ok false for a token a client was issued
+// for itself (SubjectClient, the client credentials grant), whose
+// InternalSubject is its own client_id, not a user's. Authorize anything
+// that belongs to a user by it, refusing the request (a 403
+// insufficient_scope, NewInsufficientScopeError) when ok is false:
+// a client is free to pick a client_id equal to a user's identifier.
+//
+// ok is false, too, for an AuthorizationContext built by hand without a
+// SubjectKind, and when InternalSubject is "" (a pairwise sub under
+// PairwiseClientSubjectsOnly, which the verifier doesn't map back;
+// authorize by ClientSubject with ClientID there).
+func (a AuthorizationContext) EndUser() (internalSubject string, ok bool) {
+	if a.SubjectKind != SubjectEndUser || a.InternalSubject == "" {
+		return "", false
+	}
+	return a.InternalSubject, true
 }
 
 // stringClaim is claims[name] as a string, or "" when it is absent or

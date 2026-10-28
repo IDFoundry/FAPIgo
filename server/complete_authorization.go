@@ -9,6 +9,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/httperror"
+	"github.com/idfoundry/fapigo/internal/querystring"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -326,31 +327,36 @@ func (s *Server) completeErrorRedirect(ctx context.Context, clientID fapi.Client
 // server (RFC 9207), so a client can detect a response mixed up between
 // two authorization servers; a JARM response doesn't need one, since its
 // own "iss" claim already serves that purpose.
+//
+// The response parameters are added after the redirect URI's own query,
+// which is kept byte for byte: RFC 6749 §3.1.2 says it "MUST be retained
+// when adding additional query parameters", and decoding and re-encoding
+// it would reorder it and drop or rewrite what url.ParseQuery can't
+// represent. storage.NewRegisteredClient refuses a redirect URI whose
+// query already names a response parameter, so none is sent twice.
 func (s *Server) buildAuthorizationResponse(ctx context.Context, clientID fapi.ClientID, redirectURI string, params map[string]string) (fapi.URL, *Error) {
 	base, err := url.Parse(redirectURI)
 	if err != nil {
 		return fapi.URL{}, newError(ErrorServerError, 500, "stored redirect_uri is malformed", err)
 	}
 
+	response := url.Values{}
 	if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
 		responseJWT, err := s.signJARMResponse(ctx, clientID, params)
 		if err != nil {
 			return fapi.URL{}, newError(ErrorServerError, 500, "failed to sign authorization response", err)
 		}
-		q := base.Query()
-		q.Set("response", responseJWT)
-		base.RawQuery = q.Encode()
+		response.Set("response", responseJWT)
 	} else {
-		q := base.Query()
 		for k, v := range params {
 			if v == "" {
 				continue
 			}
-			q.Set(k, v)
+			response.Set(k, v)
 		}
-		q.Set("iss", s.cfg.Issuer.String())
-		base.RawQuery = q.Encode()
+		response.Set("iss", s.cfg.Issuer.String())
 	}
+	base.RawQuery = querystring.Append(base.RawQuery, response.Encode())
 
 	// The caller already held redirect_uri to the client's registered type
 	// (parseRedirectURI): the pushed authorization request, or

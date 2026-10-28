@@ -25,9 +25,13 @@ func (c RegisteredClient) SubjectType() fapi.SubjectType { return c.subjectType 
 // can't have pairwise subjects).
 func (c RegisteredClient) Sector() string { return c.sector }
 
-// checkApplicationTypeAndSector runs checkApplicationType, then
-// clientSector, whose sector derivation depends on the application type.
+// checkApplicationTypeAndSector runs checkRedirectURIQueries and
+// checkApplicationType, then clientSector, whose sector derivation
+// depends on the application type.
 func checkApplicationTypeAndSector(cfg RegisteredClientConfig) (string, error) {
+	if err := checkRedirectURIQueries(cfg); err != nil {
+		return "", err
+	}
 	if err := checkApplicationType(cfg); err != nil {
 		return "", err
 	}

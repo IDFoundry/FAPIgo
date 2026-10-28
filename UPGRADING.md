@@ -214,6 +214,43 @@ if len(approvedScope) == 0 {
 }
 ```
 
+### Redirect and authorization endpoint queries are kept byte for byte, and may not name the parameters added to them (storage, server, client)
+
+**Affects:** a client registered (`storage.NewRegisteredClient`, and so
+OpenID Federation automatic registration) with a redirect URI whose
+query names `code`, `state`, `iss`, `error`, `error_description`,
+`error_uri` or `response`; a `client.Config` whose `RedirectURI` query
+names one of those, or whose `Endpoints.Authorization` query names
+`client_id` or `request_uri`; and anything that compared the exact
+redirect the server built for a redirect URI with a query.
+
+**Why:** RFC 6749 §3.1 and §3.1.2 say an endpoint's query "MUST be
+retained when adding additional query parameters". The server and the
+client rebuilt it through `url.Values`, which sorted it, turned `?flag`
+into `flag=`, dropped pairs with a `;` or an invalid escape, and let a
+registered `state` be overwritten. The query is now kept as registered
+and the added parameters follow it, so a name in both would arrive
+twice, and the client couldn't tell which value is the response's.
+
+**What fails:** `storage.NewRegisteredClient` returns an error naming
+the redirect URI and the parameter, and `client.New` returns one naming
+`redirect_uri` or `endpoints.authorization`. A name is matched after
+percent-decoding, and pairs split at `;` as well as `&`.
+
+**What to change:** rename the colliding query parameter, or move what
+it carries into the path:
+
+```go
+storage.RegisteredClientConfig{
+	RedirectURIs: []fapi.RegisteredRedirectURI{
+		"https://rp.example/callback?tenant=acme", // not ?state=acme
+	},
+}
+```
+
+`fapi.URL.WithAddedQuery` adds parameters after a URL's own query in the
+same way, for code that builds on an endpoint URL itself.
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

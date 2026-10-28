@@ -10,6 +10,7 @@ import (
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/internal/depcheck"
 	"github.com/idfoundry/fapigo/internal/nofollow"
+	"github.com/idfoundry/fapigo/internal/querystring"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -755,6 +756,25 @@ func idTokensPossible(cfg Config) bool {
 	return !cfg.OAuthOnly && (!cfg.Endpoints.Authorization.IsZero() || !cfg.Endpoints.BackchannelAuthentication.IsZero())
 }
 
+// validateQueries refuses an Endpoints.Authorization whose query names
+// client_id or request_uri, which BeginAuthorization adds after it, and
+// a Config.RedirectURI whose query names a parameter an authorization
+// response adds (code, state, iss, error, error_description, error_uri,
+// response). RFC 6749 §3.1 and §3.1.2 have the query retained and the
+// parameters added after it, so either would arrive twice.
+func validateQueries(cfg Config) error {
+	endpoint := cfg.Endpoints.Authorization.URL()
+	if name, found := querystring.FirstReserved(endpoint.RawQuery, "client_id", "request_uri"); found {
+		return fmt.Errorf("client: config: endpoints.authorization: its query names %q, which the authorization request adds (RFC 6749 §3.1)", name)
+	}
+	if u, err := url.Parse(cfg.RedirectURI); err == nil {
+		if name, found := querystring.FirstReserved(u.RawQuery, "code", "state", "iss", "error", "error_description", "error_uri", "response"); found {
+			return fmt.Errorf("client: config: redirect_uri: its query names %q, which the authorization response adds (RFC 6749 §3.1.2)", name)
+		}
+	}
+	return nil
+}
+
 // validateRedirectURI refuses a Config.RedirectURI no authorization
 // server following FAPI 2.0 §5.3.2.2 would accept, so the mistake shows
 // at New rather than as an invalid_request from the server's pushed
@@ -764,8 +784,11 @@ func idTokensPossible(cfg Config) bool {
 // all three forms pass; under AssuranceProduction a loopback redirect
 // must name the IP literal 127.0.0.1 or [::1], not localhost, as RFC
 // 8252 §8.3 recommends and a server's native client registration
-// requires.
+// requires. validateQueries runs first.
 func validateRedirectURI(cfg Config) error {
+	if err := validateQueries(cfg); err != nil {
+		return err
+	}
 	if cfg.RedirectURI == "" {
 		return nil
 	}

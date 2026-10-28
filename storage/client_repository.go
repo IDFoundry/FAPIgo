@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/querystring"
 	"github.com/idfoundry/fapigo/internal/resourceindicator"
 )
 
@@ -242,7 +243,11 @@ type RegisteredClientConfig struct {
 	// (BackchannelAuthenticationRequestAlgorithm set) or client
 	// credentials (AllowsClientCredentialsGrant) — in which case, left
 	// empty, the client can't use the authorization code grant (see
-	// RegisteredClient.AllowsAuthorizationCodeGrant).
+	// RegisteredClient.AllowsAuthorizationCodeGrant). A URI's query is
+	// kept byte for byte and the authorization response's parameters
+	// added after it (RFC 6749 §3.1.2), so a query naming one of them —
+	// code, state, iss, error, error_description, error_uri or
+	// response — is refused.
 	RedirectURIs []fapi.RegisteredRedirectURI
 
 	// ApplicationType is ApplicationTypeWeb (the zero value) or
@@ -909,6 +914,31 @@ func (c RegisteredClient) HasRedirectURI(candidate string) bool {
 // ApplicationType returns whether this client is a web application or a
 // native app — see RegisteredClientConfig.ApplicationType.
 func (c RegisteredClient) ApplicationType() ApplicationType { return c.applicationType }
+
+// authorizationResponseParameters are the parameters an authorization
+// response adds to a redirect URI's query: RFC 6749 §4.1.2's code and
+// state, §4.1.2.1's error, error_description and error_uri, RFC 9207's
+// iss, and JARM's response.
+var authorizationResponseParameters = []string{"code", "state", "iss", "error", "error_description", "error_uri", "response"}
+
+// checkRedirectURIQueries refuses a redirect URI whose query names an
+// authorization response parameter (authorizationResponseParameters).
+// RFC 6749 §3.1.2 has the server retain the registered query and add
+// the response's parameters after it, so such a URI would receive the
+// parameter twice — or, rewritten, a registered "state" in place of the
+// client's — and a client can't tell which one is the response's.
+func checkRedirectURIQueries(cfg RegisteredClientConfig) error {
+	for _, uri := range cfg.RedirectURIs {
+		u, err := url.Parse(string(uri))
+		if err != nil {
+			continue // refused for what it is where it's parsed as a redirect URI
+		}
+		if name, found := querystring.FirstReserved(u.RawQuery, authorizationResponseParameters...); found {
+			return fmt.Errorf("storage: client %q: redirect URI %q: its query names %q, which the authorization response adds (RFC 6749 §3.1.2)", cfg.ID, uri, name)
+		}
+	}
+	return nil
+}
 
 // checkApplicationType refuses an unknown application type, and a native
 // client's redirect URI that isn't one of the forms ApplicationTypeNative

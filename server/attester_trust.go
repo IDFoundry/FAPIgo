@@ -68,7 +68,8 @@ type attesterSigner struct {
 // Keys returns for the client's registered attester
 // (storage.RegisteredClient.ExpectedAttesterIssuer), selected by the
 // attestation's "kid" (any key with the client's registered attestation
-// algorithm when there is no "kid"). Any "x5c" header is ignored, not
+// algorithm when there is no "kid"); when several keys match, up to
+// eight are tried, and the one whose signature verifies is used. Any "x5c" header is ignored, not
 // validated — so rotating an Attester's signing key means
 // re-registering it, and a certificate's expiry or trust status plays
 // no part. Use X5CAttesterChain for HAIP's certificate-based trust.
@@ -94,7 +95,17 @@ func (r RegisteredAttesterKeys) attesterKey(ctx context.Context, _ *Server, clie
 	if err != nil {
 		return attesterSigner{}, err
 	}
-	key, err := selectVerificationKey(set, alg, kid)
+	candidates, err := verificationKeyCandidates(set, alg, kid)
+	if err != nil {
+		return attesterSigner{}, err
+	}
+	// The key is the first candidate whose signature verifies, so a
+	// rotation without distinct kids doesn't lock clients out; the full
+	// verification, claims included, then runs once with it (see
+	// verifyClientAttestation).
+	key, err := verifyWithCandidates(candidates, func(pub crypto.PublicKey) (crypto.PublicKey, error) {
+		return pub, attestation.VerifySignature(pub, alg)
+	})
 	if err != nil {
 		return attesterSigner{}, err
 	}

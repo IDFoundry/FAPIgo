@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
@@ -322,12 +323,12 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "malformed backchannel authentication request", err)
 	}
 
-	pub, err := s.resolveClientKey(ctx, client.ID(), keys.BackchannelAuthenticationRequestVerification, alg, obj.KeyID())
+	candidates, err := s.resolveClientKeys(ctx, client.ID(), keys.BackchannelAuthenticationRequestVerification, alg, obj.KeyID())
 	if err != nil {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "no matching client key", err)
 	}
 
-	verified, err := obj.Verify(ctx, pub, requestobject.VerifyPolicy{
+	policy := requestobject.VerifyPolicy{
 		ExpectedClientID: client.ID().String(),
 		ExpectedAudience: s.cfg.Issuer.String(),
 		Algorithm:        alg,
@@ -345,6 +346,9 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 		RequireNotBefore: true,
 		RequireJTI:       true,
 		RequireIssuedAt:  true,
+	}
+	verified, err := verifyWithCandidates(candidates, func(pub crypto.PublicKey) (requestobject.VerifiedObject, error) {
+		return obj.Verify(ctx, pub, policy)
 	})
 	if err != nil {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "backchannel authentication request verification failed", err)

@@ -459,13 +459,13 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 			newError(ErrorInvalidClient, 401, "client assertion algorithm is not permitted", nil)
 	}
 
-	pub, err := s.resolveClientKey(ctx, client.ID(), keys.ClientAssertionVerification, alg, assertion.KeyID())
+	candidates, err := s.resolveClientKeys(ctx, client.ID(), keys.ClientAssertionVerification, alg, assertion.KeyID())
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "no matching client key", err)
 	}
 
-	verified, err := assertion.Verify(ctx, pub, clientassertion.VerifyPolicy{
+	policy := clientassertion.VerifyPolicy{
 		ExpectedClientID:  client.ID().String(),
 		ExpectedAudiences: s.acceptableClientAssertionAudiences(client, endpoints, mtlsEndpoints),
 		Algorithm:         alg,
@@ -473,6 +473,9 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 		MaxLifetime:       s.cfg.Limits.MaxClientAssertionLifetime,
 		MaxClockSkew:      s.cfg.Limits.MaxClockSkew,
 		Replay:            s.clientSignedJWTReplayChecker(client.ID()),
+	}
+	verified, err := verifyWithCandidates(candidates, func(pub crypto.PublicKey) (clientassertion.VerifiedAssertion, error) {
+		return assertion.Verify(ctx, pub, policy)
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
@@ -595,12 +598,12 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "malformed request object", err)
 	}
 
-	pub, err := s.resolveClientKey(ctx, client.ID(), keys.RequestObjectVerification, alg, obj.KeyID())
+	candidates, err := s.resolveClientKeys(ctx, client.ID(), keys.RequestObjectVerification, alg, obj.KeyID())
 	if err != nil {
 		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "no matching client key", err)
 	}
 
-	verified, err := obj.Verify(ctx, pub, requestobject.VerifyPolicy{
+	policy := requestobject.VerifyPolicy{
 		ExpectedClientID: client.ID().String(),
 		ExpectedAudience: s.cfg.Issuer.String(),
 		Algorithm:        alg,
@@ -618,6 +621,9 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		// requestobject.VerifyPolicy.AutomaticFederationRegistration's
 		// own doc comment.
 		AutomaticFederationRegistration: client.AutomaticFederationRegistration(),
+	}
+	verified, err := verifyWithCandidates(candidates, func(pub crypto.PublicKey) (requestobject.VerifiedObject, error) {
+		return obj.Verify(ctx, pub, policy)
 	})
 	if err != nil {
 		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object verification failed", err)
@@ -709,33 +715,6 @@ func (s *Server) checkExtensions(ctx context.Context, client storage.RegisteredC
 		params[authorizationDetailsParameter] = granted
 	}
 	return extension.AsParameters(values, s.cfg.Extensions.Definitions()...), nil
-}
-
-// resolveClientKey picks the verification key matching kid/alg from
-// whatever ClientKeys returns for the client.
-func (s *Server) resolveClientKey(ctx context.Context, id fapi.ClientID, purpose keys.VerificationPurpose, alg fapi.SignatureAlgorithm, kid string) (crypto.PublicKey, error) {
-	set, err := s.deps.ClientKeys.ResolveVerificationKeys(ctx, keys.ClientKeyRequest{
-		ClientID: id, Purpose: purpose, Algorithm: alg, KeyID: kid,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return selectVerificationKey(set, alg, kid)
-}
-
-// selectVerificationKey returns the first key in set with algorithm alg
-// and, when kid is set, that key ID.
-func selectVerificationKey(set keys.VerificationKeySet, alg fapi.SignatureAlgorithm, kid string) (crypto.PublicKey, error) {
-	for _, k := range set.Keys {
-		if kid != "" && k.KeyID != kid {
-			continue
-		}
-		if k.Algorithm != alg {
-			continue
-		}
-		return k.PublicKey, nil
-	}
-	return nil, fmt.Errorf("no verification key found for kid=%q algorithm=%v", kid, alg)
 }
 
 // validateAuthorizationParameters checks the FAPI-mandated authorization

@@ -22,8 +22,10 @@ const (
 	ProfileFAPISecurity
 
 	// ProfileFAPISecurityWithMessageSigning additionally signs every
-	// pushed authorization request as a request object, and requires the
-	// authorization response to be a signed JARM response.
+	// pushed authorization request as a request object, asks for a
+	// signed JARM response with response_mode=jwt in it (FAPI 2.0
+	// Message Signing §5.4.2), and requires the authorization response
+	// to be one.
 	ProfileFAPISecurityWithMessageSigning
 )
 

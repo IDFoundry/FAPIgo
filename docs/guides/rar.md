@@ -112,6 +112,12 @@ details don't cover with `resource.NewInsufficientScopeError(authz,
 "...")`, sent with `resource.WriteError`: a 403 whose challenge uses
 the scheme the token was presented with.
 
+Details granted through the client credentials grant are the client's
+own, approved by no user. Before acting on a user's account, take the
+user from `authz.EndUser()`, which reports `ok` false for a client
+credentials token: its subject is the client's own `client_id`, which
+a client can choose to equal a user's identifier.
+
 ## Checked for you
 
 - **Strict parsing:** a member the Go type doesn't declare is refused, and

@@ -1078,8 +1078,9 @@ For a client with pairwise subjects, `AuthorizationContext` carries two
 subjects:
 
 - **`InternalSubject`** is the user's internal subject, which your API
-  authorizes by. Never return it to a client: it's exactly what the
-  client's pairwise `sub` hides.
+  authorizes by, through `EndUser` (see "Verify a request" below).
+  Never return it to a client: it's exactly what the client's pairwise
+  `sub` hides.
 - **`ClientSubject`** is the pairwise `sub` the client knows the user
   by. **Compare and return anything client-facing with
   `ClientSubject`**: a user ID in a path (`/users/{id}/accounts`) or a
@@ -1119,7 +1120,9 @@ your access tokens) must never be given those. It accepts pairwise
 ```go
 cfg.PairwiseResolution = resource.PairwiseClientSubjectsOnly
 // authz.InternalSubject is then "" for a pairwise sub: authorize by
-// authz.ClientSubject together with authz.ClientID.
+// authz.ClientSubject together with authz.ClientID, for a token whose
+// authz.SubjectKind is resource.SubjectEndUser (a client credentials
+// token's ClientSubject is the client's own client_id).
 ```
 
 A verifier with neither refuses a pairwise JWT access token with
@@ -1360,11 +1363,27 @@ every request.
 authCtx, err := verifier.Verify(ctx, resource.VerifyRequestFromHTTP(r))
 ```
 
-On success, `authCtx.InternalSubject`/`ClientID`/`Scopes`/`Claims` are
-what your API handler needs to authorize the call (return
-`authCtx.ClientSubject`, never `InternalSubject`, to the client). Call
-`authCtx.SetDPoPNonce(w.Header())` on the response, so a client's next
-call already carries a fresh DPoP nonce when you've enabled them. A
+On success, `authCtx.EndUser()`/`ClientID`/`Scopes`/`Claims` are what
+your API handler needs to authorize the call (return
+`authCtx.ClientSubject`, never the internal subject, to the client).
+Authorize anything that belongs to a user by `EndUser`, never by
+`InternalSubject` alone: a client credentials token's subject is the
+client's own `client_id` (`SubjectKind` is `SubjectClient`), and a client
+can be registered with a `client_id` equal to a user's identifier
+(automatically, through OpenID Federation, for one). `EndUser` reports
+`ok` false for it:
+
+```go
+user, ok := authCtx.EndUser()
+if !ok {
+	resource.NewInsufficientScopeError(authCtx, "the access token wasn't issued for a user").WriteJSON(w)
+	return
+}
+accounts := accountsOf(user)
+```
+
+Call `authCtx.SetDPoPNonce(w.Header())` on the response, so a client's
+next call already carries a fresh DPoP nonce when you've enabled them. A
 UserInfo endpoint hosted with the authorization server builds its
 response with `serverresource.UserInfoClaims(ctx, authCtx,
 identityClaims)`: only the claims the client requested and the user
@@ -1436,7 +1455,26 @@ certificate. Take it only from your own proxy, over a hop clients can't
 reach, and have the proxy remove any copy of that header a client sent: a
 certificate is public, and only the TLS handshake proves the client holds
 its key, so a header a client can set lets anyone present a stolen
-certificate-bound token.
+certificate-bound token. For a proxy that forwards RFC 9440's
+`Client-Cert` header, `fapihttp.ForwardedClientCertificate` reads it,
+and refuses a request its trust check says didn't come from the proxy:
+
+```go
+// The proxy connects from 10.0.0.5, and strips and re-sets Client-Cert.
+fromProxy := fapihttp.RemoteAddrIn(netip.MustParsePrefix("10.0.0.5/32"))
+
+cert, err := fapihttp.ForwardedClientCertificate(r, fapihttp.ClientCertHeader, fromProxy)
+if err != nil {
+	http.Error(w, "forbidden", http.StatusForbidden)
+	return
+}
+req := resource.VerifyRequestFromHTTP(r)
+req.PeerCertificate = cert // nil: the client presented none
+```
+
+The authorization server's `…FromHTTP` requests take it the same way
+(`TokenEndpointRequest.SetPeerCertificate`, or the `PeerCertificate`
+field).
 
 That's the whole surface: `resource.Verifier` has no other public entry
 point. Everything above `Verify` — routing, and what the protected API

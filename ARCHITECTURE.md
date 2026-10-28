@@ -387,7 +387,11 @@ optional `net/http` conveniences for reading it off an
 reimplement it" precedent as `FormRequestFromHTTP` — deliberately
 duplicated between the two packages rather than shared, since they
 never import each other (design rule 14) and the helper is small enough
-that a shared package would cost more than it saves.
+that a shared package would cost more than it saves. Behind a
+TLS-terminating proxy, `fapihttp.ForwardedClientCertificate` reads the
+RFC 9440 `Client-Cert` header instead, refusing a request its caller's
+trust check says didn't come from the proxy; it lives in `fapihttp`,
+which both packages already import, because it is the same for both.
 `server`/`resource` compare it — thumbprint for
 `ClientAuthMethodSelfSignedTLSClientAuth` and `SenderConstrainMTLS`
 (RFC 8705 §3), subject DN or a SAN field for
@@ -885,8 +889,10 @@ sees:
   is the application's to interpret, with `Server.ResolveClientSubject`
   and `Server.ClientSubject` for one carrying a `sub`.
 - **Resource servers.** `resource.AuthorizationContext` carries both:
-  `InternalSubject`, which the API authorizes by and never returns, and
-  `ClientSubject`, which anything client-facing uses. An opaque access
+  `InternalSubject`, which the API authorizes by (through `EndUser`,
+  which refuses a client credentials token, whose subject is the
+  client's own `client_id`) and never returns, and `ClientSubject`,
+  which anything client-facing uses. An opaque access
   token's record holds the internal subject; a JWT access token's
   pairwise `sub` is mapped back under its `pairwise_sector` by the
   OP's own resource servers (`Dependencies.PairwiseSubjects` or

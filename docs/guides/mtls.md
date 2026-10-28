@@ -104,7 +104,10 @@ srv, err := server.New(server.Config{
   forwarding header a client sent. A certificate is public (a self-signed
   one is in the client's registered JWKS); only the TLS handshake proves
   the client holds its key, so a header a client can set lets anyone
-  authenticate as any mTLS client.
+  authenticate as any mTLS client. For a proxy that forwards RFC 9440's
+  `Client-Cert` header, `fapihttp.ForwardedClientCertificate(r,
+  fapihttp.ClientCertHeader, fapihttp.RemoteAddrIn(proxyPrefix))` reads
+  it, and refuses a request that didn't come from the proxy's address.
 - **Metadata** advertises `mtls_endpoint_aliases` once
   `MTLSEndpoints` is set, and `tls_client_certificate_bound_access_tokens`
   and the mTLS authentication methods once a client can do mutual TLS
@@ -119,7 +122,8 @@ srv, err := server.New(server.Config{
 `resource.Verifier` checks that the certificate on the request matches
 the token's `cnf.x5t#S256`. `resource.VerifyRequestFromHTTP` reads it
 from the connection; behind a proxy, set `VerifyRequest.PeerCertificate`,
-under the same rule: only from your own proxy's forwarding.
+under the same rule: only from your own proxy's forwarding
+(`fapihttp.ForwardedClientCertificate` again).
 The resource server checks the binding, not revocation, so keep
 `Limits.AccessTokenLifetime` short.
 

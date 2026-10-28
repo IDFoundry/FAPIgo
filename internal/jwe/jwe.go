@@ -9,6 +9,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -177,6 +178,14 @@ type EncryptRequest struct {
 	// attaches no meaning to it itself.
 	ContentType string
 
+	// AgreementPartyUInfo and AgreementPartyVInfo, if non-empty, are
+	// embedded as the header's "apu"/"apv" and fed into the ECDH-ES
+	// key derivation (RFC 7518 §4.6.2). Only valid with ECDHESA256KW.
+	// Nothing in this module sets them today; they exist so a sender
+	// that does derives the key the way a recipient will.
+	AgreementPartyUInfo []byte
+	AgreementPartyVInfo []byte
+
 	// Random is the source of randomness for the CEK, the IV, and (for
 	// ECDHESA256KW) the ephemeral key pair. crypto/rand.Reader if nil.
 	Random io.Reader
@@ -203,15 +212,18 @@ func Encrypt(req EncryptRequest) (string, error) {
 		return "", fmt.Errorf("jwe: generate cek: %w", err)
 	}
 
-	encryptedKey, epk, err := wrapCEK(req.Algorithm, req.RecipientKey, cek, random)
+	header := Header{
+		Algorithm: req.Algorithm, Encryption: req.Encryption,
+		ContentType: req.ContentType, KeyID: req.KeyID,
+		AgreementPartyUInfo: req.AgreementPartyUInfo, AgreementPartyVInfo: req.AgreementPartyVInfo,
+	}
+	encryptedKey, epk, err := wrapCEK(header, req.RecipientKey, cek, random)
 	if err != nil {
 		return "", err
 	}
+	header.EphemeralPublicKey = epk
 
-	headerJSON, err := marshalHeader(Header{
-		Algorithm: req.Algorithm, Encryption: req.Encryption,
-		ContentType: req.ContentType, KeyID: req.KeyID, EphemeralPublicKey: epk,
-	})
+	headerJSON, err := marshalHeader(header)
 	if err != nil {
 		return "", fmt.Errorf("jwe: marshal header: %w", err)
 	}
@@ -242,17 +254,21 @@ func Encrypt(req EncryptRequest) (string, error) {
 // wrapCEK delivers cek to recipientKey under alg, returning the
 // encrypted_key compact-serialization component and — for an
 // ECDH-ES-family algorithm — the ephemeral public key to embed as the
-// header's "epk" (nil for RSAOAEP256). Each algorithm's own logic is
-// split into its own function purely to keep this dispatcher's
-// cognitive complexity manageable.
-func wrapCEK(alg fapi.KeyManagementAlgorithm, recipientKey any, cek []byte, random io.Reader) ([]byte, *ecdh.PublicKey, error) {
-	switch alg {
+// header's "epk" (nil for RSAOAEP256). header supplies the algorithm
+// and, for ECDH-ES, the "apu"/"apv" the key derivation uses. Each
+// algorithm's own logic is split into its own function purely to keep
+// this dispatcher's cognitive complexity manageable.
+func wrapCEK(header Header, recipientKey any, cek []byte, random io.Reader) ([]byte, *ecdh.PublicKey, error) {
+	switch header.Algorithm {
 	case fapi.RSAOAEP256:
+		if len(header.AgreementPartyUInfo) > 0 || len(header.AgreementPartyVInfo) > 0 {
+			return nil, nil, errors.New("jwe: apu/apv apply only to ECDH-ES key agreement, not RSAOAEP256")
+		}
 		return wrapCEKRSAOAEP256(recipientKey, cek, random)
 	case fapi.ECDHESA256KW:
-		return wrapCEKECDHESA256KW(alg, recipientKey, cek, random)
+		return wrapCEKECDHESA256KW(header, recipientKey, cek, random)
 	default:
-		return nil, nil, fmt.Errorf("jwe: unsupported key management algorithm %v", alg)
+		return nil, nil, fmt.Errorf("jwe: unsupported key management algorithm %v", header.Algorithm)
 	}
 }
 
@@ -271,7 +287,7 @@ func wrapCEKRSAOAEP256(recipientKey any, cek []byte, random io.Reader) ([]byte, 
 	return encryptedKey, nil, nil
 }
 
-func wrapCEKECDHESA256KW(alg fapi.KeyManagementAlgorithm, recipientKey any, cek []byte, random io.Reader) ([]byte, *ecdh.PublicKey, error) {
+func wrapCEKECDHESA256KW(header Header, recipientKey any, cek []byte, random io.Reader) ([]byte, *ecdh.PublicKey, error) {
 	pub, ok := recipientKey.(*ecdh.PublicKey)
 	if !ok || pub.Curve() != ecdh.P256() {
 		return nil, nil, fmt.Errorf("jwe: ECDHESA256KW requires a P-256 *ecdh.PublicKey, got %T", recipientKey)
@@ -284,12 +300,10 @@ func wrapCEKECDHESA256KW(alg fapi.KeyManagementAlgorithm, recipientKey any, cek 
 	if err != nil {
 		return nil, nil, fmt.Errorf("jwe: ecdh: %w", err)
 	}
-	const kekSizeBits = 256 // AES-256 Key Wrap's own key size
-	info, err := otherInfo(alg.String(), nil, nil, kekSizeBits)
+	kek, err := deriveKEK(header.Algorithm, z, header.AgreementPartyUInfo, header.AgreementPartyVInfo)
 	if err != nil {
-		return nil, nil, fmt.Errorf("jwe: %w", err)
+		return nil, nil, err
 	}
-	kek := concatKDF(z, kekSizeBits, info)
 	encryptedKey, err := aesKeyWrap(kek, cek)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jwe: ecdh-es+a256kw wrap: %w", err)
@@ -356,14 +370,17 @@ type DecryptRequest struct {
 // path never hands a crypto.Signer or raw private key across a
 // KeyManager boundary. ctx is threaded through unchanged, so an
 // implementation backed by a remote call can honor cancellation the
-// same way keys.KeyManager.Sign does. keyID is the header's own "kid",
-// forwarded so an implementation holding more than one registered key
-// (e.g. mid-rotation) can select the right one; like every other header
-// value, it's a routing hint only — an implementation still must
-// perform the actual unwrap/decrypt to confirm it, never trust keyID by
-// itself as proof of which key was really used.
+// same way keys.KeyManager.Sign does. header is the JWE's parsed
+// (still unauthenticated) protected header. Its KeyID is forwarded so
+// an implementation holding more than one registered key (e.g.
+// mid-rotation) can select the right one — like every other header
+// value, a routing hint only; an implementation still must perform the
+// actual unwrap/decrypt to confirm it, never trust the kid by itself as
+// proof of which key was really used. For ECDHESA256KW, its
+// EphemeralPublicKey, AgreementPartyUInfo and AgreementPartyVInfo are
+// all inputs to the key derivation (RFC 7518 §4.6.2).
 type Unwrapper interface {
-	UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, keyID string, encryptedKey []byte, ephemeralPublicKey *ecdh.PublicKey) ([]byte, error)
+	UnwrapCEK(ctx context.Context, header Header, encryptedKey []byte) ([]byte, error)
 }
 
 // DecryptResult is a successfully decrypted and authenticated JWE.
@@ -445,12 +462,12 @@ func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 
 	var cek []byte
 	if unwrapper, ok := req.RecipientKey.(Unwrapper); ok {
-		cek, err = unwrapper.UnwrapCEK(ctx, req.Algorithm, header.KeyID, encryptedKey, header.EphemeralPublicKey)
+		cek, err = unwrapper.UnwrapCEK(ctx, header, encryptedKey)
 		if err != nil {
 			return DecryptResult{}, fmt.Errorf("%w: %v", ErrDecryptionFailed, err)
 		}
 	} else {
-		cek, err = UnwrapCEK(req.Algorithm, req.RecipientKey, encryptedKey, header.EphemeralPublicKey)
+		cek, err = UnwrapCEK(header, req.RecipientKey, encryptedKey)
 		if err != nil {
 			return DecryptResult{}, err
 		}
@@ -468,14 +485,16 @@ func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 
 // UnwrapCEK recovers the content-encryption key encryptedKey carries,
 // using recipientKey directly (*rsa.PrivateKey for RSAOAEP256,
-// *ecdh.PrivateKey for ECDHESA256KW — epk is required for the latter,
-// ignored for the former). Exported so a KeyManager-backed Unwrapper
+// *ecdh.PrivateKey for ECDHESA256KW). header.Algorithm selects the
+// algorithm; for ECDHESA256KW header.EphemeralPublicKey is required and
+// header.AgreementPartyUInfo/AgreementPartyVInfo feed the key
+// derivation, and all three are ignored for RSAOAEP256. Exported so a KeyManager-backed Unwrapper
 // implementation that does hold a concrete private key in memory (e.g.
 // keys/ephemeral, for tests) can reuse this package's own
 // already-verified ECDH-ES+A256KW unwrap logic rather than
 // reimplementing the Concat KDF and AES Key Wrap itself.
-func UnwrapCEK(alg fapi.KeyManagementAlgorithm, recipientKey any, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
-	switch alg {
+func UnwrapCEK(header Header, recipientKey any, encryptedKey []byte) ([]byte, error) {
+	switch alg := header.Algorithm; alg {
 	case fapi.RSAOAEP256:
 		priv, ok := recipientKey.(*rsa.PrivateKey)
 		if !ok {
@@ -495,14 +514,14 @@ func UnwrapCEK(alg fapi.KeyManagementAlgorithm, recipientKey any, encryptedKey [
 		if !ok || priv.Curve() != ecdh.P256() {
 			return nil, fmt.Errorf("jwe: ECDHESA256KW requires a P-256 *ecdh.PrivateKey, got %T", recipientKey)
 		}
-		if epk == nil {
+		if header.EphemeralPublicKey == nil {
 			return nil, fmt.Errorf("%w: missing epk", ErrMalformed)
 		}
-		z, err := priv.ECDH(epk)
+		z, err := priv.ECDH(header.EphemeralPublicKey)
 		if err != nil {
 			return nil, fmt.Errorf("%w: ecdh: %v", ErrDecryptionFailed, err)
 		}
-		return UnwrapCEKFromSharedSecret(alg, z, encryptedKey)
+		return UnwrapCEKFromSharedSecret(alg, z, encryptedKey, header.AgreementPartyUInfo, header.AgreementPartyVInfo)
 
 	default:
 		return nil, fmt.Errorf("jwe: unsupported key management algorithm %v", alg)
@@ -517,16 +536,16 @@ func UnwrapCEK(alg fapi.KeyManagementAlgorithm, recipientKey any, encryptedKey [
 // step itself (an HSM or KMS's raw key-agreement primitive, never
 // handing this package a private key at all) can still recover the CEK
 // through this package's own audited KDF/unwrap logic rather than
-// reimplementing it.
-func UnwrapCEKFromSharedSecret(alg fapi.KeyManagementAlgorithm, z, encryptedKey []byte) ([]byte, error) {
+// reimplementing it. apu and apv are the header's decoded "apu"/"apv"
+// (nil when absent), the PartyUInfo/PartyVInfo inputs of the key
+// derivation (RFC 7518 §4.6.2).
+func UnwrapCEKFromSharedSecret(alg fapi.KeyManagementAlgorithm, z, encryptedKey, apu, apv []byte) ([]byte, error) {
 	switch alg {
 	case fapi.ECDHESA256KW:
-		const kekSizeBits = 256
-		info, err := otherInfo(alg.String(), nil, nil, kekSizeBits)
+		kek, err := deriveKEK(alg, z, apu, apv)
 		if err != nil {
-			return nil, fmt.Errorf("jwe: %w", err)
+			return nil, err
 		}
-		kek := concatKDF(z, kekSizeBits, info)
 		cek, err := aesKeyUnwrap(kek, encryptedKey)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrDecryptionFailed, err)
@@ -536,6 +555,18 @@ func UnwrapCEKFromSharedSecret(alg fapi.KeyManagementAlgorithm, z, encryptedKey 
 	default:
 		return nil, fmt.Errorf("jwe: unsupported key management algorithm %v for shared-secret unwrap", alg)
 	}
+}
+
+// deriveKEK derives ECDH-ES+A256KW's 256-bit key-encryption key from
+// the shared secret z with the Concat KDF (RFC 7518 §4.6.2), whose
+// OtherInfo binds the "alg" value and the "apu"/"apv" party info.
+func deriveKEK(alg fapi.KeyManagementAlgorithm, z, apu, apv []byte) ([]byte, error) {
+	const kekSizeBits = 256 // AES-256 Key Wrap's own key size
+	info, err := otherInfo(alg.String(), apu, apv, kekSizeBits)
+	if err != nil {
+		return nil, fmt.Errorf("jwe: %w", err)
+	}
+	return concatKDF(z, kekSizeBits, info), nil
 }
 
 func open(cek, iv, ciphertext, tag, aad []byte) ([]byte, error) {

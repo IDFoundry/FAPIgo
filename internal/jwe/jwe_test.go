@@ -325,7 +325,7 @@ func TestUnwrapCEKFromSharedSecretMatchesUnwrapCEK(t *testing.T) {
 		t.Fatalf("decode encrypted key: %v", err)
 	}
 
-	want, err := UnwrapCEK(fapi.ECDHESA256KW, priv, encryptedKey, header.EphemeralPublicKey)
+	want, err := UnwrapCEK(header, priv, encryptedKey)
 	if err != nil {
 		t.Fatalf("UnwrapCEK: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestUnwrapCEKFromSharedSecretMatchesUnwrapCEK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ecdh: %v", err)
 	}
-	got, err := UnwrapCEKFromSharedSecret(fapi.ECDHESA256KW, z, encryptedKey)
+	got, err := UnwrapCEKFromSharedSecret(fapi.ECDHESA256KW, z, encryptedKey, nil, nil)
 	if err != nil {
 		t.Fatalf("UnwrapCEKFromSharedSecret: %v", err)
 	}
@@ -368,13 +368,13 @@ func TestUnwrapCEKFromSharedSecretRejectsTamperedEncryptedKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ecdh: %v", err)
 	}
-	if _, err := UnwrapCEKFromSharedSecret(fapi.ECDHESA256KW, z, encryptedKey); err == nil {
+	if _, err := UnwrapCEKFromSharedSecret(fapi.ECDHESA256KW, z, encryptedKey, nil, nil); err == nil {
 		t.Fatal("UnwrapCEKFromSharedSecret(tampered encrypted key) = nil error, want error")
 	}
 }
 
 func TestUnwrapCEKFromSharedSecretRejectsUnsupportedAlgorithm(t *testing.T) {
-	if _, err := UnwrapCEKFromSharedSecret(fapi.RSAOAEP256, []byte("z"), []byte("wrapped")); err == nil {
+	if _, err := UnwrapCEKFromSharedSecret(fapi.RSAOAEP256, []byte("z"), []byte("wrapped"), nil, nil); err == nil {
 		t.Fatal("UnwrapCEKFromSharedSecret(RSAOAEP256) = nil error, want error")
 	}
 }
@@ -554,13 +554,13 @@ type fakeUnwrapper struct {
 	keyIDSeen string
 }
 
-func (f *fakeUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, keyID string, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
+func (f *fakeUnwrapper) UnwrapCEK(ctx context.Context, header Header, encryptedKey []byte) ([]byte, error) {
 	f.ctxSeen = ctx
-	f.keyIDSeen = keyID
-	if alg != f.alg {
-		return nil, fmt.Errorf("fakeUnwrapper: alg = %v, want %v", alg, f.alg)
+	f.keyIDSeen = header.KeyID
+	if header.Algorithm != f.alg {
+		return nil, fmt.Errorf("fakeUnwrapper: alg = %v, want %v", header.Algorithm, f.alg)
 	}
-	return UnwrapCEK(alg, f.key, encryptedKey, epk)
+	return UnwrapCEK(header, f.key, encryptedKey)
 }
 
 func TestDecryptDispatchesToUnwrapper(t *testing.T) {

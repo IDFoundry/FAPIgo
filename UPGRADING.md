@@ -390,6 +390,46 @@ case client.BackchannelAuthenticationPending:
 	retryAfter(session.Interval())
 }
 ```
+### A custom `keys.Decrypter` must use `apu`/`apv` for ECDH-ES+A256KW (keys, client)
+
+**Affects:** a client whose `Dependencies.Decryption` is your own
+`keys.Decrypter` implementation that recovers ECDH-ES+A256KW
+content-encryption keys itself (an HSM or KMS wrapper that runs the
+Concat KDF and AES key unwrap in its own code). A `Decrypter` built by
+`keys.NewDecrypter` or `keys.NewSingleKeyDecrypter` over an
+`ECDHAgreer`, `keys/ephemeral`, and any RSA-OAEP-256-only
+implementation need no change.
+
+**Why:** RFC 7518 §4.6.2 makes the JWE header's `apu` and `apv` the
+PartyUInfo and PartyVInfo inputs of the ECDH-ES key derivation. The
+client ignored them, so an encrypted ID token or UserInfo response
+from an authorization server whose JOSE library sets them failed to
+decrypt. The client now decodes both as strict base64url and passes
+them to the `Decrypter` in the new `keys.UnwrapRequest` fields
+`AgreementPartyUInfo` and `AgreementPartyVInfo` (nil when absent).
+
+**What fails:** nothing at compile time. An implementation that
+ignores the new fields still decrypts JWEs without `apu`/`apv`, and
+fails to decrypt those that carry them, as before.
+
+**What to change:** include both fields in the OtherInfo of your
+Concat KDF:
+
+```go
+func (d *hsmDecrypter) UnwrapContentEncryptionKey(ctx context.Context, req keys.UnwrapRequest) ([]byte, error) {
+	z, err := d.hsm.DeriveECDH(ctx, req.KeyID, req.EphemeralPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	// AlgorithmID || PartyUInfo || PartyVInfo || SuppPubInfo (RFC 7518 §4.6.2)
+	info := otherInfo(req.Algorithm.String(), req.AgreementPartyUInfo, req.AgreementPartyVInfo, 256)
+	return aesKeyUnwrap(concatKDF(z, 256, info), req.EncryptedKey)
+}
+```
+
+Or, when your backend can return the raw shared secret, implement
+`keys.ECDHAgreer` and wrap it with `keys.NewDecrypter`, which applies
+the KDF, `apu`/`apv` included, for you.
 
 ## v0.64.0
 

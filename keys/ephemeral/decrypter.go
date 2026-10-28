@@ -88,7 +88,10 @@ func (m *KeyManager) UnwrapContentEncryptionKey(_ context.Context, req keys.Unwr
 	if !ok {
 		return nil, fmt.Errorf("ephemeral: no key for decryption purpose %v", req.Purpose)
 	}
-	return jwe.UnwrapCEK(req.Algorithm, priv, req.EncryptedKey, req.EphemeralPublicKey)
+	return jwe.UnwrapCEK(jwe.Header{
+		Algorithm: req.Algorithm, KeyID: req.KeyID, EphemeralPublicKey: req.EphemeralPublicKey,
+		AgreementPartyUInfo: req.AgreementPartyUInfo, AgreementPartyVInfo: req.AgreementPartyVInfo,
+	}, priv, req.EncryptedKey)
 }
 
 // EncryptionPublicKey implements keys.Decrypter.

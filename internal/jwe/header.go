@@ -42,6 +42,17 @@ type Header struct {
 	// key, used with the recipient's static key to derive the shared
 	// secret. Always nil for RSAOAEP256.
 	EphemeralPublicKey *ecdh.PublicKey
+
+	// AgreementPartyUInfo and AgreementPartyVInfo are the decoded "apu"
+	// and "apv" members (RFC 7518 §4.6.1.2/§4.6.1.3), nil when absent.
+	// They're inputs to ECDH-ES key derivation (the PartyUInfo and
+	// PartyVInfo fields of the Concat KDF's OtherInfo, RFC 7518
+	// §4.6.2), so a sender that sets them derives a different key from
+	// one that doesn't; this package feeds them into the KDF on both
+	// sides. They carry no other meaning here and are unused by
+	// RSAOAEP256.
+	AgreementPartyUInfo []byte
+	AgreementPartyVInfo []byte
 }
 
 type rawHeader struct {
@@ -50,6 +61,8 @@ type rawHeader struct {
 	Cty  string          `json:"cty,omitempty"`
 	Kid  string          `json:"kid,omitempty"`
 	Epk  *rawEPK         `json:"epk,omitempty"`
+	Apu  string          `json:"apu,omitempty"`
+	Apv  string          `json:"apv,omitempty"`
 	Crit json.RawMessage `json:"crit,omitempty"`
 
 	// Zip is modeled only to be refused: this package never compresses
@@ -86,6 +99,8 @@ func marshalHeader(h Header) ([]byte, error) {
 	if h.EphemeralPublicKey != nil {
 		raw.Epk = marshalEPK(h.EphemeralPublicKey)
 	}
+	raw.Apu = base64.RawURLEncoding.EncodeToString(h.AgreementPartyUInfo)
+	raw.Apv = base64.RawURLEncoding.EncodeToString(h.AgreementPartyVInfo)
 	return json.Marshal(raw)
 }
 
@@ -125,7 +140,24 @@ func parseHeader(data []byte) (Header, error) {
 		}
 		h.EphemeralPublicKey = epk
 	}
+	if h.AgreementPartyUInfo, err = decodePartyInfo(raw.Apu); err != nil {
+		return Header{}, fmt.Errorf("jwe: parse header apu: %w", err)
+	}
+	if h.AgreementPartyVInfo, err = decodePartyInfo(raw.Apv); err != nil {
+		return Header{}, fmt.Errorf("jwe: parse header apv: %w", err)
+	}
 	return h, nil
+}
+
+// decodePartyInfo decodes an "apu"/"apv" member as strict base64url (RFC
+// 7518 §4.6.1.2: "base64url-encoded"), returning nil for an absent (or
+// empty) member — either contributes an empty octet string to the
+// Concat KDF's OtherInfo, so they derive the same key.
+func decodePartyInfo(s string) ([]byte, error) {
+	if s == "" {
+		return nil, nil
+	}
+	return strictb64.URL(s)
 }
 
 func marshalEPK(pub *ecdh.PublicKey) *rawEPK {

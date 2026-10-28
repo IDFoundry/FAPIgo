@@ -16,7 +16,7 @@ import (
 )
 
 // testUnwrapper adapts a keys.Decrypter (request-struct shaped) to
-// jwe.Unwrapper (flat-argument shaped) for a fixed purpose — the same
+// jwe.Unwrapper (header shaped) for a fixed purpose — the same
 // bridge client's own production code (and keys/ephemeral's own tests)
 // use in front of a real Decrypter.
 type testUnwrapper struct {
@@ -24,9 +24,10 @@ type testUnwrapper struct {
 	purpose keys.DecryptionPurpose
 }
 
-func (u testUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, keyID string, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
+func (u testUnwrapper) UnwrapCEK(ctx context.Context, header jwe.Header, encryptedKey []byte) ([]byte, error) {
 	return u.d.UnwrapContentEncryptionKey(ctx, keys.UnwrapRequest{
-		Purpose: u.purpose, Algorithm: alg, KeyID: keyID, EncryptedKey: encryptedKey, EphemeralPublicKey: epk,
+		Purpose: u.purpose, Algorithm: header.Algorithm, KeyID: header.KeyID, EncryptedKey: encryptedKey,
+		EphemeralPublicKey: header.EphemeralPublicKey, AgreementPartyUInfo: header.AgreementPartyUInfo, AgreementPartyVInfo: header.AgreementPartyVInfo,
 	})
 }
 
@@ -77,8 +78,11 @@ func TestNewDecrypterRoundTripECDHESA256KW(t *testing.T) {
 	}
 
 	plaintext := []byte("nested jwt goes here")
+	// apu/apv are set so the round trip also proves they reach the
+	// Concat KDF through UnwrapRequest (RFC 7518 §4.6.2).
 	compact, err := jwe.Encrypt(jwe.EncryptRequest{
 		Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM, RecipientKey: pub, Plaintext: plaintext,
+		AgreementPartyUInfo: []byte("Alice"), AgreementPartyVInfo: []byte("Bob"),
 	})
 	if err != nil {
 		t.Fatalf("jwe.Encrypt: %v", err)

@@ -170,10 +170,11 @@ tell which request they're approving. Either each request carries a
 unique authorization context you show them (a payment's amount and
 payee in its authorization details, say), or you require a binding
 message, which the consumption device shows too. This package can't
-tell whether a request's details are unique to it, so it accepts a
-request without `binding_message`. If yours can't be told apart
-otherwise, complete one with an empty `a.Interaction.BindingMessage` as
-`server.AuthenticationFailed(...)` before asking the user anything.
+tell whether a request's details are unique to it, so by default it
+accepts a request without `binding_message`. If yours can't be told
+apart otherwise, set `Config.RequireBindingMessage`: a request without
+one is then refused with `invalid_request` before it's stored or shown
+to anyone.
 
 ## See it running
 

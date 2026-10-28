@@ -491,6 +491,19 @@ type Config struct {
 	// client to use it.
 	ClientCredentialsGrant bool
 
+	// RequireBindingMessage makes BeginBackchannelAuthentication refuse
+	// a CIBA request without a binding_message, with ErrorInvalidRequest
+	// (CIBA Core §13: a required parameter is missing), before anything
+	// is stored or shown to the user. FAPI-CIBA §5.2.2 requires that the
+	// user can tell which request they're approving: either each request
+	// carries a unique authorization context you show them, or a binding
+	// message the consumption device shows too. Set this when your
+	// requests can't be told apart otherwise. False (the default)
+	// accepts a request without one, leaving that decision to the
+	// application. Only meaningful when Endpoints.BackchannelAuthentication
+	// is set.
+	RequireBindingMessage bool
+
 	// AdditionalGrantTypes are grant types the embedder serves itself at
 	// Endpoints.Token, routing requests by grant_type — such as
 	// OpenID4VCI's urn:ietf:params:oauth:grant-type:pre-authorized_code.

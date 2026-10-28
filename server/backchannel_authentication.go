@@ -445,7 +445,7 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 		return verifiedBackchannelRequest{}, requestError(ErrorInvalidRequest, err)
 	}
 
-	if bindingErr := validateBindingMessage(params); bindingErr != nil {
+	if bindingErr := validateBindingMessage(params, s.cfg.RequireBindingMessage); bindingErr != nil {
 		return verifiedBackchannelRequest{}, bindingErr
 	}
 
@@ -477,10 +477,14 @@ func validateBackchannelHints(params map[string]json.RawMessage) *Error {
 }
 
 // validateBindingMessage checks params' binding_message, if any, is a
-// string the authentication device can show (CIBA §7.1).
-func validateBindingMessage(params map[string]json.RawMessage) *Error {
+// string the authentication device can show (CIBA §7.1), and that there
+// is one when required (Config.RequireBindingMessage).
+func validateBindingMessage(params map[string]json.RawMessage, required bool) *Error {
 	raw, ok := params["binding_message"]
 	if !ok {
+		if required {
+			return newError(ErrorInvalidRequest, 400, "binding_message is required", nil)
+		}
 		return nil
 	}
 	bindingMessage, err := jsonStringValue(raw)

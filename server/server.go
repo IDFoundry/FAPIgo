@@ -312,6 +312,9 @@ func validateLimits(cfg Config, cibaEnabled bool) error {
 	if !cfg.OAuthOnly && cfg.Limits.MaxIDTokenClaimsBytes <= 0 {
 		return fmt.Errorf("server: config: limits.max_id_token_claims_bytes must be positive unless oauth_only is set")
 	}
+	if cfg.Limits.MaxAccessTokenClaimsBytes <= 0 {
+		return fmt.Errorf("server: config: limits.max_access_token_claims_bytes must be positive")
+	}
 	if cfg.Limits.RefreshTokenLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.refresh_token_lifetime must be positive")
 	}

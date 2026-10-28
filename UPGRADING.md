@@ -15,6 +15,39 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.65.0
+
+### `Limits.MaxAccessTokenClaimsBytes` is required (server)
+
+**Affects:** every server that builds its `Limits` without
+`RecommendedLimits()`, at every assurance level, `Config.OAuthOnly`
+included.
+
+**Why:** nothing bounded an access token's size. Its non-standard claims
+(`authorization_details`, extension parameters registered with
+`ReturnInTokenClaims`, and the requested userinfo claim names) are capped
+only part by part, so a large enough grant made the server issue a JWT
+access token over the 16 KiB `resource.JWTAccessTokens` parses, which its
+own resource servers then refused. Issuance now refuses claims over
+`Limits.MaxAccessTokenClaimsBytes` with `server_error`, and any token
+over `Limits.MaxAccessTokenBytes()`, which is 16 KiB at the recommended
+6144 and grows only as the claims budget does. Resource servers get a
+matching `resource.JWTAccessTokens.MaxTokenBytes` (zero keeps 16 KiB),
+which `serverresource.NewVerifier` sets from the server's limits itself.
+
+**What fails:** `server.New` returns an error naming
+`limits.max_access_token_claims_bytes`.
+
+**What to change:** set it, starting from `RecommendedLimits()`'s value:
+
+```go
+cfg.Limits.MaxAccessTokenClaimsBytes = 6144
+```
+
+If you raise it past 6144, set `MaxTokenBytes` on each standalone
+resource server's `resource.JWTAccessTokens` to the server's
+`cfg.Limits.MaxAccessTokenBytes()`.
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

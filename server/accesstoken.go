@@ -218,3 +218,22 @@ func (o OpaqueAccessTokens) IssueAccessToken(ctx context.Context, p AccessTokenP
 	}
 	return raw, hex.EncodeToString(hash[:]), nil
 }
+
+// issueAccessToken issues p through Dependencies.AccessTokens, within
+// Limits.MaxAccessTokenClaimsBytes and Limits.MaxAccessTokenBytes: one
+// over either fails as server_error, so this server never issues a
+// token its own resource servers refuse. It returns the token and its
+// revocation-lookup key.
+func (s *Server) issueAccessToken(ctx context.Context, p AccessTokenParams) (string, string, *Error) {
+	if size := claimsSize(p.Claims); size > s.cfg.Limits.MaxAccessTokenClaimsBytes {
+		return "", "", newError(ErrorServerError, 500, "access token claims exceed limits.max_access_token_claims_bytes", fmt.Errorf("%d bytes, limit %d", size, s.cfg.Limits.MaxAccessTokenClaimsBytes))
+	}
+	accessToken, key, err := s.deps.AccessTokens.IssueAccessToken(ctx, p)
+	if err != nil {
+		return "", "", newError(ErrorServerError, 500, "failed to issue access token", err)
+	}
+	if size, limit := len(accessToken), s.cfg.Limits.MaxAccessTokenBytes(); size > limit {
+		return "", "", newError(ErrorServerError, 500, "the issued access token is larger than limits.max_access_token_claims_bytes allows", fmt.Errorf("%d bytes, limit %d", size, limit))
+	}
+	return accessToken, key, nil
+}

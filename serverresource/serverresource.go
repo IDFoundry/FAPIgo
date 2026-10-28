@@ -260,6 +260,9 @@ func jwtAccessTokens(cfg server.Config, t server.JWTAccessTokens, aud audience) 
 		return nil, fmt.Errorf("serverresource: %w", err)
 	}
 	resolver.AdditionalAudiences = aud.additional
+	// Accept every token the server issues: it refuses to issue one
+	// over this.
+	resolver.MaxTokenBytes = cfg.Limits.MaxAccessTokenBytes()
 	return resolver, nil
 }
 

@@ -89,7 +89,7 @@ func userInfoServer(t *testing.T) (*server.Server, storage.ClientRepository) {
 		MaxRequestObjectLifetime: time.Minute, InteractionLifetime: 5 * time.Minute,
 		AuthorizationCodeLifetime: time.Minute, JARMResponseLifetime: time.Minute,
 		AccessTokenLifetime: 5 * time.Minute, IDTokenLifetime: 5 * time.Minute,
-		MaxIDTokenClaimsBytes: 4096, RefreshTokenLifetime: 5 * time.Minute,
+		MaxIDTokenClaimsBytes: 4096, MaxAccessTokenClaimsBytes: 6144, RefreshTokenLifetime: 5 * time.Minute,
 		MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second,
 	}
 	srv, err := server.New(cfg, server.Dependencies{

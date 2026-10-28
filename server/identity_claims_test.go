@@ -161,6 +161,7 @@ func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityCl
 			AccessTokenLifetime:        5 * time.Minute,
 			IDTokenLifetime:            5 * time.Minute,
 			MaxIDTokenClaimsBytes:      4096,
+			MaxAccessTokenClaimsBytes:  6144,
 			RefreshTokenLifetime:       5 * time.Minute,
 			MaxDPoPProofAge:            time.Minute,
 			MaxClockSkew:               5 * time.Second,

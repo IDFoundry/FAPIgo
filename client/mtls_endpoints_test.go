@@ -5,7 +5,33 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/storage"
 )
+
+// applyForConfig adapts MTLSEndpoints.ApplyForConfig to the
+// per-Endpoints shape of the other two helpers, for cfg's settings.
+func applyForConfig(cfg client.Config) func(*client.MTLSEndpoints, *client.Endpoints) bool {
+	return func(m *client.MTLSEndpoints, endpoints *client.Endpoints) bool {
+		cfg.Endpoints = *endpoints
+		ok := m.ApplyForConfig(&cfg)
+		*endpoints = cfg.Endpoints
+		return ok
+	}
+}
+
+// TestMTLSEndpointsApplyForConfigLeavesANonMTLSClient: a private_key_jwt
+// + DPoP client that doesn't set UseMTLSEndpointAliases does no mutual
+// TLS, so it keeps every ordinary endpoint.
+func TestMTLSEndpointsApplyForConfigLeavesANonMTLSClient(t *testing.T) {
+	aliases := &client.MTLSEndpoints{Token: mustEndpointURL(t, "https://mtls.example.com/token")}
+	cfg := client.Config{Endpoints: client.Endpoints{Token: mustEndpointURL(t, "https://as.example.com/token")}}
+	if aliases.ApplyForConfig(&cfg) {
+		t.Fatal("ApplyForConfig(DPoP, private_key_jwt) = true, want false")
+	}
+	if got := cfg.Endpoints.Token.String(); got != "https://as.example.com/token" {
+		t.Fatalf("Token = %s, want the ordinary endpoint", got)
+	}
+}
 
 func mustEndpointURL(t *testing.T, raw string) fapi.URL {
 	t.Helper()
@@ -30,8 +56,15 @@ func TestMTLSEndpointsApplyAliasesPerRequest(t *testing.T) {
 		apply   func(*client.MTLSEndpoints, *client.Endpoints) bool
 		wantPAR bool
 	}{
-		"ApplyForSenderConstrain": {(*client.MTLSEndpoints).ApplyForSenderConstrain, false},
-		"ApplyForClientAuth":      {(*client.MTLSEndpoints).ApplyForClientAuth, true},
+		"ApplyForSenderConstrain":            {(*client.MTLSEndpoints).ApplyForSenderConstrain, false},
+		"ApplyForClientAuth":                 {(*client.MTLSEndpoints).ApplyForClientAuth, true},
+		"ApplyForConfig/SenderConstrainMTLS": {applyForConfig(client.Config{SenderConstrain: storage.SenderConstrainMTLS}), false},
+		"ApplyForConfig/certificate auth": {applyForConfig(client.Config{
+			ClientAuthMethod: storage.ClientAuthMethodSelfSignedTLSClientAuth, SenderConstrain: storage.SenderConstrainMTLS,
+		}), true},
+		"ApplyForConfig/UseMTLSEndpointAliases": {applyForConfig(client.Config{
+			ClientAuthMethod: storage.ClientAuthMethodPrivateKeyJWT, SenderConstrain: storage.SenderConstrainDPoP, UseMTLSEndpointAliases: true,
+		}), true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			aliases := &client.MTLSEndpoints{

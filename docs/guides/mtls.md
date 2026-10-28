@@ -29,9 +29,12 @@ the `*http.Client` you pass as `Dependencies.HTTP`:
 // at every request that authenticates the client (PAR, token, CIBA,
 // revocation) for certificate client authentication, and at the
 // token-using ones (not PAR) for certificate-bound tokens alone. Set
-// Endpoints yourself only to adjust them first, with
-// discovered.MTLSEndpointAliases.ApplyForClientAuth or
-// ApplyForSenderConstrain.
+// Endpoints yourself only to adjust them first, then call
+// discovered.MTLSEndpointAliases.ApplyForConfig(&cfg) to apply the same
+// aliases. A private_key_jwt + DPoP client in an ecosystem that requires
+// mutual TLS on every connection sets UseMTLSEndpointAliases to send
+// every call, PAR included, to the aliases (FAPI 2.0 Security Profile
+// §5.2.2.1).
 c, err := client.NewFromDiscovery(discovered, client.Config{
 	// ClientID, Profile, Limits ...
 	ClientAuthMethod: storage.ClientAuthMethodTLSClientAuth,

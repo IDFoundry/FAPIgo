@@ -52,13 +52,12 @@ type DiscoveredMetadata struct {
 	// MTLSEndpointAliases is the server's advertised RFC 8705 §5
 	// "mtls_endpoint_aliases", if any — nil means the server never
 	// advertised one, the common case (most servers never offer an
-	// mTLS-requiring alternate listener at all). A caller building a
-	// Config.SenderConstrain == SenderConstrainMTLS client should
-	// prefer these URLs over the corresponding Endpoints ones when
-	// building Config.Endpoints — Discover itself never makes that
-	// substitution automatically, consistent with never picking
-	// anything on the caller's behalf (see this type's own doc
-	// comment).
+	// mTLS-requiring alternate listener at all). A client that does
+	// mutual TLS should use these URLs over the corresponding Endpoints
+	// ones. Discover itself never makes that substitution, consistent
+	// with never picking anything on the caller's behalf (see this
+	// type's own doc comment); NewFromDiscovery does, and
+	// MTLSEndpoints.ApplyForConfig does it for Endpoints set by hand.
 	MTLSEndpointAliases *MTLSEndpoints
 
 	IDTokenAlgorithms       []fapi.SignatureAlgorithm

@@ -274,6 +274,29 @@ func (m *MTLSEndpoints) ApplyForClientAuth(endpoints *Endpoints) bool {
 	return m.apply(endpoints, true)
 }
 
+// ApplyForConfig applies the aliases cfg's use of mutual TLS calls
+// for to cfg.Endpoints: ApplyForClientAuth's set when cfg authenticates
+// with its certificate or sets UseMTLSEndpointAliases, and
+// ApplyForSenderConstrain's when its tokens are only bound to its
+// certificate (SenderConstrainMTLS). A client doing neither is left
+// untouched. It reports whether any set applied: false for a nil m or
+// a client that does no mutual TLS. NewFromDiscovery calls it when it
+// fills Endpoints from discovery; call it yourself after setting
+// Endpoints by hand:
+//
+//	cfg.Endpoints = myEndpoints
+//	discovered.MTLSEndpointAliases.ApplyForConfig(&cfg)
+func (m *MTLSEndpoints) ApplyForConfig(cfg *Config) bool {
+	switch {
+	case cfg.UseMTLSEndpointAliases || authenticatesWithCertificate(cfg.ClientAuthMethod):
+		return m.ApplyForClientAuth(&cfg.Endpoints)
+	case cfg.SenderConstrain == storage.SenderConstrainMTLS:
+		return m.ApplyForSenderConstrain(&cfg.Endpoints)
+	default:
+		return false
+	}
+}
+
 // apply overrides each endpoint m advertises an alias for — PAR only
 // when par is set; see ApplyForSenderConstrain.
 func (m *MTLSEndpoints) apply(endpoints *Endpoints, par bool) bool {
@@ -518,6 +541,24 @@ type Config struct {
 	// storage's enum type directly rather than duplicating it, the same
 	// precedent SenderConstrain itself establishes.
 	ClientAuthMethod storage.ClientAuthMethod
+
+	// UseMTLSEndpointAliases sends every call to the server's mTLS
+	// endpoint aliases (RFC 8705 §5), PAR included, whatever
+	// ClientAuthMethod and SenderConstrain are — for a client that
+	// presents a TLS client certificate on every connection, as an
+	// ecosystem requiring mutual TLS for transport asks of a
+	// private_key_jwt + DPoP client too. FAPI 2.0 Security Profile
+	// §5.2.2.1 says such a client "shall use" the aliases where the
+	// server advertises them. Dependencies.HTTP must then present the
+	// certificate (see SenderConstrain).
+	//
+	// It decides which endpoints NewFromDiscovery and
+	// MTLSEndpoints.ApplyForConfig take from the discovered aliases;
+	// New itself uses Endpoints as given. False (the default) uses an
+	// alias only where this client does mutual TLS anyway: every
+	// endpoint for certificate client authentication, the token-bound
+	// ones for SenderConstrainMTLS.
+	UseMTLSEndpointAliases bool
 
 	// BackchannelTokenDeliveryMode selects how this client expects to
 	// learn a CIBA backchannel authentication request's decision —

@@ -70,11 +70,13 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 //     endpoints when cfg.RedirectURI is empty, since a client with no
 //     redirect URI (one using only CIBA or client credentials) never
 //     uses the redirect-based flow. A client that does mutual TLS gets
-//     the server's mtls_endpoint_aliases (RFC 8705 §5) where it does:
-//     discovered.MTLSEndpointAliases.ApplyForClientAuth when it
-//     authenticates with its certificate, ApplyForSenderConstrain when
-//     its tokens are only bound to it. Set Endpoints yourself instead
-//     when you need to adjust it first, and it's left as given.
+//     the server's mtls_endpoint_aliases (RFC 8705 §5) where it does,
+//     via discovered.MTLSEndpointAliases.ApplyForConfig: every endpoint
+//     when it authenticates with its certificate or sets
+//     cfg.UseMTLSEndpointAliases, the token-bound ones when its tokens
+//     are only bound to its certificate. Set Endpoints yourself instead
+//     when you need to adjust it first, and it's left as given — call
+//     ApplyForConfig after setting it to keep the aliases.
 //  3. It checks that the issuer advertises support for every algorithm
 //     cfg declares (discovered.SupportsAlgorithms), turning a
 //     declared-but-unadvertised algorithm into a startup error rather
@@ -103,12 +105,7 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 		if cfg.RedirectURI == "" {
 			cfg.Endpoints.Authorization, cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}, fapi.URL{}
 		}
-		switch {
-		case authenticatesWithCertificate(cfg.ClientAuthMethod):
-			discovered.MTLSEndpointAliases.ApplyForClientAuth(&cfg.Endpoints)
-		case cfg.SenderConstrain == storage.SenderConstrainMTLS:
-			discovered.MTLSEndpointAliases.ApplyForSenderConstrain(&cfg.Endpoints)
-		}
+		discovered.MTLSEndpointAliases.ApplyForConfig(&cfg)
 		if cfg.RedirectURI == "" {
 			cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}
 		}

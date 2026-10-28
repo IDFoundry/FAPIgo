@@ -171,12 +171,14 @@ func (w *World) newBank(apps apps) (*bank, error) {
 	mux.HandleFunc("GET /.well-known/openid-configuration", b.discovery)
 	mux.HandleFunc("GET /jwks", b.jwks)
 	mux.HandleFunc("POST /par", b.par)
-	mux.HandleFunc("GET "+authorizePath, b.authorize)
+	// The sign-in and consent page: never framed (clickjacking), cached,
+	// or leaked in a Referer (server.AuthorizationPageHeaders).
+	mux.Handle("GET "+authorizePath, server.AuthorizationPageHeaders(http.HandlerFunc(b.authorize)))
 	protect := http.NewCrossOriginProtection()
 	// The interaction cookie is SameSite, but a sibling *.localhost host
 	// is the same site; refusing cross-origin POSTs is the CSRF defence
 	// server.InteractionHandle's doc comment asks for.
-	mux.Handle("POST "+authorizePath, protect.Handler(http.HandlerFunc(b.decide)))
+	mux.Handle("POST "+authorizePath, server.AuthorizationPageHeaders(protect.Handler(http.HandlerFunc(b.decide))))
 	mux.HandleFunc("POST /token", b.token)
 	mux.HandleFunc("GET "+connectedAppsPath, b.connectedApps)
 	mux.Handle("POST "+connectedAppsPath, protect.Handler(http.HandlerFunc(b.revoke)))
@@ -309,10 +311,10 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
 		return
 	}
-	result := server.Deny("the customer declined")
+	c, signedIn := signIn(r)
+	result := refusal(signedIn)
 	if r.PostForm.Get("decision") == "approve" {
-		c, ok := customerByName(r.PostForm.Get("username"))
-		if !ok || !hmac.Equal([]byte(c.pin), []byte(r.PostForm.Get("pin"))) {
+		if !signedIn {
 			b.w.render(w, "consent", b.consentPage(in, tag, "That username and PIN don't match."))
 			return
 		}
@@ -341,8 +343,31 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 	case server.AuthorizationRedirect:
 		http.Redirect(w, r, o.Destination().String(), http.StatusSeeOther) // after a form POST: never 307
 	case server.AuthorizationLocalError:
+		if o.Error.Code() == server.ErrorAccessDenied {
+			b.w.renderError(w, bankHost, o.Error.HTTPStatus(), "Sharing cancelled", "Nothing was shared, and Alder Bank sent nothing back to the app: you hadn't signed in. You can close this page.")
+			return
+		}
 		b.w.renderError(w, bankHost, o.Error.HTTPStatus(), approvalFailed, string(o.Error.Code())+": "+o.Error.PublicDescription())
 	}
+}
+
+// signIn checks the form's username and PIN, reporting whether they
+// name a customer.
+func signIn(r *http.Request) (customer, bool) {
+	c, ok := customerByName(r.PostForm.Get("username"))
+	return c, ok && hmac.Equal([]byte(c.pin), []byte(r.PostForm.Get("pin")))
+}
+
+// refusal is how a cancellation ends. A customer who cancels before
+// signing in isn't sent back to the app: the bank redirects only once
+// it knows who it's talking to (RFC 9700 §4.11.2), so the app can't use
+// it to bounce anyone to a page of its choosing. Signed in, the refusal
+// goes back to the app.
+func refusal(signedIn bool) server.InteractionResult {
+	if signedIn {
+		return server.Deny("the customer declined")
+	}
+	return server.DenyLocally("you cancelled before signing in")
 }
 
 // approve grants c's chosen accounts to the app, naming the grant so

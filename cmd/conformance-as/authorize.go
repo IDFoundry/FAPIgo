@@ -133,6 +133,11 @@ func (h *consentHandler) handleBegin(w http.ResponseWriter, r *http.Request) {
 		// gets a perfectly good, safe outcome either way — a rendered
 		// local page is fine for a human in a browser — this exists
 		// purely so the suite's own automated verification can run.
+		// It works only because this binary runs AssuranceDevelopment
+		// (wiring.go): the redirect happens before anyone authenticated,
+		// which RFC 9700 §4.11.2 forbids, so under AssuranceProduction
+		// BuildAuthorizationErrorRedirect refuses and this falls through
+		// to the local page below.
 		q := r.URL.Query()
 		clientID := req.ClientID
 		redirectURI := q.Get("redirect_uri")

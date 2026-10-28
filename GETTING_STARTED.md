@@ -596,8 +596,10 @@ case server.InteractionRequired:
 	// that user, or CompleteAuthorization answers login_required.
 	// a.Interaction.UILocales, ClaimsLocales and Display are the
 	// client's presentation preferences: render the page in the first
-	// UILocales language you have. a.Handle must come back to
-	// CompleteAuthorization once the user is done.
+	// UILocales language you have. a.Interaction.RedirectURI is where
+	// the browser goes afterwards: show its host on the consent page.
+	// a.Handle must come back to CompleteAuthorization once the user
+	// is done.
 case server.RedirectResponse:
 	// no interaction needed — redirect the browser to a.Destination
 case server.LocalErrorResponse:
@@ -613,6 +615,23 @@ so a reload or a browser's prefetch doesn't use it up, but only one
 interaction for it can complete. Serve the login page with
 `Referrer-Policy: no-referrer` and no third-party scripts or images,
 and don't log full `/authorize` URLs.
+
+**Serve the authorization pages with `server.AuthorizationPageHeaders`.**
+Wrap `/authorize`, and every login, consent and error page of the
+interaction, form submissions included:
+
+```go
+mux.Handle("GET /authorize", server.AuthorizationPageHeaders(http.HandlerFunc(authorize)))
+mux.Handle("POST /authorize", server.AuthorizationPageHeaders(csrfProtected(http.HandlerFunc(decide))))
+```
+
+It sets `Content-Security-Policy: frame-ancestors 'none'` and
+`X-Frame-Options: DENY` ("Authorization servers MUST prevent
+clickjacking attacks", RFC 9700 §4.16: a consent page framed invisibly
+over another site's has the user approve what they can't see),
+`Referrer-Policy: no-referrer`, and `Cache-Control: no-store`. A page that
+must be framed by a particular origin sets its own
+`Content-Security-Policy` in the handler, which replaces the wrapper's.
 
 Once you've actually authenticated the user (checked their password,
 verified their SSO assertion, whatever), conclude the interaction:
@@ -641,7 +660,9 @@ result := server.Authorize(subject, authCtx, server.GrantedAuthorization{
 	// the grant's refresh token and every access token issued from it.
 	GrantID: yourOwnIDForThisGrant,
 })
-// or: server.Deny("user declined") / server.AuthenticationFailed("bad credentials")
+// or, once the user has authenticated: server.Deny("user declined"),
+// or server.AuthenticationFailed("not the account the client named").
+// Before anyone has authenticated: server.DenyLocally("cancelled").
 
 authResult, err := srv.CompleteAuthorization(ctx, server.CompleteAuthorizationRequest{
 	Handle: handle, // the same InteractionHandle from step above
@@ -656,6 +677,36 @@ case server.AuthorizationLocalError:
 	res.Error.WriteText(w) // render locally: code and public description only
 }
 ```
+
+**Redirect only after the user has authenticated.** `Deny` and
+`AuthenticationFailed` send the browser back to the client with
+`access_denied` or `login_required`. RFC 9700 §4.11.2 says the
+authorization server "MUST always authenticate the user first ...
+before redirecting the user". Any client can register a phishing page as
+its redirect URI and send users to your server only to be bounced
+there with your name on it, whatever they choose. That includes a
+member of an OpenID Federation registered automatically. So:
+
+- a user who cancels, closes or gives up on the sign-in page before
+  authenticating: complete with `server.DenyLocally(reason)`. It ends
+  the interaction without a redirect: `CompleteAuthorization` returns
+  `AuthorizationLocalError` with `access_denied`, which you render as a
+  page of your own. The client's request simply expires.
+- a user who authenticated, then declined: `server.Deny(reason)`.
+- a user who authenticated but can't meet the request — not the account
+  `a.Interaction.RequiredSubject` names, a method below its essential
+  acr: `server.AuthenticationFailed(reason)`. A wrong password isn't
+  this: let the user try again, or `DenyLocally`.
+- a `prompt=none` request you'd have to show something for:
+  `server.InteractionNeeded(...)`, which redirects. This is the
+  silent-authentication exception §4.11.2 makes.
+
+`CompleteAuthorization` also checks that the redirect URI is still
+registered for the client, and answers `AuthorizationLocalError` if it
+was removed since the request was pushed.
+`server.BuildAuthorizationErrorRedirect`, which builds an error redirect
+for a request that never got as far as an interaction, is for test
+harnesses and refuses under `AssuranceProduction`.
 
 Redirect with **303 See Other** after the login or consent form's POST,
 so the browser follows with a GET (FAPI 2.0 Security Profile §5.3.2.2).

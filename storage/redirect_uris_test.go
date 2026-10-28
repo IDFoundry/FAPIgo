@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"slices"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -43,5 +44,24 @@ func TestRedirectURIsOptionalWithoutAuthorizationCode(t *testing.T) {
 	c, err := NewRegisteredClient(withRedirect)
 	if err != nil || !c.AllowsAuthorizationCodeGrant() {
 		t.Errorf("client with a redirect URI: AllowsAuthorizationCodeGrant() = %v, err %v", c.AllowsAuthorizationCodeGrant(), err)
+	}
+}
+
+// TestRegisteredClientRedirectURIs: the registered redirect URIs come
+// back in registration order, as a copy the caller can't use to change
+// the registration.
+func TestRegisteredClientRedirectURIs(t *testing.T) {
+	want := []fapi.RegisteredRedirectURI{"https://rp.example/b", "https://rp.example/a"}
+	c, err := NewRegisteredClient(RegisteredClientConfig{ID: "c", RedirectURIs: want, ClientAssertionAlgorithm: fapi.ES256, AllowedScopes: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	got := c.RedirectURIs()
+	if !slices.Equal(got, want) {
+		t.Fatalf("RedirectURIs() = %v, want %v", got, want)
+	}
+	got[0] = "https://attacker.example/cb"
+	if c.HasRedirectURI("https://attacker.example/cb") || !slices.Equal(c.RedirectURIs(), want) {
+		t.Fatal("changing RedirectURIs()'s result changed the registration")
 	}
 }

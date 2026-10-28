@@ -221,6 +221,21 @@ type InteractionRequest struct {
 	// client chose these values, so show ClientID alongside them.
 	ClientDisplay storage.ClientDisplay
 
+	// RedirectURI is where CompleteAuthorization will send the browser:
+	// the redirect URI the client pushed, one of those it registered
+	// (storage.RegisteredClient.RedirectURIs; for a native app's
+	// loopback redirect, on whichever port it chose). The client chose
+	// it, and any client can register a page of its own, so show its
+	// host on the consent screen alongside ClientDisplay, so the user
+	// can see where they'll be sent. An application that decides which
+	// destinations it trusts (RFC 9700 §4.11.2: the server "SHOULD only
+	// automatically redirect the user agent if it trusts the
+	// redirection URI") checks it here, and ends an interaction it
+	// won't send there with DenyLocally. The zero URL in an
+	// InteractionRequest restored from an encoding made before this
+	// field existed.
+	RedirectURI fapi.URL
+
 	// AuthorizationDetails holds the request's own validated Rich
 	// Authorization Requests (RFC 9396) detail objects, if any were
 	// requested and Config.RAR is configured — zero value otherwise. A

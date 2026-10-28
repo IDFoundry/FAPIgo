@@ -29,7 +29,8 @@ type AuthorizationResult interface {
 // Destination. This covers both a successful authorization (destination
 // carries a code) and a denied/failed one (destination carries an OAuth
 // error) — both are safe to redirect to, since the redirect_uri was
-// already validated when the request was pushed.
+// validated when the request was pushed and is still registered for the
+// client when the interaction completes.
 type AuthorizationRedirect struct {
 	destination fapi.URL
 }
@@ -49,7 +50,9 @@ func (r AuthorizationRedirect) Destination() fapi.URL { return r.destination }
 
 // AuthorizationLocalError means the caller must render a local error
 // rather than redirect anywhere — the interaction handle could not be
-// validated well enough to trust the associated redirect_uri. Render
+// validated well enough to trust the associated redirect_uri, the
+// redirect_uri is no longer registered for the client, or the
+// interaction ended with DenyLocally (ErrorAccessDenied). Render
 // it with Error.WriteText (or Code and PublicDescription in a page of
 // your own); never Error.Error(), which carries internal causes.
 type AuthorizationLocalError struct {
@@ -71,9 +74,13 @@ type CompleteAuthorizationRequest struct {
 // authorization code and returns a success redirect, or returns an
 // error redirect: access_denied for Deny, login_required for
 // AuthenticationFailed or for an Authorize that fails the request's
-// max_age or prompt=login, and InteractionNeeded's own code. A handle
-// that is unknown, used or expired, or a grant exceeding what was
-// requested, is an AuthorizationLocalError instead — never a redirect.
+// max_age or prompt=login, and InteractionNeeded's own code. Deny and
+// AuthenticationFailed redirect, so use them only once the user has
+// authenticated (RFC 9700 §4.11.2); DenyLocally ends the interaction
+// with an AuthorizationLocalError (access_denied) instead. A handle
+// that is unknown, used or expired, a client or redirect_uri that is
+// no longer registered, or a grant exceeding what was requested, is an
+// AuthorizationLocalError too — never a redirect.
 // Every outcome is represented in the returned AuthorizationResult; the
 // error return is reserved for failures outside the request itself.
 // Redirect with 303 See Other after a form POST, never 307 (see
@@ -106,6 +113,13 @@ func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthoriz
 	state, err := optionalJSONString(request.Parameters, "state")
 	if err != nil {
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "pushed authorization request has a malformed state", err)), nil
+	}
+
+	if result, ok := req.Result.(denyLocallyResult); ok {
+		return s.completeLocalFail(ctx, completed.ClientID, localDenial(result.reason)), nil
+	}
+	if registrationErr := s.checkRedirectURIStillRegistered(ctx, completed.ClientID, redirectURI); registrationErr != nil {
+		return s.completeLocalFail(ctx, completed.ClientID, registrationErr), nil
 	}
 
 	switch result := req.Result.(type) {

@@ -125,23 +125,24 @@ func TestNativeClientPrivateUseRedirectWithJARM(t *testing.T) {
 
 // TestBuildAuthorizationErrorRedirectHoldsTheRedirectPolicy covers the
 // error redirect a caller builds without a pushed authorization request:
-// it gets the same redirect policy PAR applies. Under production, a web
-// client's registered loopback or private-use URI is refused; a native
-// client's is accepted.
+// it gets the same redirect policy PAR applies. It is refused outright
+// under production (TestBuildAuthorizationErrorRedirectRefusedUnderProduction),
+// so this runs under development, where a web client's registered
+// private-use URI is refused, and a native client's, or a loopback one,
+// accepted.
 func TestBuildAuthorizationErrorRedirectHoldsTheRedirectPolicy(t *testing.T) {
 	for name, tc := range map[string]struct {
 		uri     string
 		appType storage.ApplicationType
 		ok      bool
 	}{
-		"web, loopback":       {"http://127.0.0.1/callback", storage.ApplicationTypeWeb, false},
-		"web, localhost":      {"http://localhost/callback", storage.ApplicationTypeWeb, false},
+		"web, loopback":       {"http://127.0.0.1/callback", storage.ApplicationTypeWeb, true},
 		"web, private-use":    {testPrivateUseRedirectURI, storage.ApplicationTypeWeb, false},
 		"native, private-use": {testPrivateUseRedirectURI, storage.ApplicationTypeNative, true},
 		"native, loopback":    {"http://127.0.0.1/callback", storage.ApplicationTypeNative, true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			h := newHarnessWithApplicationType(t, server.ProfileFAPISecurity, true, testRedirectURI, server.AssuranceProduction, storage.ApplicationTypeWeb)
+			h := newHarnessWithApplicationType(t, server.ProfileFAPISecurity, true, testRedirectURI, server.AssuranceDevelopment, storage.ApplicationTypeWeb)
 			client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
 				ID: testClientID, RedirectURIs: []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(tc.uri)},
 				ClientAssertionAlgorithm: fapi.ES256, AllowedScopes: []string{"openid"}, ApplicationType: tc.appType,

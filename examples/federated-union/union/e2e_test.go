@@ -335,17 +335,24 @@ func startConsent(t *testing.T, w *union.World, b browser, service, provider str
 	if status != http.StatusOK || at.Hostname() != provider {
 		t.Fatalf("sign-in didn't reach %s's consent page (%d at %s):\n%s", provider, status, at, body)
 	}
+	// The page names where the service's pushed redirect URI goes.
+	mustContain(t, body, "be sent back to <code>"+service)
 }
 
 func TestDeclinedSignIn(t *testing.T) {
 	w, n := startUnion(t)
 	b := newBrowser(t, n)
 	startConsent(t, w, b, "bank.southport.localhost", "id.eastmark.localhost")
-	status, body, _ := b.post(w.URL("id.eastmark.localhost", "/authorize"), url.Values{"citizen": {"em-3306"}, "decision": {"deny"}})
+	status, body, at := b.post(w.URL("id.eastmark.localhost", "/authorize"), url.Values{"citizen": {"em-3306"}, "decision": {"deny"}})
 	if status != http.StatusForbidden {
 		t.Fatalf("declined sign-in = %d, want 403:\n%s", status, body)
 	}
-	mustContain(t, body, "Sign-in declined", "access_denied")
+	// Cancelled before signing in: no redirect to the service (RFC 9700
+	// §4.11.2), so the citizen stays at the provider.
+	if at.Hostname() != "id.eastmark.localhost" {
+		t.Fatalf("declined sign-in landed on %s, want to stay at the identity provider", at)
+	}
+	mustContain(t, body, "Sign-in declined", "sent nothing back")
 }
 
 func TestConsentRefusesCrossOriginSubmission(t *testing.T) {

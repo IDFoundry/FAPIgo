@@ -48,7 +48,7 @@ func TestAccountsRefusesAClientCredentialsToken(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			w.api.accounts(rec, apiRequest(t, w, http.MethodGet, accountsPath, "", tc.clientID, "sam", claims(tc.grantType)))
+			w.api.accounts(rec, apiRequest(t, w, http.MethodGet, accountsPath, "", testToken{tc.clientID, "sam", claims(tc.grantType)}))
 			if rec.Code != tc.want {
 				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.want, rec.Body)
 			}
@@ -74,11 +74,18 @@ func testWorld(t *testing.T) *World {
 	return w
 }
 
-// apiRequest is a request to the API at path, presenting an access token
-// the bank issued to clientID for subject, with claims, bound to a
-// client certificate the request also carries.
-func apiRequest(t *testing.T, w *World, method, path, body, clientID, subject string, claims map[string]json.RawMessage) *http.Request {
+// testToken is an access token for apiRequest: issued to clientID for
+// subject, with claims.
+type testToken struct {
+	clientID, subject string
+	claims            map[string]json.RawMessage
+}
+
+// apiRequest is a request to the API at path, presenting tok, as the bank
+// issues it, bound to a client certificate the request also carries.
+func apiRequest(t *testing.T, w *World, method, path, body string, tok testToken) *http.Request {
 	t.Helper()
+	clientID, subject, claims := tok.clientID, tok.subject, tok.claims
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)

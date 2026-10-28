@@ -99,7 +99,7 @@ func TestPayRefusesAClientCredentialsToken(t *testing.T) {
 			tc.claims["authorization_details"] = json.RawMessage(`[{"type":"payment_initiation","instructedAmount":{"currency":"EUR","amount":"129.00"},"creditorName":"Northgate Outfitters","creditorAccount":{"iban":"XA37ALDR00007777888899"}}]`)
 			tc.claims["code_grant_id"] = json.RawMessage(`"grant-` + tc.clientID + `"`)
 			rec := httptest.NewRecorder()
-			w.Handler().ServeHTTP(rec, apiRequest(t, w, http.MethodPost, paymentsPath, order, tc.clientID, "sam", tc.claims))
+			w.Handler().ServeHTTP(rec, apiRequest(t, w, http.MethodPost, paymentsPath, order, testToken{tc.clientID, "sam", tc.claims}))
 			if rec.Code != tc.want {
 				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.want, rec.Body)
 			}
@@ -122,11 +122,18 @@ func testWorld(t *testing.T) *World {
 	return w
 }
 
-// apiRequest is a request to the API at path, presenting an access token
-// the bank issued to clientID for subject, with claims, bound to a
-// client certificate the request also carries.
-func apiRequest(t *testing.T, w *World, method, path, body, clientID, subject string, claims map[string]json.RawMessage) *http.Request {
+// testToken is an access token for apiRequest: issued to clientID for
+// subject, with claims.
+type testToken struct {
+	clientID, subject string
+	claims            map[string]json.RawMessage
+}
+
+// apiRequest is a request to the API at path, presenting tok, as the bank
+// issues it, bound to a client certificate the request also carries.
+func apiRequest(t *testing.T, w *World, method, path, body string, tok testToken) *http.Request {
 	t.Helper()
+	clientID, subject, claims := tok.clientID, tok.subject, tok.claims
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)

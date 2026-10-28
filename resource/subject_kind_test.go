@@ -55,13 +55,20 @@ func TestVerifySubjectKind(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Verify: %v", err)
 			}
-			if authz.SubjectKind != tc.want {
-				t.Fatalf("SubjectKind = %v, want %v", authz.SubjectKind, tc.want)
-			}
-			if sub, ok := authz.EndUser(); ok != tc.wantEndUser || (ok && sub != authz.InternalSubject) {
-				t.Fatalf("EndUser = %q, %v; want ok %v", sub, ok, tc.wantEndUser)
-			}
+			assertSubjectKind(t, authz, tc.want, tc.wantEndUser)
 		})
+	}
+}
+
+// assertSubjectKind checks authz's SubjectKind, and that EndUser reports
+// InternalSubject exactly when wantEndUser.
+func assertSubjectKind(t *testing.T, authz resource.AuthorizationContext, want resource.SubjectKind, wantEndUser bool) {
+	t.Helper()
+	if authz.SubjectKind != want {
+		t.Fatalf("SubjectKind = %v, want %v", authz.SubjectKind, want)
+	}
+	if sub, ok := authz.EndUser(); ok != wantEndUser || (ok && sub != authz.InternalSubject) {
+		t.Fatalf("EndUser = %q, %v; want ok %v", sub, ok, wantEndUser)
 	}
 }
 

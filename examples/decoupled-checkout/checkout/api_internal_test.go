@@ -98,9 +98,9 @@ func TestAPIRefusesAClientCredentialsToken(t *testing.T) {
 		"a client named as the customer": {"sam", "client_credentials", http.StatusForbidden},
 	} {
 		t.Run(name, func(t *testing.T) {
-			pay := apiRequest(t, w, http.MethodPost, paymentsPath, order, tc.clientID, "sam", testClaims(tc.grantType, payment, "grant-"+tc.clientID))
+			pay := apiRequest(t, w, http.MethodPost, paymentsPath, order, testToken{tc.clientID, "sam", testClaims(tc.grantType, payment, "grant-"+tc.clientID)})
 			assertAPIStatus(t, w, pay, tc.want)
-			read := apiRequest(t, w, http.MethodGet, accountsPath+"XA21ALDR00001234567890/balances", "", tc.clientID, "sam", testClaims(tc.grantType, reading, ""))
+			read := apiRequest(t, w, http.MethodGet, accountsPath+"XA21ALDR00001234567890/balances", "", testToken{tc.clientID, "sam", testClaims(tc.grantType, reading, "")})
 			assertAPIStatus(t, w, read, tc.want)
 		})
 	}
@@ -145,11 +145,18 @@ func testWorld(t *testing.T) *World {
 	return w
 }
 
-// apiRequest is a request to the API at path, presenting an access token
-// the bank issued to clientID for subject, with claims, bound to a
-// client certificate the request also carries.
-func apiRequest(t *testing.T, w *World, method, path, body, clientID, subject string, claims map[string]json.RawMessage) *http.Request {
+// testToken is an access token for apiRequest: issued to clientID for
+// subject, with claims.
+type testToken struct {
+	clientID, subject string
+	claims            map[string]json.RawMessage
+}
+
+// apiRequest is a request to the API at path, presenting tok, as the bank
+// issues it, bound to a client certificate the request also carries.
+func apiRequest(t *testing.T, w *World, method, path, body string, tok testToken) *http.Request {
 	t.Helper()
+	clientID, subject, claims := tok.clientID, tok.subject, tok.claims
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)

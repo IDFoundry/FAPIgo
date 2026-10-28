@@ -37,6 +37,9 @@ func resourceNonceScope(u *url.URL) string {
 // losing it, or a stale/wrong value, only costs one extra
 // challenge/retry round trip on the next call, recovered by the
 // existing retry logic exactly as if this cache didn't exist at all.
+// A resource server's nonces are cached per origin (scheme and host),
+// so resource servers sharing an origin share one slot: a nonce one of
+// them sends is presented to the other, which costs at most that retry.
 // New installs a NewInMemoryDPoPNonceCache when
 // Dependencies.DPoPNonceCache is nil.
 type DPoPNonceCache interface {

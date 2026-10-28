@@ -49,9 +49,10 @@ type RefreshTokenRequest struct {
 //
 // A returned ID token is validated as ExchangeCode validates one, and
 // checked against the original (OIDC Core §12.2): the same sub, the same
-// auth_time when present (the time of the original authentication, not
-// of the refresh), and the same azp. No nonce is expected: a refreshed
-// ID token has none to match.
+// aud (when the original records one), the same auth_time when present
+// (the time of the original authentication, not of the refresh), the
+// same azp (none when the original had none), and, when it carries a
+// nonce at all — it SHOULD NOT — the original's nonce.
 func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (TokenSet, error) {
 	if !req.Tokens.HasRefreshToken || req.Tokens.RefreshToken.Reveal() == "" {
 		return TokenSet{}, newError(ErrorInvalidRequest, "the token set has no refresh token", nil)
@@ -78,7 +79,9 @@ func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (To
 	if tokenErr != nil {
 		return TokenSet{}, tokenErr
 	}
-	// No nonce: a refreshed ID token has none to match.
+	// No nonce to expect here: a refreshed ID token SHOULD carry none,
+	// and checkRefreshedIDToken compares one it does carry with the
+	// original's.
 	result, idErr := c.tokenSetFromResponse(ctx, body, "")
 	if idErr != nil {
 		return TokenSet{}, idErr
@@ -136,9 +139,12 @@ func refreshParameters(req RefreshTokenRequest) (map[string]string, []string, *E
 
 // checkRefreshedIDToken applies OIDC Core §12.2's comparisons of a
 // refreshed ID token with the one the original authentication issued —
-// iss and aud are already checked against this client's own
-// configuration. With no original ID token to compare with, there is
-// nothing to check here.
+// iss is already checked against this client's own configuration, and
+// aud against its client_id. aud is compared as a set, and only when
+// the original records one (a TokenSet built by hand may not). A nonce
+// SHOULD be absent; a present one MUST equal the original's, so one the
+// original didn't carry fails. With no original ID token to compare
+// with, there is nothing to check here.
 func checkRefreshedIDToken(original TokenSet, refreshed IDTokenClaims) *Error {
 	if !original.HasIDToken {
 		return nil
@@ -147,12 +153,28 @@ func checkRefreshedIDToken(original TokenSet, refreshed IDTokenClaims) *Error {
 	switch {
 	case refreshed.Subject != was.Subject:
 		return newError(ErrorInvalidResponse, "refreshed ID token's sub differs from the original ID token's", nil)
+	case len(was.Audience) > 0 && !sameStringSet(refreshed.Audience, was.Audience):
+		return newError(ErrorInvalidResponse, "refreshed ID token's aud differs from the original ID token's", nil)
+	case refreshed.Nonce != "" && refreshed.Nonce != was.Nonce:
+		return newError(ErrorInvalidResponse, "refreshed ID token's nonce differs from the original ID token's", nil)
 	case !refreshed.AuthTime.IsZero() && !refreshed.AuthTime.Equal(was.AuthTime):
 		return newError(ErrorInvalidResponse, "refreshed ID token's auth_time differs from the original authentication's", nil)
 	case refreshed.AZP != was.AZP:
 		return newError(ErrorInvalidResponse, "refreshed ID token's azp differs from the original ID token's", nil)
 	}
 	return nil
+}
+
+// sameStringSet reports whether a and b hold the same values, in any
+// order.
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	sa, sb := slices.Clone(a), slices.Clone(b)
+	slices.Sort(sa)
+	slices.Sort(sb)
+	return slices.Equal(sa, sb)
 }
 
 // grantedScope is a token response's scope: as it says, or, when it

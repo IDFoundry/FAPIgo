@@ -12,8 +12,9 @@ import (
 // client's configured authorization server, resolved through the same
 // cached, rotation-aware Dependencies.IssuerKeys the client itself uses
 // to verify an ID token — so a caller never needs a second, unhardened
-// key fetch to check an issuer-signed artifact beyond the ID token (a
-// UserInfo response, most commonly). It checks the signature against
+// key fetch to check an issuer-signed artifact beyond the ID token. It
+// is UserInfo-oriented: the key is resolved for
+// keys.UserInfoVerification, and it checks the signature against
 // Config.Algorithms.UserInfo, never the JWS header's own "alg" — this
 // module treats a token's own algorithm header as untrusted input
 // everywhere else, and this call is no exception — and returns the
@@ -22,19 +23,25 @@ import (
 // caller still owns checking whatever claims that payload carries (iss,
 // aud, sub, expiry, ...) against its own policy.
 //
-// Nor does it check the header's "typ": it verifies any kind of
-// issuer-signed JWS, and an issuer may sign several kinds of JWT with
-// one key (ID tokens, JWT access tokens, logout tokens, ...). The
-// payload's claims are what tell them apart, so a caller expecting one
-// kind checks the claims only that kind carries — an "aud" naming this
-// client, say, which an access token for a resource server doesn't.
-// FetchUserInfo, which knows it expects a UserInfo response, refuses
-// one whose typ names another explicitly typed kind of JWT (RFC 8725
-// §3.11), as ID token and JARM validation do.
+// An issuer may sign several kinds of JWT with one key (ID tokens, JWT
+// access tokens, logout tokens, ...), so VerifyIssuerJWS accepts only a
+// generic one: a header "typ" that is absent or "JWT" ("application/jwt"
+// too, compared case-insensitively), as FetchUserInfo does for a signed
+// UserInfo response. A JWS whose typ names an explicitly typed kind —
+// "at+jwt", "logout+jwt", "dc+sd-jwt", or any other — is refused with
+// ErrorInvalidResponse, so one of those is never taken for the
+// artifact a caller expected (RFC 8725 §3.11). A generic JWS still says
+// nothing about which kind it is: the payload's claims tell them apart,
+// so a caller checks the claims only the kind it expects carries — an
+// "aud" naming this client, say, which an access token for a resource
+// server doesn't.
 func (c *Client) VerifyIssuerJWS(ctx context.Context, compactJWS string) ([]byte, error) {
 	parsed, err := c.verifyIssuerJWS(ctx, compactJWS)
 	if err != nil {
 		return nil, err
+	}
+	if err := jose.RequireGenericType(parsed.Header.Type); err != nil {
+		return nil, newError(ErrorInvalidResponse, "JWS is an explicitly typed kind of JWT", err)
 	}
 	return parsed.Payload, nil
 }

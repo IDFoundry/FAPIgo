@@ -88,8 +88,8 @@ the client the token was issued to, so the response can only be
 addressed to that client, and refuses claims whose `sub` isn't the
 token's subject.
 On the client, setting `Algorithms.UserInfo` makes `FetchUserInfo`
-verify the response; `VerifyIssuerJWS` verifies any other
-issuer-signed artifact with the same keys.
+verify the response; `VerifyIssuerJWS` verifies another generically
+typed issuer-signed JWS (`typ` absent or `JWT`) with the same keys.
 
 ## See it running
 

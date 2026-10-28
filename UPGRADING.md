@@ -390,6 +390,74 @@ case client.BackchannelAuthenticationPending:
 	retryAfter(session.Interval())
 }
 ```
+### A custom `keys.Decrypter` must use `apu`/`apv` for ECDH-ES+A256KW (keys, client)
+
+**Affects:** a client whose `Dependencies.Decryption` is your own
+`keys.Decrypter` implementation that recovers ECDH-ES+A256KW
+content-encryption keys itself (an HSM or KMS wrapper that runs the
+Concat KDF and AES key unwrap in its own code). A `Decrypter` built by
+`keys.NewDecrypter` or `keys.NewSingleKeyDecrypter` over an
+`ECDHAgreer`, `keys/ephemeral`, and any RSA-OAEP-256-only
+implementation need no change.
+
+**Why:** RFC 7518 §4.6.2 makes the JWE header's `apu` and `apv` the
+PartyUInfo and PartyVInfo inputs of the ECDH-ES key derivation. The
+client ignored them, so an encrypted ID token or UserInfo response
+from an authorization server whose JOSE library sets them failed to
+decrypt. The client now decodes both as strict base64url and passes
+them to the `Decrypter` in the new `keys.UnwrapRequest` fields
+`AgreementPartyUInfo` and `AgreementPartyVInfo` (nil when absent).
+
+**What fails:** nothing at compile time. An implementation that
+ignores the new fields still decrypts JWEs without `apu`/`apv`, and
+fails to decrypt those that carry them, as before.
+
+**What to change:** include both fields in the OtherInfo of your
+Concat KDF:
+
+```go
+func (d *hsmDecrypter) UnwrapContentEncryptionKey(ctx context.Context, req keys.UnwrapRequest) ([]byte, error) {
+	z, err := d.hsm.DeriveECDH(ctx, req.KeyID, req.EphemeralPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	// AlgorithmID || PartyUInfo || PartyVInfo || SuppPubInfo (RFC 7518 §4.6.2)
+	info := otherInfo(req.Algorithm.String(), req.AgreementPartyUInfo, req.AgreementPartyVInfo, 256)
+	return aesKeyUnwrap(concatKDF(z, 256, info), req.EncryptedKey)
+}
+```
+
+Or, when your backend can return the raw shared secret, implement
+`keys.ECDHAgreer` and wrap it with `keys.NewDecrypter`, which applies
+the KDF, `apu`/`apv` included, for you.
+
+### `VerifyIssuerJWS` refuses an explicitly typed JWS (client)
+
+**Affects:** a caller of `client.Client.VerifyIssuerJWS` that verifies
+a JWS whose header `typ` is something other than absent or `JWT`.
+`FetchUserInfo` already refused those and is unchanged.
+
+**Why:** an issuer may sign several kinds of JWT with one key (ID
+tokens, JWT access tokens, logout tokens), and `VerifyIssuerJWS`
+returned the payload of any of them. A caller expecting a generic
+artifact, a signed UserInfo response most commonly, could be handed an
+access token or a logout token signed with the same key and take it for
+one (RFC 8725 §3.11). It now accepts only a generic JWS, as
+`FetchUserInfo` does: a `typ` that is absent or `JWT` (`jwt` and
+`application/jwt` too).
+
+**What fails:** `VerifyIssuerJWS` returns a `*client.Error` with code
+`ErrorInvalidResponse` for a JWS whose `typ` is, for example, `at+jwt`,
+`logout+jwt` or `dc+sd-jwt`.
+
+**What to change:** nothing for a signed UserInfo response or another
+generic JWS. An explicitly typed artifact needs a validator for that
+kind, one that checks its own `typ` and claims, rather than
+`VerifyIssuerJWS`:
+
+```go
+payload, err := c.VerifyIssuerJWS(ctx, signedUserInfo) // typ absent or "JWT"
+```
 
 ## v0.64.0
 

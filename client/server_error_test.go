@@ -381,3 +381,31 @@ func TestPARErrorBoundsAMalformedCode(t *testing.T) {
 		t.Errorf("Error() = %q, want the malformed code cut to 64 bytes", msg)
 	}
 }
+
+// TestServerErrorKeepsOnlyHTTPSErrorURI: an error_uri is exposed only
+// as an absolute https URL, so a javascript: or data: one an attacker
+// answering for the endpoint sends never reaches a page that renders
+// ServerResponse().URI as a link.
+func TestServerErrorKeepsOnlyHTTPSErrorURI(t *testing.T) {
+	for uri, want := range map[string]string{
+		"https://as.example.com/errors#invalid_client": "https://as.example.com/errors#invalid_client",
+		"HTTPS://as.example.com/errors":                "HTTPS://as.example.com/errors",
+		"javascript:alert(document.cookie)":            "",
+		"data:text/html,<script>alert(1)</script>":     "",
+		"http://as.example.com/errors":                 "",
+		"//as.example.com/errors":                      "",
+		"/errors":                                      "",
+		"https:/errors":                                "",
+		"https://user@as.example.com/errors":           "",
+	} {
+		c := newPARErrorTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_request", "error_uri": uri})
+		})
+		got, ok := serverResponseOf(t, beginAuthorizationError(t, c))
+		if !ok || got.Code != "invalid_request" || got.URI != want {
+			t.Errorf("error_uri %q: ServerResponse() = %+v, %v, want URI %q", uri, got, ok, want)
+		}
+	}
+}

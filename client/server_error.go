@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/idfoundry/fapigo/internal/authchallenge"
@@ -22,19 +23,25 @@ import (
 // or sent one containing characters RFC 6749 §5.2 doesn't allow; a
 // response that wasn't an OAuth error at all (an HTML 502 page, say)
 // still carries HTTPStatus. Description is the server's own text: show
-// it to an operator, not as a user-facing message.
+// it to an operator, not as a user-facing message. URI is kept only
+// when it is an absolute https URL with a host, so a javascript: or
+// data: value never reaches a page that renders it as a link — but it
+// is still a link the server chose: escape it like any other
+// server-supplied text, and don't send users to it without the same
+// care as any other external link.
 //
 // Whether a failed call is worth retrying depends on the call, not only
 // on Code. A pushed authorization request, a client credentials request
 // or a backchannel authentication request can simply be made again.
 // ExchangeCode can't: after a server_error the authorization server may
 // already have consumed the authorization code, so a retry typically
-// fails with invalid_grant, and the flow should restart with
+// fails with invalid_grant — and the server may then revoke the tokens
+// the first redemption issued — and the flow should restart with
 // BeginAuthorization.
 type ServerErrorResponse struct {
 	Code        string // "error", e.g. "invalid_client"
 	Description string // "error_description"
-	URI         string // "error_uri"
+	URI         string // "error_uri", only an absolute https URL
 	HTTPStatus  int
 }
 
@@ -156,7 +163,10 @@ func isErrorText(s string) bool {
 }
 
 // isErrorURI reports whether s is within RFC 6749 §5.2's "error_uri"
-// character set: %x21 / %x23-5B / %x5D-7E.
+// character set (%x21 / %x23-5B / %x5D-7E) and is an absolute https URL
+// with a host: RFC 6749 §5.2 makes it a web page for the developer, and
+// any other scheme (javascript:, data:) is a hazard to a caller that
+// renders it as a link, with no use to one that doesn't.
 func isErrorURI(s string) bool {
 	if s == "" {
 		return false
@@ -167,5 +177,6 @@ func isErrorURI(s string) bool {
 			return false
 		}
 	}
-	return true
+	u, err := url.Parse(s)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.Opaque == "" && u.User == nil
 }

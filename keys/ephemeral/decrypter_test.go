@@ -22,9 +22,10 @@ type testUnwrapper struct {
 	purpose keys.DecryptionPurpose
 }
 
-func (u testUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, keyID string, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
+func (u testUnwrapper) UnwrapCEK(ctx context.Context, header jwe.Header, encryptedKey []byte) ([]byte, error) {
 	return u.d.UnwrapContentEncryptionKey(ctx, keys.UnwrapRequest{
-		Purpose: u.purpose, Algorithm: alg, KeyID: keyID, EncryptedKey: encryptedKey, EphemeralPublicKey: epk,
+		Purpose: u.purpose, Algorithm: header.Algorithm, KeyID: header.KeyID, EncryptedKey: encryptedKey,
+		EphemeralPublicKey: header.EphemeralPublicKey, AgreementPartyUInfo: header.AgreementPartyUInfo, AgreementPartyVInfo: header.AgreementPartyVInfo,
 	})
 }
 
@@ -88,6 +89,7 @@ func TestKeyManagerDecrypterRoundTripECDHESA256KW(t *testing.T) {
 	plaintext := []byte("nested jwt goes here")
 	compact, err := jwe.Encrypt(jwe.EncryptRequest{
 		Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM, RecipientKey: pub, Plaintext: plaintext,
+		AgreementPartyUInfo: []byte("Alice"), AgreementPartyVInfo: []byte("Bob"),
 	})
 	if err != nil {
 		t.Fatalf("jwe.Encrypt: %v", err)

@@ -126,7 +126,7 @@ func (d *capabilityDecrypter) UnwrapContentEncryptionKey(ctx context.Context, re
 		if err != nil {
 			return nil, fmt.Errorf("keys: ecdh agreement: %w", err)
 		}
-		return jwe.UnwrapCEKFromSharedSecret(req.Algorithm, z, req.EncryptedKey)
+		return jwe.UnwrapCEKFromSharedSecret(req.Algorithm, z, req.EncryptedKey, req.AgreementPartyUInfo, req.AgreementPartyVInfo)
 
 	case fapi.RSAOAEP256:
 		decrypter, ok := backend.(KeyDecrypter)

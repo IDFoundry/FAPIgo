@@ -2,9 +2,8 @@ package client
 
 import (
 	"context"
-	"crypto/ecdh"
 
-	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/jwe"
 	"github.com/idfoundry/fapigo/keys"
 )
 
@@ -19,8 +18,10 @@ type decrypterUnwrapper struct {
 }
 
 // UnwrapCEK implements internal/jwe.Unwrapper.
-func (u decrypterUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, keyID string, encryptedKey []byte, ephemeralPublicKey *ecdh.PublicKey) ([]byte, error) {
+func (u decrypterUnwrapper) UnwrapCEK(ctx context.Context, header jwe.Header, encryptedKey []byte) ([]byte, error) {
 	return u.decrypter.UnwrapContentEncryptionKey(ctx, keys.UnwrapRequest{
-		Purpose: u.purpose, Algorithm: alg, KeyID: keyID, EncryptedKey: encryptedKey, EphemeralPublicKey: ephemeralPublicKey,
+		Purpose: u.purpose, Algorithm: header.Algorithm, KeyID: header.KeyID, EncryptedKey: encryptedKey,
+		EphemeralPublicKey:  header.EphemeralPublicKey,
+		AgreementPartyUInfo: header.AgreementPartyUInfo, AgreementPartyVInfo: header.AgreementPartyVInfo,
 	})
 }

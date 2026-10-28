@@ -135,8 +135,8 @@ func TestFetchUserInfoVerifiesSignedJWTResponse(t *testing.T) {
 
 // A signed UserInfo response whose typ names another kind of JWT — a
 // JWT access token signed with the same key, an SD-JWT, a kind no list
-// of known types would name — is refused; a generic "JWT" isn't. VerifyIssuerJWS, which verifies any
-// kind of issuer-signed JWS, doesn't look at typ.
+// of known types would name — is refused; a generic "JWT" isn't. So is
+// it by VerifyIssuerJWS.
 func TestFetchUserInfoRefusesOtherExplicitType(t *testing.T) {
 	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -169,8 +169,8 @@ func TestFetchUserInfoRefusesOtherExplicitType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("jose.Sign: %v", err)
 	}
-	if _, err := c.VerifyIssuerJWS(context.Background(), compact); err != nil {
-		t.Fatalf("VerifyIssuerJWS(typ at+jwt): %v", err)
+	if _, err := c.VerifyIssuerJWS(context.Background(), compact); err == nil {
+		t.Fatal("VerifyIssuerJWS(typ at+jwt) = nil error, want refusal")
 	}
 	typ = "JWT"
 	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err != nil {

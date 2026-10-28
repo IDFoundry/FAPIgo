@@ -29,8 +29,9 @@ const (
 )
 
 // UnwrapRequest describes one content-encryption key to recover.
-// EncryptedKey, EphemeralPublicKey, and KeyID come from the unverified
-// header of the JWE being opened — safe to use only as inputs to the
+// EncryptedKey, EphemeralPublicKey, AgreementPartyUInfo,
+// AgreementPartyVInfo and KeyID come from the unverified header of the
+// JWE being opened — safe to use only as inputs to the
 // unwrap operation itself, never as something to trust ahead of it.
 type UnwrapRequest struct {
 	Purpose   DecryptionPurpose
@@ -53,6 +54,17 @@ type UnwrapRequest struct {
 	// EphemeralPublicKey is the JWE header's "epk", required for
 	// ECDHESA256KW and nil for RSAOAEP256.
 	EphemeralPublicKey *ecdh.PublicKey
+
+	// AgreementPartyUInfo and AgreementPartyVInfo are the JWE header's
+	// decoded "apu" and "apv" (RFC 7518 §4.6.1.2/§4.6.1.3), nil when
+	// absent. For ECDHESA256KW they are the PartyUInfo and PartyVInfo
+	// inputs of the Concat KDF (RFC 7518 §4.6.2), so a Decrypter that
+	// derives the key-encryption key itself must include them — one
+	// that ignores them fails to decrypt any JWE whose sender set them.
+	// A Decrypter built by NewDecrypter (over an ECDHAgreer) handles
+	// them already. Unused for RSAOAEP256.
+	AgreementPartyUInfo []byte
+	AgreementPartyVInfo []byte
 }
 
 // Decrypter performs the client's own content-encryption-key recovery.

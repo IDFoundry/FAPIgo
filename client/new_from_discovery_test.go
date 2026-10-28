@@ -341,14 +341,17 @@ func TestNewFromDiscoveryAcceptsOAuthOnlyClient(t *testing.T) {
 // tokens are bound to its certificate does mutual TLS at UserInfo, so
 // with discovered endpoints it gets the server's mtls_endpoint_aliases
 // there (RFC 8705 §5), as ApplyForSenderConstrain gives; a DPoP client
-// keeps the ordinary endpoint.
+// keeps the ordinary endpoint unless it sets UseMTLSEndpointAliases
+// (FAPI 2.0 Security Profile §5.2.2.1).
 func TestNewFromDiscoveryUsesMTLSAliasesForAnMTLSClient(t *testing.T) {
 	for _, tc := range []struct {
-		constrain storage.SenderConstrain
-		wantPath  string
+		constrain  storage.SenderConstrain
+		useAliases bool
+		wantPath   string
 	}{
-		{storage.SenderConstrainMTLS, "/mtls/userinfo"},
-		{storage.SenderConstrainDPoP, "/userinfo"},
+		{storage.SenderConstrainMTLS, false, "/mtls/userinfo"},
+		{storage.SenderConstrainDPoP, false, "/userinfo"},
+		{storage.SenderConstrainDPoP, true, "/mtls/userinfo"},
 	} {
 		var ts *httptest.Server
 		var gotPath string
@@ -382,6 +385,7 @@ func TestNewFromDiscoveryUsesMTLSAliasesForAnMTLSClient(t *testing.T) {
 
 		cfg := validConfig(t)
 		cfg.Issuer, cfg.Endpoints, cfg.SenderConstrain = fapi.URL{}, client.Endpoints{}, tc.constrain
+		cfg.UseMTLSEndpointAliases = tc.useAliases
 		cfg.Algorithms.IDToken = fapi.ES256
 		deps := validDependencies(t)
 		deps.HTTP = ts.Client()

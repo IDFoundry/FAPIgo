@@ -1509,8 +1509,9 @@ signed protocol outputs. The one narrow exception is
 `client.Client.VerifyIssuerJWS`: it checks only that this client's own
 configured authorization server signed a compact JWS, with the client's
 issuer key source and its configured `Algorithms.UserInfo` (never the
-header's `alg`), and hands back the payload for the caller's own claim
-checks.
+header's `alg`), and that its `typ` is absent or the generic `JWT` (so an
+explicitly typed JWT such as an access token isn't accepted), and hands
+back the payload for the caller's own claim checks.
 
 [fapi2]: https://openid.net/specs/fapi-security-profile-2_0-final.html
 [attacker]: https://openid.net/specs/fapi-attacker-model-2_0-final.html

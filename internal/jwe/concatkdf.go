@@ -73,10 +73,10 @@ func otherInfo(algorithmID string, apu, apv []byte, keyDataLenBits int) ([]byte,
 
 // lengthPrefixed returns b prefixed with its own length as a 32-bit
 // big-endian integer, the "Datalen || Data" encoding RFC 7518 §4.6.2
-// uses for each OtherInfo component. b is always a short, fixed program
-// value in this package (an algorithm identifier or an apu/apv header
-// value this package itself never sets), never attacker-controlled
-// length, but the bound is checked explicitly rather than assumed.
+// uses for each OtherInfo component. b is an algorithm identifier or a
+// decoded apu/apv header value — the latter sender-chosen, but bounded
+// by the JWE's own size — and the 32-bit bound is checked explicitly
+// rather than assumed.
 func lengthPrefixed(b []byte) ([]byte, error) {
 	n := len(b)
 	if n < 0 || uint64(n) > math.MaxUint32 {

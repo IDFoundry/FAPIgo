@@ -124,9 +124,13 @@ type Metadata struct {
 	// RevocationEndpoint (RFC 8414 §2) is set only when
 	// Config.Endpoints.Revocation is: RevokeToken serves it.
 	// RevocationEndpointAuthMethodsSupported then lists the same client
-	// authentication methods as TokenEndpointAuthMethodsSupported.
-	RevocationEndpoint                     *fapi.URL `json:"revocation_endpoint,omitempty"`
-	RevocationEndpointAuthMethodsSupported []string  `json:"revocation_endpoint_auth_methods_supported,omitempty"`
+	// authentication methods as TokenEndpointAuthMethodsSupported, and
+	// RevocationEndpointAuthSigningAlgValuesSupported the same client
+	// assertion algorithms as TokenEndpointAuthSigningAlgValuesSupported:
+	// RFC 8414 §2 requires it whenever private_key_jwt is listed.
+	RevocationEndpoint                              *fapi.URL `json:"revocation_endpoint,omitempty"`
+	RevocationEndpointAuthMethodsSupported          []string  `json:"revocation_endpoint_auth_methods_supported,omitempty"`
+	RevocationEndpointAuthSigningAlgValuesSupported []string  `json:"revocation_endpoint_auth_signing_alg_values_supported,omitempty"`
 
 	// MTLSEndpointAliases (RFC 8705 §5) is set only when
 	// Config.MTLSEndpoints is non-zero — most deployments never offer
@@ -348,6 +352,9 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		// RevokeToken authenticates a client exactly as the token
 		// endpoint does.
 		md.RevocationEndpointAuthMethodsSupported = slices.Clone(md.TokenEndpointAuthMethodsSupported)
+		if slices.Contains(md.RevocationEndpointAuthMethodsSupported, storage.ClientAuthMethodPrivateKeyJWT.String()) {
+			md.RevocationEndpointAuthSigningAlgValuesSupported = slices.Clone(md.TokenEndpointAuthSigningAlgValuesSupported)
+		}
 	}
 
 	return md

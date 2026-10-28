@@ -91,7 +91,7 @@ func TestNewRegisteredClientRefusesRedirectQueryNamingResponseParameter(t *testi
 				ID: "c", RedirectURIs: []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(uri)},
 				ClientAssertionAlgorithm: fapi.ES256, AllowedScopes: []string{"openid"},
 			})
-			if gotErr := err != nil; gotErr != wantErr {
+			if (err != nil) != wantErr {
 				t.Fatalf("NewRegisteredClient(%q) error = %v, want error %v", uri, err, wantErr)
 			}
 		})

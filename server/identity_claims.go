@@ -8,6 +8,7 @@ import (
 
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/internal/claimnames"
+	"github.com/idfoundry/fapigo/internal/claimvalues"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/token"
 )
@@ -36,7 +37,12 @@ type IdentityClaimsSource interface {
 	// The server enforces the restriction too: it puts only names into
 	// an ID token or UserInfo response, whatever this returns, and never
 	// a value for a claim it sets itself — "sub", "acr", "auth_time" and
-	// the like, which a client may request but the server answers.
+	// the like, which a client may request but the server answers. A
+	// claim requested with "value" or "values" (OIDC Core §5.5.1) is
+	// released only with one of those values, compared as JSON: the
+	// server, and serverresource.UserInfoClaims, drop it otherwise, so a
+	// source returns the claim's real value and needn't look at the
+	// request.
 	ResolveIdentityClaims(ctx context.Context, subject string, names []string) (map[string]json.RawMessage, error)
 }
 
@@ -54,15 +60,25 @@ type IdentityClaimsSource interface {
 // it and builds the response's claims from IdentityClaimsSource.
 const RequestedUserinfoClaimsKey = "requested_userinfo_claims"
 
+// RequestedUserinfoClaimValuesKey is the access-token claim name this
+// package records, beside RequestedUserinfoClaimsKey, the values the
+// "claims" parameter's userinfo-scoped requests asked each claim to have
+// under: a JSON object mapping each claim requested with "value" or
+// "values" (OIDC Core §5.5.1) to the array of values it may be released
+// with. OIDC Core §5.5.1: "When the Claim value does not match the
+// requested value, the Claim is not included in the response."
+// serverresource.UserInfoClaims drops a claim whose resolved value isn't
+// one of them; a claim absent from the object is unconstrained, and the
+// claim is absent from the token when no request carried a value.
+const RequestedUserinfoClaimValuesKey = "requested_userinfo_claim_values"
+
 // parseRequestedClaimNames extracts the claim names requested for each
 // delivery location from raw (the "claims" parameter's raw JSON value,
 // or empty if absent), reading members by their exact names through
-// claimsMembers. Only the names are kept: everything else about each
-// entry (essential/value/values) is ignored here, since OIDC Core §5.5
-// lets a server honor as much or as little of a claims request as it
-// wants, and this package's contract is "never return what wasn't asked
-// for". The one exception is an essential "acr" request with values,
-// which §5.5.1.1 makes a requirement: see essentialACRValues. Malformed
+// claimsMembers. Only the names are kept here: "essential" is advisory
+// (OIDC Core §5.5.1), "value" and "values" are kept apart by
+// requestedClaimValues, and an essential "acr" request with values,
+// which §5.5.1.1 makes a requirement, by essentialACRValues. Malformed
 // input yields no requested claims rather than an error here; requests
 // are refused earlier, by validateClaimsParameter.
 //
@@ -113,6 +129,30 @@ func (r RequestedClaims) Names() []string {
 	return slices.Compact(names)
 }
 
+// requestedClaimValues returns the values each of names, as requested
+// under location ("id_token" or "userinfo") by params' "claims"
+// parameter, may be released with (claimvalues.FromRequest): nil when
+// none was requested with "value" or "values".
+func requestedClaimValues(params map[string]json.RawMessage, location string, names []string) claimvalues.Acceptable {
+	top, ok := claimsMembers(params["claims"])
+	if !ok {
+		return nil
+	}
+	requests := claimsLocation(top, location)
+	var out claimvalues.Acceptable
+	for _, name := range names {
+		acceptable, constrained := claimvalues.FromRequest(requests[name])
+		if !constrained {
+			continue
+		}
+		if out == nil {
+			out = claimvalues.Acceptable{}
+		}
+		out[name] = acceptable
+	}
+	return out
+}
+
 func requestedClaimsFrom(params map[string]json.RawMessage) RequestedClaims {
 	idToken, userinfo := parseRequestedClaimNames(params["claims"])
 	return RequestedClaims{IDToken: idToken, UserInfo: userinfo}
@@ -151,7 +191,7 @@ func approvedClaimNames(params map[string]json.RawMessage, approved []string) (i
 // authorization server: they record the grant behind a token, so only
 // this server may set them.
 var serverTokenClaims = []string{
-	RequestedUserinfoClaimsKey, grantrevocation.Claim, grantrevocation.CodeClaim, token.GrantTypeClaim,
+	RequestedUserinfoClaimsKey, RequestedUserinfoClaimValuesKey, grantrevocation.Claim, grantrevocation.CodeClaim, token.GrantTypeClaim,
 	token.PairwiseSectorClaim, token.ClientSubjectClaim,
 }
 

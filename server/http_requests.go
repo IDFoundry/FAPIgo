@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"net/http"
 	"net/url"
+	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
 )
@@ -26,20 +27,74 @@ type httpRequestParts struct {
 }
 
 // readHTTPRequestParts reads everything from r at once, so an adapter
-// can't forget a header that only some clients send.
+// can't forget a header that only some clients send. A request whose
+// only credential is the Authorization header is refused here
+// (authorizationHeaderOnly).
 func readHTTPRequestParts(r *http.Request) (httpRequestParts, error) {
 	form, err := FormRequestFromHTTP(r)
 	if err != nil {
 		return httpRequestParts{}, err
 	}
 	attestations, pops := ClientAttestationHeadersFromHTTP(r)
-	return httpRequestParts{
+	parts := httpRequestParts{
 		HTTP:                  form,
 		DPoPProofs:            DPoPProofsFromHTTP(r),
 		ClientAttestations:    attestations,
 		ClientAttestationPoPs: pops,
 		PeerCertificate:       PeerCertificateFromHTTP(r),
-	}, nil
+	}
+	if challengeErr := authorizationHeaderOnly(r, parts); challengeErr != nil {
+		return httpRequestParts{}, challengeErr
+	}
+	return parts, nil
+}
+
+// authorizationHeaderOnly refuses a request that tried to authenticate
+// with the Authorization header (client_secret_basic, say) and carries
+// none of the credentials this server authenticates clients by — a
+// client assertion, client attestation headers, a TLS client certificate
+// — so it can only fail as invalid_client. RFC 6749 §5.2: "If the client
+// attempted to authenticate via the "Authorization" request header
+// field, the authorization server MUST respond with an HTTP 401 (Unauthorized)
+// status code and include the WWW-Authenticate response header field
+// matching the authentication scheme used by the client." A request that
+// also carries one of those credentials is authenticated by it as before.
+func authorizationHeaderOnly(r *http.Request, parts httpRequestParts) *Error {
+	header := r.Header.Get("Authorization")
+	if header == "" || parts.PeerCertificate != nil || len(parts.ClientAttestations) > 0 || len(parts.ClientAttestationPoPs) > 0 {
+		return nil
+	}
+	for _, p := range parts.HTTP.Parameters {
+		if p.Name == "client_assertion" || p.Name == "client_assertion_type" {
+			return nil
+		}
+	}
+	scheme, _, _ := strings.Cut(header, " ")
+	if !isAuthScheme(scheme) {
+		scheme = "Basic"
+	}
+	err := newError(ErrorInvalidClient, http.StatusUnauthorized, "client authentication with the Authorization header is not supported", nil)
+	err.challenge = scheme + ` realm="oauth", error="invalid_client"`
+	return err
+}
+
+// isAuthScheme reports whether s is an HTTP authentication scheme name:
+// an RFC 9110 §5.6.2 token.
+func isAuthScheme(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if !isTokenChar(c) {
+			return false
+		}
+	}
+	return true
+}
+
+// isTokenChar reports whether c is an RFC 9110 §5.6.2 tchar.
+func isTokenChar(c rune) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", c)
 }
 
 // PushAuthorizationRequestFromHTTP builds a PushAuthorizationRequest
@@ -130,28 +185,56 @@ func (t TokenEndpointRequest) BackchannelTokenExchange() BackchannelTokenExchang
 }
 
 // BeginAuthorizationRequestFromHTTP reads the authorization endpoint's
-// request from r's query string: the client_id and request_uri a client
-// sends the browser with after a pushed authorization request (RFC 9126
-// §4). r.URL.Query().Get would silently take the first of a repeated
+// request from r: the client_id and request_uri a client sends the
+// browser with after a pushed authorization request (RFC 9126 §4), and
+// any request parameter (BeginAuthorizationRequest.Request). OIDC
+// Core §3.1.2.1 has an authorization server "support the use of the HTTP
+// GET and POST methods": a POST is read from its
+// application/x-www-form-urlencoded body, as FormRequestFromHTTP reads
+// one (and only from it), any other method from the query string.
+// r.URL.Query().Get would silently take the first of a repeated
 // parameter; RFC 6749 §3.1 says one "MUST NOT be included more than
-// once", so a repeated client_id or request_uri, or a malformed query,
-// is an invalid_request *Error. Render it locally: an authorization
-// endpoint never redirects for a request it can't attribute to a
-// client's registered redirect URI. A missing value is left empty for
+// once", so a repeated client_id, request_uri or request, a malformed
+// query or body, or a POST that isn't form-encoded, is an
+// invalid_request *Error. Render it locally: an authorization endpoint
+// never redirects for a request it can't attribute to a client's
+// registered redirect URI. A missing value is left empty for
 // BeginAuthorization to answer, as it does any request_uri or client_id
 // it doesn't accept.
 func BeginAuthorizationRequestFromHTTP(r *http.Request) (BeginAuthorizationRequest, error) {
-	query, err := url.ParseQuery(r.URL.RawQuery)
+	params, err := authorizationEndpointParameters(r)
 	if err != nil {
-		return BeginAuthorizationRequest{}, newError(ErrorInvalidRequest, 400, "the authorization request's query is malformed", err)
+		return BeginAuthorizationRequest{}, err
 	}
-	for _, name := range []string{"client_id", "request_uri"} {
-		if len(query[name]) > 1 {
+	for _, name := range []string{"client_id", "request_uri", "request"} {
+		if len(params[name]) > 1 {
 			return BeginAuthorizationRequest{}, newError(ErrorInvalidRequest, 400, name+" is included more than once", nil)
 		}
 	}
 	return BeginAuthorizationRequest{
-		RequestURI: query.Get("request_uri"),
-		ClientID:   fapi.ClientID(query.Get("client_id")),
+		RequestURI: params.Get("request_uri"),
+		ClientID:   fapi.ClientID(params.Get("client_id")),
+		Request:    params.Get("request"),
 	}, nil
+}
+
+// authorizationEndpointParameters is an authorization request's
+// parameters: a POST's form body, or any other request's query string.
+func authorizationEndpointParameters(r *http.Request) (url.Values, error) {
+	if r.Method != http.MethodPost {
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			return nil, newError(ErrorInvalidRequest, 400, "the authorization request's query is malformed", err)
+		}
+		return query, nil
+	}
+	form, err := FormRequestFromHTTP(r)
+	if err != nil {
+		return nil, err
+	}
+	params := url.Values{}
+	for _, p := range form.Parameters {
+		params.Add(p.Name, p.Value)
+	}
+	return params, nil
 }

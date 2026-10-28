@@ -225,8 +225,9 @@ func (e MTLSEndpoints) IsZero() bool {
 type Limits struct {
 	// PushedRequestLifetime is how long a pushed authorization request's
 	// request_uri remains valid, and is reported to the client as
-	// expires_in. Under AssuranceProduction it must be less than 600
-	// seconds (FAPI 2.0 Security Profile §5.3.2.2).
+	// expires_in, in whole seconds (RFC 9126 §2.2), so it must be at
+	// least one second. Under AssuranceProduction it must be less than
+	// 600 seconds (FAPI 2.0 Security Profile §5.3.2.2).
 	PushedRequestLifetime time.Duration
 
 	// MaxClientAssertionLifetime bounds how far in the future a client

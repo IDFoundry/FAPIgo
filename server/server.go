@@ -291,8 +291,10 @@ func validateAttestationAlgorithms(cfg Config) error {
 }
 
 func validateLimits(cfg Config, cibaEnabled bool) error {
-	if cfg.Limits.PushedRequestLifetime <= 0 {
-		return fmt.Errorf("server: config: limits.pushed_request_lifetime must be positive")
+	// RFC 9126 §2.2 reports it as expires_in, a positive whole number of
+	// seconds: under a second would be sent as 0.
+	if cfg.Limits.PushedRequestLifetime < time.Second {
+		return fmt.Errorf("server: config: limits.pushed_request_lifetime must be at least 1s, since it's reported as expires_in in whole seconds (RFC 9126 §2.2)")
 	}
 	if cfg.Limits.MaxClientAssertionLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.max_client_assertion_lifetime must be positive")

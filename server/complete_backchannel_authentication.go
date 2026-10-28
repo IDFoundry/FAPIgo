@@ -166,7 +166,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 
 	requestedScope, _ := jsonString(request.Parameters, "scope")
 	if scopeErr := validateGrantedScopeSubset(result.grant.Scope, requestedScope); scopeErr != nil {
-		wrapped := newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", scopeErr)
+		wrapped := newError(ErrorInvalidRequest, 400, "granted scope is empty or exceeds requested scope", scopeErr)
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
 		return wrapped
 	}
@@ -215,25 +215,27 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 	}
 	decidedAt := s.deps.Clock.Now()
 	grant, encodeErr := s.encodeGrantRecord(grantRecord{
-		Kind:                    grantKindBackchannel,
-		IssuedAt:                &decidedAt,
-		DPoPJKT:                 request.DPoPJKT,
-		Subject:                 result.subject.ID().String(),
-		ClientSubject:           distinctClientSubject(clientSub, result.subject.ID().String()),
-		PairwiseSector:          sector,
-		PairwisePrefix:          pairwisePrefixOf(s.cfg, sector),
-		Scope:                   result.grant.Scope,
-		AuthTime:                result.auth.authTime,
-		ACR:                     result.auth.acr,
-		AMR:                     result.auth.amr,
-		AuthorizationDetails:    grantedAuthorizationDetails,
-		Resources:               resources,
-		TokenClaims:             request.TokenClaims,
-		RequestedIDTokenClaims:  idTokenClaims,
-		RequestedUserinfoClaims: userinfoClaims,
-		IDTokenClaims:           result.grant.IDTokenClaims,
-		GrantID:                 result.grant.GrantID,
-		GrantType:               CIBAGrantType,
+		Kind:                         grantKindBackchannel,
+		IssuedAt:                     &decidedAt,
+		DPoPJKT:                      request.DPoPJKT,
+		Subject:                      result.subject.ID().String(),
+		ClientSubject:                distinctClientSubject(clientSub, result.subject.ID().String()),
+		PairwiseSector:               sector,
+		PairwisePrefix:               pairwisePrefixOf(s.cfg, sector),
+		Scope:                        result.grant.Scope,
+		AuthTime:                     result.auth.authTime,
+		ACR:                          result.auth.acr,
+		AMR:                          result.auth.amr,
+		AuthorizationDetails:         grantedAuthorizationDetails,
+		Resources:                    resources,
+		TokenClaims:                  request.TokenClaims,
+		RequestedIDTokenClaims:       idTokenClaims,
+		RequestedUserinfoClaims:      userinfoClaims,
+		RequestedIDTokenClaimValues:  requestedClaimValues(request.Parameters, "id_token", idTokenClaims),
+		RequestedUserinfoClaimValues: requestedClaimValues(request.Parameters, "userinfo", userinfoClaims),
+		IDTokenClaims:                result.grant.IDTokenClaims,
+		GrantID:                      result.grant.GrantID,
+		GrantType:                    CIBAGrantType,
 	})
 	if encodeErr != nil {
 		wrapped := newError(ErrorServerError, 500, "failed to encode backchannel authentication grant", encodeErr)

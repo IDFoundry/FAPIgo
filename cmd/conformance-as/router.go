@@ -36,6 +36,8 @@ func newRouter(srv *server.Server, consent *consentHandler, backchannel *backcha
 	// Pages a browser shows: not to be framed, cached or leaked in a
 	// Referer (server.AuthorizationPageHeaders).
 	mux.Handle("GET /authorize", server.AuthorizationPageHeaders(http.HandlerFunc(consent.handleBegin)))
+	// OIDC Core §3.1.2.1: GET and POST both (a form-serialized body).
+	mux.Handle("POST /authorize", server.AuthorizationPageHeaders(http.HandlerFunc(consent.handleBegin)))
 	mux.Handle("POST /authorize/decision", server.AuthorizationPageHeaders(http.HandlerFunc(consent.handleDecision)))
 	mux.HandleFunc("POST /token", tokenHandler(srv))
 	mux.HandleFunc("/userinfo", userinfoHandler(srv, resourceVerifier, identityClaims, clients, userinfoSigning))

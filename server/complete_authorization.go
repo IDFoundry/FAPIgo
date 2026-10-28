@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/claimvalues"
 	"github.com/idfoundry/fapigo/internal/httperror"
+	"github.com/idfoundry/fapigo/internal/querystring"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -175,29 +177,31 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 
 	now := s.deps.Clock.Now()
 	grant, err := s.encodeGrantRecord(grantRecord{
-		Kind:                    grantKindAuthorizationCode,
-		IssuedAt:                &now,
-		RedirectURI:             redirectURI,
-		CodeChallenge:           codeChallenge,
-		Nonce:                   nonce,
-		DPoPJKT:                 dpopJKT,
-		Subject:                 result.subject.ID().String(),
-		ClientSubject:           distinctClientSubject(clientSub, result.subject.ID().String()),
-		PairwiseSector:          sector,
-		PairwisePrefix:          pairwisePrefixOf(s.cfg, sector),
-		Scope:                   result.grant.Scope,
-		AuthTime:                result.auth.authTime,
-		ACR:                     result.auth.acr,
-		AMR:                     result.auth.amr,
-		AuthorizationDetails:    approved.authorizationDetails,
-		Resources:               approved.resources,
-		TokenClaims:             request.TokenClaims,
-		RequestedIDTokenClaims:  approved.idTokenClaims,
-		RequestedUserinfoClaims: approved.userinfoClaims,
-		IDTokenClaims:           result.grant.IDTokenClaims,
-		GrantID:                 result.grant.GrantID,
-		ClientInstanceKey:       request.ClientInstanceKey,
-		GrantType:               "authorization_code",
+		Kind:                         grantKindAuthorizationCode,
+		IssuedAt:                     &now,
+		RedirectURI:                  redirectURI,
+		CodeChallenge:                codeChallenge,
+		Nonce:                        nonce,
+		DPoPJKT:                      dpopJKT,
+		Subject:                      result.subject.ID().String(),
+		ClientSubject:                distinctClientSubject(clientSub, result.subject.ID().String()),
+		PairwiseSector:               sector,
+		PairwisePrefix:               pairwisePrefixOf(s.cfg, sector),
+		Scope:                        result.grant.Scope,
+		AuthTime:                     result.auth.authTime,
+		ACR:                          result.auth.acr,
+		AMR:                          result.auth.amr,
+		AuthorizationDetails:         approved.authorizationDetails,
+		Resources:                    approved.resources,
+		TokenClaims:                  request.TokenClaims,
+		RequestedIDTokenClaims:       approved.idTokenClaims,
+		RequestedUserinfoClaims:      approved.userinfoClaims,
+		RequestedIDTokenClaimValues:  approved.idTokenClaimValues,
+		RequestedUserinfoClaimValues: approved.userinfoClaimValues,
+		IDTokenClaims:                result.grant.IDTokenClaims,
+		GrantID:                      result.grant.GrantID,
+		ClientInstanceKey:            request.ClientInstanceKey,
+		GrantType:                    "authorization_code",
 	})
 	if err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "failed to encode authorization code grant", err)), nil
@@ -267,9 +271,10 @@ func (s *Server) loginRequiredProblem(request requestRecord, auth Authentication
 // approvedGrant is what an application's GrantedAuthorization approves
 // of a pending authorization request, checked against it.
 type approvedGrant struct {
-	authorizationDetails          json.RawMessage
-	resources                     []string
-	idTokenClaims, userinfoClaims []string
+	authorizationDetails                    json.RawMessage
+	resources                               []string
+	idTokenClaims, userinfoClaims           []string
+	idTokenClaimValues, userinfoClaimValues claimvalues.Acceptable
 }
 
 // checkApprovedGrant checks grant against request, what the client
@@ -279,7 +284,7 @@ type approvedGrant struct {
 func (s *Server) checkApprovedGrant(request requestRecord, grant GrantedAuthorization) (approvedGrant, *Error) {
 	requestedScope, _ := jsonString(request.Parameters, "scope")
 	if err := validateGrantedScopeSubset(grant.Scope, requestedScope); err != nil {
-		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "granted scope is empty or exceeds requested scope", err)
 	}
 	details, err := s.validateGrantedAuthorizationDetails(request.Parameters[authorizationDetailsParameter], grant.AuthorizationDetails)
 	if err != nil {
@@ -299,7 +304,11 @@ func (s *Server) checkApprovedGrant(request requestRecord, grant GrantedAuthoriz
 	if err != nil {
 		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "approved identity claims exceed what was requested", err)
 	}
-	return approvedGrant{authorizationDetails: details, resources: resources, idTokenClaims: idTokenClaims, userinfoClaims: userinfoClaims}, nil
+	return approvedGrant{
+		authorizationDetails: details, resources: resources, idTokenClaims: idTokenClaims, userinfoClaims: userinfoClaims,
+		idTokenClaimValues:  requestedClaimValues(request.Parameters, "id_token", idTokenClaims),
+		userinfoClaimValues: requestedClaimValues(request.Parameters, "userinfo", userinfoClaims),
+	}, nil
 }
 
 func (s *Server) completeErrorRedirect(ctx context.Context, clientID fapi.ClientID, redirectURI, state, errorCode, description string, outcome AuditOutcome) (AuthorizationResult, error) {
@@ -326,31 +335,36 @@ func (s *Server) completeErrorRedirect(ctx context.Context, clientID fapi.Client
 // server (RFC 9207), so a client can detect a response mixed up between
 // two authorization servers; a JARM response doesn't need one, since its
 // own "iss" claim already serves that purpose.
+//
+// The response parameters are added after the redirect URI's own query,
+// which is kept byte for byte: RFC 6749 §3.1.2 says it "MUST be retained
+// when adding additional query parameters", and decoding and re-encoding
+// it would reorder it and drop or rewrite what url.ParseQuery can't
+// represent. storage.NewRegisteredClient refuses a redirect URI whose
+// query already names a response parameter, so none is sent twice.
 func (s *Server) buildAuthorizationResponse(ctx context.Context, clientID fapi.ClientID, redirectURI string, params map[string]string) (fapi.URL, *Error) {
 	base, err := url.Parse(redirectURI)
 	if err != nil {
 		return fapi.URL{}, newError(ErrorServerError, 500, "stored redirect_uri is malformed", err)
 	}
 
+	response := url.Values{}
 	if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
 		responseJWT, err := s.signJARMResponse(ctx, clientID, params)
 		if err != nil {
 			return fapi.URL{}, newError(ErrorServerError, 500, "failed to sign authorization response", err)
 		}
-		q := base.Query()
-		q.Set("response", responseJWT)
-		base.RawQuery = q.Encode()
+		response.Set("response", responseJWT)
 	} else {
-		q := base.Query()
 		for k, v := range params {
 			if v == "" {
 				continue
 			}
-			q.Set(k, v)
+			response.Set(k, v)
 		}
-		q.Set("iss", s.cfg.Issuer.String())
-		base.RawQuery = q.Encode()
+		response.Set("iss", s.cfg.Issuer.String())
 	}
+	base.RawQuery = querystring.Append(base.RawQuery, response.Encode())
 
 	// The caller already held redirect_uri to the client's registered type
 	// (parseRedirectURI): the pushed authorization request, or
@@ -397,9 +411,18 @@ func (s *Server) parseRedirectURI(client storage.RegisteredClient, raw string) (
 	return u, err
 }
 
+// validateGrantedScopeSubset checks that granted, the scope a grant or a
+// refreshed access token gets, holds only values of
+// requestedSpaceDelimited, and at least one when that holds any: an
+// empty granted scope can't be told apart from the whole request at the
+// client (see GrantedAuthorization.Scope).
 func validateGrantedScopeSubset(granted []string, requestedSpaceDelimited string) error {
-	allowed := make(map[string]struct{}, len(granted))
-	for _, s := range strings.Fields(requestedSpaceDelimited) {
+	requested := strings.Fields(requestedSpaceDelimited)
+	if len(granted) == 0 && len(requested) > 0 {
+		return fmt.Errorf("no scope was granted of the requested %q; a token response without scope means the whole request was granted (RFC 6749 §5.1)", requestedSpaceDelimited)
+	}
+	allowed := make(map[string]struct{}, len(requested))
+	for _, s := range requested {
 		allowed[s] = struct{}{}
 	}
 	for _, g := range granted {

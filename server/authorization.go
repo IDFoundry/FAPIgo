@@ -74,6 +74,15 @@ func (LocalErrorResponse) authorizationAction() {}
 type BeginAuthorizationRequest struct {
 	RequestURI string
 	ClientID   fapi.ClientID
+
+	// Request is the request parameter (a request object, OIDC Core
+	// §6.1) the authorization request carried, if any. This server takes
+	// request objects only at the pushed authorization request
+	// endpoint, so one sent here without a request_uri is refused with
+	// ErrorRequestNotSupported; beside a request_uri it's ignored, like
+	// any other parameter but client_id (RFC 9126 §4).
+	// BeginAuthorizationRequestFromHTTP sets it.
+	Request string
 }
 
 // BeginAuthorization redeems a request_uri previously obtained from
@@ -98,6 +107,11 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	// query's client_id is only what the browser claims: those failures
 	// are audited with no client (AuditEvent.ClientID), never with this
 	// unverified value, which could carry anything into an audit log.
+	if req.RequestURI == "" && req.Request != "" {
+		// OIDC Core §6.1: an OP that doesn't support the request
+		// parameter here answers request_not_supported.
+		return s.beginFail(ctx, "", newError(ErrorRequestNotSupported, 400, "the request parameter is not supported at the authorization endpoint: push the request object (RFC 9126)", nil)), nil
+	}
 	reference, ok := par.SplitRequestURI(req.RequestURI)
 	if !ok {
 		return s.beginFail(ctx, "", newError(ErrorInvalidRequest, 400, "request_uri is not recognized", nil)), nil

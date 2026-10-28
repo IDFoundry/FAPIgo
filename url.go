@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/idfoundry/fapigo/internal/canonical"
+	"github.com/idfoundry/fapigo/internal/querystring"
 )
 
 // URL is a validated, security-sensitive URL — an issuer identifier, an
@@ -230,9 +231,10 @@ func (u URL) IsZero() bool {
 }
 
 // WithQuery returns a copy of u with its query string replaced by
-// query: any query u already had is dropped, so to add parameters to
-// an endpoint's own query (which RFC 6749 §3.1 has a client retain),
-// start query from u.URL().Query(). It does not
+// query: any query u already had is dropped. To add parameters to an
+// endpoint's own query, which RFC 6749 §3.1 has a client retain, use
+// WithAddedQuery: rebuilding it from u.URL().Query() reorders it and
+// drops what url.ParseQuery can't decode. It does not
 // re-validate scheme, credentials or fragment, since replacing only the
 // query string cannot reintroduce a problem ParseEndpointURL already
 // ruled out on u; this is what lets a caller build on an endpoint URL
@@ -241,5 +243,17 @@ func (u URL) IsZero() bool {
 func (u URL) WithQuery(query url.Values) URL {
 	out := u.value
 	out.RawQuery = query.Encode()
+	return URL{value: out}
+}
+
+// WithAddedQuery returns a copy of u with query's parameters added after
+// its own query, which is kept byte for byte: RFC 6749 §3.1 and §3.1.2
+// say an endpoint's query "MUST be retained when adding additional query
+// parameters". A parameter query names that u's query already has is
+// then sent twice; the caller keeps the two apart. Like WithQuery, it
+// does not re-validate the rest of u.
+func (u URL) WithAddedQuery(query url.Values) URL {
+	out := u.value
+	out.RawQuery = querystring.Append(out.RawQuery, query.Encode())
 	return URL{value: out}
 }

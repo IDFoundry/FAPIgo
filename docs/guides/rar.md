@@ -78,6 +78,16 @@ request, and `CompleteBackchannelAuthentication` applies the same check.
 The client credentials grant has no one to approve, so what the
 `ClientCredentialsRARPolicy` returns is what's granted.
 
+**Narrowing at the token endpoint.** A token request (code exchange,
+refresh, CIBA poll) may carry its own `authorization_details` asking
+for part of the grant (RFC 9396 §6). The server compares it with the
+grant the way it compares a grant with the request (`ValidateGrant`, or
+an exact match), issues the access token with only what was asked for,
+and refuses anything malformed or wider with
+`invalid_authorization_details`. An empty array gets a token without
+details; no parameter gets the whole grant. The refresh token always
+keeps the whole grant, so a later refresh can ask for any of it.
+
 ## Client: ask with the same definition
 
 ```go

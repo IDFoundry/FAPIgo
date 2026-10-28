@@ -308,3 +308,76 @@ func (s *Server) CheckClientRegistration(client storage.RegisteredClient) error 
 	}
 	return nil
 }
+
+// requestedAuthorizationDetails is a token request's own
+// "authorization_details" parameter (RFC 9396 §6), shape-checked by
+// tokenRequestAuthorizationDetails: its detail objects, and whether the
+// request carried the parameter at all (an empty array asks for a token
+// with no authorization details; no parameter asks for the grant's).
+type requestedAuthorizationDetails struct {
+	objects []json.RawMessage
+	present bool
+}
+
+// tokenRequestAuthorizationDetails checks a token request's own
+// "authorization_details" parameter for shape against Config.RAR. It runs
+// before the request spends anything — an authorization code, a CIBA
+// approval — so a malformed value refuses the request without consuming
+// the grant; accessTokenGrant then checks the objects against the grant
+// itself.
+//
+// Every failure is invalid_authorization_details (RFC 9396 §5, which §8
+// applies to the token endpoint), including a server without Config.RAR:
+// it supports no authorization details type, so every type is unknown.
+func (s *Server) tokenRequestAuthorizationDetails(params map[string]string) (requestedAuthorizationDetails, *Error) {
+	raw, present := params[authorizationDetailsParameter]
+	if !present {
+		return requestedAuthorizationDetails{}, nil
+	}
+	if s.cfg.RAR == nil {
+		return requestedAuthorizationDetails{}, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not supported by this server", nil)
+	}
+	if _, err := s.cfg.RAR.Parse(json.RawMessage(raw)); err != nil {
+		return requestedAuthorizationDetails{}, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is invalid", err)
+	}
+	var objects []json.RawMessage
+	_ = json.Unmarshal([]byte(raw), &objects) // Parse has already decoded raw as exactly this
+	return requestedAuthorizationDetails{objects: objects, present: true}, nil
+}
+
+// accessTokenGrant returns grant as the access token a token request
+// asking for requested is issued from: grant unchanged when the request
+// named no authorization_details (RFC 9396 §7: the AS then "determines
+// the resulting authorization_details at its discretion" — here, all of
+// the grant's), and otherwise with its AuthorizationDetails replaced by
+// requested, once requested is shown to ask for no more than the grant
+// holds — RFC 9396 §6: "The AS checks whether the underlying grant ...
+// allows the issuance of an access token with the requested authorization
+// details. Otherwise, the AS refuses the request with the error code
+// invalid_authorization_details".
+//
+// The comparison is the one a resource owner's grant gets at completion
+// (validateGrantedAuthorizationDetails): every requested object must
+// match a distinct granted object of its type, exactly or as its
+// RARDefinition.ValidateGrant hook allows — RFC 9396 §6.1's "the same
+// processing techniques as used in granting the request in the first
+// place".
+//
+// Only the access token is narrowed: the grant itself, which a refresh
+// token carries forward, is the caller's to keep unchanged (RFC 9396
+// §6.1: "the resource owner's previous authorization is unchanged by such
+// requests").
+func (s *Server) accessTokenGrant(grant grantRecord, requested requestedAuthorizationDetails) (grantRecord, *Error) {
+	if !requested.present {
+		return grant, nil
+	}
+	if len(requested.objects) > 0 && len(grant.AuthorizationDetails) == 0 {
+		return grantRecord{}, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details was not granted", nil)
+	}
+	narrowed, err := s.validateGrantedAuthorizationDetails(grant.AuthorizationDetails, requested.objects)
+	if err != nil {
+		return grantRecord{}, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details exceeds what was granted", err)
+	}
+	grant.AuthorizationDetails = narrowed
+	return grant, nil
+}

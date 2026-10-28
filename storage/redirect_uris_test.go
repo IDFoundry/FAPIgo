@@ -65,3 +65,35 @@ func TestRegisteredClientRedirectURIs(t *testing.T) {
 		t.Fatal("changing RedirectURIs()'s result changed the registration")
 	}
 }
+
+// RFC 6749 §3.1.2 has the server retain a redirect URI's query and add
+// the response's parameters after it, so a registered query naming one
+// of them would send it twice. NewRegisteredClient refuses such a URI,
+// however the name is spelled or separated.
+func TestNewRegisteredClientRefusesRedirectQueryNamingResponseParameter(t *testing.T) {
+	for uri, wantErr := range map[string]bool{
+		"https://rp.example/cb?state=registered":     true,
+		"https://rp.example/cb?a=1&code=x":           true,
+		"https://rp.example/cb?a=1;iss=x":            true,
+		"https://rp.example/cb?st%61te=x":            true,
+		"https://rp.example/cb?error":                true,
+		"https://rp.example/cb?response=x":           true,
+		"https://rp.example/cb?error_uri=x":          true,
+		"https://rp.example/cb?error_description=x":  true,
+		"https://rp.example/cb?tenant=acme&flag":     false,
+		"https://rp.example/cb?State=x":              false,
+		"https://rp.example/cb?codes=x&statement=1":  false,
+		"https://rp.example/cb":                      false,
+		"https://rp.example/cb?x=state&y=code%3Dabc": false,
+	} {
+		t.Run(uri, func(t *testing.T) {
+			_, err := NewRegisteredClient(RegisteredClientConfig{
+				ID: "c", RedirectURIs: []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(uri)},
+				ClientAssertionAlgorithm: fapi.ES256, AllowedScopes: []string{"openid"},
+			})
+			if (err != nil) != wantErr {
+				t.Fatalf("NewRegisteredClient(%q) error = %v, want error %v", uri, err, wantErr)
+			}
+		})
+	}
+}

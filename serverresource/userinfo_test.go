@@ -161,3 +161,27 @@ func TestUserInfoClaimsRefusesClientCredentialsToken(t *testing.T) {
 		t.Errorf("source asked about %q, want not at all", source.subjects)
 	}
 }
+
+// TestUserInfoClaimsHonoursRequestedValues: OIDC Core §5.5.1, "When the
+// Claim value does not match the requested value, the Claim is not
+// included in the response" — the values the token records under
+// server.RequestedUserinfoClaimValuesKey.
+func TestUserInfoClaimsHonoursRequestedValues(t *testing.T) {
+	authz := authzFor([]string{"openid"}, `["email","name","phone"]`)
+	authz.Claims[server.RequestedUserinfoClaimValuesKey] = json.RawMessage(`{"email":["other@example.com"],"name":["Sam Rivera","S. Rivera"]}`)
+	claims, err := serverresource.UserInfoClaims(context.Background(), authz, &claimsSource{})
+	if err != nil {
+		t.Fatalf("UserInfoClaims: %v", err)
+	}
+	if _, ok := claims["email"]; ok {
+		t.Errorf("claims carry email %s, whose value wasn't the one requested", claims["email"])
+	}
+	if string(claims["name"]) != `"Sam Rivera"` || string(claims["phone"]) != `"+44 7700 900000"` {
+		t.Errorf("claims = %s, want name (an acceptable value) and phone (unconstrained)", claims)
+	}
+
+	authz.Claims[server.RequestedUserinfoClaimValuesKey] = json.RawMessage(`["email"]`)
+	if _, err := serverresource.UserInfoClaims(context.Background(), authz, &claimsSource{}); err == nil {
+		t.Error("UserInfoClaims(malformed requested claim values) = nil error")
+	}
+}

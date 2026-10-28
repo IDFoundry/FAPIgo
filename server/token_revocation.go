@@ -9,6 +9,8 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
+	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -87,13 +89,18 @@ type TokenRevocationResult struct {
 // requester the token is live. The audit record (below) still tells the
 // cases apart for the operator.
 //
-// Only refresh tokens can be revoked. A token in JWT form, or one sent
-// with token_type_hint "access_token" that isn't a refresh token this
-// client may revoke, is refused with unsupported_token_type (RFC 7009
-// §2.2.1): access tokens are short-lived, and revoking one would need
+// Only refresh tokens can be revoked. A live access token this server
+// issued to the client (a JWT one it signed, or an opaque one in its
+// store) is refused with unsupported_token_type (RFC 7009 §2.2.1, "the
+// client tried to revoke an access token on a server not supporting this
+// feature"): access tokens are short-lived, and revoking one would need
 // every resource server to check a per-token record. Revoke the grant
-// instead (RevokeGrant). The hint is only a hint (RFC 7009 §2.1): a
-// refresh token sent as "access_token" is still revoked.
+// instead (RevokeGrant). Any other token — one in JWT form this server
+// didn't sign for the client, or one sent with token_type_hint
+// "access_token" that's no token of the client's — is an invalid token
+// and answered 200, as §2.2 says: the hint "does not influence the
+// revocation response". It's only a hint (§2.1): a refresh token sent as
+// "access_token" is still revoked.
 //
 // A grant is revoked before its refresh token is deleted, so a failure
 // part way (answered server_error) never leaves the grant's access
@@ -119,20 +126,27 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 	if token == "" {
 		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), newError(ErrorInvalidRequest, 400, "token is required", nil))
 	}
-	unsupported := newError(ErrorUnsupportedTokenType, 400, "only refresh tokens can be revoked", nil)
-	if strings.Contains(token, ".") {
-		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), unsupported)
+	// A refresh token never contains a ".", so a token that does isn't
+	// one; it's looked up as nothing but an access token.
+	var result TokenRevocationResult
+	if !strings.Contains(token, ".") {
+		var revokeErr *Error
+		result, revokeErr = s.revokeRefreshToken(ctx, client.ID(), authn.InstanceKey, token)
+		if revokeErr != nil {
+			return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), revokeErr)
+		}
 	}
-	result, revokeErr := s.revokeRefreshToken(ctx, client.ID(), authn.InstanceKey, token)
-	if revokeErr != nil {
-		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), revokeErr)
-	}
-	// The hint only orders the search (RFC 7009 §2.1), so a refresh
-	// token sent as "access_token" is still revoked above. One that
-	// isn't a refresh token this client may revoke is answered as the
-	// access token it was said to be, which this server can't revoke.
-	if !result.Revoked && (params["token_type_hint"] == "access_token" || s.isOwnOpaqueAccessToken(ctx, client.ID(), token)) {
-		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), unsupported)
+	// RFC 7009 §2.2.1: unsupported_token_type is for "the client tried to
+	// revoke an access token on a server not supporting this feature",
+	// so it answers only a live access token this server issued to the
+	// client. Anything else — a JWT-shaped string that isn't one, a
+	// token sent with token_type_hint "access_token" that's neither —
+	// is an invalid token, answered 200 (§2.2): the hint "does not
+	// influence the revocation response", and only orders the search
+	// (§2.1), so a refresh token sent as "access_token" is still revoked
+	// above.
+	if !result.Revoked && s.isOwnAccessToken(ctx, client.ID(), token) {
+		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), newError(ErrorUnsupportedTokenType, 400, "only refresh tokens can be revoked", nil))
 	}
 	// The client gets the same 200 either way; the audit record says
 	// whether anything was revoked, so an operator can see requests for
@@ -143,6 +157,68 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 	}
 	s.audit(ctx, AuditEventRevokeToken, client.ID(), AuditOutcomeSuccess, description)
 	return result, nil
+}
+
+// isOwnAccessToken reports whether rawToken is a live access token this
+// server issued to clientID: an opaque one (isOwnOpaqueAccessToken) or
+// a JWT one (isOwnJWTAccessToken).
+func (s *Server) isOwnAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) bool {
+	if strings.Contains(rawToken, ".") {
+		return s.isOwnJWTAccessToken(ctx, clientID, rawToken)
+	}
+	return s.isOwnOpaqueAccessToken(ctx, clientID, rawToken)
+}
+
+// isOwnJWTAccessToken reports whether rawToken is a JWT access token
+// Dependencies.AccessTokens (a JWTAccessTokens) signed with one of its
+// current keys, for this server's issuer and clientID, and not expired
+// (allowing Limits.MaxClockSkew). Only the client's own tokens are
+// reported, as isOwnOpaqueAccessToken reports only the client's own; a
+// key that can't be read counts as no.
+func (s *Server) isOwnJWTAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) bool {
+	var issuer JWTAccessTokens
+	switch t := s.deps.AccessTokens.(type) {
+	case JWTAccessTokens:
+		issuer = t
+	case *JWTAccessTokens:
+		if t == nil {
+			return false
+		}
+		issuer = *t
+	default:
+		return false
+	}
+	parsed, err := token.ParseAccessToken(rawToken)
+	if err != nil || parsed.Algorithm() != issuer.Algorithm {
+		return false
+	}
+	for _, key := range accessTokenVerificationKeys(ctx, issuer) {
+		claims, err := parsed.SignedClaims(key.PublicKey, issuer.Algorithm)
+		if err != nil {
+			continue
+		}
+		return claims.Issuer == s.cfg.Issuer.String() && claims.ClientID == clientID.String() &&
+			s.deps.Clock.Now().Before(claims.ExpiresAt.Add(s.cfg.Limits.MaxClockSkew))
+	}
+	return false
+}
+
+// accessTokenVerificationKeys is every key issuer currently publishes for
+// access token signing: all of a keys.RotatingKeyManager's, or the one
+// keys.KeyManager.PublicKey returns.
+func accessTokenVerificationKeys(ctx context.Context, issuer JWTAccessTokens) []keys.PublicKeyInfo {
+	if rotating, ok := issuer.Keys.(keys.RotatingKeyManager); ok {
+		set, err := rotating.PublicKeys(ctx, keys.AccessTokenSigning, issuer.Algorithm)
+		if err != nil {
+			return nil
+		}
+		return set.Keys
+	}
+	info, err := issuer.Keys.PublicKey(ctx, keys.AccessTokenSigning, issuer.Algorithm)
+	if err != nil {
+		return nil
+	}
+	return []keys.PublicKeyInfo{info}
 }
 
 // isOwnOpaqueAccessToken reports whether rawToken is an opaque access

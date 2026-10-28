@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/claimvalues"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/token"
 )
@@ -224,6 +225,14 @@ type grantRecord struct {
 	RequestedIDTokenClaims  []string `json:"requested_id_token_claims,omitempty"`
 	RequestedUserinfoClaims []string `json:"requested_userinfo_claims,omitempty"`
 
+	// RequestedIDTokenClaimValues and RequestedUserinfoClaimValues are,
+	// for those of these names requested with "value" or "values" (OIDC
+	// Core §5.5.1), the values each may be released with
+	// (requestedClaimValues). A claim whose value isn't one of them is
+	// left out of the ID token, or the UserInfo response.
+	RequestedIDTokenClaimValues  claimvalues.Acceptable `json:"requested_id_token_claim_values,omitempty"`
+	RequestedUserinfoClaimValues claimvalues.Acceptable `json:"requested_userinfo_claim_values,omitempty"`
+
 	// IDTokenClaims are the application's own ID-token-only claims
 	// (GrantedAuthorization.IDTokenClaims), already validated.
 	IDTokenClaims map[string]json.RawMessage `json:"id_token_claims,omitempty"`
@@ -331,10 +340,11 @@ func issuedWithin(issuedAt *time.Time, lifetime time.Duration, now time.Time) bo
 
 // accessTokenClaims returns the non-standard claims for an access token
 // issued from g: its extension claims, the "claims" parameter's
-// userinfo-scoped names (see RequestedUserinfoClaimsKey), and its
+// userinfo-scoped names and requested values (see
+// RequestedUserinfoClaimsKey, RequestedUserinfoClaimValuesKey), and its
 // granted authorization_details.
 func (g grantRecord) accessTokenClaims() (map[string]json.RawMessage, error) {
-	claims, err := withRequestedUserinfoClaims(g.RequestedUserinfoClaims, g.TokenClaims)
+	claims, err := withRequestedUserinfoClaims(g.RequestedUserinfoClaims, g.RequestedUserinfoClaimValues, g.TokenClaims)
 	if err != nil {
 		return nil, err
 	}

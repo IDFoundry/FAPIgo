@@ -143,7 +143,154 @@ func (s *Store) BeginAuthorization(ctx context.Context, txn storage.BeginAuthori
 		return storage.PushedAuthorizationRequest{}, errors.New("request_uri has expired")
 	}
 	// ... then insert the interaction under txn.Handle.
+### A token request's `authorization_details` is checked against the grant (server)
+
+**Affects:** a client that sends an `authorization_details` parameter
+on a token request for the authorization code, refresh token or CIBA
+grant (`ExchangeAuthorizationCode`, `RefreshAccessToken`,
+`ExchangeBackchannelAuthentication`).
+
+**Why:** RFC 9396 §6 lets a token request ask for an access token with
+only part of the grant's authorization details, and says the server
+refuses the request with `invalid_authorization_details` when the grant
+doesn't allow what was asked. The parameter used to be ignored at these
+three grants: a request for less got the whole grant, and a malformed or
+wider value was accepted. The server now parses it against
+`Config.RAR`, compares it with the grant the way a resource owner's
+approval is compared with the request (`RARDefinition.ValidateGrant`,
+or an exact match), and issues the access token, and the token
+response's `authorization_details`, with only what was asked for. The
+refresh token keeps the whole grant. A token request without the
+parameter is unchanged.
+
+**What fails:** the token request, with `invalid_authorization_details`
+(400), when its `authorization_details` is malformed, names a type or
+field `Config.RAR` doesn't accept, asks for more than the grant holds,
+or is sent to a server without `Config.RAR`. A malformed value is
+refused before the authorization code or CIBA approval is spent.
+
+**What to change:** send `authorization_details` on a token request
+only to narrow the grant, with objects taken from it; to get everything
+granted, leave the parameter out:
+
+```go
+form := url.Values{
+	"grant_type": {"refresh_token"},
+	"refresh_token": {refreshToken},
+	// no authorization_details: the access token gets the whole grant
 }
+```
+
+### An approval granting no scope of a request that asked for one is refused (server)
+
+**Affects:** an application that calls `CompleteAuthorization` with
+`server.Authorize(..., server.GrantedAuthorization{Scope: nil})` (or an
+empty slice) for a request that asked for a scope — to approve only its
+`authorization_details`, say — and a refresh request whose `scope` is
+only spaces.
+
+**Why:** RFC 6749 §5.1 lets a token response omit `scope` only when it
+is "identical to the scope requested", and §3.3's scope has at least one
+value, so a response can't say that no scope was granted. The server
+issued the code anyway, and the token response then left `scope` out,
+which a client reads as the whole requested scope granted (FAPIgo's own
+client does).
+
+**What fails:** `CompleteAuthorization` returns an
+`AuthorizationLocalError` with `invalid_request` and the description
+"granted scope is empty or exceeds requested scope", and no code is
+issued. `CompleteBackchannelAuthentication` already refused such a grant
+(it must keep `openid`). A refresh request with a blank `scope` gets
+`invalid_scope`.
+
+**What to change:** grant at least one requested scope value, or deny
+the request when the user approved none of it:
+
+```go
+if len(approvedScope) == 0 {
+	result = server.Deny("the user approved none of the requested access")
+} else {
+	result = server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: approvedScope})
+}
+```
+
+### Redirect and authorization endpoint queries are kept byte for byte, and may not name the parameters added to them (storage, server, client)
+
+**Affects:** a client registered (`storage.NewRegisteredClient`, and so
+OpenID Federation automatic registration) with a redirect URI whose
+query names `code`, `state`, `iss`, `error`, `error_description`,
+`error_uri` or `response`; a `client.Config` whose `RedirectURI` query
+names one of those, or whose `Endpoints.Authorization` query names
+`client_id` or `request_uri`; and anything that compared the exact
+redirect the server built for a redirect URI with a query.
+
+**Why:** RFC 6749 §3.1 and §3.1.2 say an endpoint's query "MUST be
+retained when adding additional query parameters". The server and the
+client rebuilt it through `url.Values`, which sorted it, turned `?flag`
+into `flag=`, dropped pairs with a `;` or an invalid escape, and let a
+registered `state` be overwritten. The query is now kept as registered
+and the added parameters follow it, so a name in both would arrive
+twice, and the client couldn't tell which value is the response's.
+
+**What fails:** `storage.NewRegisteredClient` returns an error naming
+the redirect URI and the parameter, and `client.New` returns one naming
+`redirect_uri` or `endpoints.authorization`. A name is matched after
+percent-decoding, and pairs split at `;` as well as `&`.
+
+**What to change:** rename the colliding query parameter, or move what
+it carries into the path:
+
+```go
+storage.RegisteredClientConfig{
+	RedirectURIs: []fapi.RegisteredRedirectURI{
+		"https://rp.example/callback?tenant=acme", // not ?state=acme
+	},
+}
+```
+
+`fapi.URL.WithAddedQuery` adds parameters after a URL's own query in the
+same way, for code that builds on an endpoint URL itself.
+
+### `SignUserInfoResponse` requires `sub` (server)
+
+**Affects:** an application that calls `Server.SignUserInfoResponse`
+directly, for a client with public subjects, with claims that carry no
+`sub` or a `sub` that isn't a non-empty string.
+`serverresource.SignUserInfoResponse` and `serverresource.UserInfoClaims`
+already supply and check it.
+
+**Why:** OIDC Core §5.3.2 says "The sub (subject) Claim MUST always be
+returned in the UserInfo Response". Only a pairwise client's `sub` was
+checked, so a public client's response could be signed without one.
+
+**What fails:** the call, with a `server_error` `*server.Error` whose
+description names `sub`.
+
+**What to change:** put the sub the client was given for the user in
+the claims:
+
+```go
+claims["sub"], _ = json.Marshal(authz.ClientSubject)
+signed, srvErr := srv.SignUserInfoResponse(ctx, client, claims)
+```
+
+### `Limits.PushedRequestLifetime` must be at least a second (server)
+
+**Affects:** a server whose `Config.Limits.PushedRequestLifetime` is
+positive but under one second.
+
+**Why:** RFC 9126 §2.2 reports the lifetime as the PAR response's
+`expires_in`, a positive whole number of seconds. A shorter lifetime was
+sent as `expires_in: 0`.
+
+**What fails:** `server.New` returns an error naming
+`limits.pushed_request_lifetime`.
+
+**What to change:** set a lifetime of a second or more; the presets'
+90 seconds suits most deployments:
+
+```go
+cfg.Limits.PushedRequestLifetime = 90 * time.Second
 ```
 
 ## v0.64.0

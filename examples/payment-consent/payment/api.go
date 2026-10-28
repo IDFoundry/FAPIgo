@@ -85,6 +85,11 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 	// The client's next call carries a fresh DPoP nonce, when the
 	// verifier issues them.
 	authz.SetDPoPNonce(w.Header())
+	c, ok := customerOf(authz)
+	if !ok {
+		resource.NewInsufficientScopeError(authz, "the access token wasn't issued for a customer").WriteJSON(w)
+		return
+	}
 	var order paymentOrder
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&order); err != nil {
 		resource.NewError(resource.ErrorInvalidRequest, http.StatusBadRequest, "malformed payment order").WriteJSON(w)
@@ -107,12 +112,24 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 		resource.NewInsufficientScopeError(authz, "this approval was for one payment, and it has been made").WriteJSON(w)
 		return
 	}
-	c, _ := customerByName(authz.InternalSubject)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(paymentResult{
 		Status: "executed", Amount: "€" + order.InstructedAmount.Amount,
 		Payee: payees[order.CreditorAccount.IBAN], From: c.account.describe(),
 	})
+}
+
+// customerOf is the customer authz's token was issued for. A token a
+// client was issued for itself (the client credentials grant) names no
+// customer, even when the client's client_id equals a customer's
+// username, so EndUser, not InternalSubject alone, says whose account
+// pays.
+func customerOf(authz resource.AuthorizationContext) (customer, bool) {
+	username, ok := authz.EndUser()
+	if !ok {
+		return customer{}, false
+	}
+	return customerByName(username)
 }
 
 // usedApprovalNamespace keeps this API's used approvals apart from the

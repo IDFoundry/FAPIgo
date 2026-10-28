@@ -279,7 +279,7 @@ type approvedGrant struct {
 func (s *Server) checkApprovedGrant(request requestRecord, grant GrantedAuthorization) (approvedGrant, *Error) {
 	requestedScope, _ := jsonString(request.Parameters, "scope")
 	if err := validateGrantedScopeSubset(grant.Scope, requestedScope); err != nil {
-		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "granted scope is empty or exceeds requested scope", err)
 	}
 	details, err := s.validateGrantedAuthorizationDetails(request.Parameters[authorizationDetailsParameter], grant.AuthorizationDetails)
 	if err != nil {
@@ -397,9 +397,18 @@ func (s *Server) parseRedirectURI(client storage.RegisteredClient, raw string) (
 	return u, err
 }
 
+// validateGrantedScopeSubset checks that granted, the scope a grant or a
+// refreshed access token gets, holds only values of
+// requestedSpaceDelimited, and at least one when that holds any: an
+// empty granted scope can't be told apart from the whole request at the
+// client (see GrantedAuthorization.Scope).
 func validateGrantedScopeSubset(granted []string, requestedSpaceDelimited string) error {
-	allowed := make(map[string]struct{}, len(granted))
-	for _, s := range strings.Fields(requestedSpaceDelimited) {
+	requested := strings.Fields(requestedSpaceDelimited)
+	if len(granted) == 0 && len(requested) > 0 {
+		return fmt.Errorf("no scope was granted of the requested %q; a token response without scope means the whole request was granted (RFC 6749 §5.1)", requestedSpaceDelimited)
+	}
+	allowed := make(map[string]struct{}, len(requested))
+	for _, s := range requested {
 		allowed[s] = struct{}{}
 	}
 	for _, g := range granted {

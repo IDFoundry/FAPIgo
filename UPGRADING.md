@@ -181,6 +181,39 @@ form := url.Values{
 }
 ```
 
+### An approval granting no scope of a request that asked for one is refused (server)
+
+**Affects:** an application that calls `CompleteAuthorization` with
+`server.Authorize(..., server.GrantedAuthorization{Scope: nil})` (or an
+empty slice) for a request that asked for a scope — to approve only its
+`authorization_details`, say — and a refresh request whose `scope` is
+only spaces.
+
+**Why:** RFC 6749 §5.1 lets a token response omit `scope` only when it
+is "identical to the scope requested", and §3.3's scope has at least one
+value, so a response can't say that no scope was granted. The server
+issued the code anyway, and the token response then left `scope` out,
+which a client reads as the whole requested scope granted (FAPIgo's own
+client does).
+
+**What fails:** `CompleteAuthorization` returns an
+`AuthorizationLocalError` with `invalid_request` and the description
+"granted scope is empty or exceeds requested scope", and no code is
+issued. `CompleteBackchannelAuthentication` already refused such a grant
+(it must keep `openid`). A refresh request with a blank `scope` gets
+`invalid_scope`.
+
+**What to change:** grant at least one requested scope value, or deny
+the request when the user approved none of it:
+
+```go
+if len(approvedScope) == 0 {
+	result = server.Deny("the user approved none of the requested access")
+} else {
+	result = server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: approvedScope})
+}
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

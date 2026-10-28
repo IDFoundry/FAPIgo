@@ -138,6 +138,14 @@ func (a AuthenticationContext) authTimeProblem(now time.Time, skew time.Duration
 // CompleteAuthorization rejects a scope not present in the original
 // request; it does not otherwise second-guess this decision.
 type GrantedAuthorization struct {
+	// Scope is the granted scope, a subset of the request's. A request
+	// that asked for a scope must be granted at least one of its values:
+	// CompleteAuthorization and CompleteBackchannelAuthentication refuse
+	// an empty Scope then, as an error to the caller. A token response
+	// can't say that nothing was granted — RFC 6749 §3.3's scope has at
+	// least one value, and §5.1 reads an absent scope as "identical to
+	// the scope requested" — so the client would take the whole request
+	// as granted. To approve none of it, Deny the request instead.
 	Scope []string
 
 	// ApprovedIdentityClaims names the identity claims, from the

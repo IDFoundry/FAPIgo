@@ -166,7 +166,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 
 	requestedScope, _ := jsonString(request.Parameters, "scope")
 	if scopeErr := validateGrantedScopeSubset(result.grant.Scope, requestedScope); scopeErr != nil {
-		wrapped := newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", scopeErr)
+		wrapped := newError(ErrorInvalidRequest, 400, "granted scope is empty or exceeds requested scope", scopeErr)
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
 		return wrapped
 	}

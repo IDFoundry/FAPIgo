@@ -161,7 +161,7 @@ func (s *Server) checkUserInfoSubject(ctx context.Context, client storage.Regist
 	// in the UserInfo Response", for every subject type.
 	var anySub string
 	if err := json.Unmarshal(raw, &anySub); err != nil || anySub == "" {
-		return newError(ErrorServerError, 500, `userinfo claims must carry the user's "sub", a non-empty string (OIDC Core §5.3.2)`, err)
+		return newError(ErrorServerError, 500, "userinfo claims must carry the user's sub, a non-empty string (OIDC Core section 5.3.2)", err)
 	}
 	subjectType, typeErr := s.subjectTypeFor(client)
 	if typeErr != nil {

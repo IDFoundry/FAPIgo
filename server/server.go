@@ -9,6 +9,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/federation"
+	"github.com/idfoundry/fapigo/internal/depcheck"
 )
 
 // Server is a FAPI 2.0 authorization-server engine. It is entirely
@@ -390,6 +391,22 @@ const (
 	// FAPI-CIBA §5.2.2: a signed authentication request's nbf and exp
 	// "limit the lifetime of the request to no more than 60 minutes".
 	fapiMaxBackchannelAuthenticationRequestLifetime = 60 * time.Minute
+	// RFC 9449 §11.1: a DPoP proof is accepted "only for a limited time
+	// after [its] creation (preferably only for a relatively brief
+	// period on the order of seconds or minutes)". Five minutes is the
+	// top of that range; RecommendedLimits uses 60 seconds.
+	fapiMaxDPoPProofAge = 5 * time.Minute
+	// RFC 9449 §8 and §11.1 give a nonce no number: it limits how long
+	// a proof made for it stays usable, so it's held to a few multiples
+	// of the proof age.
+	fapiMaxDPoPNonceLifetime = 15 * time.Minute
+	// JARM §2.1: "a maximum JWT lifetime of 10 minutes is RECOMMENDED".
+	fapiMaxJARMResponseLifetime = 10 * time.Minute
+	// No spec numbers it: InteractionLifetime is how long a user has to
+	// sign in and consent, which takes minutes. An hour leaves room for
+	// a slow sign-in (a second factor, a password reset) while keeping a
+	// pushed request's interaction from staying completable for days.
+	fapiMaxInteractionLifetime = time.Hour
 )
 
 // validateFAPILimits refuses Limits outside the FAPI 2.0 Security
@@ -398,6 +415,12 @@ const (
 // deployment can't drift out of the profile by configuration.
 // RecommendedLimits is within all of them.
 func validateFAPILimits(l Limits, cibaEnabled bool) error {
+	return errors.Join(fapiLimitErrors(l, cibaEnabled)...)
+}
+
+// fapiLimitErrors is validateFAPILimits' list of every limit out of
+// bounds.
+func fapiLimitErrors(l Limits, cibaEnabled bool) []error {
 	var errs []error
 	if l.AuthorizationCodeLifetime > fapiMaxAuthorizationCodeLifetime {
 		errs = append(errs, fmt.Errorf("server: config: limits.authorization_code_lifetime must be at most %v under AssuranceProduction (FAPI 2.0 §5.3.2.1)", fapiMaxAuthorizationCodeLifetime))
@@ -414,7 +437,28 @@ func validateFAPILimits(l Limits, cibaEnabled bool) error {
 	if cibaEnabled && l.MaxBackchannelAuthenticationRequestLifetime > fapiMaxBackchannelAuthenticationRequestLifetime {
 		errs = append(errs, fmt.Errorf("server: config: limits.max_backchannel_authentication_request_lifetime must be at most %v under AssuranceProduction (FAPI-CIBA §5.2.2)", fapiMaxBackchannelAuthenticationRequestLifetime))
 	}
-	return errors.Join(errs...)
+	return append(errs, validateProductionLifetimes(l)...)
+}
+
+// validateProductionLifetimes is validateFAPILimits' half for the
+// limits no FAPI 2.0 number fixes, held under AssuranceProduction to
+// the bounds RFC 9449, JARM and this module set (see the constants
+// above).
+func validateProductionLifetimes(l Limits) []error {
+	var errs []error
+	if l.MaxDPoPProofAge > fapiMaxDPoPProofAge {
+		errs = append(errs, fmt.Errorf("server: config: limits.max_dpop_proof_age must be at most %v under AssuranceProduction (RFC 9449 §11.1)", fapiMaxDPoPProofAge))
+	}
+	if l.DPoPNonceLifetime > fapiMaxDPoPNonceLifetime {
+		errs = append(errs, fmt.Errorf("server: config: limits.dpop_nonce_lifetime must be at most %v under AssuranceProduction", fapiMaxDPoPNonceLifetime))
+	}
+	if l.JARMResponseLifetime > fapiMaxJARMResponseLifetime {
+		errs = append(errs, fmt.Errorf("server: config: limits.jarm_response_lifetime must be at most %v under AssuranceProduction (JARM §2.1)", fapiMaxJARMResponseLifetime))
+	}
+	if l.InteractionLifetime > fapiMaxInteractionLifetime {
+		errs = append(errs, fmt.Errorf("server: config: limits.interaction_lifetime must be at most %v under AssuranceProduction", fapiMaxInteractionLifetime))
+	}
+	return errs
 }
 
 func validateAssurance(cfg Config, cibaEnabled bool) error {
@@ -545,6 +589,9 @@ func rejectLoopbackURL(name string, u fapi.URL) error {
 // groups for the same reason validateConfig is — the checks, their
 // order and their error messages are unchanged.
 func validateDependencies(cfg Config, deps Dependencies) error {
+	if err := rejectTypedNilDependencies(deps); err != nil {
+		return err
+	}
 	if err := validateRequiredDependencies(deps); err != nil {
 		return err
 	}
@@ -556,6 +603,17 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 		return nil
 	}
 	return validateProductionAssurance(cfg, deps, cibaEnabled)
+}
+
+// rejectTypedNilDependencies refuses an interface-typed Dependencies
+// field holding a typed nil (a nil *memstore.GrantStore, say): it isn't
+// == nil, so it would pass every check below and fail only on the first
+// request, or panic inside New.
+func rejectTypedNilDependencies(deps Dependencies) error {
+	if found, ok := depcheck.FindTypedNil(deps, map[string]string{"CIBARARPolicy": "ciba_rar_policy"}); ok {
+		return fmt.Errorf("server: dependencies: %s is a nil %s", found.Name, found.Type)
+	}
+	return nil
 }
 
 func validateRequiredDependencies(deps Dependencies) error {
@@ -680,7 +738,7 @@ func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool
 	if deps.Audit == nil {
 		errs = append(errs, fmt.Errorf("server: dependencies: audit is required under AssuranceProduction"))
 	}
-	errs = append(errs, checkRandom(deps.Random))
+	errs = append(errs, checkRandom(deps.Random), checkClock(deps.Clock, cfg.Limits.MaxClockSkew))
 	scaled := cfg.Deployment == DeploymentHorizontallyScaled
 	issuer, err := productionAccessTokenAssurance(deps.AccessTokens)
 	errs = append(errs, err)

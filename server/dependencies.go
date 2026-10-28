@@ -13,7 +13,9 @@ import (
 // nil value for any field except Audit, whose requirement depends on
 // Config.Assurance — there is no implicit fallback for any of them (no
 // silently-installed in-memory store, no default clock, no default
-// randomness source).
+// randomness source). It also rejects, in every field, a typed nil: an
+// interface holding a nil pointer (or nil map, slice or func), which
+// isn't == nil but would fail on the first call.
 type Dependencies struct {
 	// Clients resolves a registered client by ID.
 	Clients storage.ClientRepository
@@ -71,7 +73,8 @@ type Dependencies struct {
 	// comment for why; RevokeGrant then fails).
 	Revocation RevocationSink
 
-	// Clock supplies the current time.
+	// Clock supplies the current time. Under AssuranceProduction it
+	// must declare ClockAssurance, as SystemClock does.
 	Clock Clock
 
 	// Random is the source of randomness for request_uri, interaction

@@ -90,18 +90,13 @@ func snakeCase(name string) string {
 	return b.String()
 }
 
-// SystemTimeClock is the declaration a Clock makes that its Now reads
-// the system's current time. server.ClockAssurance, client.ClockAssurance
-// and resource.ClockAssurance are each this same method set, so one
-// clock type declaring it satisfies all three.
-type SystemTimeClock interface {
-	ReadsSystemTime() bool
-}
-
-// ReadsSystemTime reports whether clock declares, through
-// SystemTimeClock, that it reads the system's current time.
+// ReadsSystemTime reports whether clock declares, through a
+// ReadsSystemTime method returning true, that it reads the system's
+// current time. server.ClockAssurance, client.ClockAssurance and
+// resource.ClockAssurance are each that one method, so one clock type
+// declaring it satisfies all three.
 func ReadsSystemTime(clock any) bool {
-	declared, ok := clock.(SystemTimeClock)
+	declared, ok := clock.(interface{ ReadsSystemTime() bool })
 	return ok && declared.ReadsSystemTime()
 }
 

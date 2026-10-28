@@ -447,9 +447,12 @@ type RegisteredClientConfig struct {
 	// UserInfo endpoint, which accepts only those, must list the issuer
 	// identifier here too (and the server must accept it as a resource,
 	// in server.Config.Resources, say), and then, having more than one
-	// entry, name a resource in every request. The list has no effect while the
-	// server accepts no resource indicators (neither
-	// server.Config.Resources nor a ResourcePolicy).
+	// entry, name a resource in every request. While the server accepts
+	// no resource indicators (neither server.Config.Resources nor a
+	// ResourcePolicy), every token would be addressed to the issuer, so
+	// the server refuses each request from a client with this list set
+	// with server_error rather than lift its confinement;
+	// server.Server.CheckClientRegistration reports it beforehand.
 	AllowedResources []string
 
 	// AllowsClientCredentialsGrant permits this client to use the RFC

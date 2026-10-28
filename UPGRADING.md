@@ -48,6 +48,45 @@ If you raise it past 6144, set `MaxTokenBytes` on each standalone
 resource server's `resource.JWTAccessTokens` to the server's
 `cfg.Limits.MaxAccessTokenBytes()`.
 
+### `AllowedResources` needs resource indicators enabled (server)
+
+**Affects:** a server with neither `Config.Resources` nor
+`Dependencies.ResourcePolicy` set, that has a client registered with
+`storage.RegisteredClientConfig.AllowedResources`, or sets
+`Config.AutomaticRegistration.AllowedResources`.
+
+**Why:** with resource indicators disabled, the `resource` parameter is
+ignored and every access token is addressed to the issuer, which every
+resource server accepting the issuer as an audience takes, whatever the
+client's `AllowedResources` says. The list was documented as having no
+effect then, so removing `Config.Resources` silently turned every
+confined client into one getting issuer-audience tokens. A client listing
+`AllowedResources` is now refused instead of having its confinement
+lifted.
+
+**What fails:** `server.New` returns an error naming
+`automatic_registration` when `Config.AutomaticRegistration.AllowedResources`
+is set without resource indicators. A statically registered client can't
+be seen at `New`: `Server.CheckClientRegistration` now reports it, and
+each request from it that would be given a token (PAR, CIBA,
+client_credentials, the code exchange of a grant made without resources,
+and the embedder's `IssueAccessToken` and `IssueRefreshToken`) is refused
+with `server_error` (500).
+
+**What to change:** enable resource indicators for the resources the
+client is confined to, or drop its `AllowedResources`. Call
+`CheckClientRegistration` over every client at startup to find them:
+
+```go
+cfg.Resources = []string{"https://rs.example.com"}
+
+for _, c := range registeredClients {
+	if err := srv.CheckClientRegistration(c); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

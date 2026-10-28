@@ -1297,6 +1297,12 @@ and `IssueRefreshTokenRequest.Resources`, and check the resources your
 grant may be used for against `Resources()` too: `Parameters()` leaves
 `resource` out, since the client may have sent several.
 
+With resource indicators disabled, every token would be addressed to the
+issuer, so a client listing `AllowedResources` is refused with
+`server_error` rather than given one; `server.New` refuses
+`AutomaticRegistration.AllowedResources` then, and
+`Server.CheckClientRegistration` reports such a registered client.
+
 A grant's resources are checked again at every access token it issues
 — the code exchange, the CIBA poll, each refresh — as its scopes are:
 once a resource is removed from the client's `AllowedResources` or from

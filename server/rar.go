@@ -288,15 +288,23 @@ func unknownRARTypes(registry *extension.RARRegistry, types []string) []string {
 }
 
 // CheckClientRegistration reports what in client's registration this
-// server can't honour: today, Rich Authorization Request types
+// server can't honour: Rich Authorization Request types
 // (storage.RegisteredClientConfig.AuthorizationDetailsTypes) Config.RAR
-// doesn't register — usually a typo. Nothing else reports it before a
-// request for that type is refused, since clients live in the
-// ClientRepository, out of New's sight. Call it when registering a
-// client, or over every client at startup; nil means nothing found.
+// doesn't register — usually a typo — and AllowedResources
+// (storage.RegisteredClientConfig.AllowedResources) while this server
+// accepts no resource indicators (neither Config.Resources nor a
+// ResourcePolicy), whose every request is then refused with
+// server_error rather than given tokens addressed to the issuer.
+// Nothing else reports either before a request is refused, since
+// clients live in the ClientRepository, out of New's sight. Call it
+// when registering a client, or over every client at startup; nil
+// means nothing found.
 func (s *Server) CheckClientRegistration(client storage.RegisteredClient) error {
 	if unknown := unknownRARTypes(s.cfg.RAR, client.AuthorizationDetailsTypes()); len(unknown) > 0 {
 		return fmt.Errorf("server: client %q: authorization_details_types %q aren't registered in Config.RAR", client.ID(), unknown)
+	}
+	if len(client.AllowedResources()) > 0 && !s.resourceIndicatorsEnabled() {
+		return fmt.Errorf("server: client %q: %w", client.ID(), errConfinedWithoutResourceIndicators)
 	}
 	return nil
 }

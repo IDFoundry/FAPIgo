@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,17 +92,43 @@ func TestResourceIndicatorsAllowedResourcesDefaultIsChecked(t *testing.T) {
 	wantErrorCode(t, err, server.ErrorInvalidTarget)
 }
 
-// With resource indicators disabled AllowedResources has no effect: the
-// "resource" parameter is ignored, and every token is addressed to the
-// issuer.
-func TestResourceIndicatorsAllowedResourcesIgnoredWhenDisabled(t *testing.T) {
-	h := newHarness(t, server.ProfileFAPISecurity, true)
-	restrictClientResources(t, h, resourceA, resourceB)
-	result, err := exchangeWithResources(t, h, grantForResources(t, h))
+// With resource indicators disabled every token would be addressed to
+// the issuer, so a client confined by AllowedResources is refused with
+// server_error, at every request, rather than given one: its
+// confinement isn't silently lifted. CheckClientRegistration reports it.
+func TestResourceIndicatorsAllowedResourcesRefusedWhenDisabled(t *testing.T) {
+	h := withResources(t, newHarness(t, server.ProfileFAPISecurity, true), []string{resourceA, resourceB}, nil)
+	issued, err := exchangeWithResources(t, h, grantForResources(t, h, resourceA))
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
 	}
-	wantAudience(t, result, testIssuer)
+	pending := grantForResources(t, h)
+
+	h = withResources(t, h, nil, nil)
+	restrictClientResources(t, h, resourceA, resourceB)
+	wantConfinedWithoutResourceIndicators(t, h)
+	_, err = pushWithResources(t, h)
+	wantErrorCode(t, err, server.ErrorServerError)
+	_, err = exchangeWithResources(t, h, pending)
+	wantErrorCode(t, err, server.ErrorServerError)
+	_, err = refreshWithResources(t, h, issued.RefreshToken.Reveal())
+	wantErrorCode(t, err, server.ErrorInvalidTarget)
+
+	restrictClientResources(t, h)
+	if err := h.server.CheckClientRegistration(h.clients.clients[testClientID]); err != nil {
+		t.Fatalf("CheckClientRegistration for an unconfined client: %v", err)
+	}
+}
+
+// wantConfinedWithoutResourceIndicators checks CheckClientRegistration
+// reports testClientID's AllowedResources on h, whose resource
+// indicators are disabled.
+func wantConfinedWithoutResourceIndicators(t *testing.T, h harness) {
+	t.Helper()
+	err := h.server.CheckClientRegistration(h.clients.clients[testClientID])
+	if err == nil || !strings.Contains(err.Error(), "resource indicators are disabled") {
+		t.Fatalf("CheckClientRegistration = %v, want it to report AllowedResources without resource indicators", err)
+	}
 }
 
 // A grant made without resources before its client was confined gets

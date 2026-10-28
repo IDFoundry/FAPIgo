@@ -511,7 +511,11 @@ type Config struct {
 	// doesn't list. A resource neither admits is invalid_target. With
 	// neither set, the "resource" parameter is ignored, as any
 	// unregistered parameter is, and every access token's audience is
-	// Issuer. A request naming no resource also gets Issuer as its
+	// Issuer — so a request from a client confined by AllowedResources
+	// is then refused with server_error (New refuses
+	// AutomaticRegistration.AllowedResources, and
+	// Server.CheckClientRegistration reports a registered client's).
+	// A request naming no resource also gets Issuer as its
 	// audience — unless its client is confined by AllowedResources,
 	// whose single entry it is then for, or which, listing several,
 	// make naming one required (invalid_target otherwise).
@@ -639,7 +643,9 @@ type AutomaticRegistrationConfig struct {
 	// this never comes from an RP's own metadata. Each an absolute URI
 	// without a fragment, none repeated. Empty (the default) leaves them
 	// unconfined: any resource Config.Resources or the ResourcePolicy
-	// accepts, and the issuer as audience when they name none.
+	// accepts, and the issuer as audience when they name none. Set, it
+	// needs resource indicators enabled (Config.Resources or a
+	// ResourcePolicy): New refuses it otherwise.
 	AllowedResources []string
 
 	// MaxPathLength/MaxAuthorityHints/MaxStatementLifetime/MaxClockSkew

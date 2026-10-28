@@ -36,6 +36,12 @@ are things no constructor can check.
   share, or `server.NoRevocation{}` with short access token lifetimes,
   knowing that code reuse and `RevokeGrant` then revoke nothing.
   [Step 2](../GETTING_STARTED.md#2-build-a-config)
+- [ ] **A DPoP nonce choice:** a nonce store every instance shares
+  (`Dependencies.Nonces`, with `Limits.DPoPNonceLifetime` of at most 15
+  minutes), so a DPoP proof generated ahead of time or captured is
+  refused, at the cost of one extra round trip per client on first use;
+  or `server.NoDPoPNonces{}` to decline, as an mTLS-only deployment can.
+  [Step 4](../GETTING_STARTED.md#4-wire-dependencies-and-construct-the-server)
 - [ ] **A client certificate trust choice:** `NoPKIClientAuthentication{}`
   unless a client uses `tls_client_auth`; otherwise `TrustedClientCAs`
   with revocation checking, or `ClientCertificateChainVerifiedUpstream{}`
@@ -92,6 +98,11 @@ are things no constructor can check.
 - [ ] **The same revocation store as the authorization server**, or
   `resource.NoRevocationUntilExpiry{MaxTokenLifetime: ...}` (at most 15
   minutes) to decline checking it; production refuses `NoRevocation{}`.
+  [Wire `Dependencies`](../GETTING_STARTED.md#wire-dependencies)
+- [ ] **A DPoP nonce choice:** a nonce store of the resource server's
+  own (never the authorization server's), shared by its instances, with
+  `Random` and `Limits.DPoPNonceLifetime`; or `resource.NoDPoPNonces{}`
+  to decline. `serverresource.NewVerifier` takes it as `Options.Nonces`.
   [Wire `Dependencies`](../GETTING_STARTED.md#wire-dependencies)
 - [ ] *(yours)* **Authorize anything a user owns by
   `AuthorizationContext.EndUser()`**, never by `InternalSubject` alone (a

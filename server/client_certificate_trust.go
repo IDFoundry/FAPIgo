@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -80,8 +81,43 @@ func (t TrustedClientCAs) verifyChain(ctx context.Context, cert *x509.Certificat
 	if err != nil {
 		return newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", err)
 	}
-	check := ClientCertificateRevocationCheck{Chain: chains[0], Now: now}
-	return revocationError(t.Revocation.CheckRevocation(ctx, check), "client certificate")
+	_, revErr := checkChainsRevocation(ctx, t.Revocation, chains, now)
+	return revocationError(revErr, "client certificate")
+}
+
+// checkChainsRevocation asks revocation about each of chains, verified
+// chains for one leaf, in turn, and returns the first that passes: a
+// certificate is accepted when at least one path from it to a trust
+// anchor has nothing revoked (RFC 5280 §6 accepts any valid path). The
+// leaf is on every path, so a revoked leaf fails them all; a revoked
+// intermediate fails only the paths through it, so a cross-certified
+// PKI with a clean alternative path still authenticates. With none
+// passing, the error is the first that couldn't decide, if any, since
+// that path might have passed — so the request fails closed with
+// server_error rather than a revocation the check didn't establish —
+// and otherwise the first chain's revocation.
+func checkChainsRevocation(ctx context.Context, revocation ClientCertificateRevocation, chains [][]*x509.Certificate, now time.Time) ([]*x509.Certificate, error) {
+	var revoked, undecided error
+	for _, chain := range chains {
+		err := revocation.CheckRevocation(ctx, ClientCertificateRevocationCheck{Chain: slices.Clone(chain), Now: now})
+		switch {
+		case err == nil:
+			return chain, nil
+		case errors.Is(err, ErrCertificateRevoked):
+			if revoked == nil {
+				revoked = err
+			}
+		case undecided == nil:
+			undecided = err
+		}
+	}
+	if undecided != nil {
+		return nil, undecided
+	}
+	if revoked == nil {
+		return nil, errors.New("server: no verified certificate chain to check for revocation")
+	}
+	return nil, revoked
 }
 
 // revocationError maps a ClientCertificateRevocation's error for the
@@ -237,14 +273,18 @@ var ErrCertificateRevoked = errors.New("server: the certificate is revoked")
 // ClientCertificateRevocationCheck is what ClientCertificateRevocation
 // checks.
 type ClientCertificateRevocationCheck struct {
-	// Chain is the chain crypto/x509 verified, leaf first, through any
+	// Chain is a chain crypto/x509 verified, leaf first, through any
 	// of TrustedClientCAs.Intermediates, and ending at the trust anchor
-	// from TrustedClientCAs.Roots, so Chain[i+1] issued Chain[i]. When
-	// more than one chain verifies, it is the first one crypto/x509
-	// returns. Under X5CAttesterChain it is the attester's signing
-	// certificate, through the attestation's other "x5c" certificates,
-	// to the trust anchor — under AttesterIssuerBoundToAnchor, the first
-	// chain ending at an anchor bound to the client's attester.
+	// from TrustedClientCAs.Roots, so Chain[i+1] issued Chain[i]. Under
+	// X5CAttesterChain it is the attester's signing certificate, through
+	// the attestation's other "x5c" certificates, to the trust anchor —
+	// under AttesterIssuerBoundToAnchor, a chain ending at an anchor
+	// bound to the client's attester. When more than one chain verifies
+	// (a cross-certified PKI, say), each is checked in turn, in the
+	// order crypto/x509 returns them, until one passes: the certificate
+	// is accepted when any path from it to a trust anchor has nothing
+	// revoked, as RFC 5280 path validation accepts any valid path. Its
+	// own revocation fails every path, so it is always refused.
 	Chain []*x509.Certificate
 	// Now is Dependencies.Clock's current time, the time the chain was
 	// verified at.

@@ -48,6 +48,104 @@ If you raise it past 6144, set `MaxTokenBytes` on each standalone
 resource server's `resource.JWTAccessTokens` to the server's
 `cfg.Limits.MaxAccessTokenBytes()`.
 
+### `AllowedResources` needs resource indicators enabled (server)
+
+**Affects:** a server with neither `Config.Resources` nor
+`Dependencies.ResourcePolicy` set, that has a client registered with
+`storage.RegisteredClientConfig.AllowedResources`, or sets
+`Config.AutomaticRegistration.AllowedResources`.
+
+**Why:** with resource indicators disabled, the `resource` parameter is
+ignored and every access token is addressed to the issuer, which every
+resource server accepting the issuer as an audience takes, whatever the
+client's `AllowedResources` says. The list was documented as having no
+effect then, so removing `Config.Resources` silently turned every
+confined client into one getting issuer-audience tokens. A client listing
+`AllowedResources` is now refused instead of having its confinement
+lifted.
+
+**What fails:** `server.New` returns an error naming
+`automatic_registration` when `Config.AutomaticRegistration.AllowedResources`
+is set without resource indicators. A statically registered client can't
+be seen at `New`: `Server.CheckClientRegistration` now reports it, and
+each request from it that would be given a token (PAR, CIBA,
+client_credentials, the code exchange of a grant made without resources,
+and the embedder's `IssueAccessToken` and `IssueRefreshToken`) is refused
+with `server_error` (500).
+
+**What to change:** enable resource indicators for the resources the
+client is confined to, or drop its `AllowedResources`. Call
+`CheckClientRegistration` over every client at startup to find them:
+
+```go
+cfg.Resources = []string{"https://rs.example.com"}
+
+for _, c := range registeredClients {
+	if err := srv.CheckClientRegistration(c); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+### Pushed requests and interactions are stored under digests (server, storage)
+
+**Affects:** every server, once, at deploy; and a custom
+`storage.TransactionStore` that doesn't refuse an expired pushed
+request at `BeginAuthorization`. `memstore` needs no change.
+
+**Why:** a pushed request's `request_uri` reference and an interaction
+handle were the store's keys as they were, while codes and refresh
+tokens were stored as digests, so a read of the transaction store
+yielded live bearer values. And `BeginAuthorization` minted an
+interaction record before it compared the `client_id` and expiry, so a
+`request_uri` presented with any `client_id`, or after it expired,
+added a record each time. Now:
+
+- `NewPARRecord.Reference` and `BeginAuthorizationTransaction.Reference`
+  are a domain-separated SHA-256 digest of the reference bound to the
+  client that pushed it, base64url-encoded, and
+  `BeginAuthorizationTransaction.Handle` and
+  `CompleteAuthorizationTransaction.Handle` a digest of the interaction
+  handle. Both stay opaque strings, at most 64 bytes. A `request_uri`
+  presented with another `client_id` is unknown to the store, so mints
+  nothing; it's still `invalid_request_uri`, now with the description
+  "request_uri is invalid, expired, or already used".
+- `BeginAuthorizationTransaction.Now` carries the server's `Clock`
+  time, and a store refuses a reference whose `ExpiresAt` isn't after
+  it, without minting the handle.
+
+**What fails:**
+
+- An authorization in progress at deploy can't continue: a
+  `request_uri` pushed before it (live for `Limits.PushedRequestLifetime`,
+  under 600 seconds at production assurance) is unknown, and so is an
+  interaction handle begun before it (live for
+  `Limits.InteractionLifetime`). The user
+  sees a local error, and the client starts the authorization again.
+- `storage.TestTransactionStoreContract` has a new subtest,
+  `BeginAuthorizationExpiredReferenceMintsNoHandle`, which a store that
+  ignores expiry at `BeginAuthorization` fails.
+- Anything outside the server that looked a pushed request up by its
+  `request_uri`, or an interaction by its handle, no longer finds it.
+
+**What to change:** to avoid failing authorizations in progress, deploy
+when few are, or drain them first. A custom store compares
+`BeginAuthorizationTransaction.Now` with the pushed request's
+`ExpiresAt` before it mints the handle:
+
+```go
+func (s *Store) BeginAuthorization(ctx context.Context, txn storage.BeginAuthorizationTransaction) (storage.PushedAuthorizationRequest, error) {
+	rec, err := s.lookupPAR(ctx, txn.Reference)
+	if err != nil {
+		return storage.PushedAuthorizationRequest{}, err
+	}
+	if !txn.Now.Before(rec.ExpiresAt) {
+		return storage.PushedAuthorizationRequest{}, errors.New("request_uri has expired")
+	}
+	// ... then insert the interaction under txn.Handle.
+}
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

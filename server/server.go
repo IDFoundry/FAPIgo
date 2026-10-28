@@ -56,6 +56,9 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 	if unknown := unknownRARTypes(cfg.RAR, cfg.AutomaticRegistration.AuthorizationDetailsTypes); len(unknown) > 0 {
 		return nil, fmt.Errorf("server: config: automatic_registration: authorization_details_types %q aren't registered in Config.RAR", unknown)
 	}
+	if len(cfg.AutomaticRegistration.AllowedResources) > 0 && len(cfg.Resources) == 0 && deps.ResourcePolicy == nil {
+		return nil, fmt.Errorf("server: config: automatic_registration: %w", errConfinedWithoutResourceIndicators)
+	}
 	if len(cfg.AutomaticRegistration.TrustAnchors) > 0 {
 		// Wraps deps.Clients/ClientKeys transparently — every other
 		// internal (PAR, the token endpoint, CIBA) keeps calling those

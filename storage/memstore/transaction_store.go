@@ -58,6 +58,9 @@ func (s *TransactionStore) BeginAuthorization(_ context.Context, txn storage.Beg
 	if !ok {
 		return storage.PushedAuthorizationRequest{}, fmt.Errorf("memstore: no such request_uri")
 	}
+	if !txn.Now.Before(record.ExpiresAt) {
+		return storage.PushedAuthorizationRequest{}, fmt.Errorf("memstore: request_uri has expired")
+	}
 	s.byHandle[txn.Handle] = pendingInteraction{
 		reference: txn.Reference,
 		interaction: storage.CompletedInteraction{

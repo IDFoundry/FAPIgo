@@ -50,14 +50,17 @@ type AttesterTrust interface {
 
 // attesterSigner is what an AttesterTrust establishes for an
 // attestation: the key to verify its signature with and, under
-// X5CAttesterChain, the verified certificate chain that key comes from
-// — leaf first, ending at the trust anchor, so chain[i+1] issued
-// chain[i] — and the ClientCertificateRevocation to check it with once
-// the attestation's PoP has verified. chain and revocation are nil under
-// RegisteredAttesterKeys.
+// X5CAttesterChain, the verified certificate chains that key comes
+// from — each leaf first, ending at the trust anchor, so chain[i+1]
+// issued chain[i] — and the ClientCertificateRevocation to check them
+// with once the attestation's PoP has verified (checkChainsRevocation:
+// one must pass). chain is the first of chains, or, once revocation has
+// been checked, the one that passed. chain, chains and revocation are
+// nil under RegisteredAttesterKeys.
 type attesterSigner struct {
 	key        crypto.PublicKey
 	chain      []*x509.Certificate
+	chains     [][]*x509.Certificate
 	revocation ClientCertificateRevocation
 }
 
@@ -172,7 +175,9 @@ type X5CAttesterChain struct {
 	// compromised attester key before it expires. It's checked, with the
 	// verified chain (leaf first, ending at the trust anchor) and
 	// Dependencies.Clock's time, on every attestation-authenticated
-	// request once the attestation and its PoP have verified. An error
+	// request once the attestation and its PoP have verified; with more
+	// than one verified chain, each in turn until one passes (see
+	// ClientCertificateRevocationCheck.Chain). An error
 	// wrapping ErrCertificateRevoked rejects the client with
 	// invalid_client; any other error, a check that couldn't decide,
 	// refuses the request with server_error. Tokens already issued to
@@ -302,15 +307,13 @@ func (c X5CAttesterChain) attesterKey(ctx context.Context, s *Server, client sto
 	if c.IssuerBinding != AttesterIssuerByTrustAnchors && !hasURIName(leaf, expected) {
 		return attesterSigner{}, fmt.Errorf("attester certificate does not name the client's attester %q as a URI subject alternative name", expected)
 	}
-	chain := chains[0]
 	if c.IssuerBinding == AttesterIssuerBoundToAnchor {
-		bound, ok := chainEndingAtAnchorFor(chains, anchors, expected)
-		if !ok {
+		chains = chainsEndingAtAnchorFor(chains, anchors, expected)
+		if len(chains) == 0 {
 			return attesterSigner{}, fmt.Errorf("attester certificate chain does not end at a trust anchor bound to the client's attester %q", expected)
 		}
-		chain = bound
 	}
-	return attesterSigner{key: leaf.PublicKey, chain: chain, revocation: c.Revocation}, nil
+	return attesterSigner{key: leaf.PublicKey, chain: chains[0], chains: chains, revocation: c.Revocation}, nil
 }
 
 // resolveAnchors returns the pool a client's attestation chain must
@@ -341,22 +344,23 @@ func (c X5CAttesterChain) resolveAnchors(ctx context.Context, client storage.Reg
 	return roots, nil, nil
 }
 
-// chainEndingAtAnchorFor returns the first of chains — each leaf first,
-// anchor last, as x509.Certificate.Verify returns them — that ends at an
-// anchor bound to issuer, and whether there is one.
-func chainEndingAtAnchorFor(chains [][]*x509.Certificate, anchors []AttesterAnchor, issuer string) ([]*x509.Certificate, bool) {
+// chainsEndingAtAnchorFor returns those of chains — each leaf first,
+// anchor last, as x509.Certificate.Verify returns them — that end at an
+// anchor bound to issuer, in order.
+func chainsEndingAtAnchorFor(chains [][]*x509.Certificate, anchors []AttesterAnchor, issuer string) [][]*x509.Certificate {
+	var bound [][]*x509.Certificate
 	for _, chain := range chains {
 		if len(chain) == 0 {
 			continue
 		}
 		root := chain[len(chain)-1]
-		for _, a := range anchors {
-			if a.Certificate.Equal(root) && slices.Contains(a.Issuers, issuer) {
-				return chain, true
-			}
+		if slices.ContainsFunc(anchors, func(a AttesterAnchor) bool {
+			return a.Certificate.Equal(root) && slices.Contains(a.Issuers, issuer)
+		}) {
+			bound = append(bound, chain)
 		}
 	}
-	return nil, false
+	return bound
 }
 
 // hasURIName reports whether cert carries uri, exactly, as a URI
@@ -499,6 +503,12 @@ func verifyAttesterChain(ders [][]byte, roots *x509.CertPool, now time.Time) (*x
 	leaf := certs[0]
 	if isSelfSigned(leaf) {
 		return nil, nil, errors.New("attester certificate must not be self-signed")
+	}
+	// An attester signs attestations, not certificates: a CA
+	// certificate as the signing certificate would let a CA key, or
+	// whoever holds an intermediate, attest directly.
+	if leaf.IsCA {
+		return nil, nil, errors.New("attester certificate must not be a CA certificate")
 	}
 	if leaf.KeyUsage != 0 && leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
 		return nil, nil, errors.New("attester certificate key usage does not permit digital signatures")

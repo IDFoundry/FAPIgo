@@ -210,6 +210,11 @@ func TestNewRejectsInvalidAutomaticRegistrationConfig(t *testing.T) {
 		"zero max path length":     func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.MaxPathLength = 0 },
 		"zero max authority hints": func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.MaxAuthorityHints = 0 },
 		"nil federation http":      func(c *server.Config, d *server.Dependencies) { d.FederationHTTP = nil },
+		// Confinement without resource indicators would be silently
+		// lifted: every token addressed to the issuer.
+		"allowed resources without resource indicators": func(c *server.Config, d *server.Dependencies) {
+			c.AutomaticRegistration.AllowedResources = []string{resourceA}
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

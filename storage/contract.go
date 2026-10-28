@@ -374,6 +374,9 @@ func TestTransactionStoreContract(t *testing.T, factory func() TransactionStore)
 	t.Run("BeginAuthorizationRepeatsUntilCompleted", func(t *testing.T) { testTransactionStoreBeginAuthorizationRepeatsUntilCompleted(t, factory) })
 	t.Run("BeginAuthorizationFailsAfterCompletion", func(t *testing.T) { testTransactionStoreBeginAuthorizationFailsAfterCompletion(t, factory) })
 	t.Run("BeginAuthorizationUnknownReferenceFails", func(t *testing.T) { testTransactionStoreBeginAuthorizationUnknownReferenceFails(t, factory) })
+	t.Run("BeginAuthorizationExpiredReferenceMintsNoHandle", func(t *testing.T) {
+		testTransactionStoreBeginAuthorizationExpiredReferenceMintsNoHandle(t, factory)
+	})
 	t.Run("ConcurrentBeginAuthorizationAllSucceedBeforeCompletion", func(t *testing.T) {
 		testTransactionStoreConcurrentBeginAuthorizationAllSucceedBeforeCompletion(t, factory)
 	})
@@ -397,7 +400,7 @@ func testTransactionStoreCreatePARAndBeginAuthorization(t *testing.T, factory fu
 		t.Fatalf("CreatePAR: %v", err)
 	}
 	got, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
-		Reference: "ref-1", Handle: "handle-1", HandleExpiresAt: time.Now().Add(time.Minute),
+		Reference: "ref-1", Handle: "handle-1", HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
 	})
 	if err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
@@ -426,12 +429,12 @@ func testTransactionStoreBeginAuthorizationRepeatsUntilCompleted(t *testing.T, f
 		t.Fatalf("CreatePAR: %v", err)
 	}
 	if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
-		Reference: "ref-2", Handle: "handle-2a", HandleExpiresAt: time.Now().Add(time.Minute),
+		Reference: "ref-2", Handle: "handle-2a", HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
 	}); err != nil {
 		t.Fatalf("first BeginAuthorization: %v", err)
 	}
 	if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
-		Reference: "ref-2", Handle: "handle-2b", HandleExpiresAt: time.Now().Add(time.Minute),
+		Reference: "ref-2", Handle: "handle-2b", HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
 	}); err != nil {
 		t.Fatalf("second BeginAuthorization (before completion) = %v, want success", err)
 	}
@@ -446,7 +449,7 @@ func testTransactionStoreBeginAuthorizationFailsAfterCompletion(t *testing.T, fa
 		t.Fatalf("CreatePAR: %v", err)
 	}
 	if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
-		Reference: "ref-2c", Handle: "handle-2c", HandleExpiresAt: time.Now().Add(time.Minute),
+		Reference: "ref-2c", Handle: "handle-2c", HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
 	}); err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
@@ -454,7 +457,7 @@ func testTransactionStoreBeginAuthorizationFailsAfterCompletion(t *testing.T, fa
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
 	if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
-		Reference: "ref-2c", Handle: "handle-2d", HandleExpiresAt: time.Now().Add(time.Minute),
+		Reference: "ref-2c", Handle: "handle-2d", HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
 	}); err == nil {
 		t.Fatalf("BeginAuthorization after completion = nil error, want error")
 	}
@@ -463,9 +466,33 @@ func testTransactionStoreBeginAuthorizationFailsAfterCompletion(t *testing.T, fa
 func testTransactionStoreBeginAuthorizationUnknownReferenceFails(t *testing.T, factory func() TransactionStore) {
 	store := factory()
 	if _, err := store.BeginAuthorization(context.Background(), BeginAuthorizationTransaction{
-		Reference: "never-created", Handle: "handle-x", HandleExpiresAt: time.Now().Add(time.Minute),
+		Reference: "never-created", Handle: "handle-x", HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
 	}); err == nil {
 		t.Fatalf("BeginAuthorization(unknown reference) = nil error, want error")
+	}
+}
+
+// testTransactionStoreBeginAuthorizationExpiredReferenceMintsNoHandle:
+// a Reference whose ExpiresAt isn't after txn.Now fails, and the Handle
+// it named isn't minted, so CompleteAuthorization doesn't know it.
+func testTransactionStoreBeginAuthorizationExpiredReferenceMintsNoHandle(t *testing.T, factory func() TransactionStore) {
+	store := factory()
+	ctx := context.Background()
+	expiresAt := time.Now().Add(time.Minute)
+	if err := store.CreatePAR(ctx, NewPARRecord{
+		Reference: "ref-expired", ClientID: "client-1", ExpiresAt: expiresAt,
+	}); err != nil {
+		t.Fatalf("CreatePAR: %v", err)
+	}
+	for _, now := range []time.Time{expiresAt, expiresAt.Add(time.Second)} {
+		if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
+			Reference: "ref-expired", Handle: "handle-expired", HandleExpiresAt: now.Add(time.Minute), Now: now,
+		}); err == nil {
+			t.Fatalf("BeginAuthorization at %v, the reference expiring at %v = nil error, want error", now, expiresAt)
+		}
+	}
+	if _, err := store.CompleteAuthorization(ctx, CompleteAuthorizationTransaction{Handle: "handle-expired"}); err == nil {
+		t.Fatalf("CompleteAuthorization of a handle an expired reference's BeginAuthorization named = nil error, want error")
 	}
 }
 
@@ -489,7 +516,7 @@ func testTransactionStoreConcurrentBeginAuthorizationAllSucceedBeforeCompletion(
 		handle := fmt.Sprintf("handle-3-%d", counter)
 		counterMu.Unlock()
 		_, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
-			Reference: "ref-3", Handle: handle, HandleExpiresAt: time.Now().Add(time.Minute),
+			Reference: "ref-3", Handle: handle, HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
 		})
 		return err == nil
 	})
@@ -507,7 +534,7 @@ func testTransactionStoreCompleteAuthorizationAndIsSingleUse(t *testing.T, facto
 		t.Fatalf("CreatePAR: %v", err)
 	}
 	if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
-		Reference: "ref-4", Handle: "handle-4", HandleExpiresAt: time.Now().Add(time.Minute),
+		Reference: "ref-4", Handle: "handle-4", HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
 	}); err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
@@ -539,7 +566,7 @@ func testTransactionStoreConcurrentCompleteAuthorizationHasExactlyOneWinner(t *t
 		t.Fatalf("CreatePAR: %v", err)
 	}
 	if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
-		Reference: "ref-5", Handle: "handle-5", HandleExpiresAt: time.Now().Add(time.Minute),
+		Reference: "ref-5", Handle: "handle-5", HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
 	}); err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
@@ -569,7 +596,7 @@ func testTransactionStoreConcurrentCompleteAuthorizationAcrossHandlesForSameRefe
 	for i := range handles {
 		handles[i] = fmt.Sprintf("handle-6-%d", i)
 		if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
-			Reference: "ref-6", Handle: handles[i], HandleExpiresAt: time.Now().Add(time.Minute),
+			Reference: "ref-6", Handle: handles[i], HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
 		}); err != nil {
 			t.Fatalf("BeginAuthorization(%s): %v", handles[i], err)
 		}

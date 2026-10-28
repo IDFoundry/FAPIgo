@@ -159,6 +159,9 @@ func (s *refTransactionStore) BeginAuthorization(_ context.Context, txn storage.
 	if !ok {
 		return storage.PushedAuthorizationRequest{}, fmt.Errorf("unknown reference")
 	}
+	if !txn.Now.Before(record.ExpiresAt) {
+		return storage.PushedAuthorizationRequest{}, fmt.Errorf("expired reference")
+	}
 	s.byHandle[txn.Handle] = refPendingInteraction{
 		reference: txn.Reference,
 		interaction: storage.CompletedInteraction{

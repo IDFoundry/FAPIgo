@@ -195,6 +195,7 @@ func TestX5CAttesterChainRejectsUntrustedAttestation(t *testing.T) {
 	selfSigned := newTestCert(t, "self-signed attester", certOptions{})
 	fromOtherRoot := newTestCert(t, "attester", certOptions{parent: &otherRoot})
 	notSigning := newTestCert(t, "attester", certOptions{parent: &root, keyUsage: x509.KeyUsageKeyEncipherment})
+	caLeaf := newTestCert(t, "attester CA", certOptions{parent: &root, isCA: true})
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("rsa.GenerateKey: %v", err)
@@ -211,6 +212,7 @@ func TestX5CAttesterChainRejectsUntrustedAttestation(t *testing.T) {
 		"chain to an untrusted anchor":     {fromOtherRoot.key, x5cOf(fromOtherRoot), poolOf(root)},
 		"self-signed leaf that is anchor":  {selfSigned.key, x5cOf(selfSigned), poolOf(root, selfSigned)},
 		"leaf without digitalSignature":    {notSigning.key, x5cOf(notSigning), poolOf(root)},
+		"CA certificate as the leaf":       {caLeaf.key, x5cOf(caLeaf), poolOf(root)},
 		"RSA leaf for an ES256 client":     {otherSigner, x5cOf(rsaLeaf), poolOf(root)},
 		"signed by a key other than leaf":  {otherSigner, x5cOf(leaf), poolOf(root)},
 		"x5c not an array":                 {leaf.key, json.RawMessage(`"MIIB"`), poolOf(root)},

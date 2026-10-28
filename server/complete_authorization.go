@@ -87,7 +87,7 @@ type CompleteAuthorizationRequest struct {
 // AuthorizationRedirect.Destination).
 func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthorizationRequest) (AuthorizationResult, error) {
 	completed, err := s.deps.Transactions.CompleteAuthorization(ctx, storage.CompleteAuthorizationTransaction{
-		Handle: req.Handle.String(),
+		Handle: interactionHandleKey(req.Handle.String()),
 	})
 	if err != nil {
 		return s.completeLocalFail(ctx, "", newError(ErrorInvalidRequest, 400, "interaction handle is invalid, expired, or already used", err)), nil

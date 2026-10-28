@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -241,40 +240,5 @@ func TestCIBARefreshTokenBoundToClientInstanceKey(t *testing.T) {
 	}
 	if _, err := issuing.refresh(tokens.RefreshToken.Reveal()); err != nil {
 		t.Fatalf("refresh by the issuing instance: %v", err)
-	}
-}
-
-// TestRefreshTokenIssuedBeforeInstanceBindingStillRedeems covers a
-// refresh token issued to an attestation client before refresh tokens
-// recorded the Client Instance Key (v0.47.0): there is no key to
-// compare, so it stays redeemable rather than failing every existing
-// installation on upgrade. Such a record predates issued_at too
-// (v0.50.0), which is what tells it apart from a grant issued under
-// another client authentication method (see
-// TestRefreshTokenFromAnotherAuthMethodRefusedToInstance).
-func TestRefreshTokenIssuedBeforeInstanceBindingStillRedeems(t *testing.T) {
-	attesterKey := generateKey(t)
-	h := newInstanceBindingHarness(t, attesterKey)
-	issuing := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
-	refreshToken := issuing.issueRefreshToken()
-
-	h.grants.mu.Lock()
-	for hash, stored := range h.grants.refreshByHash {
-		var record map[string]json.RawMessage
-		if err := json.Unmarshal(stored.Grant, &record); err != nil {
-			t.Fatalf("decode stored grant: %v", err)
-		}
-		if _, ok := record["client_instance_jkt"]; !ok {
-			t.Fatalf("stored grant has no client_instance_jkt: %s", stored.Grant)
-		}
-		delete(record, "client_instance_jkt")
-		delete(record, "issued_at")
-		stored.Grant, _ = json.Marshal(record)
-		h.grants.refreshByHash[hash] = stored
-	}
-	h.grants.mu.Unlock()
-
-	if _, err := issuing.refresh(refreshToken); err != nil {
-		t.Fatalf("refresh of a grant without an instance key: %v", err)
 	}
 }

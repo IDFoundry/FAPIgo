@@ -97,7 +97,8 @@ type VerifiedClientAttestation struct {
 	SignerKey crypto.PublicKey
 
 	// SignerCertificates is, under X5CAttesterChain, the certificate
-	// chain that verified: leaf first, ending at the trust anchor, so
+	// chain that verified — with more than one, the first that passed
+	// X5CAttesterChain.Revocation: leaf first, ending at the trust anchor, so
 	// SignerCertificates[i+1] issued SignerCertificates[i] — the
 	// convention of ClientCertificateRevocationCheck.Chain. Nil under
 	// RegisteredAttesterKeys.
@@ -151,10 +152,11 @@ func checkProductionClientAttestationStatus(checker ClientAttestationStatusCheck
 // X5CAttesterChain, then Dependencies.ClientAttestationStatus, if set.
 func (s *Server) checkAttestationStillValid(ctx context.Context, client storage.RegisteredClient, verified clientattestation.VerifiedAttestation, signer attesterSigner, instanceKey string) *Error {
 	if signer.revocation != nil {
-		check := ClientCertificateRevocationCheck{Chain: slices.Clone(signer.chain), Now: s.deps.Clock.Now()}
-		if err := revocationError(signer.revocation.CheckRevocation(ctx, check), "attester certificate"); err != nil {
+		passed, revErr := checkChainsRevocation(ctx, signer.revocation, signer.chains, s.deps.Clock.Now())
+		if err := revocationError(revErr, "attester certificate"); err != nil {
 			return err
 		}
+		signer.chain = passed
 	}
 	if s.deps.ClientAttestationStatus == nil {
 		return nil

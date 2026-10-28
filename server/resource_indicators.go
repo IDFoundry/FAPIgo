@@ -54,6 +54,17 @@ type ResourcePolicy interface {
 // a resource: invalid_target.
 var ErrResourceNotAllowed = errors.New("server: resource not allowed")
 
+// errConfinedWithoutResourceIndicators is a deployment error: a client
+// (or Config.AutomaticRegistration) lists AllowedResources while this
+// server accepts no resource indicators, neither Config.Resources nor a
+// ResourcePolicy. Every access token would then be addressed to the
+// issuer, which every resource server accepting the issuer as an
+// audience takes, whatever AllowedResources says — so the confinement
+// would be silently lifted. New refuses it for automatically-registered
+// clients, CheckClientRegistration reports it for a registered one, and
+// each request from such a client is refused with server_error.
+var errConfinedWithoutResourceIndicators = errors.New("server: AllowedResources is set, but resource indicators are disabled (neither Config.Resources nor a ResourcePolicy)")
+
 // resourceIndicatorsEnabled reports whether this server accepts RFC
 // 8707 resource indicators: when Config.Resources or a ResourcePolicy is
 // configured. Otherwise the "resource" parameter is ignored entirely, as
@@ -185,12 +196,17 @@ func (s *Server) checkRequestedResources(ctx context.Context, client storage.Reg
 // with one entry, the request is for that one; with more, it must name
 // which, so it's invalid_target. With resource indicators disabled,
 // there is never a default: the "resource" parameter is ignored, and
-// every token is addressed to the issuer.
+// every token is addressed to the issuer — so a confined client's
+// request is refused with server_error instead, rather than its
+// confinement silently lifted (see errConfinedWithoutResourceIndicators).
 func (s *Server) defaultResources(client storage.RegisteredClient) ([]string, *Error) {
+	allowed := client.AllowedResources()
 	if !s.resourceIndicatorsEnabled() {
+		if len(allowed) > 0 {
+			return nil, newError(ErrorServerError, 500, "client is confined by AllowedResources, but this server accepts no resource indicators", errConfinedWithoutResourceIndicators)
+		}
 		return nil, nil
 	}
-	allowed := client.AllowedResources()
 	if len(allowed) > 1 {
 		return nil, newError(ErrorInvalidTarget, 400, "a resource is required: this client may request more than one, so must name which", nil)
 	}

@@ -113,15 +113,22 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 
 	now := s.deps.Clock.Now()
 	handleExpiresAt := now.Add(s.cfg.Limits.InteractionLifetime)
+	// Keyed by the client_id presented with it (parReferenceKey), a
+	// request_uri presented with another is unknown to the store, and
+	// one the store finds expired at now is refused there: neither
+	// mints an interaction record.
 	pushed, err := s.deps.Transactions.BeginAuthorization(ctx, storage.BeginAuthorizationTransaction{
-		Reference:       reference,
-		Handle:          handle,
+		Reference:       parReferenceKey(req.ClientID, reference),
+		Handle:          interactionHandleKey(handle),
 		HandleExpiresAt: handleExpiresAt,
+		Now:             now,
 	})
 	if err != nil {
 		return s.beginFail(ctx, "", newError(ErrorInvalidRequestURI, 400, "request_uri is invalid, expired, or already used", err)), nil
 	}
 
+	// Backstops: a store keying by Reference can't return another
+	// client's request, nor (keeping to its contract) an expired one.
 	if pushed.ClientID != req.ClientID {
 		return s.beginFail(ctx, "", newError(ErrorInvalidRequestURI, 400, "client_id does not match the pushed authorization request", nil)), nil
 	}

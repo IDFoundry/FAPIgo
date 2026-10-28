@@ -102,3 +102,25 @@ func TestApplyPolicyScopeWithoutPolicyIsUnchanged(t *testing.T) {
 		map[string]json.RawMessage{"openid_relying_party": json.RawMessage(`{"scope":"openid  profile"}`)})
 	checkScopeResult(t, out, err, `"openid  profile"`, false)
 }
+
+// TestSpaceDelimitedHelpersLeaveOtherShapesAlone covers the shapes the
+// split and join steps don't rewrite, and the arrays they can't join.
+func TestSpaceDelimitedHelpersLeaveOtherShapesAlone(t *testing.T) {
+	if got := splitSpaceDelimitedOperators(nil); got != nil {
+		t.Errorf("splitSpaceDelimitedOperators(nil) = %v", got)
+	}
+	if got := string(splitOneOfOptions(json.RawMessage(`"not an array"`))); got != `"not an array"` {
+		t.Errorf("splitOneOfOptions(non-array) = %s", got)
+	}
+	if got := string(splitSpaceDelimited(json.RawMessage(`["a"]`))); got != `["a"]` {
+		t.Errorf("splitSpaceDelimited(array) = %s", got)
+	}
+	if got, err := joinSpaceDelimited(json.RawMessage(`"a b"`)); err != nil || string(got) != `"a b"` {
+		t.Errorf("joinSpaceDelimited(string) = %s, %v", got, err)
+	}
+	for _, bad := range []string{`["a b"]`, `[""]`, `[1]`} {
+		if _, err := joinSpaceDelimited(json.RawMessage(bad)); !errors.Is(err, ErrPolicyError) {
+			t.Errorf("joinSpaceDelimited(%s) = %v, want a policy error", bad, err)
+		}
+	}
+}

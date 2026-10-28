@@ -396,8 +396,11 @@ func TestNewResolverRejectsInvalidConfig(t *testing.T) {
 		"zero max authority hints":    func(c *federation.Config, d *federation.Dependencies) { c.Limits.MaxAuthorityHints = 0 },
 		"zero max statement lifetime": func(c *federation.Config, d *federation.Dependencies) { c.Limits.MaxStatementLifetime = 0 },
 		"negative max clock skew":     func(c *federation.Config, d *federation.Dependencies) { c.Limits.MaxClockSkew = -time.Second },
-		"nil http":                    func(c *federation.Config, d *federation.Dependencies) { d.HTTP = nil },
-		"nil clock":                   func(c *federation.Config, d *federation.Dependencies) { d.Clock = nil },
+		"negative max trust mark status age": func(c *federation.Config, d *federation.Dependencies) {
+			c.Limits.MaxTrustMarkStatusAge = -time.Second
+		},
+		"nil http":  func(c *federation.Config, d *federation.Dependencies) { d.HTTP = nil },
+		"nil clock": func(c *federation.Config, d *federation.Dependencies) { d.Clock = nil },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

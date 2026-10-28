@@ -26,7 +26,7 @@ type statusIssuerUnderSuperior struct {
 	superiorQueries *atomic.Int32
 }
 
-func setupStatusIssuerUnderSuperior(t *testing.T, statusIssuedAt func(now time.Time) time.Time) statusIssuerUnderSuperior {
+func setupStatusIssuerUnderSuperior(t *testing.T, statusIssuedAt func(now time.Time) time.Time, maxStatusAge time.Duration) statusIssuerUnderSuperior {
 	t.Helper()
 	now := time.Now()
 	taKey, issuerKey := generateKey(t), generateKey(t)
@@ -85,7 +85,7 @@ func setupStatusIssuerUnderSuperior(t *testing.T, statusIssuedAt func(now time.T
 
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: taID, JWKS: jwksFor(t, "ta", taKey)}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second, MaxTrustMarkStatusAge: maxStatusAge},
 	}, federation.Dependencies{HTTP: fetcherFor(t, taServer, issuerServer), Clock: fixedClock{now: now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -109,7 +109,7 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 // A superior's Subordinate Statement setting another endpoint in the
 // issuer's metadata doesn't redirect the query.
 func TestCheckTrustMarkStatusUsesTheIssuersOwnEndpoint(t *testing.T) {
-	f := setupStatusIssuerUnderSuperior(t, func(now time.Time) time.Time { return now })
+	f := setupStatusIssuerUnderSuperior(t, func(now time.Time) time.Time { return now }, 0)
 	if _, err := f.resolver.CheckTrustMarkStatus(context.Background(), f.trustMark); err != nil {
 		t.Fatalf("CheckTrustMarkStatus: %v", err)
 	}
@@ -122,10 +122,14 @@ func TestCheckTrustMarkStatusUsesTheIssuersOwnEndpoint(t *testing.T) {
 // no exp, so one issued long ago (a replayed "active" answer, say) is
 // refused once older than Limits.MaxTrustMarkStatusAge's default.
 func TestCheckTrustMarkStatusRefusesAnOldResponse(t *testing.T) {
-	f := setupStatusIssuerUnderSuperior(t, func(now time.Time) time.Time {
-		return now.Add(-federation.DefaultMaxTrustMarkStatusAge - time.Minute)
-	})
+	issuedAt := func(now time.Time) time.Time { return now.Add(-federation.DefaultMaxTrustMarkStatusAge - time.Minute) }
+	f := setupStatusIssuerUnderSuperior(t, issuedAt, 0)
 	if _, err := f.resolver.CheckTrustMarkStatus(context.Background(), f.trustMark); !errors.Is(err, intfed.ErrTrustMarkStatusResponseTooOld) {
 		t.Fatalf("CheckTrustMarkStatus(old response) = %v, want ErrTrustMarkStatusResponseTooOld", err)
+	}
+	// A federation whose issuers cache their answers raises the bound.
+	f = setupStatusIssuerUnderSuperior(t, issuedAt, time.Hour)
+	if _, err := f.resolver.CheckTrustMarkStatus(context.Background(), f.trustMark); err != nil {
+		t.Fatalf("CheckTrustMarkStatus(old response, MaxTrustMarkStatusAge 1h) = %v", err)
 	}
 }

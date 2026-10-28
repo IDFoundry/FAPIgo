@@ -402,17 +402,8 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	if cfg.FailureCacheAge == 0 {
 		cfg.FailureCacheAge = DefaultFailureCacheAge
 	}
-	for _, method := range cfg.AllowedClientAuthMethods {
-		if !method.IsValid() {
-			return nil, fmt.Errorf("federation: config: allowed_client_auth_methods: invalid client auth method %v", method)
-		}
-		if method == storage.ClientAuthMethodAttestation {
-			// A client authenticated by attestation is bound to a trusted
-			// Attester (RegisteredClientConfig.ExpectedAttesterIssuer), a
-			// capability grant no RP metadata can make, so no RP could
-			// ever register with it.
-			return nil, fmt.Errorf("federation: config: allowed_client_auth_methods: %v can't be registered automatically: its attester is an operator's grant, not RP metadata", method)
-		}
+	if err := validateAllowedClientAuthMethods(cfg.AllowedClientAuthMethods); err != nil {
+		return nil, err
 	}
 	for _, alg := range cfg.ClientAssertionAlgorithms {
 		if !alg.IsValid() {
@@ -1032,6 +1023,25 @@ func applyPKIClientAuthFields(cfg *storage.RegisteredClientConfig, authMethod st
 		// same defensive-completeness reason a switch over a closed enum
 		// gets one elsewhere in this module.
 		return fmt.Errorf("token_endpoint_auth_method %q is not supported", m.TokenEndpointAuthMethod)
+	}
+	return nil
+}
+
+// validateAllowedClientAuthMethods checks every
+// AutomaticRegistrationConfig.AllowedClientAuthMethods entry is a valid
+// method automatic registration can register.
+func validateAllowedClientAuthMethods(methods []storage.ClientAuthMethod) error {
+	for _, method := range methods {
+		if !method.IsValid() {
+			return fmt.Errorf("federation: config: allowed_client_auth_methods: invalid client auth method %v", method)
+		}
+		if method == storage.ClientAuthMethodAttestation {
+			// A client authenticated by attestation is bound to a trusted
+			// Attester (RegisteredClientConfig.ExpectedAttesterIssuer), a
+			// capability grant no RP metadata can make, so no RP could
+			// ever register with it.
+			return fmt.Errorf("federation: config: allowed_client_auth_methods: %v can't be registered automatically: its attester is an operator's grant, not RP metadata", method)
+		}
 	}
 	return nil
 }

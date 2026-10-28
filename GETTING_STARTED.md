@@ -105,6 +105,17 @@ cfg := server.Config{
 }
 ```
 
+**`AssuranceDevelopment` is not FAPI 2.0 conformant**, although the
+server's metadata looks exactly the same under either level, so a client
+can't tell. Development accepts an authorization code lifetime over 60
+seconds, a pushed request lifetime of 600 seconds or more, a clock skew
+under 10 seconds (0 refuses JWTs a few seconds in the future, which FAPI
+2.0 says to accept) or over 60, request object and CIBA request lifetimes
+over 60 minutes, loopback http redirect URIs for web clients, loopback
+http issuer and endpoint URLs, and any `Random` reader, and it skips the
+storage, key custody and audit checks. Use it for local development and
+tests; run anything clients rely on under `AssuranceProduction`.
+
 `AssuranceProduction` holds the limits FAPI 2.0 fixes (authorization
 code and pushed request lifetimes, clock skew, request object and CIBA
 request lifetimes) to the profile's numbers, and bounds a few it leaves

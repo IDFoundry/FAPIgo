@@ -186,14 +186,15 @@ func (t TokenEndpointRequest) BackchannelTokenExchange() BackchannelTokenExchang
 
 // BeginAuthorizationRequestFromHTTP reads the authorization endpoint's
 // request from r: the client_id and request_uri a client sends the
-// browser with after a pushed authorization request (RFC 9126 §4). OIDC
+// browser with after a pushed authorization request (RFC 9126 §4), and
+// any request parameter (BeginAuthorizationRequest.Request). OIDC
 // Core §3.1.2.1 has an authorization server "support the use of the HTTP
 // GET and POST methods": a POST is read from its
 // application/x-www-form-urlencoded body, as FormRequestFromHTTP reads
 // one (and only from it), any other method from the query string.
 // r.URL.Query().Get would silently take the first of a repeated
 // parameter; RFC 6749 §3.1 says one "MUST NOT be included more than
-// once", so a repeated client_id or request_uri, a malformed
+// once", so a repeated client_id, request_uri or request, a malformed
 // query or body, or a POST that isn't form-encoded, is an
 // invalid_request *Error. Render it locally: an authorization endpoint
 // never redirects for a request it can't attribute to a client's
@@ -205,7 +206,7 @@ func BeginAuthorizationRequestFromHTTP(r *http.Request) (BeginAuthorizationReque
 	if err != nil {
 		return BeginAuthorizationRequest{}, err
 	}
-	for _, name := range []string{"client_id", "request_uri"} {
+	for _, name := range []string{"client_id", "request_uri", "request"} {
 		if len(params[name]) > 1 {
 			return BeginAuthorizationRequest{}, newError(ErrorInvalidRequest, 400, name+" is included more than once", nil)
 		}
@@ -213,6 +214,7 @@ func BeginAuthorizationRequestFromHTTP(r *http.Request) (BeginAuthorizationReque
 	return BeginAuthorizationRequest{
 		RequestURI: params.Get("request_uri"),
 		ClientID:   fapi.ClientID(params.Get("client_id")),
+		Request:    params.Get("request"),
 	}, nil
 }
 

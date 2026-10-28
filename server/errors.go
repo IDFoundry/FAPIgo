@@ -49,6 +49,12 @@ const (
 	// malformed request_uri reference that doesn't even parse, etc.).
 	ErrorInvalidRequestURI ErrorCode = "invalid_request_uri"
 
+	// ErrorRequestNotSupported is OpenID Connect Core §3.1.2.6's error
+	// for an authorization request carrying the "request" parameter at
+	// an OP that doesn't take it there (§6.1): this server takes request
+	// objects only at the pushed authorization request endpoint.
+	ErrorRequestNotSupported ErrorCode = "request_not_supported"
+
 	// ErrorUseDPoPNonce indicates a DPoP proof presented to the PAR or
 	// token endpoint was otherwise valid but carried no nonce, or one
 	// this server didn't just issue (unknown, already consumed, or

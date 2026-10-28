@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"errors"
+	"strconv"
 	"strings"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
@@ -59,7 +61,12 @@ type BackchannelTokenExchangeRequest struct {
 // guarantee: a later poll fails with ErrorInvalidGrant. An auth_req_id
 // issued to another client is refused with ErrorInvalidGrant; a store
 // that honours storage.PollBackchannelAuthentication.ClientID refuses
-// it without spending the approval. An approved grant is checked
+// it without spending the approval. So is an auth_req_id presented by
+// another client instance than the one that made the request (for a
+// client authenticated by Client Attestation), or, when the request
+// carried a dpop_jkt, with another DPoP key: to the store it is
+// unknown, so the approval is never spent by such a poll and the
+// right instance and key can still redeem it. An approved grant is checked
 // against the client's current registration first, as
 // RefreshAccessToken does: a scope or authorization_details type the
 // client may no longer use is refused (invalid_scope, invalid_grant),
@@ -109,17 +116,12 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
 
 	now := s.deps.Clock.Now()
-	authReqIDHash := sha256.Sum256([]byte(authReqID))
-	polled, err := s.deps.Backchannel.PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{
-		AuthReqIDHash: authReqIDHash,
-		Now:           now,
-		ClientID:      client.ID(),
-	})
+	polled, authReqIDHash, err := s.pollBackchannelAuthentication(ctx, client, authReqID, authn.InstanceKey, thumbprint, now)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), backchannelPollError(err))
 	}
 
-	grant, grantErr := s.approvedBackchannelGrant(polled, client.ID(), thumbprint)
+	grant, grantErr := s.approvedBackchannelGrant(polled, client.ID(), thumbprint, authn.InstanceKey)
 	if grantErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), grantErr)
 	}
@@ -179,17 +181,92 @@ func backchannelTokenParameters(client storage.RegisteredClient, params map[stri
 	return authReqID, nil
 }
 
+// backchannelAuthReqIDHashPrefix separates the digest of an auth_req_id
+// bound to a client instance or a DPoP key from the plain SHA-256 of an
+// unbound one.
+const backchannelAuthReqIDHashPrefix = "fapigo bound auth_req_id\x00"
+
+// backchannelAuthReqIDHash is the digest a CIBA request is stored and
+// polled under (storage.NewBackchannelAuthentication.AuthReqIDHash):
+// the plain SHA-256 of authReqID for a request bound to neither a
+// client instance nor a DPoP key, as before such bindings existed, and
+// otherwise the SHA-256 of authReqID bound to instanceKey (the
+// thumbprint of the Client Instance Key of a client authenticated by
+// Client Attestation) and dpopJKT (the request's dpop_jkt).
+//
+// The store spends an approval in the poll that observes it, before the
+// server can compare the poll's client instance or DPoP key with the
+// request's, and every installation of a wallet app shares one
+// client_id. Keyed by both, an auth_req_id presented by another
+// instance, or with another DPoP key, is simply unknown to the store,
+// as authorizationCodeHash makes another instance's code: the poll
+// neither spends the approval nor sees the request, so the poll from
+// the instance and key it was issued to still succeeds. Each part is
+// length-prefixed, so no two different bindings share a digest.
+func backchannelAuthReqIDHash(authReqID, instanceKey, dpopJKT string) [32]byte {
+	if instanceKey == "" && dpopJKT == "" {
+		return sha256.Sum256([]byte(authReqID))
+	}
+	return sha256.Sum256([]byte(backchannelAuthReqIDHashPrefix +
+		strconv.Itoa(len(instanceKey)) + ":" + instanceKey +
+		strconv.Itoa(len(dpopJKT)) + ":" + dpopJKT + authReqID))
+}
+
+// pollBackchannelAuthentication polls the CIBA request authReqID names
+// for client, presented by the client instance instanceKey with the
+// DPoP or mTLS binding thumbprint, returning it and the digest it is
+// stored under. A request with a dpop_jkt is stored under that key
+// (backchannelAuthReqIDHash), so it is looked for under the presented
+// DPoP key first, then under none, without the dpop_jkt it may not
+// have. A miss leaves the store unchanged, so the second lookup is
+// polled as if it were the only one.
+func (s *Server) pollBackchannelAuthentication(ctx context.Context, client storage.RegisteredClient, authReqID, instanceKey, thumbprint string, now time.Time) (storage.PolledBackchannelAuthentication, [32]byte, error) {
+	poll := func(hash [32]byte) (storage.PolledBackchannelAuthentication, error) {
+		return s.deps.Backchannel.PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{
+			AuthReqIDHash: hash,
+			Now:           now,
+			ClientID:      client.ID(),
+		})
+	}
+	if client.SenderConstrain() != storage.SenderConstrainMTLS {
+		hash := backchannelAuthReqIDHash(authReqID, instanceKey, thumbprint)
+		polled, err := poll(hash)
+		if err == nil || isBackchannelPollOutcome(err) {
+			return polled, hash, err
+		}
+	}
+	hash := backchannelAuthReqIDHash(authReqID, instanceKey, "")
+	polled, err := poll(hash)
+	return polled, hash, err
+}
+
+// isBackchannelPollOutcome reports whether err is one of the typed
+// errors PollBackchannelAuthentication returns for a request it found,
+// rather than one it doesn't know.
+func isBackchannelPollOutcome(err error) bool {
+	var expired *storage.BackchannelAuthenticationExpiredError
+	var slowDown *storage.BackchannelAuthenticationSlowDownError
+	var alreadyRedeemed *storage.BackchannelAuthenticationAlreadyRedeemedError
+	return errors.As(err, &expired) || errors.As(err, &slowDown) || errors.As(err, &alreadyRedeemed)
+}
+
 // approvedBackchannelGrant returns the grant polled holds for clientID,
-// whose DPoP or mTLS binding is thumbprint, once it is approved: the
-// auth_req_id must have been issued to clientID, by this server
-// (ownsRecord), to the dpop_jkt it was bound to, if any.
-func (s *Server) approvedBackchannelGrant(polled storage.PolledBackchannelAuthentication, clientID fapi.ClientID, thumbprint string) (grantRecord, *Error) {
+// whose DPoP or mTLS binding is thumbprint, presented by the client
+// instance instanceKey, once it is approved: the auth_req_id must have
+// been issued to clientID, by this server (ownsRecord), to that client
+// instance, to the dpop_jkt it was bound to, if any.
+// backchannelAuthReqIDHash already keeps another instance or DPoP key
+// from finding the request at all; the record says the same.
+func (s *Server) approvedBackchannelGrant(polled storage.PolledBackchannelAuthentication, clientID fapi.ClientID, thumbprint, instanceKey string) (grantRecord, *Error) {
 	if polled.ClientID != clientID {
 		return grantRecord{}, newError(ErrorInvalidGrant, 400, "auth_req_id was not issued to this client", nil)
 	}
 	request, err := s.decodeOwnRequestRecord(polled.Request)
 	if err != nil {
 		return grantRecord{}, recordFailure(err, newError(ErrorInvalidGrant, 400, authReqIDUnknownDescription, nil), "backchannel authentication request")
+	}
+	if request.ClientInstanceKey != instanceKey {
+		return grantRecord{}, newError(ErrorInvalidGrant, 400, authReqIDUnknownDescription, nil)
 	}
 	if request.DPoPJKT != "" && request.DPoPJKT != thumbprint {
 		return grantRecord{}, newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this backchannel authentication request", nil)

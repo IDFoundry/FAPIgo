@@ -96,10 +96,11 @@ type requestRecord struct {
 
 	// ClientInstanceKey is the RFC 7638 thumbprint of the Client
 	// Instance Key a client authenticated by Client Attestation pushed
-	// the authorization request with: the authorization code issued for
-	// it is bound to that instance (see authorizationCodeHash). Empty for
-	// any other client authentication, for a CIBA request, and in a
-	// record written before this field existed.
+	// the authorization request, or made the CIBA request, with: the
+	// authorization code issued for it, or the auth_req_id, is bound to
+	// that instance (see authorizationCodeHash and
+	// backchannelAuthReqIDHash). Empty for any other client
+	// authentication, and in a record written before this field existed.
 	ClientInstanceKey string `json:"client_instance_jkt,omitempty"`
 }
 

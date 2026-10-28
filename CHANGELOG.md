@@ -1,5 +1,94 @@
 # Changelog
 
+## [0.65.0](https://github.com/IDFoundry/FAPIgo/compare/v0.64.0...v0.65.0) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** under AssuranceProduction, server.New and resource.NewVerifier refuse a nil Dependencies.Nonces, and serverresource.NewVerifier refuses a nil Options.Nonces when the server has a nonce store. Add a nonce store shared by every instance and declaring StoreAssurance, with Limits.DPoPNonceLifetime, or decline explicitly with server.NoDPoPNonces{} or resource.NoDPoPNonces{}. See UPGRADING.md.
+* fapi.ParseIssuerURL now refuses an issuer with a query component, including an empty one. This applies to a configured issuer and to the issuer a client reads from discovery. Give the issuer without its query, and put anything that tells tenants apart in the path instead.
+* **server:** storage.NonceStore replaces Consume and the NonceConsumption input with Lookup and NonceLookup, and Lookup must not retire the nonce it returns. A custom nonce store must rename the method and stop deleting the record on read. memstore.NonceStore is already updated. See UPGRADING.md.
+* **federation:** automatic registration refuses an RP whose metadata names an id_token_signed_response_alg or userinfo_signed_response_alg the server doesn't sign with. See UPGRADING.md.
+* **federation:** federation.NewAutomaticClientRepository and server.New refuse an AllowedClientAuthMethods listing attest_jwt_client_auth. See UPGRADING.md.
+* **federation:** CheckTrustMarkStatus queries only the endpoint in the issuer's own Entity Configuration and refuses a status response older than Limits.MaxTrustMarkStatusAge. See UPGRADING.md.
+* **federation:** a Trust Mark delegation, Resolve Response, Trust Mark Status Response or historical keys JWT without a kid header is refused. See UPGRADING.md.
+* **federation:** a Client built with NewFromDiscovery from DiscoverViaFederation's metadata refuses to start a flow or refresh tokens after the Trust Chain expires. See UPGRADING.md.
+* **federation:** an automatically registered RP authenticating with tls_client_auth or a tls_client_auth_san_* method is refused with invalid_client unless its certificate carries a key of its RP JWK Set. See UPGRADING.md.
+* **federation:** server.New and client.New refuse a federation Entity ID that isn't exactly the issuer or client_id. See UPGRADING.md.
+* **federation:** the federation statement builders return an error for input they used to sign, listed in UPGRADING.md.
+* **federation:** a Trust Chain through an Entity Statement carrying any of these claims or headers no longer resolves. In particular a null metadata parameter, which a metadata policy used to treat as absent, now fails the chain. See UPGRADING.md.
+* **client:** VerifyIssuerJWS refuses a JWS whose typ names an explicitly typed kind of JWT, such as at+jwt or logout+jwt, with ErrorInvalidResponse. See UPGRADING.md.
+* **keys:** a custom keys.Decrypter that performs the ECDH-ES Concat KDF itself must include UnwrapRequest.AgreementPartyUInfo and AgreementPartyVInfo in its OtherInfo, or it fails to decrypt JWEs whose sender set apu or apv. Decrypters built by keys.NewDecrypter need no change. See UPGRADING.md.
+* **client:** BackchannelAuthenticationPending has a new Session field holding slices, so it is no longer comparable with ==. Switch on the result's type, read SlowDown, and poll with Session from then on.
+* **client:** client.New refuses a Limits.BackchannelAuthenticationRequestLifetime over 60 minutes when CIBA is configured. Use 60 minutes or less.
+* **server:** under NoBackchannelNotifications a client registered for ping delivery is refused with unauthorized_client, and ping is no longer advertised. Register the client for poll, or configure a real BackchannelNotifier such as backchannelhttp.
+* **server:** server.New refuses a CIBA configuration whose poll interval or request lifetime is under one second or not a whole number of seconds. Use whole seconds, for example 2 * time.Second.
+* **server:** server.New refuses a Limits.PushedRequestLifetime under one second. See UPGRADING.md.
+* **server:** Server.SignUserInfoResponse refuses claims without a non-empty string "sub" for a client with public subjects too. Put the client's sub for the user in the claims, as serverresource.UserInfoClaims does. See UPGRADING.md.
+* **server:** storage.NewRegisteredClient refuses a redirect URI whose query names code, state, iss, error, error_description, error_uri or response, and client.New refuses such a RedirectURI or an authorization endpoint whose query names client_id or request_uri. A redirect URI's query now reaches the client exactly as registered, followed by the response's parameters. See UPGRADING.md.
+* **server:** CompleteAuthorization refuses a GrantedAuthorization with an empty Scope for a request that asked for a scope, and issues no code. Grant at least one requested scope value, or Deny the request. See UPGRADING.md.
+* **server:** a token request at the authorization code, refresh token or CIBA grant whose authorization_details is malformed, asks for more than the grant holds, or is sent to a server without Config.RAR is now refused with invalid_authorization_details instead of being ignored. See UPGRADING.md.
+* **server:** authorizations in progress at deploy must restart, since request_uri values pushed and interaction handles begun before it are unknown afterwards. A custom TransactionStore must refuse a reference whose ExpiresAt isn't after BeginAuthorizationTransaction.Now without minting the handle, or it fails the new contract subtest; see UPGRADING.md.
+* **server:** a client registered with AllowedResources on a server with neither Config.Resources nor a ResourcePolicy is refused with server_error instead of getting issuer-audience tokens, and server.New refuses AutomaticRegistration.AllowedResources without resource indicators. Enable resource indicators or drop the list; see UPGRADING.md.
+* **server:** server.New refuses a Config whose Limits.MaxAccessTokenClaimsBytes is zero or negative. Set it, starting from the 6144 RecommendedLimits uses; see UPGRADING.md.
+
+### Features
+
+* **client:** send every call to mTLS endpoint aliases on request ([d390555](https://github.com/IDFoundry/FAPIgo/commit/d3905555bbabf419fdff4fb3a072ca957be9f2b5))
+* **fapihttp:** read RFC 9440 forwarded client certificates ([be1f1d6](https://github.com/IDFoundry/FAPIgo/commit/be1f1d6aff2877ecdbb1847ab1081deb40d2602b))
+* **resource:** add AuthorizationContext.EndUser ([1f541b2](https://github.com/IDFoundry/FAPIgo/commit/1f541b29145a114d27829f50f6822368dd9edb08))
+* **server:** add Config.RequireBindingMessage for CIBA ([e7c4c60](https://github.com/IDFoundry/FAPIgo/commit/e7c4c60560cf26ac72075a5918bd75d57cd303af))
+
+
+### Bug Fixes
+
+* **client:** accept only a generic typ in VerifyIssuerJWS ([2fac067](https://github.com/IDFoundry/FAPIgo/commit/2fac06719a1dd07e7a1bb37162941ed2fdb3b2ad))
+* **client:** cap the CIBA request object lifetime at 60 minutes ([2761aa1](https://github.com/IDFoundry/FAPIgo/commit/2761aa1b612e7f8337cf1940b53dc226aea8a554))
+* **client:** compare a refreshed ID token's nonce and aud with the original's ([12c1c69](https://github.com/IDFoundry/FAPIgo/commit/12c1c699fdbf4a730b2b6c327d4c110a5e8b5553))
+* **client:** expose an error_uri only as an absolute https URL ([eaa67b2](https://github.com/IDFoundry/FAPIgo/commit/eaa67b22a31c749d30ff6e2cafb662e35d43fc6c))
+* **client:** make the GETTING_STARTED client and resource server snippets work as written ([d131868](https://github.com/IDFoundry/FAPIgo/commit/d13186888b6c4ff48746e8793c7b2a9ea1e3c5b2))
+* **client:** require openid in a CIBA request's scope ([ef1c6bb](https://github.com/IDFoundry/FAPIgo/commit/ef1c6bbc3f5d1ad38115d5b25d769f918568c5a3))
+* **client:** widen the CIBA poll interval by 5 seconds after slow_down ([f8dfc9e](https://github.com/IDFoundry/FAPIgo/commit/f8dfc9e90a36e230b88d5fb952865ee1dc9a478a))
+* **federation:** apply metadata policy to scope as a string array ([6438dd7](https://github.com/IDFoundry/FAPIgo/commit/6438dd7427c98f1434431cc66e2f62fe0080b2f7))
+* **federation:** follow §8.4 and §8.9 for Trust Mark status and errors ([396fcbc](https://github.com/IDFoundry/FAPIgo/commit/396fcbcf4d6042bb3c9b346359bf1c7e7dbec9a4))
+* **federation:** refuse a federation RP's unsupported signing algorithms ([5159761](https://github.com/IDFoundry/FAPIgo/commit/51597617cdb2e9f59c00e65c792dc64609720826))
+* **federation:** refuse attest_jwt_client_auth for automatic registration ([568be2a](https://github.com/IDFoundry/FAPIgo/commit/568be2a37650addcaa87848e2a1f9c81506ea463))
+* **federation:** refuse Entity Statements that §3.2 says to reject ([1a493f0](https://github.com/IDFoundry/FAPIgo/commit/1a493f0dd13b1bf89c15ec7e83095714141d4a97))
+* **federation:** refuse to sign statements OpenID Federation 1.0 forbids ([a1187f8](https://github.com/IDFoundry/FAPIgo/commit/a1187f89c9d842d5d9175388f5b875b49a61270c))
+* **federation:** require a federation RP's certificate key in its JWK Set ([0e78914](https://github.com/IDFoundry/FAPIgo/commit/0e78914042fe7dfcb3fbe7695537c03e5789e2df))
+* **federation:** require kid on every federation JWT kind ([0c98af9](https://github.com/IDFoundry/FAPIgo/commit/0c98af9c0104aa61ddb679d5ab3a7493e87bad30))
+* **federation:** require the Entity ID to be the issuer or client_id ([1ecbafa](https://github.com/IDFoundry/FAPIgo/commit/1ecbafa920262d945c5915914955e638c835d736))
+* **federation:** stop a federation-discovered Client at Trust Chain expiry ([53c8b13](https://github.com/IDFoundry/FAPIgo/commit/53c8b13b188047f4b2e059429766f4e8d2ca4fba))
+* **keys:** feed JWE apu/apv into the ECDH-ES key derivation ([dcaba61](https://github.com/IDFoundry/FAPIgo/commit/dcaba6181badeaff15f60031c8417158c0fba6a3))
+* refuse an issuer URL with a query component ([c177b8c](https://github.com/IDFoundry/FAPIgo/commit/c177b8c8c31eea71779beefaf1666c86e6a60150))
+* refuse JOSE headers and JWT claims that aren't valid UTF-8 ([ea3ab6a](https://github.com/IDFoundry/FAPIgo/commit/ea3ab6ad67da6abd66896571eaa96287299644fc))
+* refuse NumericDates after year 9999 so a far-future nbf can't read as the past ([f81f83f](https://github.com/IDFoundry/FAPIgo/commit/f81f83f2bd6f2e9e5e08b4b64571e11622230dbe))
+* **server:** accept a DPoP nonce for its whole lifetime ([75ce627](https://github.com/IDFoundry/FAPIgo/commit/75ce6275fd7148263ef3f2e29fdf5e48f088e8ec))
+* **server:** advertise and accept CIBA ping only with a notifier ([0585639](https://github.com/IDFoundry/FAPIgo/commit/05856398a1d4bcca5b818528e8086088ba951806))
+* **server:** answer a request object at the authorization endpoint with request_not_supported ([3ad5900](https://github.com/IDFoundry/FAPIgo/commit/3ad59002ccc14797169194455fe6fe435718e9d7))
+* **server:** answer an invalid token at revocation with 200 ([edbcd01](https://github.com/IDFoundry/FAPIgo/commit/edbcd0172ec42e23d61b63a733ba6b3d96430a75))
+* **server:** bound access tokens to what the resource server accepts ([1399b9e](https://github.com/IDFoundry/FAPIgo/commit/1399b9e92ef3aaaa3f18c4fbf69609ae69092190))
+* **server:** challenge a client authenticating with the Authorization header ([8dea8fc](https://github.com/IDFoundry/FAPIgo/commit/8dea8fcbc1edd50b18845633c85f3d029463ef6b))
+* **server:** don't tell a client another client's refresh token is live ([8b0cb64](https://github.com/IDFoundry/FAPIgo/commit/8b0cb6459feebf93990208a641f0bcc656f7f2c5))
+* **server:** drop the unreachable pre-instance-key refresh exemption ([31dc934](https://github.com/IDFoundry/FAPIgo/commit/31dc934d8731005db8d0e03413c2100e70da6d91))
+* **server:** keep error_description inside RFC 6749's characters and free of request input ([e024814](https://github.com/IDFoundry/FAPIgo/commit/e0248140226b46050785f356b3873651af743d2b))
+* **server:** keep the signed UserInfo sub description within RFC 6749 error text ([c2b643c](https://github.com/IDFoundry/FAPIgo/commit/c2b643cea6f761085dd111c91d3937519133c030))
+* **server:** narrow a token request's authorization_details to the grant ([a5089be](https://github.com/IDFoundry/FAPIgo/commit/a5089beb684299d06257c3d589440ae50eace31e))
+* **server:** publish revocation_endpoint_auth_signing_alg_values_supported ([8d45683](https://github.com/IDFoundry/FAPIgo/commit/8d4568327a0edc7c410606231ac96d79c25bd7f9))
+* **server:** read a form-POSTed authorization request ([bb35ff1](https://github.com/IDFoundry/FAPIgo/commit/bb35ff1dd9db38170b97e9b06d2b6743071586f9))
+* **server:** recommend a 10-minute request object lifetime ([8abad00](https://github.com/IDFoundry/FAPIgo/commit/8abad00719b9b51f6c0b9094129e35c5c6697a93))
+* **server:** refuse a CA attester leaf and check revocation on every path ([2af73b6](https://github.com/IDFoundry/FAPIgo/commit/2af73b6451ba0fc587939fff11deb07f8e112560))
+* **server:** refuse AllowedResources while resource indicators are off ([b10dbbb](https://github.com/IDFoundry/FAPIgo/commit/b10dbbbdbfdf2c9dd4ccd41d6bd54d459935d59a))
+* **server:** refuse an empty scope grant of a request with a scope ([fec7208](https://github.com/IDFoundry/FAPIgo/commit/fec72082e63f6aa88ee5f5d93bc76ba4dd421eb2))
+* **server:** release a requested claim only with the value asked for ([d72bbd0](https://github.com/IDFoundry/FAPIgo/commit/d72bbd09116c263b7bfb2e42c34c20882ad4ac59))
+* **server:** require a pushed request lifetime of at least a second ([9d2203b](https://github.com/IDFoundry/FAPIgo/commit/9d2203bf8473eae9cc43ef98561a8df0120d6321))
+* **server:** require DPoP nonces or an explicit decline under production ([52e79f1](https://github.com/IDFoundry/FAPIgo/commit/52e79f1d7440b99f3480b154d55c15c056143433))
+* **server:** require sub in a signed UserInfo response ([666497d](https://github.com/IDFoundry/FAPIgo/commit/666497d68de60724ecbf3eca12bf5557c5eecb2d))
+* **server:** require whole-second CIBA poll interval and request lifetime ([7a8bd34](https://github.com/IDFoundry/FAPIgo/commit/7a8bd340c2412f594bc0606ba2818564576c1d2d))
+* **server:** retain a redirect URI's query byte for byte ([2a9ae5e](https://github.com/IDFoundry/FAPIgo/commit/2a9ae5e42dfefb6360a239d2a9594d54766a5829))
+* **server:** store pushed requests and interactions under digests ([e12a61f](https://github.com/IDFoundry/FAPIgo/commit/e12a61f45236a29c8501abf62c996891d72f067b))
+* **server:** try every matching key for client and attester JWTs ([87d7fae](https://github.com/IDFoundry/FAPIgo/commit/87d7faece10cc64fe8f672b7cb3589c0994d6a69))
+
 ## [0.64.0](https://github.com/IDFoundry/FAPIgo/compare/v0.63.0...v0.64.0) (2026-10-28)
 
 

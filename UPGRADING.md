@@ -806,6 +806,31 @@ func (s *SQLNonceStore) Lookup(ctx context.Context, lookup storage.NonceLookup) 
 	}
 	return storage.NonceRecord{ExpiresAt: expiresAt}, nil
 }
+### An issuer URL with a query is refused (all packages)
+
+**Affects:** anything that parses an issuer with `fapi.ParseIssuerURL`:
+a server's `Config.Issuer`, a client's configured issuer, and the
+`issuer` a client reads from discovery (`client.Discover`,
+`client.NewFromDiscovery`), whose value is parsed the same way.
+
+**Why:** RFC 8414 §2 and OpenID Connect Core §2 define an issuer as an
+https URL with no query or fragment, and RFC 9207 and Discovery §3
+compare it as an exact string. `ParseIssuerURL` refused a fragment but
+accepted a query, in production too, so one issuer could be configured
+or discovered under a second spelling (`https://as.example/?` alongside
+`https://as.example/`). Endpoint URLs are unaffected:
+`fapi.ParseEndpointURL` still accepts a query, as RFC 6749 §3.1 allows.
+
+**What fails:** `fapi.ParseIssuerURL` returns an error ending "URL must
+not contain a query", for any query, including an empty `?`. Discovery
+of an authorization server whose metadata `issuer` has a query fails
+the same way.
+
+**What to change:** give the issuer without its query. An issuer that
+needs to tell tenants apart puts the tenant in the path:
+
+```go
+issuer, err := fapi.ParseIssuerURL("https://as.example/tenants/a") // not https://as.example/?tenant=a
 ```
 
 ## v0.64.0

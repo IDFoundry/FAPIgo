@@ -156,8 +156,36 @@ type Error struct {
 	nonce       string
 }
 
+// newError builds the *Error every Server method returns. description
+// is made RFC 6749 §5.2 error_description text here (see
+// httperror.Description), so no path can put a character outside
+// %x20-21 / %x23-5B / %x5D-7E in a response. It must never carry
+// request input: anything a client chose belongs in cause, which stays
+// out of every response — see requestError.
 func newError(code ErrorCode, httpStatus int, description string, cause error) *Error {
-	return &Error{code: code, httpStatus: httpStatus, description: description, cause: cause}
+	return &Error{code: code, httpStatus: httpStatus, description: httperror.Description(description), cause: cause}
+}
+
+// detailedError is a request validation failure whose public
+// description names no request input, with detail (which may, such as
+// a client-chosen claim name) kept for the log-facing cause only.
+type detailedError struct {
+	description string
+	detail      string
+}
+
+func (e *detailedError) Error() string { return e.description + ": " + e.detail }
+
+// requestError is the 400 *Error with code for err, a request
+// validation failure: its message is the public description, except a
+// detailedError's, whose description alone is public and whose detail
+// stays in the cause.
+func requestError(code ErrorCode, err error) *Error {
+	var detailed *detailedError
+	if errors.As(err, &detailed) {
+		return newError(code, http.StatusBadRequest, detailed.description, err)
+	}
+	return newError(code, http.StatusBadRequest, err.Error(), nil)
 }
 
 // NewError builds an *Error for a caller reporting an OAuth-shaped

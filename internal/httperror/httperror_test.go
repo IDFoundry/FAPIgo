@@ -125,3 +125,40 @@ func TestStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestDescription(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                         "",
+		"claims must be an object": "claims must be an object",
+		`the "acr" entry`:          "the 'acr' entry",
+		`a\b`:                      "",
+		"RFC 9700 \u00a74.11.2":    "",
+		"line\nbreak":              "",
+		"quote \" and \u00e9":      "",
+		"\x7f":                     "",
+		" !#[]~":                   " !#[]~",
+		`only "quotes" "here"`:     "only 'quotes' 'here'",
+	} {
+		if got := httperror.Description(in); got != want {
+			t.Errorf("Description(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestWriteJSONNormalizesDescription: WriteJSON never sends a
+// description outside RFC 6749 §5.2's characters, whatever it's given.
+func TestWriteJSONNormalizesDescription(t *testing.T) {
+	for in, want := range map[string]string{`the "acr" entry`: "the 'acr' entry", "caf\u00e9": ""} {
+		rec := httptest.NewRecorder()
+		httperror.WriteJSON(rec, "", "", "invalid_request", in, 400)
+		var body struct {
+			ErrorDescription string `json:"error_description"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.ErrorDescription != want {
+			t.Errorf("WriteJSON(%q) error_description = %q, want %q", in, body.ErrorDescription, want)
+		}
+	}
+}

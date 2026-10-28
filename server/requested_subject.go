@@ -25,7 +25,7 @@ import (
 func (s *Server) requiredSubject(ctx context.Context, params map[string]json.RawMessage, clientID fapi.ClientID) (string, *Error) {
 	claimed, err := claimsSubValue(params)
 	if err != nil {
-		return "", newError(ErrorInvalidRequest, 400, err.Error(), nil)
+		return "", requestError(ErrorInvalidRequest, err)
 	}
 	raw, ok := params["id_token_hint"]
 	if !ok {

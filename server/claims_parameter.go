@@ -71,7 +71,7 @@ func validateClaimsLocationValue(member string, value json.RawMessage) error {
 	}
 	for name, request := range requests {
 		if trimmed := bytes.TrimSpace(request); !isJSONNull(trimmed) && (len(trimmed) == 0 || trimmed[0] != '{') {
-			return fmt.Errorf("claims.%s.%s must be null or a JSON object", member, name)
+			return &detailedError{description: "claims." + member + " must map each claim name to null or a JSON object", detail: fmt.Sprintf("claim %q", name)}
 		}
 	}
 	return nil
@@ -137,7 +137,7 @@ func checkMemberCase(members map[string]json.RawMessage, where string, names ...
 	for key := range members {
 		for _, name := range names {
 			if key != name && strictjson.FoldKey(key) == strictjson.FoldKey(name) {
-				return fmt.Errorf("%s member %q must be spelled %q", where, key, name)
+				return &detailedError{description: where + " member " + name + " must be spelled in lowercase", detail: fmt.Sprintf("member %q", key)}
 			}
 		}
 	}

@@ -257,7 +257,7 @@ func (s *Server) beginFail(ctx context.Context, clientID fapi.ClientID, err *Err
 // to bounce users there. Render a LocalErrorResponse locally instead.
 func (s *Server) BuildAuthorizationErrorRedirect(ctx context.Context, client storage.RegisteredClient, redirectURI, state, errorCode, description string) (fapi.URL, error) {
 	if s.cfg.Assurance == AssuranceProduction {
-		return fapi.URL{}, newError(ErrorServerError, 500, "an authorization error redirect before the user has authenticated is refused under AssuranceProduction (RFC 9700 §4.11.2)", nil)
+		return fapi.URL{}, newError(ErrorServerError, 500, "an authorization error redirect before the user has authenticated is refused under AssuranceProduction (RFC 9700 section 4.11.2)", nil)
 	}
 	if !client.HasRedirectURI(redirectURI) {
 		return fapi.URL{}, newError(ErrorInvalidRequest, 400, "redirect_uri is not registered for this client", nil)

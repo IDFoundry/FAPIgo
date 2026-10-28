@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // Message formats the log-facing message every role's own Error()
@@ -45,6 +46,24 @@ func IsErrorText(s string) bool {
 		}
 	}
 	return true
+}
+
+// Description returns s as RFC 6749 §5.2 error_description text: each
+// double quote becomes an apostrophe, the one character this package's
+// own fixed descriptions use that the grammar excludes, and a result
+// still outside %x20-21 / %x23-5B / %x5D-7E is dropped (""). Every
+// role's internal error constructor and WriteJSON apply it, so no
+// description reaches a response outside the grammar, whatever built
+// it.
+func Description(s string) string {
+	if s == "" || IsErrorText(s) {
+		return s
+	}
+	s = strings.ReplaceAll(s, `"`, "'")
+	if !IsErrorText(s) {
+		return ""
+	}
+	return s
 }
 
 // IsErrorStatus reports whether status is a 4xx or 5xx HTTP status,
@@ -90,7 +109,8 @@ func Status(status int) int {
 // 6750 §3.1 — resource's own errors are the only ones that set this),
 // the "application/json" Content-Type, httpStatus, and a
 // {"error": ..., "error_description": ...} body built from code and
-// description.
+// description — passed through Description, so a description outside
+// RFC 6749 §5.2's characters never reaches the body.
 //
 // Must be called before anything else writes to w — like every
 // http.ResponseWriter header/status call, it has no effect once a
@@ -108,5 +128,5 @@ func WriteJSON(w http.ResponseWriter, nonce, challengeScheme, code, description 
 	_ = json.NewEncoder(w).Encode(struct {
 		Error            string `json:"error"`
 		ErrorDescription string `json:"error_description,omitempty"`
-	}{Error: code, ErrorDescription: description})
+	}{Error: code, ErrorDescription: Description(description)})
 }

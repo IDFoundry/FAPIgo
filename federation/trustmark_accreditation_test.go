@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -50,7 +51,8 @@ func setupAccreditationFederation(t *testing.T, trustMarkIssuers func(taID, leID
 
 	sign := func(p intfed.CreateParams) string {
 		t.Helper()
-		token, err := intfed.Create(p)
+		// Unchecked: one of the subject's Trust Marks has no kid.
+		token, err := intfed.CreateUncheckedForTesting(p)
 		if err != nil {
 			t.Fatalf("intfed.Create: %v", err)
 		}
@@ -147,7 +149,7 @@ func TestVerifyTrustMarkRequiresKeyID(t *testing.T) {
 		return map[string][]string{testTrustMarkType: {taID}}
 	})
 	_, err := f.resolver.VerifyTrustMark(context.Background(), f.subject(t), f.withoutKeyID, federation.AcceptAnyFederationIssuer)
-	if err == nil || !strings.Contains(err.Error(), "no kid") {
+	if !errors.Is(err, intfed.ErrMissingKeyID) {
 		t.Fatalf("VerifyTrustMark(no kid) = %v, want a kid error", err)
 	}
 }

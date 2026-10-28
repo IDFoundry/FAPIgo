@@ -85,7 +85,7 @@ func MergePolicy(current MetadataPolicy, currentCrit []string, next MetadataPoli
 				currentParams[claim] = nextOps
 				continue
 			}
-			mergedOps, err := mergeOperators(currentOps, nextOps, crit)
+			mergedOps, err := mergeOperators(parameterOperators(claim, currentOps), parameterOperators(claim, nextOps), crit)
 			if err != nil {
 				return nil, fmt.Errorf("federation: metadata_policy: %s.%s: %w", entityType, claim, err)
 			}
@@ -415,7 +415,7 @@ func ValidatePolicy(policy MetadataPolicy, crit []string) error {
 func validatePolicy(policy MetadataPolicy, crit critSet) error {
 	for entityType, params := range policy {
 		for claim, ops := range params {
-			if err := validateCombination(ops, crit); err != nil {
+			if err := validateCombination(parameterOperators(claim, ops), crit); err != nil {
 				return fmt.Errorf("federation: metadata_policy: %s.%s: %w", entityType, claim, err)
 			}
 		}
@@ -444,6 +444,12 @@ func isStandardOperator(name string) bool {
 // nothing — not even "essential" — so it can't give an entity metadata
 // it never declared, including a type allowed_entity_types removed
 // (§6.2.3). metadata may be nil; the result is then empty.
+//
+// A space-delimited string parameter (scope) is processed as the
+// string array of its values and resolved back to a space-separated
+// string, as §6.1.3.1.8 requires; its value and default operands, and
+// each of its one_of options, may be given either as such a string or
+// as the array.
 //
 // Only the seven standard operators (§6.1.3.1) are understood and
 // acted on; a non-standard operator (§6.1.3.2) is ignored during
@@ -497,7 +503,7 @@ func applyEntityTypePolicy(params map[string]PolicyOperators, crit critSet, curr
 			// "essential" operator requires, and is left out.
 			value, present = nil, false
 		}
-		value, present, err := applyClaimPolicy(params[claim], crit, value, present)
+		value, present, err := applyParameterPolicy(claim, params[claim], crit, value, present)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", claim, err)
 		}

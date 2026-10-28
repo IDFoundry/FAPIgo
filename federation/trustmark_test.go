@@ -617,7 +617,7 @@ func TestCheckTrustMarkStatusRejectsMalformedIssuerMetadata(t *testing.T) {
 	t.Cleanup(server.Close)
 	issuerID := server.URL
 
-	issuerConfig, err := intfed.Create(intfed.CreateParams{
+	issuerConfig, err := intfed.CreateUncheckedForTesting(intfed.CreateParams{
 		Signer: issuerKey, Algorithm: fapi.ES256, KeyID: "issuer",
 		Issuer: issuerID, Subject: issuerID, Now: now, Lifetime: time.Hour, JWKS: issuerJWKS,
 		Metadata: map[string]json.RawMessage{"federation_entity": json.RawMessage(`"not an object"`)},

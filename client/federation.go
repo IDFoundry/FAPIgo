@@ -3,8 +3,10 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
@@ -108,6 +110,12 @@ func (c *Client) EntityConfiguration(ctx context.Context, metadata map[string]js
 // chosen by whoever controls that entity, and only NewClient's
 // transport stops a DNS answer that changes after validation (DNS
 // rebinding) from aiming those fetches at an internal host.
+//
+// The Trust Chain expires (ResolvedEntity().ExpiresAt, the earliest
+// expiry of its statements), and OpenID Federation 1.0 §12.3 forbids
+// using the OP past it. A Client NewFromDiscovery builds from this
+// metadata enforces that with ErrTrustChainExpired; call
+// DiscoverViaFederation again, and build a new Client, before then.
 func DiscoverViaFederation(ctx context.Context, resolver *federation.Resolver, issuer string, opts ...fapi.URLOption) (DiscoveredMetadata, error) {
 	if resolver == nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover via federation: resolver is required")
@@ -157,4 +165,35 @@ func requireAutomaticRegistration(raw json.RawMessage) error {
 		return fmt.Errorf("openid_provider metadata client_registration_types_supported %q does not include \"automatic\"", md.ClientRegistrationTypesSupported)
 	}
 	return nil
+}
+
+// ErrTrustChainExpired is returned by BeginAuthorization,
+// BeginBackchannelAuthentication, RequestClientCredentialsToken and
+// RefreshTokens on a Client NewFromDiscovery built from
+// DiscoverViaFederation's metadata, once the authorization server's
+// Trust Chain has expired. OpenID Federation 1.0 §12.3 says an RP "MUST
+// NOT use it past the expiration of the Trust Chain" and that "the
+// trust in the OP MUST be successfully reevaluated before continuing";
+// §11 has every participant "support refreshing a Trust Chain when it
+// expires". Resolve the chain again with DiscoverViaFederation and
+// build a new Client from the result, before TrustChainExpiresAt to
+// avoid the error. A flow already begun (CompleteAuthorization,
+// ExchangeCode, PollBackchannelToken) isn't interrupted.
+var ErrTrustChainExpired = errors.New("client: the authorization server's Trust Chain has expired: resolve it again with DiscoverViaFederation and build a new Client")
+
+// TrustChainExpiresAt is when the authorization server's Trust Chain
+// expires, for a Client NewFromDiscovery built from
+// DiscoverViaFederation's metadata (ok is false otherwise): from then
+// on, the methods ErrTrustChainExpired lists refuse to run.
+func (c *Client) TrustChainExpiresAt() (expiresAt time.Time, ok bool) {
+	return c.trustChainExpiresAt, !c.trustChainExpiresAt.IsZero()
+}
+
+// checkTrustChain returns ErrTrustChainExpired once the Trust Chain this
+// Client was built from has expired.
+func (c *Client) checkTrustChain() error {
+	if c.trustChainExpiresAt.IsZero() || c.deps.Clock.Now().Before(c.trustChainExpiresAt) {
+		return nil
+	}
+	return fmt.Errorf("%w (it expired at %s)", ErrTrustChainExpired, c.trustChainExpiresAt.UTC().Format(time.RFC3339))
 }

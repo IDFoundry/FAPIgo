@@ -59,6 +59,11 @@ func ParseTrustMark(token string) (TrustMark, error) {
 	if !jose.TypeIs(compact.Header.Type, trustMarkJWTType) {
 		return TrustMark{}, ErrTrustMarkWrongType
 	}
+	if compact.Header.KeyID == "" {
+		// OpenID Federation 1.0 §7: Trust Mark JWTs "MUST include the kid
+		// (Key ID) header parameter".
+		return TrustMark{}, ErrMissingKeyID
+	}
 	claims, err := parseTrustMarkClaims(compact.Payload)
 	if err != nil {
 		return TrustMark{}, err
@@ -66,7 +71,7 @@ func ParseTrustMark(token string) (TrustMark, error) {
 	return TrustMark{compact: compact, claims: claims}, nil
 }
 
-// KeyID returns the Trust Mark header's "kid", or "" if absent.
+// KeyID returns the Trust Mark header's "kid" — never empty, since parsing refuses a JWT without one.
 // Untrusted until Verify succeeds; use only to select which of the
 // issuer's published keys to verify against.
 func (tm TrustMark) KeyID() string { return tm.compact.Header.KeyID }
@@ -373,6 +378,11 @@ func ParseTrustMarkDelegation(token string) (TrustMarkDelegation, error) {
 	if !jose.TypeIs(compact.Header.Type, trustMarkDelegationJWTType) {
 		return TrustMarkDelegation{}, ErrTrustMarkDelegationWrongType
 	}
+	if compact.Header.KeyID == "" {
+		// OpenID Federation 1.0 §7.2.1: Trust Mark delegation JWTs "MUST include the kid
+		// (Key ID) header parameter".
+		return TrustMarkDelegation{}, ErrMissingKeyID
+	}
 	claims, err := parseTrustMarkDelegationClaims(compact.Payload)
 	if err != nil {
 		return TrustMarkDelegation{}, err
@@ -380,7 +390,7 @@ func ParseTrustMarkDelegation(token string) (TrustMarkDelegation, error) {
 	return TrustMarkDelegation{compact: compact, claims: claims}, nil
 }
 
-// KeyID returns the delegation header's "kid", or "" if absent.
+// KeyID returns the delegation header's "kid" — never empty, since parsing refuses a JWT without one.
 // Untrusted until Verify succeeds; use only to select which of the
 // owner's published keys to verify against.
 func (d TrustMarkDelegation) KeyID() string { return d.compact.Header.KeyID }

@@ -458,6 +458,311 @@ kind, one that checks its own `typ` and claims, rather than
 ```go
 payload, err := c.VerifyIssuerJWS(ctx, signedUserInfo) // typ absent or "JWT"
 ```
+### Entity Statements that OpenID Federation 1.0 §3.2 rejects are refused (federation)
+
+**Affects:** a federation resolver, automatic registration or RP
+discovery that fetches an Entity Configuration or Subordinate Statement
+carrying any of the following, and a federation entity that publishes
+one:
+
+- `aud` or `trust_anchor` (Explicit Registration claims, §3.2);
+- `trust_anchor_hints` in a Subordinate Statement, or as `[]`, or
+  listing something other than an https Entity Identifier (§3.1.2);
+- `authority_hints` as `[]` or listing a non-https value (§3.1.2);
+- `metadata_policy_crit` as `[]` (§3.1.3);
+- `metadata` whose Entity Type value isn't a JSON object, or with a
+  `null` parameter value (§5);
+- a `source_endpoint` that isn't an https URL (§3.2);
+- the same JSON member name twice anywhere in the payload (§6.1.2 for
+  `metadata_policy`; RFC 7519 §4 for the claims);
+- a `trust_chain` or `peer_trust_chain` JWS header (§4.3, §4.4).
+
+**Why:** §3.2 ends "If any of these validation steps fail, the Entity
+Statement MUST be rejected". These statements used to be accepted: a
+`null` Entity Type read as an empty object, and a duplicate
+`metadata_policy` member kept the last value, where another validator
+may keep the first and derive a different policy from the same signed
+statement.
+
+**What fails:** resolving any Trust Chain through such a statement,
+with an error wrapping the internal "malformed claims" (or "forbidden
+parameter" for the headers) error and naming the claim. A `null`
+metadata parameter, which a metadata policy used to treat as absent,
+now fails the chain instead of reading as left out.
+
+**What to change:** leave the member out instead of publishing `null`
+or `[]`, publish `source_endpoint` as the issuer's https fetch
+endpoint, and publish each claim once:
+
+```json
+{"metadata": {"openid_relying_party": {"client_name": "Example RP"}}}
+```
+
+rather than `{"client_name": "Example RP", "logo_uri": null}`.
+
+### Statement builders refuse claims OpenID Federation 1.0 forbids (federation, server)
+
+**Affects:** `federation.SelfIssuer.EntityConfiguration`,
+`federation.SubordinateIssuer.SubordinateStatement` and
+`server.Server.EntityConfiguration` called with any of:
+
+- `SelfIssueConfig.AuthorityHints` or
+  `SubordinateStatementParams.MetadataPolicyCritical` set to an empty,
+  non-nil slice (§3.1.2, §3.1.3);
+- metadata that is `null`, not a JSON object, or has a `null`
+  parameter (§5);
+- `openid_provider` metadata whose `issuer` isn't the Entity
+  Identifier (§5.1.3);
+- a Trust Mark that isn't a JWT, or whose own `trust_mark_type` isn't
+  the type it is listed under (§3.1.2);
+- a `MetadataPolicy` that `ValidatePolicy` refuses, such as `one_of`
+  with `subset_of` (§6.1.3);
+- `Constraints` with a negative `MaxPathLength` (§6.2.1) or
+  `federation_entity` in `AllowedEntityTypes` (§6.2.3);
+- a `SourceEndpoint` that isn't an https URL (§3.2).
+
+**Why:** these were signed and published as given, so a misconfigured
+Trust Anchor or Intermediate broke every Trust Chain through it, with
+the error surfacing at each consumer rather than at the issuer. A
+negative `max_path_length` was refused by this library's own resolver.
+
+**What fails:** the builder returns an error naming the claim, and no
+statement is signed.
+
+**What to change:** leave an optional claim out (nil, not empty), and
+publish only well-formed values. `Server.EntityConfiguration` now adds
+`"automatic"` to `client_registration_types_supported` itself when
+automatic registration is configured (§12.1), so it can be left out of
+the metadata you pass:
+
+```go
+cfg := federation.SelfIssueConfig{
+	EntityID:       "https://rp.example.org",
+	AuthorityHints: nil, // a Trust Anchor: no superiors, not []string{}
+	Lifetime:       24 * time.Hour,
+}
+```
+
+### A federation Entity ID must be the issuer (server) or the client_id (client)
+
+**Affects:** a `server.Config` whose `Federation.EntityID` isn't exactly
+`Issuer.String()`, and a `client.Config` whose `Federation.EntityID`
+isn't exactly `ClientID`, including a difference of a trailing slash.
+
+**Why:** OpenID Federation 1.0 §5.1.3 says the `openid_provider`
+`issuer` "MUST match the Federation Entity Identifier", and a
+federation RP addresses its request objects and client assertions to
+the OP's Entity Identifier (§12.1.1.1, §12.1.1.2), which the server
+compares with its issuer. §12.1 says "the RP employs its Entity
+Identifier as the Client ID", which is how the OP finds the RP's Entity
+Configuration. A mismatch used to fail only later, when a conformant
+peer's request was refused or the OP resolved the wrong entity.
+
+**What fails:** `server.New` or `client.New`, with an error naming
+`federation.entity_id` and the value it must equal.
+
+**What to change:** use one identifier for both:
+
+```go
+cfg.Issuer = issuer // https://op.example.org
+cfg.Federation.EntityID = issuer.String()
+```
+
+and on the client, `cfg.ClientID = fapi.ClientID(cfg.Federation.EntityID)`.
+
+### An automatically registered `tls_client_auth` RP's certificate must carry a key of its RP JWK Set (federation, server)
+
+**Affects:** a server with `Config.AutomaticRegistration` that
+registers Relying Parties for `tls_client_auth` or one of its
+`tls_client_auth_san_*` siblings (under `TrustedClientCAs`, or where
+`AllowedClientAuthMethods` names them), and a federation RP
+authenticating that way. A custom `storage.ClientRepository` setting
+`RegisteredClientConfig.CertificateKeyThumbprints` itself is affected
+the same way; one that doesn't is not.
+
+**Why:** OpenID Federation 1.0 §12.1.1.2 says an RP that doesn't sign a
+Request Object authenticates at PAR with a method "that proves
+possession of one of the RP's private keys", and "the corresponding
+public key MUST be in the Entity's RP JWK Set". A CA-issued certificate
+naming the RP's subject DN proves possession only of whatever key the
+CA certified, which the federation never vouched for. The requirement
+that the certificate chain to a trusted CA is kept; the key requirement
+is added to it. Automatic registration now records the keys of the RP
+JWK Set in `RegisteredClientConfig.CertificateKeyThumbprints`, and the
+server requires the client certificate to carry one of them, at every
+endpoint.
+
+**What fails:** authentication of such an RP whose certificate's key
+isn't in its RP JWK Set, with `invalid_client` (401) and the
+description "client certificate's public key is not one of the
+client's registered keys". An RP whose RP JWK Set has no usable key
+isn't registered for these methods at all.
+
+**What to change:** an RP publishes the public key of its client
+certificate in the `jwks` (or `jwks_uri`) of its `openid_relying_party`
+metadata, with the certificate in that key's `x5c` if it likes:
+
+```json
+{"jwks": {"keys": [{"kty": "EC", "crv": "P-256", "kid": "mtls", "x": "...", "y": "..."}]}}
+```
+
+`self_signed_tls_client_auth` now accepts the certificate of any key in
+the RP JWK Set, not only the first, which needs no change.
+
+### A Client built from `DiscoverViaFederation` stops at the Trust Chain's expiry (client)
+
+**Affects:** a `client.Client` built with `client.NewFromDiscovery`
+from `client.DiscoverViaFederation`'s metadata and kept running past
+the resolved Trust Chain's expiry (`DiscoveredMetadata.ResolvedEntity().ExpiresAt`,
+the earliest `exp` among the chain's statements).
+
+**Why:** OpenID Federation 1.0 §12.3 says an RP "MUST NOT use it past
+the expiration of the Trust Chain" and that "the trust in the OP MUST
+be successfully reevaluated before continuing"; §11 has every
+participant "support refreshing a Trust Chain when it expires". Such a
+Client went on sending users and tokens to an OP the federation might
+have dropped since, until the process restarted.
+
+**What fails:** `BeginAuthorization`, `BeginBackchannelAuthentication`,
+`RequestClientCredentialsToken` and `RefreshTokens`, with an error
+wrapping `client.ErrTrustChainExpired`. A flow already begun completes
+as before.
+
+**What to change:** resolve the chain again and build a new Client
+before it expires, for example on a timer from the new
+`Client.TrustChainExpiresAt`:
+
+```go
+expiresAt, _ := c.TrustChainExpiresAt()
+time.AfterFunc(time.Until(expiresAt)-time.Minute, func() {
+	md, err := client.DiscoverViaFederation(ctx, resolver, issuer)
+	// ... NewFromDiscovery(md, cfg, deps) and swap the Client in
+})
+```
+
+### Federation JWTs without a `kid` are refused (federation)
+
+**Affects:** a federation peer that signs a Trust Mark, Trust Mark
+delegation, Resolve Response, Trust Mark Status Response or historical
+keys JWT without a `kid` header, and a historical keys response whose
+entries lack `kid`, or a `revoked` object without `revoked_at`. This
+library's own builders always set them.
+
+**Why:** OpenID Federation 1.0 §7, §7.2.1, §8.3.2, §8.4.2 and §8.7.2
+each say the JWT "MUST include the kid (Key ID) header parameter", and
+§8.7.2 makes each historical key's `kid` and each revocation's
+`revoked_at` REQUIRED. A JWT without a `kid` was verified against every
+key of the issuer that matched its algorithm.
+
+**What fails:** `VerifyTrustMark`, `CheckTrustMarkStatus`,
+`ResolveViaEndpoint` and `FetchHistoricalKeys`, with an error naming
+the missing `kid`. A historical key entry missing `kid` or
+`revoked_at` is left out of `HistoricalKeysClaims.Keys`, as an entry
+without `exp` already was.
+
+**What to change:** nothing in code using this library. A peer
+publishing these JWTs puts its signing key's `kid` in each header:
+
+```json
+{"alg": "ES256", "typ": "trust-mark+jwt", "kid": "tm-signing-2026"}
+```
+
+### `CheckTrustMarkStatus` uses the issuer's own endpoint and refuses old answers (federation)
+
+**Affects:** `federation.Resolver.CheckTrustMarkStatus` against a Trust
+Mark Issuer that signs its status responses ahead of time and serves
+them for more than five minutes, or one whose status endpoint was set
+only by a superior's Subordinate Statement metadata. Also anything that
+parses `federation.WriteError`'s fallback body as plain text.
+
+**Why:** OpenID Federation 1.0 §8.4 says the status endpoint "MUST be
+published directly in Entity Configuration metadata and not in
+Subordinate Statements", but it was read from Resolved Metadata, so the
+issuer's immediate superior could redirect the queries. A status
+response carries no `exp` (§8.4.2), and only a future `iat` was
+refused, so an old signed "active" answer could be replayed after the
+Trust Mark was revoked. §8.9 makes `error_description` REQUIRED and
+says the body SHOULD be JSON; `WriteError` answered an unknown error
+with a text/plain body, and an `*Error` built with no description
+omitted the member.
+
+**What fails:** `CheckTrustMarkStatus` for a response whose `iat` is
+older than `Limits.MaxTrustMarkStatusAge` (default
+`DefaultMaxTrustMarkStatusAge`, five minutes), with an error wrapping
+the internal "too old" error, and for an issuer whose own Entity
+Configuration publishes no `federation_trust_mark_status_endpoint`.
+
+**What to change:** raise the bound if your federation's issuers cache
+their responses:
+
+```go
+cfg.Limits.MaxTrustMarkStatusAge = time.Hour
+```
+
+A Trust Mark Issuer publishes its status endpoint in its own Entity
+Configuration's `federation_entity` metadata. `WriteError` now always
+writes `{"error": ..., "error_description": ...}` as
+`application/json`; the new `ErrorCode` constants cover every §8.9
+code.
+
+### `attest_jwt_client_auth` can't be allowed for automatic registration (federation, server)
+
+**Affects:** a `federation.AutomaticRegistrationConfig` or
+`server.AutomaticRegistrationConfig` whose `AllowedClientAuthMethods`
+lists `storage.ClientAuthMethodAttestation`.
+
+**Why:** an attestation-authenticated client is bound to a trusted
+Attester (`RegisteredClientConfig.ExpectedAttesterIssuer`), a grant only
+an operator can make, so automatic registration has never been able to
+register one: an RP declaring the method failed to resolve whatever this
+list said. Listing it suggested otherwise.
+
+**What fails:** `federation.NewAutomaticClientRepository`, and so
+`server.New`, with an error naming `allowed_client_auth_methods`.
+
+**What to change:** drop the method from the list. Register clients
+that authenticate by attestation statically:
+
+```go
+cfg.AutomaticRegistration.AllowedClientAuthMethods = []storage.ClientAuthMethod{
+	storage.ClientAuthMethodPrivateKeyJWT,
+	storage.ClientAuthMethodSelfSignedTLSClientAuth,
+}
+```
+
+### A federation RP asking for a signing algorithm the OP doesn't use isn't registered (federation, server)
+
+**Affects:** automatic registration of a Relying Party whose resolved
+`openid_relying_party` metadata names an `id_token_signed_response_alg`
+other than the server's `Config.Algorithms.IDToken`, or a
+`userinfo_signed_response_alg` other than `Config.Algorithms.UserInfo`
+(or any, when that is zero). A `federation.AutomaticClientRepository`
+built directly, with the new `IDTokenSigningAlgorithm` and
+`UserInfoSigningAlgorithm` left zero, refuses every RP naming a
+`userinfo_signed_response_alg`, and doesn't check
+`id_token_signed_response_alg`.
+
+**Why:** OpenID Connect Core §10.1 has the ID token signed with the
+algorithm the RP registered, and `userinfo_signed_response_alg` asks
+for a signed UserInfo JWT. The server signs each with one algorithm for
+every client, and automatic registration ignored both parameters, so
+such an RP was registered and then got tokens it refuses.
+
+**What fails:** the RP's registration, as for any metadata the OP
+can't honour: the request is answered `invalid_client` and
+`OnResolutionFailure` receives an error naming the parameter.
+
+**What to change:** a federation RP names the OP's algorithms, or
+leaves the parameters out. An embedder building the repository itself
+passes the server's algorithms:
+
+```go
+federation.AutomaticRegistrationConfig{
+	// ...
+	IDTokenSigningAlgorithm:  srvCfg.Algorithms.IDToken,
+	UserInfoSigningAlgorithm: srvCfg.Algorithms.UserInfo,
+}
+```
 
 ## v0.64.0
 

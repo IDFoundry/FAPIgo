@@ -70,3 +70,44 @@ func TestThumbprintDiffersForDifferentCertificates(t *testing.T) {
 		t.Errorf("Thumbprint() collided for two distinct certificates")
 	}
 }
+
+// TestPublicKeyThumbprintMatchesCertificateKey checks a key hashes the
+// same on its own as inside a certificate, and differently from another
+// key.
+func TestPublicKeyThumbprintMatchesCertificateKey(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "k"}}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromKey, err := mtls.PublicKeyThumbprint(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromCert, err := mtls.PublicKeyThumbprint(cert.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+	if fromKey != fromCert || fromKey != base64.RawURLEncoding.EncodeToString(digest[:]) {
+		t.Errorf("PublicKeyThumbprint: key %q, certificate %q, want both the SPKI hash", fromKey, fromCert)
+	}
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if t2, _ := mtls.PublicKeyThumbprint(&other.PublicKey); t2 == fromKey {
+		t.Error("two keys have the same PublicKeyThumbprint")
+	}
+	if _, err := mtls.PublicKeyThumbprint("not a key"); err == nil {
+		t.Error("PublicKeyThumbprint(not a key) = nil error")
+	}
+}

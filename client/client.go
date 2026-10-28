@@ -23,6 +23,12 @@ type Client struct {
 	// challenge is the most recent attestation Challenge the
 	// authorization server provided (see ChallengeSource).
 	challenge *latestChallenge
+
+	// trustChainExpiresAt is when the authorization server's Trust
+	// Chain expires, for a Client NewFromDiscovery built from
+	// DiscoverViaFederation's metadata; zero otherwise. See
+	// checkTrustChain.
+	trustChainExpiresAt time.Time
 }
 
 // New validates cfg and deps and returns a Client. Construction fails
@@ -116,7 +122,14 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 	if discovered.AuthorizationResponseIssSupported {
 		cfg.AuthorizationResponseIssPolicy = RequireAuthorizationResponseIss
 	}
-	return New(cfg, deps)
+	c, err := New(cfg, deps)
+	if err != nil {
+		return nil, err
+	}
+	if resolved, ok := discovered.ResolvedEntity(); ok {
+		c.trustChainExpiresAt = resolved.ExpiresAt
+	}
+	return c, nil
 }
 
 // validateConfig checks cfg as a whole. Each thematic group of checks
@@ -525,6 +538,12 @@ func validateFederationConfig(cfg Config) error {
 	}
 	if err := federation.ValidEntityID(cfg.Federation.EntityID); err != nil {
 		return fmt.Errorf("client: config: federation.entity_id: %w", err)
+	}
+	// OpenID Federation 1.0 §12.1: under Automatic Registration "the RP
+	// employs its Entity Identifier as the Client ID", which is how the
+	// OP finds the RP's Entity Configuration.
+	if cfg.Federation.EntityID != string(cfg.ClientID) {
+		return fmt.Errorf("client: config: federation.entity_id %q must equal client_id %q (OpenID Federation 1.0 §12.1)", cfg.Federation.EntityID, cfg.ClientID)
 	}
 	if cfg.Federation.Lifetime <= 0 {
 		return fmt.Errorf("client: config: federation.lifetime must be positive when federation.entity_id is set")

@@ -16,11 +16,23 @@ import (
 )
 
 // matchesRegisteredThumbprint reports whether cert's RFC 8705 §3.1
-// x5t#S256 thumbprint equals a client's registered
-// ExpectedCertificateThumbprint (ClientAuthMethodSelfSignedTLSClientAuth,
+// x5t#S256 thumbprint equals one of a client's registered
+// ExpectedCertificateThumbprints (ClientAuthMethodSelfSignedTLSClientAuth,
 // RFC 8705 §2.2).
-func matchesRegisteredThumbprint(cert *x509.Certificate, expected string) bool {
-	return expected != "" && mtls.Thumbprint(cert) == expected
+func matchesRegisteredThumbprint(cert *x509.Certificate, expected []string) bool {
+	thumbprint := mtls.Thumbprint(cert)
+	return slices.ContainsFunc(expected, func(e string) bool { return e != "" && e == thumbprint })
+}
+
+// carriesRegisteredKey reports whether cert's public key is among a
+// client's registered CertificateKeyThumbprints, or the client
+// registered none (no restriction).
+func carriesRegisteredKey(cert *x509.Certificate, registered []string) bool {
+	if len(registered) == 0 {
+		return true
+	}
+	thumbprint, err := mtls.PublicKeyThumbprint(cert.PublicKey)
+	return err == nil && slices.Contains(registered, thumbprint)
 }
 
 // matchesRegisteredSubjectDN reports whether cert's subject equals a
@@ -190,7 +202,6 @@ func automaticClientAuthMethods(allowed []storage.ClientAuthMethod, trust Client
 		return []storage.ClientAuthMethod{
 			storage.ClientAuthMethodPrivateKeyJWT,
 			storage.ClientAuthMethodSelfSignedTLSClientAuth,
-			storage.ClientAuthMethodAttestation,
 		}, nil
 	}
 	if _, noPKI := trust.(NoPKIClientAuthentication); !noPKI {
@@ -266,20 +277,20 @@ func (s *Server) verifyClientCertificate(ctx context.Context, client storage.Reg
 func (s *Server) verifyClientCertificateFor(ctx context.Context, method storage.ClientAuthMethod, client storage.RegisteredClient, peerCert *x509.Certificate) (*Error, bool) {
 	switch method {
 	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
-		if !matchesRegisteredThumbprint(peerCert, client.ExpectedCertificateThumbprint()) {
+		if !matchesRegisteredThumbprint(peerCert, client.ExpectedCertificateThumbprints()) {
 			return newError(ErrorInvalidClient, 401, "client certificate does not match the registered thumbprint", nil), true
 		}
 		return nil, true
 	case storage.ClientAuthMethodTLSClientAuth:
-		return s.verifyChainedFieldMatch(ctx, peerCert, matchesRegisteredSubjectDN(peerCert, client.ExpectedSubjectDN())), true
+		return s.verifyChainedFieldMatch(ctx, client, peerCert, matchesRegisteredSubjectDN(peerCert, client.ExpectedSubjectDN())), true
 	case storage.ClientAuthMethodTLSClientAuthSANDNS:
-		return s.verifyChainedFieldMatch(ctx, peerCert, matchesRegisteredSANDNS(peerCert, client.ExpectedSANDNS())), true
+		return s.verifyChainedFieldMatch(ctx, client, peerCert, matchesRegisteredSANDNS(peerCert, client.ExpectedSANDNS())), true
 	case storage.ClientAuthMethodTLSClientAuthSANURI:
-		return s.verifyChainedFieldMatch(ctx, peerCert, matchesRegisteredSANURI(peerCert, client.ExpectedSANURI())), true
+		return s.verifyChainedFieldMatch(ctx, client, peerCert, matchesRegisteredSANURI(peerCert, client.ExpectedSANURI())), true
 	case storage.ClientAuthMethodTLSClientAuthSANIP:
-		return s.verifyChainedFieldMatch(ctx, peerCert, matchesRegisteredSANIP(peerCert, client.ExpectedSANIP())), true
+		return s.verifyChainedFieldMatch(ctx, client, peerCert, matchesRegisteredSANIP(peerCert, client.ExpectedSANIP())), true
 	case storage.ClientAuthMethodTLSClientAuthSANEmail:
-		return s.verifyChainedFieldMatch(ctx, peerCert, matchesRegisteredSANEmail(peerCert, client.ExpectedSANEmail())), true
+		return s.verifyChainedFieldMatch(ctx, client, peerCert, matchesRegisteredSANEmail(peerCert, client.ExpectedSANEmail())), true
 	default:
 		return nil, false
 	}
@@ -289,13 +300,19 @@ func (s *Server) verifyClientCertificateFor(ctx context.Context, method storage.
 // verifyClientCertificate's 6 ClientAuthMethod cases have: check
 // Dependencies.ClientCertificateTrust (see checkChainsToRoot's own doc
 // comment), then fieldMatched, the case's own already-computed
-// registered-field comparison.
-func (s *Server) verifyChainedFieldMatch(ctx context.Context, peerCert *x509.Certificate, fieldMatched bool) *Error {
+// registered-field comparison, then that the certificate carries one of
+// client's CertificateKeyThumbprints when it registered any (an
+// automatically registered federation RP: OpenID Federation 1.0
+// §12.1.1.2 requires its authenticating key to be in its RP JWK Set).
+func (s *Server) verifyChainedFieldMatch(ctx context.Context, client storage.RegisteredClient, peerCert *x509.Certificate, fieldMatched bool) *Error {
 	if chainErr := s.checkChainsToRoot(ctx, peerCert); chainErr != nil {
 		return chainErr
 	}
 	if !fieldMatched {
 		return newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)
+	}
+	if !carriesRegisteredKey(peerCert, client.CertificateKeyThumbprints()) {
+		return newError(ErrorInvalidClient, 401, "client certificate's public key is not one of the client's registered keys", nil)
 	}
 	return nil
 }

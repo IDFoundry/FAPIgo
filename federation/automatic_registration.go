@@ -142,7 +142,10 @@ type AutomaticRegistrationConfig struct {
 	// operator wants federation RPs held to a narrower set than its
 	// statically registered clients (e.g. only
 	// storage.ClientAuthMethodPrivateKeyJWT, even though some static
-	// clients use mTLS). Every entry must be a valid ClientAuthMethod.
+	// clients use mTLS). Every entry must be a valid ClientAuthMethod
+	// other than storage.ClientAuthMethodAttestation, which binds a
+	// client to an attester only an operator can name, so automatic
+	// registration never registers it.
 	// server.New narrows an empty list to leave out tls_client_auth and
 	// its SAN* siblings unless its ClientCertificateTrust verifies
 	// certificate chains (see server.AutomaticRegistrationConfig).
@@ -160,6 +163,23 @@ type AutomaticRegistrationConfig struct {
 	// token_endpoint_auth_signing_alg (one_of or value) restricts these
 	// defaults too, as it does token_endpoint_auth_signing_alg_values_supported.
 	ClientAssertionAlgorithms []fapi.SignatureAlgorithm
+
+	// IDTokenSigningAlgorithm is the one algorithm the server signs ID
+	// tokens with (server.New sets it from Config.Algorithms.IDToken). An
+	// RP whose metadata names an id_token_signed_response_alg other than
+	// it isn't registered: OpenID Connect Core §10.1 has the ID token
+	// signed with the algorithm the RP registered, and the RP would
+	// otherwise get, and refuse, tokens signed with another. Zero, for a
+	// server issuing no ID tokens, leaves the parameter unchecked.
+	IDTokenSigningAlgorithm fapi.SignatureAlgorithm
+
+	// UserInfoSigningAlgorithm is the one algorithm the server signs
+	// UserInfo responses with (server.New sets it from
+	// Config.Algorithms.UserInfo), zero when it signs none. An RP whose
+	// metadata names a userinfo_signed_response_alg other than it, or
+	// any when it is zero, isn't registered, for the reason
+	// IDTokenSigningAlgorithm gives.
+	UserInfoSigningAlgorithm fapi.SignatureAlgorithm
 
 	// SubjectTypes is the kinds of sub this OP gives an automatically
 	// registered client's end users (OpenID Connect Core §8): the
@@ -299,13 +319,20 @@ func newRememberedFailure(err error) error {
 // method the RP's metadata supports is registered, and the server
 // accepts whichever it uses (see declaredClientAuthMethods) —
 // including every RFC 8705 mTLS method: ClientAuthMethodSelfSignedTLSClientAuth
-// reads the RP's own certificate from the "x5c" member of a jwks/jwks_uri
-// entry (RFC 8705 §2.2) and computes its expected thumbprint from it;
-// ClientAuthMethodTLSClientAuth and its four SAN-typed siblings read
-// their own plain-string metadata parameter directly (RFC 8705 §2.1.2:
-// tls_client_auth_subject_dn/tls_client_auth_san_dns/_san_uri/_san_ip/
-// _san_email) — see registeredClientConfigFromMetadata — unless
-// AutomaticRegistrationConfig.AllowedClientAuthMethods narrows that set. PAR/JAR-level
+// reads the RP's own certificates from the "x5c" members of its
+// jwks/jwks_uri entries (RFC 8705 §2.2) and accepts the certificate of
+// any of them; ClientAuthMethodTLSClientAuth and its four SAN-typed
+// siblings read their own plain-string metadata parameter directly (RFC
+// 8705 §2.1.2: tls_client_auth_subject_dn/tls_client_auth_san_dns/
+// _san_uri/_san_ip/_san_email) — see registeredClientConfigFromMetadata
+// — unless AutomaticRegistrationConfig.AllowedClientAuthMethods narrows
+// that set. A CA-issued certificate must also carry one of the keys of
+// the RP's JWK Set (storage.RegisteredClientConfig.CertificateKeyThumbprints):
+// OpenID Federation 1.0 §12.1.1.2 requires an RP to prove possession of
+// a key in its RP JWK Set, and a matching subject or SAN under a trusted
+// CA proves possession only of whatever key that CA certified. The PKI
+// requirement itself stays: the certificate must still chain to
+// Dependencies.ClientCertificateTrust. PAR/JAR-level
 // enforcement of OpenID Federation 1.0 §12.1.1's own
 // aud/sub/jti Request Object rules is a request-handling concern, not a
 // client registration one — see storage.RegisteredClientConfig's own
@@ -375,10 +402,8 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	if cfg.FailureCacheAge == 0 {
 		cfg.FailureCacheAge = DefaultFailureCacheAge
 	}
-	for _, method := range cfg.AllowedClientAuthMethods {
-		if !method.IsValid() {
-			return nil, fmt.Errorf("federation: config: allowed_client_auth_methods: invalid client auth method %v", method)
-		}
+	if err := validateAllowedClientAuthMethods(cfg.AllowedClientAuthMethods); err != nil {
+		return nil, err
 	}
 	for _, alg := range cfg.ClientAssertionAlgorithms {
 		if !alg.IsValid() {
@@ -729,6 +754,8 @@ type relyingPartyMetadata struct {
 	JWKS                                       json.RawMessage `json:"jwks"`
 	JWKSURI                                    string          `json:"jwks_uri"`
 	TLSClientCertificateBoundAccessTokens      bool            `json:"tls_client_certificate_bound_access_tokens"`
+	IDTokenSignedResponseAlg                   string          `json:"id_token_signed_response_alg"`
+	UserinfoSignedResponseAlg                  string          `json:"userinfo_signed_response_alg"`
 	IDTokenEncryptedResponseAlg                *string         `json:"id_token_encrypted_response_alg"`
 	IDTokenEncryptedResponseEnc                *string         `json:"id_token_encrypted_response_enc"`
 	UserinfoEncryptedResponseAlg               *string         `json:"userinfo_encrypted_response_alg"`
@@ -805,6 +832,10 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 	}
 	if (len(m.JWKS) > 0) == (m.JWKSURI != "") {
 		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("%s metadata must declare exactly one of jwks or jwks_uri", relyingPartyEntityType)
+	}
+
+	if err := a.checkSignedResponseAlgorithms(m); err != nil {
+		return storage.RegisteredClientConfig{}, nil, err
 	}
 
 	declared, err := a.declaredClientAuthMethods(m, limits.authMethods)
@@ -924,11 +955,43 @@ func applyClientAuthMethodFields(cfg *storage.RegisteredClientConfig, authMethod
 		}
 		cfg.ClientAssertionAlgorithm, cfg.ClientAssertionAlgorithms = algs[0], algs
 	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
-		thumbprint, err := certificateThumbprintFromJWKS(jwks)
+		thumbprints, err := certificateThumbprintsFromJWKS(jwks)
 		if err != nil {
 			return fmt.Errorf("self_signed_tls_client_auth: %w", err)
 		}
-		cfg.ExpectedCertificateThumbprint = thumbprint
+		cfg.ExpectedCertificateThumbprint, cfg.AdditionalCertificateThumbprints = thumbprints[0], thumbprints[1:]
+	default:
+		if err := applyPKIClientAuthFields(cfg, authMethod, m); err != nil {
+			return err
+		}
+		return requireKeyPossession(cfg, authMethod, jwks)
+	}
+	return nil
+}
+
+// requireKeyPossession sets cfg.CertificateKeyThumbprints to the keys
+// of the RP JWK Set, for a CA-issued certificate method (tls_client_auth
+// and its SAN siblings). OpenID Federation 1.0 §12.1.1.2 has an RP that
+// doesn't sign a Request Object authenticate at PAR with a method "that
+// proves possession of one of the RP's private keys", and "the
+// corresponding public key MUST be in the Entity's RP JWK Set": a
+// certificate matching the registered subject or SAN alone proves
+// possession of a key the federation never vouched for. The server
+// therefore requires the certificate to carry one of these keys as well,
+// at every endpoint, whether or not a Request Object is sent.
+func requireKeyPossession(cfg *storage.RegisteredClientConfig, authMethod storage.ClientAuthMethod, jwks json.RawMessage) error {
+	thumbprints, err := keyThumbprintsFromJWKS(jwks)
+	if err != nil {
+		return fmt.Errorf("%s: %w", authMethod, err)
+	}
+	cfg.CertificateKeyThumbprints = thumbprints
+	return nil
+}
+
+// applyPKIClientAuthFields sets the subject or SAN field a CA-issued
+// certificate method authenticates by.
+func applyPKIClientAuthFields(cfg *storage.RegisteredClientConfig, authMethod storage.ClientAuthMethod, m relyingPartyMetadata) error {
+	switch authMethod {
 	case storage.ClientAuthMethodTLSClientAuth:
 		if m.TLSClientAuthSubjectDN == "" {
 			return fmt.Errorf("tls_client_auth_subject_dn is required for tls_client_auth")
@@ -960,6 +1023,48 @@ func applyClientAuthMethodFields(cfg *storage.RegisteredClientConfig, authMethod
 		// same defensive-completeness reason a switch over a closed enum
 		// gets one elsewhere in this module.
 		return fmt.Errorf("token_endpoint_auth_method %q is not supported", m.TokenEndpointAuthMethod)
+	}
+	return nil
+}
+
+// validateAllowedClientAuthMethods checks every
+// AutomaticRegistrationConfig.AllowedClientAuthMethods entry is a valid
+// method automatic registration can register.
+func validateAllowedClientAuthMethods(methods []storage.ClientAuthMethod) error {
+	for _, method := range methods {
+		if !method.IsValid() {
+			return fmt.Errorf("federation: config: allowed_client_auth_methods: invalid client auth method %v", method)
+		}
+		if method == storage.ClientAuthMethodAttestation {
+			// A client authenticated by attestation is bound to a trusted
+			// Attester (RegisteredClientConfig.ExpectedAttesterIssuer), a
+			// capability grant no RP metadata can make, so no RP could
+			// ever register with it.
+			return fmt.Errorf("federation: config: allowed_client_auth_methods: %v can't be registered automatically: its attester is an operator's grant, not RP metadata", method)
+		}
+	}
+	return nil
+}
+
+// checkSignedResponseAlgorithms refuses an RP asking for its ID tokens
+// or UserInfo responses to be signed with an algorithm the server won't
+// use: the server signs each with one algorithm for every client, and
+// registering the RP anyway would drop its choice silently (OpenID
+// Connect Core §10.1: the ID token is signed "using the algorithm
+// specified" at registration; Dynamic Client Registration 1.0 §2:
+// userinfo_signed_response_alg makes the response a signed JWT).
+func (a *AutomaticClientRepository) checkSignedResponseAlgorithms(m relyingPartyMetadata) error {
+	if m.IDTokenSignedResponseAlg != "" && a.cfg.IDTokenSigningAlgorithm.IsValid() && m.IDTokenSignedResponseAlg != a.cfg.IDTokenSigningAlgorithm.String() {
+		return fmt.Errorf("id_token_signed_response_alg %q is not %s, the only algorithm this OP signs ID tokens with", m.IDTokenSignedResponseAlg, a.cfg.IDTokenSigningAlgorithm)
+	}
+	if m.UserinfoSignedResponseAlg == "" {
+		return nil
+	}
+	if !a.cfg.UserInfoSigningAlgorithm.IsValid() {
+		return fmt.Errorf("userinfo_signed_response_alg %q is requested, but this OP doesn't sign UserInfo responses", m.UserinfoSignedResponseAlg)
+	}
+	if m.UserinfoSignedResponseAlg != a.cfg.UserInfoSigningAlgorithm.String() {
+		return fmt.Errorf("userinfo_signed_response_alg %q is not %s, the only algorithm this OP signs UserInfo responses with", m.UserinfoSignedResponseAlg, a.cfg.UserInfoSigningAlgorithm)
 	}
 	return nil
 }
@@ -1284,31 +1389,58 @@ func parseEncryptionAlgorithmPair(algValue, encValue *string, algLabel, encLabel
 	return alg, enc, nil
 }
 
-// certificateThumbprintFromJWKS extracts and computes the RFC 8705 §3.1
-// x5t#S256 thumbprint of the first "x5c"-bearing entry found across
-// jwks' own keys (RFC 8705 §2.2: "the existing jwks_uri or jwks
-// metadata parameters... are used to convey the client's certificates
-// via JWK... A certificate is represented with the x5c parameter").
-// AutomaticClientRepository only ever registers one mTLS-authenticating
-// identity per client, so the first usable entry is sufficient — unlike
-// resource-server-side signature verification, there's no second
-// candidate to try if this one doesn't work; a client publishing more
-// than one is expected to put its authenticating certificate first.
-func certificateThumbprintFromJWKS(jwks json.RawMessage) (string, error) {
+// certificateThumbprintsFromJWKS computes the RFC 8705 §3.1 x5t#S256
+// thumbprint of every key's own certificate in jwks — the first entry
+// of each key's "x5c", which RFC 7517 §4.7 says contains the key (RFC
+// 8705 §2.2: "the existing jwks_uri or jwks metadata parameters... are
+// used to convey the client's certificates via JWK... A certificate is
+// represented with the x5c parameter"). Every one is registered, so an
+// RP may authenticate with the certificate of any key in its RP JWK Set
+// (OpenID Federation 1.0 §12.1.1.2: "an x5c Claim for a key in the
+// Entity's RP JWK Set"), the second one during a key rollover, say.
+func certificateThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
 	candidates, err := jose.ParseJWKSet(jwks)
 	if err != nil {
-		return "", fmt.Errorf("parse jwks: %w", err)
+		return nil, fmt.Errorf("parse jwks: %w", err)
 	}
+	var thumbprints []string
 	for _, c := range candidates {
-		for _, der := range c.Certificates {
-			cert, err := x509.ParseCertificate(der)
-			if err != nil {
-				continue
-			}
-			return mtls.Thumbprint(cert), nil
+		if len(c.Certificates) == 0 {
+			continue
+		}
+		cert, err := x509.ParseCertificate(c.Certificates[0])
+		if err != nil {
+			continue
+		}
+		if t := mtls.Thumbprint(cert); !slices.Contains(thumbprints, t) {
+			thumbprints = append(thumbprints, t)
 		}
 	}
-	return "", fmt.Errorf("jwks has no usable x5c certificate")
+	if len(thumbprints) == 0 {
+		return nil, fmt.Errorf("jwks has no usable x5c certificate")
+	}
+	return thumbprints, nil
+}
+
+// keyThumbprintsFromJWKS is internal/mtls.PublicKeyThumbprint of every
+// key in jwks, the keys a CA-issued certificate must carry one of.
+func keyThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
+	candidates, err := jose.ParseJWKSet(jwks)
+	if err != nil {
+		return nil, fmt.Errorf("parse jwks: %w", err)
+	}
+	var thumbprints []string
+	for _, c := range candidates {
+		t, err := mtls.PublicKeyThumbprint(c.PublicKey)
+		if err != nil || slices.Contains(thumbprints, t) {
+			continue
+		}
+		thumbprints = append(thumbprints, t)
+	}
+	if len(thumbprints) == 0 {
+		return nil, fmt.Errorf("the RP JWK Set has no usable key for the certificate to carry (OpenID Federation 1.0 §12.1.1.2)")
+	}
+	return thumbprints, nil
 }
 
 // applyDisplayAndSubjectType sets cfg's Display and SubjectType from m:

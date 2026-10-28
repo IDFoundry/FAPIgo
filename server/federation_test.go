@@ -20,7 +20,7 @@ func federationConfiguredConfig(t *testing.T) server.Config {
 	t.Helper()
 	cfg := validConfig(t)
 	cfg.Federation = server.FederationConfig{
-		EntityID: "https://as.example.org", Lifetime: time.Hour, Algorithm: fapi.ES256,
+		EntityID: testIssuer, Lifetime: time.Hour, Algorithm: fapi.ES256,
 	}
 	return cfg
 }
@@ -70,7 +70,7 @@ func TestServerEntityConfiguration(t *testing.T) {
 	}
 
 	metadata := map[string]json.RawMessage{
-		"openid_provider": json.RawMessage(`{"issuer":"https://as.example.org"}`),
+		"openid_provider": json.RawMessage(`{"issuer":"` + testIssuer + `"}`),
 	}
 	token, err := srv.EntityConfiguration(context.Background(), metadata)
 	if err != nil {
@@ -81,7 +81,7 @@ func TestServerEntityConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("intfed.Parse: %v", err)
 	}
-	if stmt.ClaimedIssuer() != "https://as.example.org" || stmt.ClaimedSubject() != "https://as.example.org" {
+	if stmt.ClaimedIssuer() != testIssuer || stmt.ClaimedSubject() != testIssuer {
 		t.Errorf("iss/sub = %q/%q, want both equal to the configured entity ID", stmt.ClaimedIssuer(), stmt.ClaimedSubject())
 	}
 	if got := stmt.ClaimedAuthorityHints(); len(got) != 1 || got[0] != "https://ta.example.org" {
@@ -96,7 +96,7 @@ func TestServerEntityConfiguration(t *testing.T) {
 		t.Fatalf("ParseJWKSet returned %d keys, want 1", len(candidates))
 	}
 	claims, err := stmt.Verify(candidates[0].PublicKey, intfed.VerifyPolicy{
-		ExpectedIssuer: "https://as.example.org", ExpectedSubject: "https://as.example.org",
+		ExpectedIssuer: testIssuer, ExpectedSubject: testIssuer,
 		Algorithm: fapi.ES256, Now: time.Now(), MaxLifetime: 2 * time.Hour,
 	})
 	if err != nil {
@@ -109,7 +109,7 @@ func TestServerEntityConfiguration(t *testing.T) {
 	var opMeta struct {
 		Issuer string `json:"issuer"`
 	}
-	if err := json.Unmarshal(op, &opMeta); err != nil || opMeta.Issuer != "https://as.example.org" {
+	if err := json.Unmarshal(op, &opMeta); err != nil || opMeta.Issuer != testIssuer {
 		t.Errorf("openid_provider = %s, want issuer to pass through", op)
 	}
 }
@@ -172,9 +172,17 @@ func TestServerEntityConfigurationPublishesTrustMarks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	mark := federation.RawTrustMark{TrustMarkType: "https://federation.example.org/marks/loa-high", TrustMark: "a.b.c"}
+	markJWT, err := intfed.CreateTrustMark(intfed.CreateTrustMarkParams{
+		Signer: generateKey(t), Algorithm: fapi.ES256, KeyID: "tmi",
+		Issuer: "https://tmi.example.org", Subject: testIssuer,
+		TrustMarkType: "https://federation.example.org/marks/loa-high", Now: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("CreateTrustMark: %v", err)
+	}
+	mark := federation.RawTrustMark{TrustMarkType: "https://federation.example.org/marks/loa-high", TrustMark: markJWT}
 	token, err := srv.EntityConfiguration(context.Background(), map[string]json.RawMessage{
-		"openid_provider": json.RawMessage(`{"issuer":"https://as.example.org"}`),
+		"openid_provider": json.RawMessage(`{"issuer":"` + testIssuer + `"}`),
 	}, mark)
 	if err != nil {
 		t.Fatalf("EntityConfiguration: %v", err)
@@ -184,7 +192,7 @@ func TestServerEntityConfigurationPublishesTrustMarks(t *testing.T) {
 		t.Fatalf("intfed.Parse: %v", err)
 	}
 	claims, err := stmt.Verify(&key.PublicKey, intfed.VerifyPolicy{
-		ExpectedIssuer: "https://as.example.org", ExpectedSubject: "https://as.example.org",
+		ExpectedIssuer: testIssuer, ExpectedSubject: testIssuer,
 		Algorithm: fapi.ES256, Now: time.Now(), MaxLifetime: 2 * time.Hour,
 	})
 	if err != nil {

@@ -96,6 +96,8 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 			AllowedClientAuthMethods:     automaticAuthMethods,
 			OnResolutionFailure:          cfg.AutomaticRegistration.OnResolutionFailure,
 			ClientAssertionAlgorithms:    cfg.Algorithms.ClientAssertion,
+			IDTokenSigningAlgorithm:      automaticIDTokenAlgorithm(cfg),
+			UserInfoSigningAlgorithm:     cfg.Algorithms.UserInfo,
 			SubjectTypes:                 automaticSubjectTypes,
 			DefaultSubjectType:           automaticDefaultSubjectType,
 		}, deps.Clock)
@@ -560,6 +562,14 @@ func validateFederationConfig(cfg Config) error {
 	if err := federation.ValidEntityID(cfg.Federation.EntityID); err != nil {
 		return fmt.Errorf("server: config: federation.entity_id: %w", err)
 	}
+	// OpenID Federation 1.0 §5.1.3: "The issuer parameter value in the
+	// openid_provider metadata MUST match the Federation Entity
+	// Identifier". A federation RP also addresses its request objects
+	// and client assertions to the OP's Entity Identifier (§12.1.1.1,
+	// §12.1.1.2), which this server checks against Issuer.
+	if cfg.Federation.EntityID != cfg.Issuer.String() {
+		return fmt.Errorf("server: config: federation.entity_id %q must equal issuer %q (OpenID Federation 1.0 §5.1.3)", cfg.Federation.EntityID, cfg.Issuer.String())
+	}
 	if cfg.Federation.Lifetime <= 0 {
 		return fmt.Errorf("server: config: federation.lifetime must be positive when federation.entity_id is set")
 	}
@@ -887,4 +897,14 @@ func declinedRevocation(revocation RevocationSink) bool {
 		return true
 	}
 	return false
+}
+
+// automaticIDTokenAlgorithm is the algorithm automatic registration
+// holds a Relying Party's id_token_signed_response_alg to: the one this
+// server signs ID tokens with, or zero (unchecked) when it issues none.
+func automaticIDTokenAlgorithm(cfg Config) fapi.SignatureAlgorithm {
+	if cfg.OAuthOnly {
+		return 0
+	}
+	return cfg.Algorithms.IDToken
 }

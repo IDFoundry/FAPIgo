@@ -74,6 +74,11 @@ func ParseResolveResponse(token string) (ResolveResponse, error) {
 	if !jose.TypeIs(compact.Header.Type, resolveResponseJWTType) {
 		return ResolveResponse{}, ErrResolveResponseWrongType
 	}
+	if compact.Header.KeyID == "" {
+		// OpenID Federation 1.0 §8.3.2: Resolve Response JWTs "MUST include the kid
+		// (Key ID) header parameter".
+		return ResolveResponse{}, ErrMissingKeyID
+	}
 	claims, err := parseResolveResponseClaims(compact.Payload)
 	if err != nil {
 		return ResolveResponse{}, err
@@ -81,7 +86,7 @@ func ParseResolveResponse(token string) (ResolveResponse, error) {
 	return ResolveResponse{compact: compact, claims: claims}, nil
 }
 
-// KeyID returns the response header's "kid", or "" if absent. Untrusted
+// KeyID returns the response header's "kid" — never empty, since parsing refuses a JWT without one. Untrusted
 // until Verify succeeds; use only to select which of the issuer's
 // published keys to verify against.
 func (r ResolveResponse) KeyID() string { return r.compact.Header.KeyID }

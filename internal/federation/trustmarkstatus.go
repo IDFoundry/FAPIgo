@@ -8,6 +8,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 )
 
 // trustMarkStatusResponseJWTType is the JWS "typ" header value every
@@ -66,6 +67,11 @@ func ParseTrustMarkStatusResponse(token string) (TrustMarkStatusResponse, error)
 	if !jose.TypeIs(compact.Header.Type, trustMarkStatusResponseJWTType) {
 		return TrustMarkStatusResponse{}, ErrTrustMarkStatusResponseWrongType
 	}
+	if compact.Header.KeyID == "" {
+		// OpenID Federation 1.0 §8.4.2: Trust Mark Status Response JWTs "MUST include the kid
+		// (Key ID) header parameter".
+		return TrustMarkStatusResponse{}, ErrMissingKeyID
+	}
 	claims, err := parseTrustMarkStatusResponseClaims(compact.Payload)
 	if err != nil {
 		return TrustMarkStatusResponse{}, err
@@ -73,7 +79,7 @@ func ParseTrustMarkStatusResponse(token string) (TrustMarkStatusResponse, error)
 	return TrustMarkStatusResponse{compact: compact, claims: claims}, nil
 }
 
-// KeyID returns the response header's "kid", or "" if absent.
+// KeyID returns the response header's "kid" — never empty, since parsing refuses a JWT without one.
 // Untrusted until Verify succeeds; use only to select which of the
 // issuer's published keys to verify against.
 func (r TrustMarkStatusResponse) KeyID() string { return r.compact.Header.KeyID }
@@ -121,9 +127,15 @@ type TrustMarkStatusResponseVerifyPolicy struct {
 	// with its own validity window.
 	Now time.Time
 
-	// MaxClockSkew bounds how far in the future an iat claim may be.
-	// Zero means no tolerance.
+	// MaxClockSkew bounds how far in the future an iat claim may be,
+	// and extends MaxAge. Zero means no tolerance.
 	MaxClockSkew time.Duration
+
+	// MaxAge bounds how long before Now the response's iat may be. The
+	// response has no exp (OpenID Federation 1.0 §8.4.2), so without a
+	// bound an old "active" answer stays valid after the Trust Mark is
+	// revoked. Required.
+	MaxAge time.Duration
 }
 
 // Verify checks r's signature against pub and its claims against
@@ -137,6 +149,9 @@ func (r TrustMarkStatusResponse) Verify(pub crypto.PublicKey, policy TrustMarkSt
 	}
 	if policy.Now.IsZero() {
 		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: Now is zero")
+	}
+	if policy.MaxAge <= 0 {
+		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: MaxAge must be positive")
 	}
 
 	if err := r.compact.Verify(pub, policy.Algorithm); err != nil {
@@ -152,6 +167,9 @@ func (r TrustMarkStatusResponse) Verify(pub crypto.PublicKey, policy TrustMarkSt
 	}
 	if policy.Now.Before(c.IssuedAt.Add(-policy.MaxClockSkew)) {
 		return TrustMarkStatusResponseClaims{}, ErrTrustMarkStatusResponseNotYetValid
+	}
+	if policy.Now.After(c.IssuedAt.Add(timeutil.SaturatingAdd(policy.MaxAge, policy.MaxClockSkew))) {
+		return TrustMarkStatusResponseClaims{}, ErrTrustMarkStatusResponseTooOld
 	}
 
 	return c, nil

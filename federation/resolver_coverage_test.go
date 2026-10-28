@@ -54,7 +54,7 @@ func setupLeafWithSuperior(t *testing.T, now time.Time, metadataFn func(supID st
 	if metadataFn != nil {
 		metadata = metadataFn(supID)
 	}
-	supConfig, err := intfed.Create(intfed.CreateParams{
+	supConfig, err := intfed.CreateUncheckedForTesting(intfed.CreateParams{
 		Signer: supKey, Algorithm: fapi.ES256, KeyID: "sup",
 		Issuer: supID, Subject: supID, Now: now, Lifetime: time.Hour, JWKS: jwksFor(t, "sup", supKey),
 		Metadata: metadata,

@@ -175,10 +175,34 @@ func validateClaimMixing(p CreateParams) error {
 	return nil
 }
 
-// Create builds and signs an Entity Statement for p.
+// Create builds and signs an Entity Statement for p. It refuses to sign
+// a statement Parse would refuse, and content OpenID Federation 1.0
+// forbids that a consumer would act on: a metadata_policy
+// ValidatePolicy refuses, federation_entity in allowed_entity_types, a
+// Trust Mark listed under a type other than its own, and
+// openid_provider metadata whose issuer isn't the Entity Identifier.
 func Create(p CreateParams) (string, error) {
+	return create(p, true)
+}
+
+// CreateUncheckedForTesting is Create without the checks on the
+// statement's content (validateStatementContent and the Parse round
+// trip): only the signer, identifiers, lifetime, keys and claim
+// placement are checked. It exists so tests can build the statements a
+// non-conformant issuer would publish, to check how a consumer handles
+// them; nothing else calls it.
+func CreateUncheckedForTesting(p CreateParams) (string, error) {
+	return create(p, false)
+}
+
+func create(p CreateParams, checked bool) (string, error) {
 	if err := validateCreateParams(p); err != nil {
 		return "", err
+	}
+	if checked {
+		if err := validateStatementContent(p); err != nil {
+			return "", err
+		}
 	}
 
 	claims := map[string]any{
@@ -214,6 +238,11 @@ func Create(p CreateParams) (string, error) {
 	}
 	if p.TrustMarkIssuers != nil {
 		claims["trust_mark_issuers"] = trustMarkIssuersWireValue(p.TrustMarkIssuers)
+	}
+	if checked {
+		if err := checkRoundTrip(claims); err != nil {
+			return "", err
+		}
 	}
 
 	return signClaims(p.Signer, p.Algorithm, p.KeyID, jwtType, claims)

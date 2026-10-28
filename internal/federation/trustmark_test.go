@@ -138,7 +138,7 @@ func TestParseTrustMarkRejectsMissingRequiredClaims(t *testing.T) {
 
 func TestParseTrustMarkRejectsNonJSONPayload(t *testing.T) {
 	key := generateKey(t)
-	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: trustMarkJWTType}, []byte("not json"))
+	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: trustMarkJWTType, KeyID: "k"}, []byte("not json"))
 	if err != nil {
 		t.Fatalf("jose.Sign: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestParseTrustMarkDelegationRejectsMalformedCompact(t *testing.T) {
 
 func TestParseTrustMarkDelegationRejectsNonJSONPayload(t *testing.T) {
 	key := generateKey(t)
-	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: trustMarkDelegationJWTType}, []byte("not json"))
+	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: trustMarkDelegationJWTType, KeyID: "k"}, []byte("not json"))
 	if err != nil {
 		t.Fatalf("jose.Sign: %v", err)
 	}

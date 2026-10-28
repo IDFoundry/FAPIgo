@@ -26,6 +26,9 @@ import (
 func federationConfiguredConfig(t *testing.T) client.Config {
 	t.Helper()
 	cfg := validConfig(t)
+	// OpenID Federation 1.0 §12.1: the RP's Entity Identifier is its
+	// client_id.
+	cfg.ClientID = "https://rp.example.org"
 	cfg.Federation = client.FederationConfig{
 		EntityID:  "https://rp.example.org",
 		Lifetime:  time.Hour,
@@ -204,22 +207,20 @@ func selfAnchoredOpenIDProvider(t *testing.T, buildMetadata func(entityID string
 	t.Cleanup(ts.Close)
 	entityID = ts.URL
 
-	issuer, err := federation.NewSelfIssuer(federation.SelfIssueConfig{
-		EntityID: entityID, Lifetime: time.Hour,
-	}, federation.SelfIssueDependencies{
-		Signer: key, Algorithm: fapi.ES256, KeyID: "as-federation-key",
-		JWKS: jwks, Clock: federation.SystemClock{},
-	})
-	if err != nil {
-		t.Fatalf("NewSelfIssuer: %v", err)
-	}
 	var metadata map[string]json.RawMessage
 	if buildMetadata != nil {
 		metadata = buildMetadata(entityID)
 	}
-	token, err := issuer.EntityConfiguration(metadata)
+	// Unchecked, so a test can publish metadata a conformant issuer
+	// wouldn't (an openid_provider issuer that isn't the Entity ID) and
+	// check the client still refuses it.
+	token, err := intfed.CreateUncheckedForTesting(intfed.CreateParams{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "as-federation-key",
+		Issuer: entityID, Subject: entityID, Now: time.Now(), Lifetime: time.Hour,
+		JWKS: jwks, Metadata: metadata,
+	})
 	if err != nil {
-		t.Fatalf("EntityConfiguration: %v", err)
+		t.Fatalf("intfed.CreateUncheckedForTesting: %v", err)
 	}
 	mux.HandleFunc(federation.WellKnownPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", federation.EntityStatementContentType)
@@ -412,5 +413,17 @@ func TestDiscoverViaFederationRejectsUnusableEndpoint(t *testing.T) {
 	})
 	if _, err := client.DiscoverViaFederation(context.Background(), resolver, entityID); err == nil {
 		t.Fatal("DiscoverViaFederation(http token_endpoint) = nil error, want error")
+	}
+}
+
+// TestNewRejectsFederationEntityIDNotClientID covers OpenID Federation
+// 1.0 §12.1, "the RP employs its Entity Identifier as the Client ID": a
+// configuration where they differ is refused, since the OP would
+// resolve a different entity from the client_id.
+func TestNewRejectsFederationEntityIDNotClientID(t *testing.T) {
+	cfg := federationConfiguredConfig(t)
+	cfg.ClientID = "https://rp.example.org/"
+	if _, err := client.New(cfg, federationConfiguredDependencies(t)); err == nil || !strings.Contains(err.Error(), "must equal client_id") {
+		t.Fatalf("New(entity ID %q, client_id %q) = %v, want it refused", cfg.Federation.EntityID, cfg.ClientID, err)
 	}
 }

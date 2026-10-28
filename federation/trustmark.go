@@ -64,11 +64,8 @@ func (r *Resolver) VerifyTrustMark(ctx context.Context, subject ResolvedEntity, 
 	if err != nil {
 		return TrustMarkClaims{}, fmt.Errorf("federation: parse trust mark: %w", err)
 	}
-	// OpenID Federation 1.0 §7: a Trust Mark MUST carry the kid of its
-	// signing key.
-	if tm.KeyID() == "" {
-		return TrustMarkClaims{}, fmt.Errorf("federation: trust mark has no kid header")
-	}
+	// intfed.ParseTrustMark refuses a Trust Mark without the kid of its
+	// signing key (OpenID Federation 1.0 §7).
 
 	// Resolved through subject's Trust Anchor alone, so the issuer's
 	// chain, and the accreditation read below, are that federation's.
@@ -173,7 +170,9 @@ func (r *Resolver) checkTrustMarkDelegation(trustAnchor ResolvedEntity, tm intfe
 }
 
 // verifyAgainstCandidateKeys resolves jwksRaw's own keys matching
-// algorithm (and kid, if non-empty), calling verify with each
+// algorithm and kid — never empty, since the parser of each of these
+// token types refuses one without (OpenID Federation 1.0 §7, §7.2.1, §8.3.2,
+// §8.4.2, §8.7.2) — calling verify with each
 // candidate's public key until one succeeds. Shared by every "parsed
 // token type + its own Verify(pub, policy) signature" this file checks
 // against a resolved JWKS (TrustMark, TrustMarkDelegation,
@@ -193,7 +192,7 @@ func verifyAgainstCandidateKeys[C any](jwksRaw json.RawMessage, kid string, algo
 		if c.Algorithm != algorithm {
 			continue
 		}
-		if kid != "" && c.KeyID != kid {
+		if c.KeyID != kid {
 			continue
 		}
 		tried = true
@@ -242,7 +241,13 @@ func (r *Resolver) verifyTrustMarkDelegationAgainstJWKS(d intfed.TrustMarkDelega
 // that issuer is resolved as a fresh Trust Chain (the same way
 // VerifyTrustMark already establishes trust in a Trust Mark's issuer)
 // before its published federation_trust_mark_status_endpoint is ever
-// queried or its response ever trusted.
+// queried or its response ever trusted. That endpoint is read from the
+// issuer's own Entity Configuration, which §8.4 says it "MUST be
+// published directly in", never from metadata a superior sets. A
+// response issued more than Limits.MaxTrustMarkStatusAge before the
+// Resolver's clock (DefaultMaxTrustMarkStatusAge when unset) is
+// refused: the response carries no exp, and an old "active" answer
+// replayed after revocation would otherwise stay valid forever.
 //
 // A Trust Mark Issuer that answers with HTTP 404 for an unknown Trust
 // Mark (§8.4.2's own "MUST respond with an HTTP status code 404") surfaces here as
@@ -262,7 +267,11 @@ func (r *Resolver) CheckTrustMarkStatus(ctx context.Context, trustMarkToken stri
 	if err != nil {
 		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: resolve trust mark issuer %q: %w", tm.ClaimedIssuer(), err)
 	}
-	issuerMeta, err := parseEntityMetadata(issuer.Metadata)
+	// §8.4: the status endpoint "MUST be published directly in Entity
+	// Configuration metadata and not in Subordinate Statements", so it
+	// is read from the issuer's own Entity Configuration, never from
+	// Resolved Metadata a superior's metadata or policy could set.
+	issuerMeta, err := parseEntityMetadata(issuer.configurationMetadata)
 	if err != nil {
 		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark issuer's own federation_entity metadata: %w", err)
 	}
@@ -291,6 +300,7 @@ func (r *Resolver) CheckTrustMarkStatus(ctx context.Context, trustMarkToken stri
 		return response.Verify(pub, intfed.TrustMarkStatusResponseVerifyPolicy{
 			ExpectedIssuer: tm.ClaimedIssuer(), ExpectedTrustMark: trustMarkToken,
 			Algorithm: response.Algorithm(), Now: r.deps.Clock.Now(), MaxClockSkew: r.cfg.Limits.MaxClockSkew,
+			MaxAge: r.maxTrustMarkStatusAge(),
 		})
 	})
 	if err != nil {

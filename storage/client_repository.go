@@ -194,26 +194,28 @@ const (
 // through NewRegisteredClient — a caller cannot return arbitrary
 // discovery or registration JSON in its place.
 type RegisteredClient struct {
-	id                            fapi.ClientID
-	redirectURIs                  []fapi.RegisteredRedirectURI
-	applicationType               ApplicationType
-	clientAssertionAlgorithm      fapi.SignatureAlgorithm
-	clientAssertionAlgorithms     []fapi.SignatureAlgorithm
-	requestObjectAlgorithm        fapi.SignatureAlgorithm
-	senderConstrain               SenderConstrain
-	clientAuthMethod              ClientAuthMethod
-	clientAuthMethods             []ClientAuthMethod
-	expectedCertificateThumbprint string
-	expectedSubjectDN             string
-	expectedSANDNS                string
-	expectedSANURI                string
-	expectedSANIP                 string
-	expectedSANEmail              string
-	expectedAttesterIssuer        string
-	clientAttestationAlgorithm    fapi.SignatureAlgorithm
-	allowedScopes                 map[string]struct{}
-	authorizationDetailsTypes     map[string]struct{}
-	allowedResources              map[string]struct{}
+	id                               fapi.ClientID
+	redirectURIs                     []fapi.RegisteredRedirectURI
+	applicationType                  ApplicationType
+	clientAssertionAlgorithm         fapi.SignatureAlgorithm
+	clientAssertionAlgorithms        []fapi.SignatureAlgorithm
+	requestObjectAlgorithm           fapi.SignatureAlgorithm
+	senderConstrain                  SenderConstrain
+	clientAuthMethod                 ClientAuthMethod
+	clientAuthMethods                []ClientAuthMethod
+	expectedCertificateThumbprint    string
+	additionalCertificateThumbprints []string
+	certificateKeyThumbprints        []string
+	expectedSubjectDN                string
+	expectedSANDNS                   string
+	expectedSANURI                   string
+	expectedSANIP                    string
+	expectedSANEmail                 string
+	expectedAttesterIssuer           string
+	clientAttestationAlgorithm       fapi.SignatureAlgorithm
+	allowedScopes                    map[string]struct{}
+	authorizationDetailsTypes        map[string]struct{}
+	allowedResources                 map[string]struct{}
 
 	idTokenEncryptionKeyManagement     fapi.KeyManagementAlgorithm
 	idTokenEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
@@ -292,6 +294,25 @@ type RegisteredClientConfig struct {
 	// produces) this client's TLS certificate must match. Required only
 	// when ClientAuthMethod is ClientAuthMethodSelfSignedTLSClientAuth.
 	ExpectedCertificateThumbprint string
+
+	// AdditionalCertificateThumbprints are further x5t#S256 values, in
+	// ExpectedCertificateThumbprint's shape, any one of which this
+	// client's self-signed certificate may match instead: every
+	// certificate a client publishes while it rolls its keys over, say.
+	// Optional; ExpectedCertificateThumbprint is still required.
+	AdditionalCertificateThumbprints []string
+
+	// CertificateKeyThumbprints, when set, further restricts the
+	// CA-issued certificate methods (ClientAuthMethodTLSClientAuth and
+	// its SAN siblings): besides matching the registered subject or SAN
+	// and chaining to a trusted CA, the certificate must carry one of
+	// these public keys, each the base64url SHA-256 of a DER
+	// SubjectPublicKeyInfo (internal/mtls.PublicKeyThumbprint's shape).
+	// federation.AutomaticClientRepository sets it to the keys of a
+	// Relying Party's JWK Set, since OpenID Federation 1.0 §12.1.1.2
+	// requires the key an automatically registered RP authenticates with
+	// to be one of them. Optional.
+	CertificateKeyThumbprints []string
 
 	// ExpectedSubjectDN is the exact string this client's certificate's
 	// subject must match. Either of two forms matches:
@@ -665,6 +686,8 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		clientAuthMethod:                          methods[0],
 		clientAuthMethods:                         methods,
 		expectedCertificateThumbprint:             cfg.ExpectedCertificateThumbprint,
+		additionalCertificateThumbprints:          slices.Clone(cfg.AdditionalCertificateThumbprints),
+		certificateKeyThumbprints:                 slices.Clone(cfg.CertificateKeyThumbprints),
 		expectedSubjectDN:                         cfg.ExpectedSubjectDN,
 		expectedSANDNS:                            cfg.ExpectedSANDNS,
 		expectedSANURI:                            cfg.ExpectedSANURI,
@@ -1084,6 +1107,27 @@ func (c RegisteredClient) AllowsClientAuthMethod(method ClientAuthMethod) bool {
 // ClientAuthMethodSelfSignedTLSClientAuth.
 func (c RegisteredClient) ExpectedCertificateThumbprint() string {
 	return c.expectedCertificateThumbprint
+}
+
+// ExpectedCertificateThumbprints returns every x5t#S256 value this
+// client's TLS certificate may match under
+// ClientAuthMethodSelfSignedTLSClientAuth:
+// ExpectedCertificateThumbprint, then
+// RegisteredClientConfig.AdditionalCertificateThumbprints. Empty for a
+// client with no self-signed certificate registered.
+func (c RegisteredClient) ExpectedCertificateThumbprints() []string {
+	if c.expectedCertificateThumbprint == "" {
+		return nil
+	}
+	return append([]string{c.expectedCertificateThumbprint}, c.additionalCertificateThumbprints...)
+}
+
+// CertificateKeyThumbprints returns the public keys a CA-issued client
+// certificate must carry one of — see
+// RegisteredClientConfig.CertificateKeyThumbprints. Empty means no such
+// restriction.
+func (c RegisteredClient) CertificateKeyThumbprints() []string {
+	return slices.Clone(c.certificateKeyThumbprints)
 }
 
 // ExpectedSubjectDN returns the subject DN this client's TLS

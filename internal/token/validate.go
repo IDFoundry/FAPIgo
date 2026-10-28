@@ -66,6 +66,18 @@ func (t AccessToken) Algorithm() fapi.SignatureAlgorithm { return t.compact.Head
 // key-lookup hint only.
 func (t AccessToken) ClaimedIssuer() string { return t.claims.Issuer }
 
+// SignedClaims verifies t's signature with pub under algorithm — and
+// nothing else: not its issuer, audience or lifetime — and returns its
+// claims. It's for an authorization server recognising a token it signed
+// itself (token revocation answering unsupported_token_type for one of
+// its own access tokens), never for authorizing a request: use Validate.
+func (t AccessToken) SignedClaims(pub crypto.PublicKey, algorithm fapi.SignatureAlgorithm) (AccessTokenClaims, error) {
+	if err := t.compact.Verify(pub, algorithm); err != nil {
+		return AccessTokenClaims{}, fmt.Errorf("token: %w", err)
+	}
+	return t.claims, nil
+}
+
 // AccessTokenValidatePolicy is the set of checks Validate enforces
 // against an AccessToken.
 type AccessTokenValidatePolicy struct {

@@ -992,12 +992,14 @@ your resource servers read, every access token issued from the same
 authorization code. The `TokenRevocationResult`
 `RevokeToken` returns names that grant when a client ends it, so you can
 delete anything you kept for it at once; it's for you only, and the
-response stays the same empty 200. Access tokens can't be revoked: one
-in JWT form, or a token sent with `token_type_hint=access_token` that
-isn't one of the client's refresh tokens, gets `unsupported_token_type`
-(an opaque access token sent without a hint is answered like any other
-unknown token, with the same empty 200). They expire on their own, and
-`RevokeGrant` ends them early.
+response stays the same empty 200. Access tokens can't be revoked: a
+live access token the server issued to the client, JWT or opaque, gets
+`unsupported_token_type` (RFC 7009 §2.2.1). Anything else that isn't
+one of the client's refresh tokens — a JWT-shaped string the server
+didn't sign, or a token sent with `token_type_hint=access_token` that's
+no token of the client's — is an invalid token, answered with the same
+empty 200 (§2.2). Access tokens expire on their own, and `RevokeGrant`
+ends them early.
 
 **Reading an ID token hint elsewhere.** For a flow outside this package
 that takes an `id_token_hint`, such as an RP-Initiated Logout endpoint,

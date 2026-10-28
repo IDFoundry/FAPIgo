@@ -161,11 +161,12 @@ func TestRevokeTokenRefusals(t *testing.T) {
 		want   server.ErrorCode
 	}{
 		"no token": {func() error { return owner.revoke() }, server.ErrorInvalidRequest},
-		"access token hint": {func() error {
-			return owner.revoke(formParam("token", "opaque"), formParam("token_type_hint", "access_token"))
-		}, server.ErrorUnsupportedTokenType},
-		"access token in JWT form": {func() error {
-			return owner.revoke(formParam("token", "eyJhbGciOiJFUzI1NiJ9.e30.c2ln"))
+		"own access token": {func() error {
+			tokens, err := owner.refresh(owner.issueRefreshToken())
+			if err != nil {
+				t.Fatalf("refresh: %v", err)
+			}
+			return owner.revoke(formParam("token", tokens.AccessToken.Reveal()))
 		}, server.ErrorUnsupportedTokenType},
 		"repeated token": {func() error {
 			return owner.revoke(formParam("token", "a"), formParam("token", "b"))
@@ -471,9 +472,9 @@ func TestRevokeTokenWithoutARevocationReader(t *testing.T) {
 
 // TestRevokeTokenSearchesPastTheHint covers RFC 7009 §2.1's "the hint
 // is only a hint": a refresh token sent with token_type_hint
-// access_token is still revoked, while a token that isn't one is
-// answered unsupported_token_type, as the access token it was said to
-// be.
+// access_token is still revoked, while a token that is neither a refresh
+// token nor an access token is an invalid token, answered 200 (§2.2: the
+// hint "does not influence the revocation response").
 func TestRevokeTokenSearchesPastTheHint(t *testing.T) {
 	attesterKey := generateKey(t)
 	h := newRevocationHarness(t, attesterKey)
@@ -487,7 +488,37 @@ func TestRevokeTokenSearchesPastTheHint(t *testing.T) {
 	if _, err := owner.refresh(refreshToken); serverErrorCode(t, err) != server.ErrorInvalidGrant {
 		t.Fatalf("refresh after revocation: %v, want invalid_grant", err)
 	}
-	if code := serverErrorCode(t, owner.revoke(formParam("token", "opaque-access-token"), formParam("token_type_hint", "access_token"))); code != server.ErrorUnsupportedTokenType {
-		t.Fatalf("revoking an unknown token hinted as an access token = code %q, want unsupported_token_type", code)
+	if err := owner.revoke(formParam("token", "opaque-access-token"), formParam("token_type_hint", "access_token")); err != nil {
+		t.Fatalf("revoking an unknown token hinted as an access token = %v, want 200", err)
+	}
+}
+
+// RFC 7009 §2.2: "The authorization server responds with HTTP status
+// code 200 if ... the client submitted an invalid token";
+// unsupported_token_type (§2.2.1) is for a real access token. A token
+// in JWT form this server didn't sign for the client, or another
+// client's access token, is invalid to this client.
+func TestRevokeTokenAnswersInvalidTokensWith200(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newRevocationHarness(t, attesterKey)
+	owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	tokens, err := owner.refresh(owner.issueRefreshToken())
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	accessToken := tokens.AccessToken.Reveal()
+	tampered := accessToken[:len(accessToken)-4] + "AAAA"
+	for name, params := range map[string][]server.FormParameter{
+		"garbage with dots":     {formParam("token", "garbage.with.dots")},
+		"unsigned JWT shape":    {formParam("token", "eyJhbGciOiJFUzI1NiJ9.e30.c2ln")},
+		"tampered access token": {formParam("token", tampered)},
+		"hinted garbage":        {formParam("token", "no-such-token"), formParam("token_type_hint", "access_token")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result, err := owner.revokeResult(params...)
+			if err != nil || result.Revoked {
+				t.Fatalf("RevokeToken = %+v, %v; want 200 with nothing revoked", result, err)
+			}
+		})
 	}
 }

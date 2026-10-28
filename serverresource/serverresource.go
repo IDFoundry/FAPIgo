@@ -69,7 +69,7 @@ type Options struct {
 	// (RFC 9449 §9); nil leaves them disabled. It must not be the
 	// server's own Dependencies.Nonces: nonce stores are keyed by nonce
 	// value alone, so a shared store would let a nonce issued by one
-	// role be consumed by the other. The verifier draws nonces from the
+	// role be accepted by the other. The verifier draws nonces from the
 	// server's Dependencies.Random.
 	Nonces storage.NonceStore
 

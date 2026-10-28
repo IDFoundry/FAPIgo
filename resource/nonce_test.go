@@ -208,7 +208,7 @@ func TestVerifyChallengesExpiredNonce(t *testing.T) {
 	}
 }
 
-func TestVerifyAcceptsValidNonceAndIssuesNext(t *testing.T) {
+func TestVerifyAcceptsValidNonceRepeatedly(t *testing.T) {
 	first := newNonceFixture(t, "", nil)
 
 	// First call: challenged, but the issued nonce is now valid for the
@@ -228,23 +228,21 @@ func TestVerifyAcceptsValidNonceAndIssuesNext(t *testing.T) {
 		t.Fatalf("Verify(valid nonce): %v", err)
 	}
 	if authz.NextDPoPNonce == "" {
-		t.Fatalf("NextDPoPNonce is empty, want a freshly issued nonce")
-	}
-	if authz.NextDPoPNonce == issued {
-		t.Fatalf("NextDPoPNonce = %q, want different from the just-consumed nonce %q", authz.NextDPoPNonce, issued)
+		t.Fatalf("NextDPoPNonce is empty, want the nonce to use next")
 	}
 
-	// The consumed nonce is single-use: a third request presenting it
-	// again must fail even though it was validly issued once.
-	reused := newNonceFixture(t, issued, first.nonces)
-	if _, err := reused.verify(t); err == nil {
-		t.Fatalf("Verify(reused nonce) = nil error, want error")
+	// A nonce is valid for its lifetime, not for one use (RFC 9449
+	// §8.2): a third request, with its own proof and jti, presenting
+	// the same nonce is accepted too.
+	again := newNonceFixture(t, issued, first.nonces)
+	if _, err := again.verify(t); err != nil {
+		t.Fatalf("Verify(same nonce again) = %v, want accepted", err)
 	}
 }
 
-// TestInsufficientScopeCarriesNextNonce: Verify consumed the request's
-// nonce, so a 403 for a token that doesn't cover the request must still
-// hand the client the next one, or its next request is challenged.
+// TestInsufficientScopeCarriesNextNonce: a 403 for a token that doesn't
+// cover the request must still hand the client the nonce to use next,
+// or its next request is challenged once the current one is replaced.
 func TestInsufficientScopeCarriesNextNonce(t *testing.T) {
 	first := newNonceFixture(t, "", nil)
 	_, err := first.verify(t)
@@ -273,7 +271,7 @@ func TestInsufficientScopeCarriesNextNonce(t *testing.T) {
 
 // TestIssueDPoPNonce: a nonce IssueDPoPNonce hands out ahead of a
 // request (as an OpenID4VCI Nonce Response does) is accepted by Verify,
-// once; a Verifier without Dependencies.Nonces has none to give.
+// for as many requests as present it; a Verifier without Dependencies.Nonces has none to give.
 func TestIssueDPoPNonce(t *testing.T) {
 	ctx := context.Background()
 	first := newNonceFixture(t, "", nil)
@@ -284,8 +282,8 @@ func TestIssueDPoPNonce(t *testing.T) {
 	if _, err := newNonceFixture(t, issued, first.nonces).verify(t); err != nil {
 		t.Fatalf("Verify(issued nonce) = %v, want accepted", err)
 	}
-	if _, err := newNonceFixture(t, issued, first.nonces).verify(t); err == nil {
-		t.Fatal("Verify(issued nonce again) = nil error, want it refused as spent")
+	if _, err := newNonceFixture(t, issued, first.nonces).verify(t); err != nil {
+		t.Fatalf("Verify(issued nonce again) = %v, want accepted until it expires", err)
 	}
 
 	if nonce, err := newFixture(t).verifier.IssueDPoPNonce(ctx); nonce != "" || err != nil {

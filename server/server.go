@@ -10,6 +10,7 @@ import (
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/internal/depcheck"
+	"github.com/idfoundry/fapigo/internal/dpopnonce"
 )
 
 // Server is a FAPI 2.0 authorization-server engine. It is entirely
@@ -17,6 +18,10 @@ import (
 type Server struct {
 	cfg  Config
 	deps Dependencies
+
+	// nonces holds the DPoP nonce this server currently hands out, when
+	// deps.Nonces is set.
+	nonces dpopnonce.Rotator
 }
 
 // New validates cfg and deps and returns a Server. Construction fails
@@ -870,7 +875,7 @@ func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) []e
 			checkNotifierAssurance(deps.BackchannelNotifier))
 	}
 	if deps.Nonces != nil {
-		errs = append(errs, checkStoreAssurance("nonces", deps.Nonces, true, scaled))
+		errs = append(errs, checkStoreAssurance("nonces", deps.Nonces, false, scaled))
 	}
 	return errs
 }

@@ -1396,7 +1396,7 @@ accounts := accountsOf(user)
 ```
 
 Call `authCtx.SetDPoPNonce(w.Header())` on the response, so a client's
-next call already carries a fresh DPoP nonce when you've enabled them. A
+next call already carries a current DPoP nonce when you've enabled them. A
 UserInfo endpoint hosted with the authorization server builds its
 response with `serverresource.UserInfoClaims(ctx, authCtx,
 identityClaims)`: only the claims the client requested and the user

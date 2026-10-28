@@ -38,7 +38,7 @@ func (failingNonceStore) Issue(context.Context, storage.NonceIssuance) error {
 	return errors.New("nonce store unavailable")
 }
 
-func (failingNonceStore) Consume(context.Context, storage.NonceConsumption) (storage.NonceRecord, error) {
+func (failingNonceStore) Lookup(context.Context, storage.NonceLookup) (storage.NonceRecord, error) {
 	return storage.NonceRecord{}, errors.New("nonce store unavailable")
 }
 

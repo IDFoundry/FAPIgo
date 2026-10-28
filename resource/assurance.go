@@ -40,10 +40,12 @@ const (
 	//     Audience must be set: a resource server "MUST refuse" a token
 	//     issued for another (RFC 9700 §2.3), and without Audience it
 	//     can't tell. JWTAccessTokens always requires one.
-	//   - Dependencies.Replay, and Dependencies.Nonces when set, must
-	//     implement storage.StoreAssurance and declare Durable and
-	//     AtomicConsume: a DPoP proof or nonce used twice is only
-	//     refused if the store records each use atomically and keeps it.
+	//   - Dependencies.Replay must implement storage.StoreAssurance and
+	//     declare Durable and AtomicConsume: a DPoP proof used twice is
+	//     only refused if the store records each use atomically and keeps
+	//     it. Dependencies.Nonces, when set, must implement it and declare
+	//     Durable; a nonce is looked up, never consumed, so it has no
+	//     atomicity to declare.
 	//   - Dependencies.Revocation must implement storage.StoreAssurance
 	//     and declare Durable, or be NoRevocationUntilExpiry with a
 	//     MaxTokenLifetime of at most 15 minutes. NoRevocation is refused:
@@ -164,7 +166,7 @@ func validateAssurance(cfg Config, deps Dependencies) error {
 	errs = append(errs, checkClock(deps.Clock, cfg.Limits.MaxClockSkew))
 	errs = append(errs, checkStoreAssurance("replay", deps.Replay, true, scaled))
 	if deps.Nonces != nil {
-		errs = append(errs, checkStoreAssurance("nonces", deps.Nonces, true, scaled), checkRandom(deps.Random))
+		errs = append(errs, checkStoreAssurance("nonces", deps.Nonces, false, scaled), checkRandom(deps.Random))
 	}
 	errs = append(errs, checkProductionRevocation(deps.Revocation, scaled))
 	if deps.PairwiseSubjects != nil {

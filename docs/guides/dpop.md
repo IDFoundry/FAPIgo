@@ -54,7 +54,12 @@ are the ones RFC 9449 §4.3 lists, plus the ones that are easy to miss:
 
 DPoP nonces ([RFC 9449] §8) are optional: set `Dependencies.Nonces` and
 `Limits.DPoPNonceLifetime`, and the server challenges a proof without a
-current nonce and issues a fresh one with every response.
+current nonce and sends its current nonce with every response. A nonce
+is valid until it expires, for any number of proofs, so concurrent
+requests from one client all succeed (the `jti` check is what refuses a
+replayed proof); the server switches to a new nonce once half the
+lifetime has passed, and the previous one keeps working until it
+expires.
 
 ## Resource server: one call
 

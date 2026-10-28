@@ -274,11 +274,11 @@ func TestDPoPStoreUnavailable(t *testing.T) {
 	})
 }
 
-// failingNonceStore issues nonces but fails every Consume with err.
+// failingNonceStore issues nonces but fails every Lookup with err.
 type failingNonceStore struct{ err error }
 
 func (failingNonceStore) Issue(context.Context, storage.NonceIssuance) error { return nil }
 
-func (s failingNonceStore) Consume(context.Context, storage.NonceConsumption) (storage.NonceRecord, error) {
+func (s failingNonceStore) Lookup(context.Context, storage.NonceLookup) (storage.NonceRecord, error) {
 	return storage.NonceRecord{}, s.err
 }

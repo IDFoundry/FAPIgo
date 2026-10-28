@@ -175,9 +175,11 @@ type PushAuthorizationResult struct {
 	RequestURI RequestURI
 	ExpiresIn  time.Duration
 
-	// NextDPoPNonce is a freshly issued DPoP nonce the caller should set
-	// as this response's own DPoP-Nonce header, so a subsequent PAR or
-	// token request already carries a valid one — issued unconditionally
+	// NextDPoPNonce is the DPoP nonce this server currently hands out
+	// (replaced before half its lifetime has passed), which the caller
+	// should set as this response's own DPoP-Nonce header, so a
+	// subsequent PAR or token request already carries a valid one — set
+	// unconditionally
 	// once Dependencies.Nonces is configured, regardless of whether this
 	// particular PAR call itself presented a DPoP proof, so a client can
 	// pick one up as early as PAR. Always "" when Dependencies.Nonces is

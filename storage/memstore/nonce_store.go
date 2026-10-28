@@ -28,16 +28,15 @@ func (s *NonceStore) Issue(_ context.Context, issuance storage.NonceIssuance) er
 	return nil
 }
 
-// Consume implements storage.NonceStore. Deleting the map entry on
-// every call — whether or not it was present — is what makes this
-// single-use: a second Consume of the same nonce always finds nothing.
-func (s *NonceStore) Consume(_ context.Context, consumption storage.NonceConsumption) (storage.NonceRecord, error) {
+// Lookup implements storage.NonceStore. It never removes the record: a
+// nonce stays valid, for any number of requests, until the caller finds
+// it expired.
+func (s *NonceStore) Lookup(_ context.Context, lookup storage.NonceLookup) (storage.NonceRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record, ok := s.issued[consumption.Nonce]
-	delete(s.issued, consumption.Nonce)
+	record, ok := s.issued[lookup.Nonce]
 	if !ok {
-		return storage.NonceRecord{}, fmt.Errorf("memstore: unknown or already-consumed nonce")
+		return storage.NonceRecord{}, fmt.Errorf("memstore: unknown nonce")
 	}
 	return record, nil
 }

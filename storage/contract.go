@@ -745,68 +745,67 @@ func testSessionStoreConcurrentConsumeHasExactlyOneWinner(t *testing.T, factory 
 }
 
 // TestNonceStoreContract exercises factory()'s behavior against the
-// guarantees NonceStore's documentation promises: an issued nonce is
-// atomically single-use, an unknown nonce is rejected, and concurrent
-// consumption of the same nonce has exactly one winner. factory must
-// return a fresh, empty NonceStore each call.
+// guarantees NonceStore's documentation promises: an issued nonce's
+// expiry round-trips, it can be looked up any number of times, including
+// concurrently, and an unknown nonce is rejected. factory must return a
+// fresh, empty NonceStore each call.
 func TestNonceStoreContract(t *testing.T, factory func() NonceStore) {
 	t.Helper()
 
-	t.Run("IssueThenConsumeRoundTripsExpiry", func(t *testing.T) { testNonceStoreIssueThenConsumeRoundTripsExpiry(t, factory) })
-	t.Run("ConsumeIsSingleUse", func(t *testing.T) { testNonceStoreConsumeIsSingleUse(t, factory) })
-	t.Run("ConsumeUnknownNonceFails", func(t *testing.T) { testNonceStoreConsumeUnknownNonceFails(t, factory) })
-	t.Run("ConcurrentConsumeHasExactlyOneWinner", func(t *testing.T) { testNonceStoreConcurrentConsumeHasExactlyOneWinner(t, factory) })
+	t.Run("IssueThenLookupRoundTripsExpiry", func(t *testing.T) { testNonceStoreIssueThenLookupRoundTripsExpiry(t, factory) })
+	t.Run("LookupIsRepeatable", func(t *testing.T) { testNonceStoreLookupIsRepeatable(t, factory) })
+	t.Run("LookupUnknownNonceFails", func(t *testing.T) { testNonceStoreLookupUnknownNonceFails(t, factory) })
+	t.Run("ConcurrentLookupsAllSucceed", func(t *testing.T) { testNonceStoreConcurrentLookupsAllSucceed(t, factory) })
 }
 
-func testNonceStoreIssueThenConsumeRoundTripsExpiry(t *testing.T, factory func() NonceStore) {
+func testNonceStoreIssueThenLookupRoundTripsExpiry(t *testing.T, factory func() NonceStore) {
 	store := factory()
 	ctx := context.Background()
 	expiresAt := time.Now().Add(time.Minute).Truncate(time.Second)
 	if err := store.Issue(ctx, NonceIssuance{Nonce: "nonce-1", ExpiresAt: expiresAt}); err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	got, err := store.Consume(ctx, NonceConsumption{Nonce: "nonce-1"})
+	got, err := store.Lookup(ctx, NonceLookup{Nonce: "nonce-1"})
 	if err != nil {
-		t.Fatalf("Consume: %v", err)
+		t.Fatalf("Lookup: %v", err)
 	}
 	if !got.ExpiresAt.Equal(expiresAt) {
-		t.Fatalf("Consume returned ExpiresAt %v, want %v", got.ExpiresAt, expiresAt)
+		t.Fatalf("Lookup returned ExpiresAt %v, want %v", got.ExpiresAt, expiresAt)
 	}
 }
 
-func testNonceStoreConsumeIsSingleUse(t *testing.T, factory func() NonceStore) {
+func testNonceStoreLookupIsRepeatable(t *testing.T, factory func() NonceStore) {
 	store := factory()
 	ctx := context.Background()
 	if err := store.Issue(ctx, NonceIssuance{Nonce: "nonce-2", ExpiresAt: time.Now().Add(time.Minute)}); err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if _, err := store.Consume(ctx, NonceConsumption{Nonce: "nonce-2"}); err != nil {
-		t.Fatalf("first Consume: %v", err)
-	}
-	if _, err := store.Consume(ctx, NonceConsumption{Nonce: "nonce-2"}); err == nil {
-		t.Fatalf("second Consume = nil error, want error")
+	for i := range 3 {
+		if _, err := store.Lookup(ctx, NonceLookup{Nonce: "nonce-2"}); err != nil {
+			t.Fatalf("Lookup #%d: %v", i+1, err)
+		}
 	}
 }
 
-func testNonceStoreConsumeUnknownNonceFails(t *testing.T, factory func() NonceStore) {
+func testNonceStoreLookupUnknownNonceFails(t *testing.T, factory func() NonceStore) {
 	store := factory()
-	if _, err := store.Consume(context.Background(), NonceConsumption{Nonce: "never-issued"}); err == nil {
-		t.Fatalf("Consume(unknown nonce) = nil error, want error")
+	if _, err := store.Lookup(context.Background(), NonceLookup{Nonce: "never-issued"}); err == nil {
+		t.Fatalf("Lookup(unknown nonce) = nil error, want error")
 	}
 }
 
-func testNonceStoreConcurrentConsumeHasExactlyOneWinner(t *testing.T, factory func() NonceStore) {
+func testNonceStoreConcurrentLookupsAllSucceed(t *testing.T, factory func() NonceStore) {
 	store := factory()
 	ctx := context.Background()
 	if err := store.Issue(ctx, NonceIssuance{Nonce: "nonce-3", ExpiresAt: time.Now().Add(time.Minute)}); err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
 	successes := runConcurrently(contractConcurrentAttempts, func() bool {
-		_, err := store.Consume(ctx, NonceConsumption{Nonce: "nonce-3"})
+		_, err := store.Lookup(ctx, NonceLookup{Nonce: "nonce-3"})
 		return err == nil
 	})
-	if successes != 1 {
-		t.Fatalf("concurrent Consume succeeded %d times, want exactly 1", successes)
+	if successes != contractConcurrentAttempts {
+		t.Fatalf("concurrent Lookup succeeded %d times, want all %d", successes, contractConcurrentAttempts)
 	}
 }
 

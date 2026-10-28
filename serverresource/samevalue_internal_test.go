@@ -12,7 +12,7 @@ import (
 type valueNonceStore struct{ inner any }
 
 func (valueNonceStore) Issue(context.Context, storage.NonceIssuance) error { return nil }
-func (valueNonceStore) Consume(context.Context, storage.NonceConsumption) (storage.NonceRecord, error) {
+func (valueNonceStore) Lookup(context.Context, storage.NonceLookup) (storage.NonceRecord, error) {
 	return storage.NonceRecord{}, nil
 }
 

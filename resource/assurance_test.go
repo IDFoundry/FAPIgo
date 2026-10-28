@@ -270,9 +270,6 @@ func TestNewVerifierProductionRefuses(t *testing.T) {
 		{"nonces not durable", func(_ *resource.Config, d *resource.Dependencies) {
 			d.Nonces = declaredNonces{NonceStore: memstore.NewNonceStore(), caps: notDurable}
 		}, "nonces must declare Durable"},
-		{"nonces not atomic", func(_ *resource.Config, d *resource.Dependencies) {
-			d.Nonces = declaredNonces{NonceStore: memstore.NewNonceStore(), caps: notAtomic}
-		}, "nonces must declare AtomicConsume"},
 		{"nonces not shared", func(_ *resource.Config, d *resource.Dependencies) {
 			d.Nonces = declaredNonces{NonceStore: memstore.NewNonceStore(), caps: notShared}
 		}, "nonces must declare CrossInstanceConsistent"},

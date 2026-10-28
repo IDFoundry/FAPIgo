@@ -304,16 +304,15 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 // app's installations using Client Attestation — has refresh tokens
 // issued under its other methods with no instance key, and an attested
 // installation mustn't redeem those: a backend's refresh token, if it
-// leaked, would otherwise work for any genuine installation. Such a
-// grant is told apart from one written before instance keys were
-// recorded (v0.47.0), which stays redeemable, by its IssuedAt: recorded
-// since v0.50.0, so a grant that has it but no instance key was issued
-// under another method.
+// leaked, would otherwise work for any genuine installation. (A grant
+// written before instance keys were recorded, v0.47.0, never reaches
+// here: it predates the issuer every record has carried since v0.58.0,
+// so decodeOwnGrantRecord refuses it as unknown.)
 func checkRefreshInstance(grant grantRecord, instanceKey string) *Error {
 	switch {
 	case grant.ClientInstanceKey != "" && grant.ClientInstanceKey != instanceKey:
 		return newError(ErrorInvalidGrant, 400, "refresh_token was issued to another client instance", nil)
-	case grant.ClientInstanceKey == "" && instanceKey != "" && grant.IssuedAt != nil:
+	case grant.ClientInstanceKey == "" && instanceKey != "":
 		return newError(ErrorInvalidGrant, 400, "refresh_token was not issued to a client instance", nil)
 	}
 	return nil

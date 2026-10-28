@@ -66,7 +66,25 @@ type jwkSetAlgHint struct {
 // algorithm isn't supported, whose shape doesn't parse, or that is
 // marked "use":"enc" — one malformed or unsupported entry does not
 // invalidate an otherwise usable key set.
+//
+// Its keys are treated as ones a caller supplied, like ParseJWK's: an
+// RSA entry over 4096 bits (maxCallerRSAModulusBits) is skipped. Use
+// ParseTrustedJWKSet for the JWK Set of a party the operator configured
+// as trusted.
 func ParseJWKSet(body []byte) ([]ParsedJWK, error) {
+	return parseJWKSet(body, maxCallerRSAModulusBits)
+}
+
+// ParseTrustedJWKSet is ParseJWKSet for the JWK Set of an authorization
+// server the operator configured this module to trust (a client's
+// issuer keys): RSA entries up to 8192 bits (maxRSAModulusBits) are
+// accepted, since which server's keys get fetched is the operator's
+// choice, not a caller's. Every other check is ParseJWKSet's.
+func ParseTrustedJWKSet(body []byte) ([]ParsedJWK, error) {
+	return parseJWKSet(body, maxRSAModulusBits)
+}
+
+func parseJWKSet(body []byte, maxRSABits int) ([]ParsedJWK, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	var set rawJWKSet
 	if err := strictjson.CheckFieldCase(body, &set); err != nil {
@@ -93,7 +111,7 @@ func ParseJWKSet(body []byte) ([]ParsedJWK, error) {
 		if !ok {
 			continue
 		}
-		jwk, err := ParseJWK(raw, alg)
+		jwk, err := parseJWK(raw, alg, maxRSABits)
 		if err != nil {
 			continue
 		}

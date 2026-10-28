@@ -212,7 +212,19 @@ func ecdhP256Coordinates(pub *ecdh.PublicKey) (x, y []byte, err error) {
 // package never resolves a key via its certificate chain, so an x5c
 // present alongside otherwise-valid key material changes nothing about
 // which key gets used.
+//
+// The key is treated as one a caller supplied (see
+// maxCallerRSAModulusBits): an RSA modulus over 4096 bits is refused
+// with ErrRSAKeyTooLarge, and, like every RSA JWK this package parses,
+// an exponent other than 65537 with ErrUnsupportedRSAExponent.
 func ParseJWK(data []byte, alg fapi.SignatureAlgorithm) (JWK, error) {
+	return parseJWK(data, alg, maxCallerRSAModulusBits)
+}
+
+// parseJWK is ParseJWK with the RSA modulus ceiling as a parameter:
+// maxCallerRSAModulusBits for a key a caller supplied, maxRSAModulusBits
+// for one the operator chose to trust (see ParseTrustedJWKSet).
+func parseJWK(data []byte, alg fapi.SignatureAlgorithm, maxRSABits int) (JWK, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var raw rawJWK
 	if err := strictjson.CheckFieldCase(data, &raw); err != nil {
@@ -239,6 +251,9 @@ func ParseJWK(data []byte, alg fapi.SignatureAlgorithm) (JWK, error) {
 		err = fmt.Errorf("jose: unsupported key type %q", raw.Kty)
 	}
 	if err != nil {
+		return JWK{}, err
+	}
+	if err := checkRSAModulusCeiling(pub, maxRSABits); err != nil {
 		return JWK{}, err
 	}
 
@@ -435,17 +450,24 @@ func decodeCoordinate(s string) (*big.Int, error) {
 	return new(big.Int).SetBytes(b), nil
 }
 
+// decodeExponent decodes an RSA JWK's "e", accepting only 65537
+// (rsaPublicExponent). RFC 7518 §6.3.1.2 lets "e" be any value, and
+// FAPI 2.0 Security Profile §5.4.1 constrains only the modulus (at
+// least 2048 bits), but every mainstream key generator — crypto/rsa,
+// OpenSSL, HSMs, cloud KMSs, and the OpenID conformance suite's own
+// keys — uses 65537, and the larger exponents RFC 7518 would otherwise
+// allow multiply the cost of every verification with the key (up to
+// 2^31-1, about 2.5 times the work of 65537 at the same modulus) while
+// a small one like 3 is a classic source of signature-forgery bugs in
+// lax verifiers. Refusing anything else therefore costs no real key
+// and closes both.
 func decodeExponent(s string) (int, error) {
 	n, err := decodeCoordinate(s)
 	if err != nil {
 		return 0, err
 	}
-	if !n.IsInt64() {
-		return 0, fmt.Errorf("exponent out of range")
+	if !n.IsInt64() || n.Int64() != rsaPublicExponent {
+		return 0, fmt.Errorf("%w: only %d is accepted", ErrUnsupportedRSAExponent, rsaPublicExponent)
 	}
-	v := n.Int64()
-	if v < 3 || v > 1<<31-1 || v%2 == 0 {
-		return 0, fmt.Errorf("exponent out of range or not a valid RSA public exponent")
-	}
-	return int(v), nil
+	return rsaPublicExponent, nil
 }

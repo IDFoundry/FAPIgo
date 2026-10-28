@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/internal/depcheck"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -56,6 +58,17 @@ const (
 	// fapi.AllowLoopbackHTTP is refused), and ProtectedResource's Do
 	// refuses a loopback http resource URL before sending anything. A
 	// native app's loopback redirect URI is unaffected.
+	// Dependencies.Clock must declare ClockAssurance (SystemClock does),
+	// and read within Limits.MaxClockSkew of time.Now when New runs: a
+	// fixed or offset test clock would accept what has long expired.
+	// Limits must keep to these bounds (RecommendedLimits does, with
+	// MaxIDTokenLifetime set to the server's ID token lifetime):
+	// MaxClockSkew from 10 to 60 seconds (FAPI 2.0 Security Profile
+	// §5.3.2.1, as server.New requires), SessionLifetime at most an
+	// hour, ClientAssertionLifetime at most 5 minutes,
+	// MaxIDTokenLifetime at most 24 hours (OpenID Providers commonly
+	// issue ID tokens for an hour, some for several), and
+	// MaxJARMResponseLifetime at most 10 minutes (JARM §2.1).
 	AssuranceProduction
 )
 
@@ -75,6 +88,18 @@ func checkStoreAssurance(name string, store any) error {
 	}
 	if !caps.AtomicConsume {
 		return fmt.Errorf("client: dependencies: %s must declare AtomicConsume capability under AssuranceProduction", name)
+	}
+	return nil
+}
+
+// checkClock requires clock to declare ClockAssurance, and its reading
+// to be within skew of the system's time now.
+func checkClock(clock Clock, skew time.Duration) error {
+	if !depcheck.ReadsSystemTime(clock) {
+		return fmt.Errorf("client: dependencies: clock must be SystemClock, or declare client.ClockAssurance, under AssuranceProduction")
+	}
+	if offset := depcheck.ClockOffset(clock.Now()); offset > skew {
+		return fmt.Errorf("client: dependencies: clock reads %v away from the system's time, more than limits.max_clock_skew (%v), under AssuranceProduction", offset.Round(time.Second), skew)
 	}
 	return nil
 }

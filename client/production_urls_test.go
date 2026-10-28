@@ -37,7 +37,7 @@ func TestNewRejectsLoopbackHTTPURLsUnderProduction(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig(t)
-			cfg.Assurance = client.AssuranceProduction
+			asProduction(&cfg)
 			cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 			mutate(&cfg)
 			_, err := client.New(cfg, productionDeps(t))
@@ -62,7 +62,7 @@ func TestNewRejectsLoopbackHTTPURLsUnderProduction(t *testing.T) {
 	// 8252 §7.3) and stays valid in production.
 	t.Run("production accepts a loopback redirect URI", func(t *testing.T) {
 		cfg := validConfig(t)
-		cfg.Assurance = client.AssuranceProduction
+		asProduction(&cfg)
 		cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 		cfg.RedirectURI = "http://127.0.0.1/callback"
 		if _, err := client.New(cfg, productionDeps(t)); err != nil {
@@ -113,6 +113,7 @@ func doLoopbackResourceRequest(t *testing.T, assurance client.AssuranceLevel) (i
 	cfg.Assurance = assurance
 	deps := validDependencies(t)
 	if assurance == client.AssuranceProduction {
+		asProduction(&cfg)
 		deps = productionDeps(t)
 		cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	}
@@ -161,7 +162,8 @@ func TestNewValidatesRedirectURI(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg, deps := validConfig(t), validDependencies(t)
 			if tc.production {
-				cfg.Assurance, deps = client.AssuranceProduction, productionDeps(t)
+				asProduction(&cfg)
+				deps = productionDeps(t)
 				cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 			}
 			cfg.RedirectURI = tc.uri

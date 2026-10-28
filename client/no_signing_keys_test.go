@@ -142,7 +142,7 @@ func TestNewRequiresKeysWhenSomethingIsSigned(t *testing.T) {
 // with no Keys still gets production assurance's other checks.
 func TestNewWithoutSigningKeysUnderProductionAssurance(t *testing.T) {
 	cfg := signingFreeConfig(t, testIssuer+"/token")
-	cfg.Assurance = client.AssuranceProduction
+	asProduction(&cfg)
 	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	deps := signingFreeDependencies(t, validDependencies(t))
 	deps.Random = nil

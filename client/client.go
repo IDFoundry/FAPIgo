@@ -8,6 +8,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
+	"github.com/idfoundry/fapigo/internal/depcheck"
 	"github.com/idfoundry/fapigo/internal/nofollow"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -399,7 +400,57 @@ func validateClientLimits(cfg Config) error {
 	if cfg.Limits.MaxJOSECompactBytes <= 0 {
 		return fmt.Errorf("client: config: limits.max_jose_compact_bytes must be positive")
 	}
+	if cfg.Assurance == AssuranceProduction {
+		return errors.Join(productionLimitErrors(cfg.Limits)...)
+	}
 	return nil
+}
+
+// The bounds AssuranceProduction holds Limits to.
+const (
+	// FAPI 2.0 Security Profile §5.3.2.1 item 13's window, as server.New
+	// and resource.NewVerifier require: it's this client's tolerance for
+	// a server's iat and nbf, and how long past exp it still accepts an
+	// ID token or JARM response.
+	productionMinClockSkew = 10 * time.Second
+	productionMaxClockSkew = 60 * time.Second
+	// How long a user has to sign in and consent, as
+	// server.Limits.InteractionLifetime is bounded.
+	productionMaxSessionLifetime = time.Hour
+	// A client assertion is used once, straight away.
+	productionMaxClientAssertionLifetime = 5 * time.Minute
+	// No spec bounds an ID token's lifetime, and widely used OpenID
+	// Providers issue them for an hour, some for 10 hours by default: a
+	// day refuses none of those, while refusing the "valid for a year"
+	// misconfiguration that would let a stale ID token be accepted.
+	productionMaxIDTokenLifetime = 24 * time.Hour
+	// JARM §2.1: "a maximum JWT lifetime of 10 minutes is RECOMMENDED".
+	// A server issuing exactly that still passes, since MaxClockSkew is
+	// allowed on top.
+	productionMaxJARMResponseLifetime = 10 * time.Minute
+)
+
+// productionLimitErrors checks l against AssuranceProduction's bounds,
+// reporting every one exceeded.
+func productionLimitErrors(l Limits) []error {
+	var errs []error
+	if l.MaxClockSkew < productionMinClockSkew || l.MaxClockSkew > productionMaxClockSkew {
+		errs = append(errs, fmt.Errorf("client: config: limits.max_clock_skew must be between %v and %v under AssuranceProduction (FAPI 2.0 §5.3.2.1)", productionMinClockSkew, productionMaxClockSkew))
+	}
+	for _, bound := range []struct {
+		name         string
+		value, limit time.Duration
+	}{
+		{"session_lifetime", l.SessionLifetime, productionMaxSessionLifetime},
+		{"client_assertion_lifetime", l.ClientAssertionLifetime, productionMaxClientAssertionLifetime},
+		{"max_id_token_lifetime", l.MaxIDTokenLifetime, productionMaxIDTokenLifetime},
+		{"max_jarm_response_lifetime", l.MaxJARMResponseLifetime, productionMaxJARMResponseLifetime},
+	} {
+		if bound.value > bound.limit {
+			errs = append(errs, fmt.Errorf("client: config: limits.%s must be at most %v under AssuranceProduction", bound.name, bound.limit))
+		}
+	}
+	return errs
 }
 
 func validateMessageSigningProfile(cfg Config) error {
@@ -480,6 +531,11 @@ func validateFederationConfig(cfg Config) error {
 }
 
 func validateDependencies(cfg Config, deps Dependencies) error {
+	// A typed nil (a nil *memstore.SessionStore, say) isn't == nil, so it
+	// would pass every check below and fail only on first use.
+	if found, ok := depcheck.FindTypedNil(deps, map[string]string{"DPoPNonceCache": "dpop_nonce_cache"}); ok {
+		return fmt.Errorf("client: dependencies: %s is a nil %s", found.Name, found.Type)
+	}
 	if err := validateSessionsDependency(cfg, deps); err != nil {
 		return err
 	}
@@ -521,7 +577,7 @@ func validateProductionDependencies(cfg Config, deps Dependencies) error {
 		errs = append(errs, checkStoreAssurance("sessions", deps.Sessions))
 		errs = append(errs, checkDeviceLocalSessions(cfg, deps.Sessions))
 	}
-	errs = append(errs, checkRandom(deps.Random))
+	errs = append(errs, checkRandom(deps.Random), checkClock(deps.Clock, cfg.Limits.MaxClockSkew))
 	if deps.Keys != nil {
 		errs = append(errs, checkKeyCustody("keys", deps.Keys))
 	}

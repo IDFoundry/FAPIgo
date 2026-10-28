@@ -33,6 +33,11 @@ type fixedClock struct{ now time.Time }
 
 func (c fixedClock) Now() time.Time { return c.now }
 
+// ReadsSystemTime declares resource.ClockAssurance, so the tests running
+// under AssuranceProduction with a fixedClock pinned at time.Now get
+// past NewVerifier's clock check.
+func (fixedClock) ReadsSystemTime() bool { return true }
+
 type fakeIssuerKeySource struct {
 	set keys.IssuerKeySet
 	err error

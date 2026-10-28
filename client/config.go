@@ -312,7 +312,8 @@ type Limits struct {
 	// ClientAssertionLifetime is how long a client assertion this client
 	// signs remains valid for (exp = Now + ClientAssertionLifetime).
 	// Required only when ClientAuthMethod is
-	// storage.ClientAuthMethodPrivateKeyJWT.
+	// storage.ClientAuthMethodPrivateKeyJWT. At most 5 minutes under
+	// AssuranceProduction.
 	ClientAssertionLifetime time.Duration
 
 	// RequestObjectLifetime is how long a signed request object this
@@ -323,12 +324,16 @@ type Limits struct {
 	RequestObjectLifetime time.Duration
 
 	// SessionLifetime bounds how long between BeginAuthorization and a
-	// completed HandleAuthorizationResponse a session remains valid.
+	// completed HandleAuthorizationResponse a session remains valid. At
+	// most an hour under AssuranceProduction, as
+	// server.Limits.InteractionLifetime is bounded.
 	SessionLifetime time.Duration
 
 	// MaxJARMResponseLifetime bounds how far in the future a JARM
 	// response's exp claim may be. Required only when Profile is
-	// ProfileFAPISecurityWithMessageSigning.
+	// ProfileFAPISecurityWithMessageSigning. At most 10 minutes under
+	// AssuranceProduction (JARM §2.1 recommends no more), with
+	// MaxClockSkew allowed on top.
 	MaxJARMResponseLifetime time.Duration
 
 	// BackchannelAuthenticationRequestLifetime is how long this
@@ -342,12 +347,16 @@ type Limits struct {
 	// claim may be. Required when Endpoints.Authorization or
 	// Endpoints.BackchannelAuthentication is set — the only flows that
 	// return an ID token — unless Config.OAuthOnly is set; unused, and
-	// may be left zero, otherwise.
+	// may be left zero, otherwise. At most 24 hours under
+	// AssuranceProduction: no spec bounds it, and OpenID Providers
+	// commonly issue ID tokens for an hour, some for several.
 	MaxIDTokenLifetime time.Duration
 
 	// MaxClockSkew bounds how far in the future an iat/nbf claim may be,
 	// and extends how long past exp an artifact is still accepted. Zero
-	// means no tolerance.
+	// means no tolerance. Under AssuranceProduction it must be from 10
+	// to 60 seconds, the FAPI 2.0 Security Profile §5.3.2.1 window
+	// server.New and resource.NewVerifier also require.
 	MaxClockSkew time.Duration
 
 	// HTTPTimeout bounds how long a single call this client makes may

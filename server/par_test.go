@@ -449,6 +449,12 @@ type fixedClock struct{ now time.Time }
 
 func (c fixedClock) Now() time.Time { return c.now }
 
+// ReadsSystemTime declares server.ClockAssurance, so the tests running
+// under AssuranceProduction with a fixedClock pinned at time.Now get
+// past New's clock check; production_gate_test.go's clock tests use
+// clocks that don't declare it.
+func (fixedClock) ReadsSystemTime() bool { return true }
+
 // --- test harness ------------------------------------------------------
 
 const testClientID = fapi.ClientID("client-123")

@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"time"
 
+	"github.com/idfoundry/fapigo/internal/depcheck"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -86,7 +88,14 @@ const (
 	// numbers (RecommendedLimits does): AuthorizationCodeLifetime at
 	// most 60 seconds, PushedRequestLifetime under 600 seconds,
 	// MaxClockSkew from 10 to 60 seconds, and MaxRequestObjectLifetime
-	// at most 60 minutes.
+	// at most 60 minutes — and to this module's bounds on the windows
+	// those numbers leave open: MaxDPoPProofAge at most 5 minutes (RFC
+	// 9449 §11.1's "seconds or minutes"), DPoPNonceLifetime at most 15
+	// minutes, JARMResponseLifetime at most 10 minutes (JARM §2.1) and
+	// InteractionLifetime at most an hour.
+	// Dependencies.Clock must declare ClockAssurance (SystemClock does),
+	// and read within Limits.MaxClockSkew of time.Now when New runs: a
+	// fixed or offset test clock would stop everything from expiring.
 	// Dependencies.Random must be crypto/rand.Reader itself: every
 	// request_uri, authorization code, refresh token, opaque access
 	// token, jti and DPoP nonce this server issues is only as
@@ -153,6 +162,18 @@ func checkStoreAssurance(name string, store any, requireAtomicConsume, requireCr
 func checkRandom(random io.Reader) error {
 	if random != rand.Reader {
 		return fmt.Errorf("server: dependencies: random must be crypto/rand.Reader under AssuranceProduction")
+	}
+	return nil
+}
+
+// checkClock requires clock to declare ClockAssurance, and its reading
+// to be within skew of the system's time now.
+func checkClock(clock Clock, skew time.Duration) error {
+	if !depcheck.ReadsSystemTime(clock) {
+		return fmt.Errorf("server: dependencies: clock must be SystemClock, or declare server.ClockAssurance, under AssuranceProduction")
+	}
+	if offset := depcheck.ClockOffset(clock.Now()); offset > skew {
+		return fmt.Errorf("server: dependencies: clock reads %v away from the system's time, more than limits.max_clock_skew (%v), under AssuranceProduction", offset.Round(time.Second), skew)
 	}
 	return nil
 }

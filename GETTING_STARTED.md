@@ -107,9 +107,13 @@ cfg := server.Config{
 
 `AssuranceProduction` holds the limits FAPI 2.0 fixes (authorization
 code and pushed request lifetimes, clock skew, request object and CIBA
-request lifetimes) to the profile's numbers, but not the ones it leaves
-to you: `AccessTokenLifetime`, `RefreshTokenLifetime`, and how long a
-client assertion or attestation may live. Those are what bound a leaked
+request lifetimes) to the profile's numbers, and bounds a few it leaves
+open (`MaxDPoPProofAge` at most 5 minutes, `DPoPNonceLifetime` 15,
+`JARMResponseLifetime` 10, `InteractionLifetime` an hour), but not the
+ones it leaves to you: `AccessTokenLifetime`, `RefreshTokenLifetime`,
+and how long a client assertion or attestation may live. It also
+requires `Dependencies.Clock` to be `server.SystemClock{}` (or a clock
+declaring `server.ClockAssurance`) reading the real time. Those are what bound a leaked
 token when nothing else does, so keep them short, and shorter still with
 `Dependencies.Revocation: server.NoRevocation{}`: then a reused
 authorization code no longer revokes what it issued, `RevokeGrant`
@@ -1050,9 +1054,15 @@ proof naming any of them is accepted. As with the server,
 declare `keys.KeySourceAssurance` (`keys.LocalIssuerKeys` does, and so
 does `keys.JWKSIssuerKeySource` on a `fapihttp` client without a loopback
 exception), the opaque-token, replay, nonce and
-revocation stores to declare `storage.StoreAssurance` (unless revocation
-is `resource.NoRevocation{}`), and `crypto/rand.Reader` when DPoP
-nonces are on, and a `MaxClockSkew` between 10 and 60 seconds, as
+revocation stores to declare `storage.StoreAssurance`, and
+`crypto/rand.Reader` when DPoP nonces are on. It refuses
+`resource.NoRevocation{}`: decline revocation there with
+`resource.NoRevocationUntilExpiry{MaxTokenLifetime: ...}` of at most 15
+minutes, which `Verify` then holds every token's remaining lifetime
+to. It requires `Dependencies.Clock` to be `resource.SystemClock{}` (or
+a clock declaring `resource.ClockAssurance`) reading the real time,
+`MaxDPoPProofAge` at most 5 minutes, `DPoPNonceLifetime` at most 15,
+and a `MaxClockSkew` between 10 and 60 seconds, as
 `server.New` does: FAPI 2.0 Security Profile §5.3.2.1 has a JWT whose
 `iat` is up to 10 seconds in the future accepted and one more than 60
 seconds ahead refused, and here the skew also extends how long past its
@@ -1185,7 +1195,12 @@ too, or it will keep accepting a token the AS has already disowned. Wire it to t
 `RevocationChecker` pair the AS uses — `memstore.NewRevocationStore()`
 already implements both, if co-located — or `resource.NoRevocation{}`
 to explicitly decline (matching `server.NoRevocation{}`'s own
-reasoning for why declining must be a conscious choice).
+reasoning for why declining must be a conscious choice). Under
+`AssuranceProduction` decline with
+`resource.NoRevocationUntilExpiry{MaxTokenLifetime: 10 * time.Minute}`
+instead (at most 15 minutes, and at least the AS's
+`AccessTokenLifetime`): it bounds how long a token the AS revoked stays
+usable here.
 
 ```go
 deps := resource.Dependencies{
@@ -1576,7 +1591,14 @@ if err != nil {
 metadata and checks them against your `Config`; `New` takes them
 explicitly instead.
 
-Under `AssuranceProduction`, `New` refuses any `Dependencies.HTTP` but
+Under `AssuranceProduction`, `New` holds `Limits` to bounds
+`RecommendedLimits` meets — `MaxClockSkew` from 10 to 60 seconds,
+`SessionLifetime` at most an hour, `ClientAssertionLifetime` 5 minutes,
+`MaxIDTokenLifetime` 24 hours and `MaxJARMResponseLifetime` 10 minutes —
+and requires `Clock` to be `client.SystemClock{}` (or a clock declaring
+`client.ClockAssurance`) reading the real time.
+
+Under `AssuranceProduction`, `New` also refuses any `Dependencies.HTTP` but
 `fapihttp.NewClient`'s client (or a copy of it): one with a proxy,
 another dialer or weaker TLS settings swapped into its transport, a
 cloned or wrapped transport, or one allowing loopback addresses, is

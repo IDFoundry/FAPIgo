@@ -47,7 +47,7 @@ func TestNewProductionRefusesLoopbackJWKSIssuerKeys(t *testing.T) {
 				t.Fatalf("NewJWKSIssuerKeySource: %v", err)
 			}
 			cfg := validConfig(t)
-			cfg.Assurance = client.AssuranceProduction
+			asProduction(&cfg)
 			cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 			deps := productionDeps(t)
 			deps.IssuerKeys = source

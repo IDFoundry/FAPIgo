@@ -239,7 +239,10 @@ type Limits struct {
 	MaxRequestObjectLifetime time.Duration
 
 	// InteractionLifetime bounds how long an InteractionHandle returned
-	// by BeginAuthorization remains valid.
+	// by BeginAuthorization remains valid. Under AssuranceProduction it
+	// must be at most an hour: signing in and consenting take minutes,
+	// and a pushed request's interaction shouldn't stay completable for
+	// days.
 	InteractionLifetime time.Duration
 
 	// AuthorizationCodeLifetime bounds how long an authorization code
@@ -249,7 +252,8 @@ type Limits struct {
 	AuthorizationCodeLifetime time.Duration
 
 	// JARMResponseLifetime bounds how long a signed authorization
-	// response remains valid, when Profile requires one.
+	// response remains valid, when Profile requires one. Under
+	// AssuranceProduction it must be at most 10 minutes (JARM §2.1).
 	JARMResponseLifetime time.Duration
 
 	// AccessTokenLifetime bounds how long an issued access token remains
@@ -294,7 +298,9 @@ type Limits struct {
 	RefreshTokenLifetime time.Duration
 
 	// MaxDPoPProofAge bounds how old (relative to verification time) a
-	// DPoP proof's iat claim may be.
+	// DPoP proof's iat claim may be. Under AssuranceProduction it must
+	// be at most 5 minutes (RFC 9449 §11.1: "a relatively brief period
+	// on the order of seconds or minutes").
 	MaxDPoPProofAge time.Duration
 
 	// MaxClockSkew bounds how far in the future an iat/nbf claim may be,
@@ -314,6 +320,8 @@ type Limits struct {
 	// valid. Required only when Dependencies.Nonces is non-nil — see
 	// its own doc comment; New rejects a zero value in that case, but
 	// leaves it unvalidated when nonce-challenge support is disabled.
+	// Under AssuranceProduction it must be at most 15 minutes, set or
+	// not.
 	DPoPNonceLifetime time.Duration
 
 	// BackchannelAuthenticationRequestLifetime bounds how long a

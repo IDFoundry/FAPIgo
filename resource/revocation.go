@@ -1,6 +1,9 @@
 package resource
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // RevocationChecker lets this verifier reject an access token its
 // issuing AS has since revoked — otherwise a cryptographically valid,
@@ -35,11 +38,57 @@ type RevocationChecker interface {
 // With it, a token the authorization server revoked (a reused
 // authorization code, server.Server.RevokeGrant, a revoked refresh
 // token's grant) stays usable here until it expires. That falls short of
-// what a FAPI deployment expects of a resource server, so use it only
-// where access tokens live too briefly for that to matter, or where
-// revocation is checked some other way.
+// what a FAPI deployment expects of a resource server (FAPI 2.0 Security
+// Profile §5.3.4), so AssuranceProduction refuses it: there, decline with
+// NoRevocationUntilExpiry instead, which bounds how long that is.
 type NoRevocation struct{}
 
 // IsRevoked implements RevocationChecker by never reporting a token as
 // revoked.
 func (NoRevocation) IsRevoked(context.Context, string) (bool, error) { return false, nil }
+
+// maxUnrevocableTokenLifetime is the longest MaxTokenLifetime
+// NoRevocationUntilExpiry may declare under AssuranceProduction: a
+// revoked token stays usable here at most this long.
+const maxUnrevocableTokenLifetime = 15 * time.Minute
+
+// NoRevocationUntilExpiry declines revocation checking, as NoRevocation
+// does, and states how long that leaves a revoked token usable: Verify
+// refuses an access token expiring more than MaxTokenLifetime (plus
+// Limits.MaxClockSkew) from now, whichever AccessTokenResolver resolved
+// it, so no token outlives the declared window. It is the decline
+// AssuranceProduction accepts, with MaxTokenLifetime at most 15 minutes:
+// short enough that a token the authorization server revoked (a reused
+// authorization code, server.Server.RevokeGrant) expires soon after.
+// Set MaxTokenLifetime to at least the authorization server's access
+// token lifetime, or its tokens are refused here.
+//
+// Prefer a real RevocationChecker over the authorization server's
+// revocation store (serverresource.NewVerifier wires one); this is for a
+// resource server that can't reach it.
+type NoRevocationUntilExpiry struct {
+	// MaxTokenLifetime bounds how far ahead of now an accepted token's
+	// expiry may be. Required (positive); at most 15 minutes under
+	// AssuranceProduction.
+	MaxTokenLifetime time.Duration
+}
+
+// IsRevoked implements RevocationChecker by never reporting a token as
+// revoked.
+func (NoRevocationUntilExpiry) IsRevoked(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+// unrevocableLifetime returns the MaxTokenLifetime revocation declares,
+// when it's a NoRevocationUntilExpiry by value or pointer.
+func unrevocableLifetime(revocation RevocationChecker) (time.Duration, bool) {
+	switch r := revocation.(type) {
+	case NoRevocationUntilExpiry:
+		return r.MaxTokenLifetime, true
+	case *NoRevocationUntilExpiry:
+		if r != nil {
+			return r.MaxTokenLifetime, true
+		}
+	}
+	return 0, false
+}

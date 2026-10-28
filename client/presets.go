@@ -45,15 +45,16 @@ func RecommendedLimits() Limits {
 		// server.RecommendedLimits' InteractionLifetime.
 		SessionLifetime: 5 * time.Minute,
 
-		// Not spec-mandated. A JARM response is meant to be consumed
-		// immediately at the redirect callback, so this only needs to
-		// comfortably exceed what a real authorization server actually
-		// issues — server.RecommendedLimits' own JARMResponseLifetime
-		// is 90s, but at least one real conformance-tested
-		// authorization server issues a 10-minute exp in practice; 15
-		// minutes covers that with margin without being unboundedly
-		// loose.
-		MaxJARMResponseLifetime: 15 * time.Minute,
+		// Spec: JARM §2.1 — "a maximum JWT lifetime of 10 minutes is
+		// RECOMMENDED", which is also AssuranceProduction's ceiling. A
+		// JARM response is meant to be consumed immediately at the
+		// redirect callback, so this only needs to admit what a real
+		// authorization server issues — server.RecommendedLimits' own
+		// JARMResponseLifetime is 90s, but at least one real
+		// conformance-tested authorization server issues a 10-minute
+		// exp in practice, which this admits, MaxClockSkew giving the
+		// margin.
+		MaxJARMResponseLifetime: 10 * time.Minute,
 
 		// Spec: FAPI 2.0 Security Profile Final §5.3.2.1 item 13 — the
 		// same clock-skew tolerance server.RecommendedLimits.MaxClockSkew

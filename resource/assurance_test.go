@@ -59,6 +59,12 @@ type declaredRevocation struct {
 
 func (d *declaredRevocation) Capabilities() storage.Capabilities { return d.caps }
 
+// undeclaredClock is a Clock that doesn't declare
+// resource.ClockAssurance.
+type undeclaredClock struct{ now time.Time }
+
+func (c undeclaredClock) Now() time.Time { return c.now }
+
 // customResolver is an application's own AccessTokenResolver; declared
 // makes it implement AccessTokenResolverAssurance.
 type customResolver struct{}
@@ -146,8 +152,20 @@ func TestNewVerifierProductionAccepts(t *testing.T) {
 		modify func(*resource.Config, *resource.Dependencies)
 	}{
 		{"baseline", func(*resource.Config, *resource.Dependencies) {}},
-		{"no revocation", func(_ *resource.Config, d *resource.Dependencies) { d.Revocation = resource.NoRevocation{} }},
-		{"no revocation pointer", func(_ *resource.Config, d *resource.Dependencies) { d.Revocation = &resource.NoRevocation{} }},
+		{"no revocation until expiry", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Revocation = resource.NoRevocationUntilExpiry{MaxTokenLifetime: 15 * time.Minute}
+		}},
+		{"no revocation until expiry pointer", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Revocation = &resource.NoRevocationUntilExpiry{MaxTokenLifetime: time.Minute}
+		}},
+		{"DPoP limits at their bounds", func(c *resource.Config, _ *resource.Dependencies) {
+			c.Limits.MaxDPoPProofAge = 5 * time.Minute
+			c.Limits.DPoPNonceLifetime = 15 * time.Minute
+		}},
+		{"SystemClock", func(_ *resource.Config, d *resource.Dependencies) { d.Clock = resource.SystemClock{} }},
+		{"declared clock 5s behind", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Clock = fixedClock{now: time.Now().Add(-5 * time.Second)}
+		}},
 		{"no nonces, any random", func(_ *resource.Config, d *resource.Dependencies) {
 			d.Nonces = nil
 			d.Random = bytes.NewReader(nil)
@@ -270,6 +288,33 @@ func TestNewVerifierProductionRefuses(t *testing.T) {
 		{"revocation not shared", func(_ *resource.Config, d *resource.Dependencies) {
 			d.Revocation = &declaredRevocation{caps: notShared}
 		}, "revocation must declare CrossInstanceConsistent"},
+		{"no revocation", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Revocation = resource.NoRevocation{}
+		}, "revocation is NoRevocation, which AssuranceProduction refuses"},
+		{"no revocation pointer", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Revocation = &resource.NoRevocation{}
+		}, "revocation is NoRevocation, which AssuranceProduction refuses"},
+		{"no revocation until expiry over 15m", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Revocation = resource.NoRevocationUntilExpiry{MaxTokenLifetime: 15*time.Minute + time.Second}
+		}, "MaxTokenLifetime must be at most 15m0s"},
+		{"DPoP proof age over 5m", func(c *resource.Config, _ *resource.Dependencies) {
+			c.Limits.MaxDPoPProofAge = 5*time.Minute + time.Second
+		}, "limits.max_dpop_proof_age must be at most 5m0s"},
+		{"DPoP proof age of 30 days", func(c *resource.Config, _ *resource.Dependencies) {
+			c.Limits.MaxDPoPProofAge = 30 * 24 * time.Hour
+		}, "limits.max_dpop_proof_age must be at most 5m0s"},
+		{"DPoP nonce lifetime over 15m", func(c *resource.Config, _ *resource.Dependencies) {
+			c.Limits.DPoPNonceLifetime = 15*time.Minute + time.Second
+		}, "limits.dpop_nonce_lifetime must be at most 15m0s"},
+		{"undeclared clock", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Clock = undeclaredClock{now: time.Now()}
+		}, "clock must be SystemClock, or declare resource.ClockAssurance"},
+		{"frozen clock", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Clock = fixedClock{now: time.Now().Add(-time.Hour)}
+		}, "away from the system's time"},
+		{"zero-time clock", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Clock = fixedClock{}
+		}, "away from the system's time"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, deps := productionSetup(t)

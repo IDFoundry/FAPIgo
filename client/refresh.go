@@ -54,6 +54,9 @@ type RefreshTokenRequest struct {
 // same azp (none when the original had none), and, when it carries a
 // nonce at all — it SHOULD NOT — the original's nonce.
 func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (TokenSet, error) {
+	if err := c.checkTrustChain(); err != nil {
+		return TokenSet{}, err
+	}
 	if !req.Tokens.HasRefreshToken || req.Tokens.RefreshToken.Reveal() == "" {
 		return TokenSet{}, newError(ErrorInvalidRequest, "the token set has no refresh token", nil)
 	}

@@ -609,6 +609,37 @@ metadata, with the certificate in that key's `x5c` if it likes:
 `self_signed_tls_client_auth` now accepts the certificate of any key in
 the RP JWK Set, not only the first, which needs no change.
 
+### A Client built from `DiscoverViaFederation` stops at the Trust Chain's expiry (client)
+
+**Affects:** a `client.Client` built with `client.NewFromDiscovery`
+from `client.DiscoverViaFederation`'s metadata and kept running past
+the resolved Trust Chain's expiry (`DiscoveredMetadata.ResolvedEntity().ExpiresAt`,
+the earliest `exp` among the chain's statements).
+
+**Why:** OpenID Federation 1.0 §12.3 says an RP "MUST NOT use it past
+the expiration of the Trust Chain" and that "the trust in the OP MUST
+be successfully reevaluated before continuing"; §11 has every
+participant "support refreshing a Trust Chain when it expires". Such a
+Client went on sending users and tokens to an OP the federation might
+have dropped since, until the process restarted.
+
+**What fails:** `BeginAuthorization`, `BeginBackchannelAuthentication`,
+`RequestClientCredentialsToken` and `RefreshTokens`, with an error
+wrapping `client.ErrTrustChainExpired`. A flow already begun completes
+as before.
+
+**What to change:** resolve the chain again and build a new Client
+before it expires, for example on a timer from the new
+`Client.TrustChainExpiresAt`:
+
+```go
+expiresAt, _ := c.TrustChainExpiresAt()
+time.AfterFunc(time.Until(expiresAt)-time.Minute, func() {
+	md, err := client.DiscoverViaFederation(ctx, resolver, issuer)
+	// ... NewFromDiscovery(md, cfg, deps) and swap the Client in
+})
+```
+
 ## v0.64.0
 
 ### A request carrying two client authentication methods is refused (server)

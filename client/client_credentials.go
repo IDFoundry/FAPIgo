@@ -81,6 +81,9 @@ type ClientCredentialsTokenResult struct {
 // self-contained call with no prior BeginAuthorization/
 // BeginBackchannelAuthentication step to complete.
 func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCredentialsTokenRequest) (ClientCredentialsTokenResult, error) {
+	if err := c.checkTrustChain(); err != nil {
+		return ClientCredentialsTokenResult{}, err
+	}
 	if reqErr := checkClientCredentialsTokenRequest(req); reqErr != nil {
 		return ClientCredentialsTokenResult{}, reqErr
 	}

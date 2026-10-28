@@ -232,6 +232,9 @@ const errPushedAuthorizationRequestFailed = "pushed authorization request failed
 // already signed in at the authorization server (who may have consented
 // before) can then end up granting access without meaning to.
 func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationRequest) (AuthorizationSession, error) {
+	if err := c.checkTrustChain(); err != nil {
+		return AuthorizationSession{}, err
+	}
 	redirectURI, reqErr := c.checkBeginRequest(req)
 	if reqErr != nil {
 		return AuthorizationSession{}, reqErr

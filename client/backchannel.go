@@ -165,6 +165,9 @@ func (s BackchannelAuthenticationSession) NotificationToken() string { return s.
 // DPoP proof bound to the request under SenderConstrainDPoP, and returns
 // the resulting BackchannelAuthenticationSession for the caller to poll.
 func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBackchannelAuthenticationRequest) (BackchannelAuthenticationSession, error) {
+	if err := c.checkTrustChain(); err != nil {
+		return BackchannelAuthenticationSession{}, err
+	}
 	if err := c.checkBackchannelAuthenticationRequest(req); err != nil {
 		return BackchannelAuthenticationSession{}, err
 	}

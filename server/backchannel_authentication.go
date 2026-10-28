@@ -161,7 +161,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	// Backchannel Authentication Endpoint URL" — confirmed live via the
 	// OIDF conformance suite's own fapi-ciba-id1/-refresh-token modules,
 	// which deliberately sign "aud" as the token endpoint's URL here.
-	client, dpopProof, _, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+	client, dpopProof, authn, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
 	},
 		[]fapi.URL{s.cfg.Endpoints.BackchannelAuthentication, s.cfg.Endpoints.Token},
@@ -233,12 +233,12 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	}
 
 	essentialACR, _ := essentialACRValues(validated.params)
-	request, err := s.encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, Resources: validated.resources})
+	request, err := s.encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, Resources: validated.resources, ClientInstanceKey: authn.InstanceKey})
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode backchannel authentication request", err)), nil
 	}
 	if err := s.deps.Backchannel.CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
-		AuthReqIDHash:           sha256.Sum256([]byte(authReqIDRaw)),
+		AuthReqIDHash:           backchannelAuthReqIDHash(authReqIDRaw, authn.InstanceKey, dpopJKT),
 		AuthReqID:               authReqIDForNotification,
 		HandleHash:              sha256.Sum256([]byte(handleRaw)),
 		ClientID:                client.ID(),

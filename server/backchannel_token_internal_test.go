@@ -1,10 +1,12 @@
 package server
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"testing"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -43,5 +45,48 @@ func TestBackchannelStatusError(t *testing.T) {
 	}
 	if got := backchannelStatusError(storage.BackchannelAuthenticationApproved); got != nil {
 		t.Errorf("backchannelStatusError(approved) = %v, want nil", got)
+	}
+}
+
+// TestBackchannelAuthReqIDHash covers the digest a CIBA request is
+// stored under: the plain SHA-256 of an unbound auth_req_id, as before
+// bindings existed, and one per client instance and dpop_jkt otherwise,
+// so a poll from another instance or with another key finds nothing.
+func TestBackchannelAuthReqIDHash(t *testing.T) {
+	const id = "auth-req-id"
+	if backchannelAuthReqIDHash(id, "", "") != sha256.Sum256([]byte(id)) {
+		t.Error("an unbound auth_req_id's digest isn't its plain SHA-256")
+	}
+	seen := map[[32]byte]string{}
+	for _, b := range [][2]string{{"", ""}, {"inst-a", ""}, {"inst-b", ""}, {"", "jkt-a"}, {"inst-a", "jkt-a"}, {"inst-a", "jkt-b"}, {"inst-aj", "kt-a"}, {"", "inst-a"}} {
+		h := backchannelAuthReqIDHash(id, b[0], b[1])
+		if prev, ok := seen[h]; ok {
+			t.Errorf("binding %q shares a digest with %q", b, prev)
+		}
+		seen[h] = b[0] + "|" + b[1]
+		if h != backchannelAuthReqIDHash(id, b[0], b[1]) {
+			t.Errorf("binding %q isn't deterministic", b)
+		}
+	}
+}
+
+// TestApprovedBackchannelGrantChecksInstance: the request record's own
+// client instance must match the polling instance's.
+func TestApprovedBackchannelGrantChecksInstance(t *testing.T) {
+	issuer, err := fapi.ParseIssuerURL("https://as.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{cfg: Config{Issuer: issuer}}
+	request, err := s.encodeRequestRecord(requestRecord{ClientInstanceKey: "inst-a"})
+	if err != nil {
+		t.Fatalf("encodeRequestRecord: %v", err)
+	}
+	polled := storage.PolledBackchannelAuthentication{ClientID: "client", Request: request, Status: storage.BackchannelAuthenticationPending}
+	if _, got := s.approvedBackchannelGrant(polled, "client", "", "inst-b"); got == nil || got.Code() != ErrorInvalidGrant {
+		t.Errorf("another instance = %v, want invalid_grant", got)
+	}
+	if _, got := s.approvedBackchannelGrant(polled, "client", "", "inst-a"); got == nil || got.Code() != ErrorAuthorizationPending {
+		t.Errorf("the same instance = %v, want authorization_pending", got)
 	}
 }

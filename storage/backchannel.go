@@ -40,7 +40,11 @@ type NewBackchannelAuthentication struct {
 	// handed to the client — matching NewAuthorizationCode.CodeHash's
 	// digest-only discipline, used to look this record up by the value a
 	// client presents back. Required unconditionally, regardless of
-	// DeliveryMode.
+	// DeliveryMode. For a request made by a client authenticated by
+	// Client Attestation, or bound to a DPoP key by dpop_jkt, the digest
+	// also covers that client instance and key, so a poll from another
+	// instance or with another key finds no record and can't spend the
+	// approval; a store just keys the record by it either way.
 	AuthReqIDHash [32]byte
 
 	// AuthReqID is the same auth_req_id value in the clear. Unlike
@@ -269,10 +273,11 @@ type BackchannelAuthenticationStore interface {
 	// (see PollBackchannelAuthentication.ClientID).
 	//
 	// An approval is spent by the poll that observes it, before tokens
-	// are issued: a failure after that (the client's DPoP key doesn't
-	// match the request's binding, its registration no longer allows
-	// the grant, or token issuance fails) leaves it spent, as a failed
-	// exchange spends an authorization code. The client starts a new
-	// request.
+	// are issued: a failure after that (the client's registration no
+	// longer allows the grant, or token issuance fails) leaves it spent,
+	// as a failed exchange spends an authorization code. The client
+	// starts a new request. A poll from another client instance, or
+	// with a DPoP key other than the request's dpop_jkt, never observes
+	// it (see NewBackchannelAuthentication.AuthReqIDHash).
 	PollBackchannelAuthentication(ctx context.Context, poll PollBackchannelAuthentication) (PolledBackchannelAuthentication, error)
 }

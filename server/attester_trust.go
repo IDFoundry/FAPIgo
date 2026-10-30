@@ -596,9 +596,7 @@ func verifyAttesterChain(ders [][]byte, roots *x509.CertPool, now time.Time) (*x
 // listed, so only those a chain reached are compared.
 func checkX5CExcludesAnchors(extra []*x509.Certificate, chains [][]*x509.Certificate) error {
 	for _, chain := range chains {
-		if len(chain) == 0 {
-			continue
-		}
+		// x509.Certificate.Verify never returns an empty chain.
 		anchor := chain[len(chain)-1]
 		for i, c := range extra {
 			if c.Equal(anchor) {

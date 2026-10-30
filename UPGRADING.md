@@ -17,6 +17,49 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.66.0
 
+### `X5CAttesterChain` refuses other roles' signing certificates (server)
+
+**Affects:** a server whose `Dependencies.AttesterTrust` is
+`server.X5CAttesterChain`, when an attester's signing certificate lists
+another role's extended key usage (TLS server or client, OCSP signing,
+code signing, an ISO/IEC 18013-5 mdoc reader or mDL document signer
+purpose), or chains to the anchor only through a CA whose extended key
+usage lists nothing but such roles.
+
+**Why:** any end-entity certificate under a client's anchors could sign
+Wallet Attestations, whatever role it was issued for. An anchor that
+also certifies TLS servers, OCSP responders or mdoc readers turned each
+of those keys, often online and less protected than a Wallet Provider's
+attestation key, into an attestation key: under
+`AttesterIssuerByTrustAnchors` nothing in the certificate is bound, and
+a TLS certificate for the Wallet Provider's own origin can carry the URI
+subject alternative name the other bindings look for. The new
+`X5CAttesterChain.LeafPolicy` judges each verified chain by role, and
+defaults to `server.DefaultAttesterLeafPolicy{}`. Chains it refuses
+play no part in the issuer binding or `Revocation`, so under
+`AttesterIssuerBoundToAnchor` only an approved chain can end at the
+client's bound anchor.
+
+**What fails:** nothing at startup. An attestation signed by such a
+certificate is refused with `invalid_client`. A certificate with no
+extended key usage, with `anyExtendedKeyUsage`, or with only purposes
+of the ecosystem's own is accepted as before.
+
+**What to change:** issue the attester a dedicated attestation signing
+certificate without another role's extended key usage. If the anchors
+certify nothing but attesters, you may instead opt out:
+
+```go
+deps.AttesterTrust = server.X5CAttesterChain{
+	// ...
+	LeafPolicy: server.AnyAttesterLeaf{},
+}
+```
+
+To require an ecosystem's own Wallet Provider purpose as well, pass a
+`server.AttesterLeafPolicyFunc` that calls
+`(server.DefaultAttesterLeafPolicy{}).CheckAttesterChain` first.
+
 ### Production bounds the Client Attestation PoP age (server, *production only*)
 
 **Affects:** a server under `AssuranceProduction` with

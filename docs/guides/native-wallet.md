@@ -44,7 +44,14 @@ own keys, by issuer (a `keys.AttesterKeySource` such as
 `server.X5CAttesterChain` to verify the attestation's `x5c` chain. With
 a trust list shared by several attesters, use its
 `AttesterIssuerBoundToAnchor` binding, so each anchor vouches only for
-the attesters it's bound to.
+the attesters it's bound to. Its `LeafPolicy`, by default
+`server.DefaultAttesterLeafPolicy{}`, refuses a signing certificate
+issued for another role (a TLS server or client, an OCSP responder, an
+mdoc reader or document signer), or chaining only through a CA
+restricted to such roles, so an anchor that also certifies those can't
+turn their keys into attestation keys. Wrap it in a
+`server.AttesterLeafPolicyFunc` to also require your ecosystem's own
+Wallet Provider purpose; `server.AnyAttesterLeaf{}` declines the check.
 
 ### Checking Wallet Attestation status
 

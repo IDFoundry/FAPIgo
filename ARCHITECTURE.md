@@ -320,8 +320,9 @@ a PAR body or similar wire-level payload.
 to withdraw a grant, `RevokeToken` for a client to revoke its own
 refresh token (RFC 7009), the CIBA and client credentials grants,
 `Metadata` and `PublicJWKS`. `AuthenticateAttestedClient` and
-`VerifyTokenRequestBinding` let an embedder serve its own grant type at
-the same token endpoint; they fit this rule because each is one
+`VerifyTokenRequestBinding` (or, for a grant without client
+authentication, `VerifyTokenRequestDPoP`) let an embedder serve its own
+grant type at the same token endpoint; they fit this rule because each is one
 endpoint's own check, run exactly as the server's own grants run it,
 not a generic primitive. `IssueRefreshToken` then issues a refresh token
 for such a grant, which `RefreshAccessToken` redeems as it does its own. The server only ever verifies; it must not expose

@@ -1015,6 +1015,16 @@ like its own, bound to the client's instance key. Give both the same
 ends the first access token too, not only the refreshed ones. Such a
 grant may not include `openid`, since no user authenticated.
 
+A grant served without client authentication — OpenID4VCI's
+pre-authorized code grant outside FAPI, say — has no client for
+`VerifyTokenRequestBinding`. Check its DPoP proof with
+`VerifyTokenRequestDPoP` instead: the same DPoP checks, replay record
+and nonces, returning the key's thumbprint and the next `DPoP-Nonce`.
+It checks only the proof, so refuse a request that authenticates a
+client when your grant expected none. `IssueAccessToken` issues only
+for an authenticated client, so issue that access token yourself,
+bound to the thumbprint.
+
 **Letting clients revoke their refresh tokens.** Set
 `Config.Endpoints.Revocation` and serve it with `RevokeToken`, reading
 the request with `server.TokenRevocationRequestFromHTTP`: a nil error

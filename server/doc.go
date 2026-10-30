@@ -16,7 +16,8 @@
 // AuthenticateAttestedClient and VerifyTokenRequestBinding serve an
 // embedder's own grant at the token endpoint (Config.AdditionalGrantTypes)
 // — OpenID4VCI's pre-authorized_code, say — with exactly the checks,
-// and the replay records, this package's own grants use;
+// and the replay records, this package's own grants use
+// (VerifyTokenRequestDPoP, for a grant without client authentication);
 // IssueAccessToken issues its access token, as revocable as this
 // package's own, and IssueRefreshToken a refresh token that
 // RefreshAccessToken redeems like its own. They are

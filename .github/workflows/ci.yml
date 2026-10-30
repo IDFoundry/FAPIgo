@@ -16,7 +16,8 @@ jobs:
       postgres:
         image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
         env:
-          POSTGRES_PASSWORD: sqlstore
+          # A throwaway server reachable only from this job: no password.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -86,7 +87,7 @@ jobs:
       - name: go test sqlstore (coverage)
         working-directory: sqlstore
         env:
-          FAPIGO_SQLSTORE_POSTGRES_DSN: postgres://postgres:sqlstore@localhost:5432/postgres?sslmode=disable
+          FAPIGO_SQLSTORE_POSTGRES_DSN: postgres://postgres@localhost:5432/postgres?sslmode=disable
         run: go test -coverprofile=coverage.out ./...
 
       # Uploads the same coverage.out the step above already produced —
@@ -166,7 +167,8 @@ jobs:
         # move it by hand (and the test job's copy above).
         image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
         env:
-          POSTGRES_PASSWORD: sqlstore
+          # A throwaway server reachable only from this job: no password.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -175,7 +177,7 @@ jobs:
           --health-timeout 5s
           --health-retries 30
     env:
-      FAPIGO_SQLSTORE_POSTGRES_DSN: postgres://postgres:sqlstore@localhost:5432/postgres?sslmode=disable
+      FAPIGO_SQLSTORE_POSTGRES_DSN: postgres://postgres@localhost:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

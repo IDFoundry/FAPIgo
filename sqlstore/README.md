@@ -8,7 +8,10 @@ database driver: bring the one you use.
 
 The package documentation ([doc.go](doc.go)) is the reference: setup,
 migrations, atomicity, sealing, capabilities, the clients table and
-sweeping. This page is the short version.
+sweeping. This page is the short version. For a running deployment,
+[examples/linked-accounts](../examples/linked-accounts) keeps an
+Authorization Server's, a resource server's and two relying parties'
+stores in one SQLite file, each under its own table prefix.
 
 ## Setup
 

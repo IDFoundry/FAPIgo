@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.66.0](https://github.com/IDFoundry/FAPIgo/compare/v0.65.1...v0.66.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** X5CAttesterChain refuses an attestation whose x5c includes the root or any other trust anchor, with invalid_client. Wallets and Wallet Providers must send x5c as the signing certificate followed by its intermediates only. There is no option to keep the old behaviour.
+* **server:** under AssuranceProduction with attestation-based client authentication enabled, server.New refuses a Limits.MaxClientAttestationPoPAge over 5 minutes. Set it to at most 5 minutes, for example 60 seconds, and have clients create a fresh PoP for each request.
+* **server:** an attestation signed by an X5CAttesterChain certificate that lists another role's extended key usage, or chains only through a CA restricted to such roles, is now refused with invalid_client. Issue the attester a dedicated attestation signing certificate, or set the chain's LeafPolicy to server.AnyAttesterLeaf{} when the anchors certify nothing but attesters.
+
+### Features
+
+* **extension:** validate client-requested authorization details separately ([5d82f43](https://github.com/IDFoundry/FAPIgo/commit/5d82f436622a239a038be5c3a8c8fe15670aef83))
+* **server:** verify a client-less token request's DPoP proof ([d705ae5](https://github.com/IDFoundry/FAPIgo/commit/d705ae54ceb07d3f09b809b31095367875ef4cb6))
+
+
+### Bug Fixes
+
+* **server:** bound the Client Attestation PoP age under production ([4719050](https://github.com/IDFoundry/FAPIgo/commit/4719050ad9ca05474b4d74cec3bb422548e80dc7))
+* **server:** refuse a trust anchor in an attestation's x5c ([e04074b](https://github.com/IDFoundry/FAPIgo/commit/e04074bba863a17cf95985c3396cb87acd1748de))
+* **server:** refuse other roles' certificates as attester signers ([028b8a2](https://github.com/IDFoundry/FAPIgo/commit/028b8a2281594254bcb777d46012130fe635f565))
+
 ## [0.65.1](https://github.com/IDFoundry/FAPIgo/compare/v0.65.0...v0.65.1) (2026-10-28)
 
 

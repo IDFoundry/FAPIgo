@@ -176,9 +176,10 @@ and `server.RecommendedAlgorithms()` do the same for `Config`'s algorithm
 and duration fields, each grounded in a specific FAPI 2.0 Security
 Profile Final or RFC 9449 requirement where one exists. For production,
 the separate [`sqlstore`](sqlstore/README.md) module provides durable
-PostgreSQL and SQLite implementations of the client repository and the
+PostgreSQL and SQLite implementations of the client repository, the
 transaction, grant, replay, nonce, revocation, opaque access token, CIBA
-and pairwise subject stores, passing the same contract tests, declaring
+and pairwise subject stores, and `client`'s session store, passing the
+same contract tests, declaring
 what production assurance checks, and optionally sealing the records
 they hold with AES-256-GCM.
 

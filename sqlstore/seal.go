@@ -156,20 +156,26 @@ const (
 	decisionColumn   = "decision"
 )
 
-// sealedColumns are the record blobs a Sealer seals: each column, its
-// table, and the table's key column. Every one of these tables has a
-// client_id column, which each blob is also bound to.
-var sealedColumns = []struct {
+// sealedColumn is one column of record blobs a Sealer seals: the
+// column, its table, the table's key column, and the client ID each
+// blob is also bound to — the client_id column, or the empty string
+// for the client sessions' table, which has none.
+type sealedColumn struct {
 	table, keyColumn, column string
+	clientID                 string // an SQL expression
 	textKey                  bool
-}{
-	{"par_requests", "reference", requestColumn, true},
-	{"interactions", "handle", requestColumn, true},
-	{"authorization_codes", "code_hash", recordColumn, false},
-	{"refresh_tokens", "token_hash", recordColumn, false},
-	{"access_tokens", "token_hash", recordColumn, false},
-	{backchannelTable, "auth_req_id_hash", recordColumn, false},
-	{backchannelTable, "auth_req_id_hash", decisionColumn, false},
+}
+
+// sealedColumns are the record blobs a Sealer seals.
+var sealedColumns = []sealedColumn{
+	{"par_requests", "reference", requestColumn, "client_id", true},
+	{"interactions", "handle", requestColumn, "client_id", true},
+	{"authorization_codes", "code_hash", recordColumn, "client_id", false},
+	{"refresh_tokens", "token_hash", recordColumn, "client_id", false},
+	{"access_tokens", "token_hash", recordColumn, "client_id", false},
+	{backchannelTable, "auth_req_id_hash", recordColumn, "client_id", false},
+	{backchannelTable, "auth_req_id_hash", decisionColumn, "client_id", false},
+	{sessionsTable, "state", recordColumn, "''", true},
 }
 
 // SealRecords seals, in place, every record blob that isn't sealed yet
@@ -195,7 +201,7 @@ func (d *DB) SealRecords(ctx context.Context) (int64, error) {
 			var sealed, read int64
 			err := d.write(ctx, func(q querier) error {
 				var err error
-				sealed, read, err = d.sealBatch(ctx, q, c.table, c.keyColumn, c.column, c.textKey)
+				sealed, read, err = d.sealBatch(ctx, q, c)
 				return err
 			})
 			if err != nil {
@@ -217,33 +223,33 @@ type unsealedRow struct {
 	stored   []byte
 }
 
-// sealBatch reads up to 100 of table's unsealed column values on q and
-// seals each that hasn't changed since, returning how many it sealed
-// and how many it read: none once none is left. One that changed is
-// read again by the next batch, if it's still unsealed.
-func (d *DB) sealBatch(ctx context.Context, q querier, table, keyColumn, column string, textKey bool) (sealed, read int64, err error) {
-	rows, err := d.unsealedRows(ctx, q, table, keyColumn, column)
+// sealBatch reads up to 100 of c's unsealed values on q and seals each
+// that hasn't changed since, returning how many it sealed and how many
+// it read: none once none is left. One that changed is read again by
+// the next batch, if it's still unsealed.
+func (d *DB) sealBatch(ctx context.Context, q querier, c sealedColumn) (sealed, read int64, err error) {
+	rows, err := d.unsealedRows(ctx, q, c)
 	if err != nil {
 		return 0, 0, err
 	}
-	n, err := d.sealRows(ctx, q, table, keyColumn, column, textKey, rows)
+	n, err := d.sealRows(ctx, q, c, rows)
 	return n, int64(len(rows)), err
 }
 
-// sealRows seals rows' column values on q, each only if it hasn't
-// changed since it was read, returning how many it sealed.
-func (d *DB) sealRows(ctx context.Context, q querier, table, keyColumn, column string, textKey bool, rows []unsealedRow) (int64, error) {
+// sealRows seals rows' values of c on q, each only if it hasn't changed
+// since it was read, returning how many it sealed.
+func (d *DB) sealRows(ctx context.Context, q querier, c sealedColumn, rows []unsealedRow) (int64, error) {
 	var total int64
 	for _, r := range rows {
-		sealed, err := d.seal(blobRef{table: table, column: column, key: string(r.key), clientID: r.clientID}, r.stored)
+		sealed, err := d.seal(blobRef{table: c.table, column: c.column, key: string(r.key), clientID: r.clientID}, r.stored)
 		if err != nil {
 			return 0, err
 		}
 		var key any = r.key
-		if textKey {
+		if c.textKey {
 			key = string(r.key)
 		}
-		res, err := q.ExecContext(ctx, d.q("UPDATE {"+table+"} SET "+column+" = ? WHERE "+keyColumn+" = ? AND "+column+" = ?"), sealed, key, r.stored)
+		res, err := q.ExecContext(ctx, d.q("UPDATE {"+c.table+"} SET "+c.column+" = ? WHERE "+c.keyColumn+" = ? AND "+c.column+" = ?"), sealed, key, r.stored)
 		if err != nil {
 			return 0, err
 		}
@@ -256,10 +262,10 @@ func (d *DB) sealRows(ctx context.Context, q querier, table, keyColumn, column s
 	return total, nil
 }
 
-// unsealedRows reads up to 100 of table's rows whose column isn't
+// unsealedRows reads up to 100 of c's table's rows whose column isn't
 // sealed.
-func (d *DB) unsealedRows(ctx context.Context, q querier, table, keyColumn, column string) ([]unsealedRow, error) {
-	rows, err := q.QueryContext(ctx, d.q("SELECT "+keyColumn+", client_id, "+column+" FROM {"+table+"} WHERE substr("+column+", 1, 1) <> ? LIMIT 100"), []byte{recordSealed})
+func (d *DB) unsealedRows(ctx context.Context, q querier, c sealedColumn) ([]unsealedRow, error) {
+	rows, err := q.QueryContext(ctx, d.q("SELECT "+c.keyColumn+", "+c.clientID+", "+c.column+" FROM {"+c.table+"} WHERE substr("+c.column+", 1, 1) <> ? LIMIT 100"), []byte{recordSealed})
 	if err != nil {
 		return nil, err
 	}

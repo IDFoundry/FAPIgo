@@ -25,8 +25,7 @@ are things no constructor can check.
   transaction, grant, replay, nonce, revocation, opaque access token,
   CIBA and pairwise subject stores on PostgreSQL (any deployment) or
   SQLite (`DeploymentSingleInstance` only), already passing those
-  contracts; run its `Migrate` and, periodically, `Sweep`, and consider
-  its `Options.Sealer` to encrypt the records it holds.
+  contracts: see [Storage with `sqlstore`](#storage-with-sqlstore).
   [Step 1](../GETTING_STARTED.md#1-dependencies-use-the-reference-implementations-to-start)
 - [ ] **Durable signing keys** that declare `keys.KeyCustodyAssurance`
   (`keys.NewKeyManagerFromSigners` with `keys.DeclareCustody`), and a
@@ -106,7 +105,8 @@ are things no constructor can check.
   minutes) to decline checking it; production refuses `NoRevocation{}`.
   [Wire `Dependencies`](../GETTING_STARTED.md#wire-dependencies)
 - [ ] **A DPoP nonce choice:** a nonce store of the resource server's
-  own (never the authorization server's), shared by its instances, with
+  own (never the authorization server's; with `sqlstore`, `Nonces()`
+  from a DB with a `TablePrefix` of its own), shared by its instances, with
   `Random` and `Limits.DPoPNonceLifetime`; or `resource.NoDPoPNonces{}`
   to decline. `serverresource.NewVerifier` takes it as `Options.Nonces`.
   [Wire `Dependencies`](../GETTING_STARTED.md#wire-dependencies)
@@ -125,8 +125,9 @@ are things no constructor can check.
   when it's built.
   [Step 10](../GETTING_STARTED.md#10-the-client-side-calling-a-fapi-20-authorization-server)
 - [ ] **A durable session store** that passes
-  `storage.TestSessionStoreContract`, and durable keys declaring
-  `keys.KeyCustodyAssurance`.
+  `storage.TestSessionStoreContract` (`sqlstore`'s `Sessions()` does;
+  for a native app with `CallbackBindingDeviceLocalStore`, on SQLite),
+  and durable keys declaring `keys.KeyCustodyAssurance`.
 - [ ] *(yours)* **Bind each authorization to the browser** that began it
   (`client/sessioncookie`), against login CSRF.
   [Step 10](../GETTING_STARTED.md#10-the-client-side-calling-a-fapi-20-authorization-server)
@@ -138,3 +139,35 @@ are things no constructor can check.
 - [ ] *(yours)* **Seal stored tokens** with `client.TokenSetSealer` if you
   keep them past the request.
   [Step 10](../GETTING_STARTED.md#10-the-client-side-calling-a-fapi-20-authorization-server)
+
+## Storage with `sqlstore`
+
+For a deployment keeping its stores in the
+[`sqlstore`](../sqlstore) module.
+[Durable storage](../GETTING_STARTED.md#durable-storage-the-sqlstore-module)
+
+- [ ] **The right database for the deployment:** PostgreSQL for
+  `DeploymentHorizontallyScaled`; SQLite (WAL mode, a busy timeout)
+  only for `DeploymentSingleInstance`, on the one host that serves.
+- [ ] **The schema migrated before serving:** `Migrate` at startup as a
+  role that may create tables, or from a deployment step, with
+  `CheckSchema` at startup to fail fast when it's behind.
+- [ ] **`Sweep` on a schedule** (every few minutes) with the server's
+  time, or the tables grow without bound. A CIBA request is kept
+  `BackchannelExpiredRetention` (an hour) past its expiry, so a late
+  poll is told `expired_token`.
+- [ ] **One `TablePrefix` per role and tenant:** the authorization
+  server and the resource servers reading its opaque access tokens or
+  revocations share the server's prefix (and `Sealer`); a resource
+  server's DPoP nonces get a prefix of their own; servers with
+  different issuers never share one.
+- [ ] *(yours)* **A sealing key kept outside the database** and its
+  backups (`Options.Sealer`, `AESGCMSealer`), with a rotation plan: a
+  `Sealer` of your own that opens with the old and new keys until the
+  old one's records expire.
+- [ ] **`ReadUnsealed` only while migrating** an existing database to
+  sealing: deploy with it, run `SealRecords`, then deploy without it.
+- [ ] *(yours)* **Write access to the database as tight as read
+  access:** sealing keeps records confidential and bound to their row,
+  but anyone who can write can still delete rows or change lookup
+  columns.

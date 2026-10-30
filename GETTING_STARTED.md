@@ -51,11 +51,11 @@ else in this guide changes. For the stores, you may not need to
 implement them either: the separate
 [`github.com/idfoundry/fapigo/sqlstore`](sqlstore) module implements
 the client repository and the transaction, grant, replay, nonce,
-revocation, opaque access token, CIBA and pairwise subject stores on
-PostgreSQL or SQLite through `database/sql`, declares their
-capabilities, passes the contract tests, and can seal the records it
-holds (`Options.Sealer`) — see its package documentation for
-migrations, sealing, sweeping and what it doesn't provide yet. For `keys.KeyManager` specifically, you may
+revocation, opaque access token, CIBA and pairwise subject stores, and
+the client's session store, on PostgreSQL or SQLite through
+`database/sql`, declares their capabilities, passes the contract tests,
+and can seal the records it holds (`Options.Sealer`) — see
+[Durable storage](#durable-storage-the-sqlstore-module) in step 4. For `keys.KeyManager` specifically, you may
 not need to implement anything at all: `keys.NewKeyManagerFromSigners`
 adapts any `crypto.Signer` — what most HSM/KMS Go client wrappers
 already implement — directly into a `KeyManager`, one `keys.SignerSpec`
@@ -550,6 +550,125 @@ that issues opaque tokens and a resource server that only knows how to
 verify JWTs, and every verification will fail with no compile-time
 signal that they were ever mismatched. `cmd/conformance-as/wiring.go`
 shows both sides wired consistently, switched on one runtime flag.
+
+### Durable storage: the `sqlstore` module
+
+The `memstore` stores above are for development. For production, the
+separate [`github.com/idfoundry/fapigo/sqlstore`](sqlstore) module
+(its own Go module, so FAPIgo itself takes no database driver) keeps
+every store `server.Dependencies` takes, and the client's session
+store (step 10), in PostgreSQL or SQLite through `database/sql`. Its
+stores pass the same contract tests and declare the
+`storage.StoreAssurance` capabilities production assurance checks.
+
+```go
+import (
+	"database/sql"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/idfoundry/fapigo/pairwise"
+	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/sqlstore"
+)
+
+sqlDB, err := sql.Open("pgx", os.Getenv("DATABASE_URL"))
+// The sealing key: 32 bytes from a secrets manager or KMS, never the
+// database or its backups.
+sealer, err := sqlstore.AESGCMSealer(sealingKey)
+db, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: sealer})
+if err := db.Migrate(ctx); err != nil { // or db.CheckSchema(ctx): see below
+	return err
+}
+
+accessTokens, err := server.NewOpaqueAccessTokens(db.AccessTokens()) // or JWTs, which need no store
+mapping, err := pairwise.NewMapping(db.PairwiseSubjects())          // only for pairwise subjects
+
+deps := server.Dependencies{
+	Clients:                db.Clients(),
+	Transactions:           db.Transactions(),
+	Grants:                 db.Grants(),
+	Replay:                 db.Replay(),
+	Nonces:                 db.Nonces(),
+	Revocation:             db.Revocation(),
+	AccessTokens:           accessTokens,
+	Backchannel:            db.Backchannel(), // only for CIBA
+	PairwiseSubjects:       mapping,
+	ClientKeys:             clientKeys,
+	Keys:                   keyManager, // keys.NewKeyManagerFromSigners, with keys.DeclareCustody
+	Audit:                  auditSink,
+	ClientCertificateTrust: server.NoPKIClientAuthentication{},
+	Clock:                  server.SystemClock{},
+	Random:                 rand.Reader,
+}
+srv, err := server.New(cfg, deps)
+
+// Sweep: the stores never delete an expired row themselves.
+go func() {
+	for range time.Tick(5 * time.Minute) {
+		if _, err := db.Sweep(ctx, time.Now()); err != nil {
+			log.Printf("sqlstore sweep: %v", err)
+		}
+	}
+}()
+```
+
+What to decide when you deploy it:
+
+- **PostgreSQL or SQLite.** PostgreSQL's stores declare
+  `CrossInstanceConsistent`, so `server.New` accepts them with either
+  `Deployment`. SQLite is one file on one host: its stores don't, so
+  production accepts them with `server.DeploymentSingleInstance` only.
+  Open SQLite (`modernc.org/sqlite`, pure Go) in WAL mode with a busy
+  timeout: `file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)`,
+  and pass `sqlstore.SQLite`.
+- **Migrations.** Nothing migrates implicitly. Either run `Migrate` at
+  startup, as a role that may create tables (it's safe from several
+  instances at once), or migrate from a deployment step and call
+  `CheckSchema` at startup, which fails fast when the schema is behind,
+  or ahead of what this release knows.
+- **Sweeping.** Call `Sweep` every few minutes with the server's time
+  (`Dependencies.Clock`); running it late only keeps rows longer. A row
+  stays as long as something may need it: a redeemed authorization code
+  until the tokens it issued expire, so reusing the code still revokes
+  them, and a CIBA request until `sqlstore.BackchannelExpiredRetention`
+  (an hour) after it expires, so a late poll gets `expired_token`
+  rather than `invalid_grant`. Pairwise subjects are never swept.
+- **Table prefix.** `Options.TablePrefix` (`fapigo_` by default)
+  prefixes every table, so several DBs, or another application's
+  tables, can share one database and one `*sql.DB`.
+- **Sealing.** `Options.Sealer` encrypts every record blob (pushed
+  requests, grants, opaque access tokens, CIBA requests and decisions,
+  client sessions), each bound to its row, so a copy of the database
+  reveals none of them. Keep the key outside the database and its
+  backups; losing it makes sealed records unreadable, so clients
+  authorize again. To rotate it, use a `Sealer` of your own that seals
+  with the new key and opens with either, until the longest-lived
+  record sealed under the old one (a refresh token) expires. To start
+  sealing a database already in use: deploy with `Sealer` and
+  `ReadUnsealed: true`, run `db.SealRecords(ctx)` once, then deploy
+  again without `ReadUnsealed`, which while set lets anyone who can
+  write to the database plant a record the sealer never sealed.
+- **Resource servers.** One reading opaque access tokens or revocations
+  (step 7) uses the server's tables: `AccessTokens()`, `Revocation()`
+  and `Replay()` through a DB with the same `*sql.DB` (or database),
+  `TablePrefix` and `Sealer` — `serverresource.NewVerifier` does that
+  for you from the server's `Dependencies`. Its DPoP nonce store must
+  not be the server's (RFC 9449 keeps the two roles' nonces apart):
+  give it `Nonces()` from a DB with a prefix of its own.
+
+  ```go
+  rsDB, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{TablePrefix: "fapigo_rs_"})
+  err = rsDB.Migrate(ctx)
+  verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{
+  	ResourceURLs: resourceURLs,
+  	Nonces:       rsDB.Nonces(),
+  })
+  ```
+
+The module's [package documentation](sqlstore/doc.go) covers the
+rest: what each consume does atomically, what sealing leaves readable,
+and the clients table's JSON document (`db.Clients().Put`).
 
 ### Wallet attestation status
 
@@ -1659,8 +1778,12 @@ The `client` package is the other end — a relying party that pushes an
 authorization request, handles the callback, exchanges the code and
 calls protected resources, with PAR, PKCE, DPoP (or mTLS) and
 `private_key_jwt` throughout. A minimal web client, discovering its
-authorization server and keeping its sessions in `memstore` (a durable
-store in production):
+authorization server and keeping its sessions in `memstore` (in
+production, a durable store such as the `sqlstore` module's
+`db.Sessions()`, which `client.New` accepts under
+`AssuranceProduction`; a native app binding callbacks with
+`CallbackBindingDeviceLocalStore` keeps them in SQLite on the device,
+since PostgreSQL's store, shared between instances, is refused there):
 
 ```go
 // Two HTTP types: the transport (an *http.Client that refuses private

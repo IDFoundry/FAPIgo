@@ -10,11 +10,19 @@ updates:
       interval: weekly
 
   # sqlstore/ is a module of its own: the database drivers its tests
-  # use, and the FAPIgo release it requires.
+  # use, and the FAPIgo release it requires. examples/linked-accounts
+  # builds against it (a replace) and takes its SQLite driver too, so
+  # its go.mod must require at least what sqlstore's does: each
+  # dependency is updated in both directories in one pull request.
   - package-ecosystem: gomod
-    directory: /sqlstore
+    directories:
+      - /sqlstore
+      - /examples/linked-accounts
     schedule:
       interval: weekly
+    groups:
+      sqlstore:
+        group-by: dependency-name
 
   # Keeps every action the workflows use current — the one real
   # dependency surface this repo has. Each is pinned to a full commit

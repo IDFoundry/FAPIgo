@@ -51,6 +51,8 @@ func newSweepFixture(t *testing.T, dialect sqlstore.Dialect) sweepFixture {
 	must(t, f.d.Backchannel().CreateBackchannelAuthentication(ctx, ciba))
 	_, err = f.d.PairwiseSubjects().GetOrCreate(ctx, storage.PairwiseSubjectKey{Issuer: "i", Sector: "s", Subject: "u"}, "body")
 	must(t, err)
+	must(t, f.d.Sessions().Create(ctx, storage.NewSession{State: "expiring", ExpiresAt: minute}))
+	must(t, f.d.Sessions().Create(ctx, storage.NewSession{State: "live", ExpiresAt: f.t0.Add(5 * time.Minute)}))
 	return f
 }
 
@@ -69,17 +71,18 @@ func TestSweep(t *testing.T) {
 			t.Fatalf("Sweep before anything expired = %d, %v, want 0, nil", n, err)
 		}
 		// The unbegun request, the unused code, the refresh token, the
-		// replay digest, the nonce, the short revocation and the access
-		// token — not the CIBA request, kept past its expiry.
-		if n, err := f.d.Sweep(ctx, f.t0.Add(2*time.Minute)); err != nil || n != 7 {
-			t.Fatalf("Sweep after a minute = %d, %v, want 7, nil", n, err)
+		// replay digest, the nonce, the short revocation, the access
+		// token and the expiring session — not the CIBA request, kept
+		// past its expiry.
+		if n, err := f.d.Sweep(ctx, f.t0.Add(2*time.Minute)); err != nil || n != 8 {
+			t.Fatalf("Sweep after a minute = %d, %v, want 8, nil", n, err)
 		}
 		checkSweptAfterAMinute(t, f)
-		// The begun request, the used code, the long revocation and the
-		// digest recorded again (the completed interaction is gone
-		// already).
-		if n, err := f.d.Sweep(ctx, f.t0.Add(30*time.Minute)); err != nil || n != 4 {
-			t.Fatalf("Sweep after everything expired = %d, %v, want 4, nil", n, err)
+		// The begun request, the used code, the long revocation, the
+		// digest recorded again and the live session (the completed
+		// interaction is gone already).
+		if n, err := f.d.Sweep(ctx, f.t0.Add(30*time.Minute)); err != nil || n != 5 {
+			t.Fatalf("Sweep after everything expired = %d, %v, want 5, nil", n, err)
 		}
 		checkSweptAfterEverything(t, f)
 		checkCIBARetention(t, f)
@@ -143,6 +146,9 @@ func checkSweptAfterAMinute(t *testing.T, f sweepFixture) {
 	}
 	if _, err := f.d.Nonces().Lookup(ctx, storage.NonceLookup{Nonce: "nonce"}); !errors.Is(err, sqlstore.ErrNotFound) {
 		t.Fatalf("Lookup of a swept nonce = %v, want ErrNotFound", err)
+	}
+	if _, err := f.d.Sessions().Consume(ctx, storage.SessionConsumption{State: "expiring"}); !errors.Is(err, sqlstore.ErrNotFound) {
+		t.Fatalf("Consume of a swept session = %v, want ErrNotFound", err)
 	}
 	if err := f.d.Replay().UseOnce(ctx, f.replayUse); err != nil {
 		t.Fatalf("UseOnce of a swept digest = %v, want nil", err)

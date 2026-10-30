@@ -35,6 +35,7 @@ break what it shows.
 | Refresh tokens kept sealed between syncs, and DPoP key rotation | [RFC 6749 §6](https://www.rfc-editor.org/rfc/rfc6749#section-6) | | | | | | ● |
 | Revoking a whole grant ("connected apps") | — | | | | | | ● |
 | OpenID Federation: trust chains, metadata policy, automatic registration, Trust Marks | [OpenID Federation 1.0](https://openid.net/specs/openid-federation-1_0.html) | ● | | | | | |
+| Durable stores in SQLite, migrated at startup and swept (the [`sqlstore`](../sqlstore/README.md) module) | — | | | | | | ● |
 | A resource server verifying sender-constrained tokens | [RFC 9449 §7](https://www.rfc-editor.org/rfc/rfc9449#section-7), [RFC 8705 §3](https://www.rfc-editor.org/rfc/rfc8705#section-3) | | ● | ● | ● | ● | ● |
 
 Each demo's README has a **What to try** walk-through, and a **How it's
@@ -60,8 +61,10 @@ built** table naming the FAPIgo API behind each piece.
   `internal/`, so nothing a demo does is out of reach of your own code.
 - **Tests** that drive the whole demo end to end, attacks included.
 
-Every store is in memory and every key is generated at startup: these
-are demos, never a template for production storage. The banks, apps,
+Every key is generated at startup, and every store is in memory except
+linked-accounts', which keeps them in a SQLite file through the
+`sqlstore` module, started afresh each run: these are demos, never a
+template for production storage. The banks, apps,
 countries and people are made up.
 
 ## Running one

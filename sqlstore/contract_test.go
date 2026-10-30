@@ -59,6 +59,12 @@ func TestPairwiseSubjectStoreContract(t *testing.T) {
 	})
 }
 
+func TestSessionStoreContract(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		storage.TestSessionStoreContract(t, func() storage.SessionStore { return freshDB(t, dialect).Sessions() })
+	})
+}
+
 // Every contract suite whose store seals its records passes with a
 // Sealer too.
 func TestSealedStoreContracts(t *testing.T) {
@@ -75,6 +81,9 @@ func TestSealedStoreContracts(t *testing.T) {
 		})
 		t.Run("Backchannel", func(t *testing.T) {
 			storage.TestBackchannelAuthenticationStoreContract(t, func() storage.BackchannelAuthenticationStore { return sealed().Backchannel() })
+		})
+		t.Run("Sessions", func(t *testing.T) {
+			storage.TestSessionStoreContract(t, func() storage.SessionStore { return sealed().Sessions() })
 		})
 	})
 }
@@ -144,6 +153,7 @@ func checkCapabilities(t *testing.T, d *sqlstore.DB, plain, sealed storage.Capab
 	}
 	for name, s := range map[string]storage.StoreAssurance{
 		"Transactions": d.Transactions(), "Grants": d.Grants(), "AccessTokens": d.AccessTokens(), "Backchannel": d.Backchannel(),
+		"Sessions": d.Sessions(),
 	} {
 		if got := s.Capabilities(); got != sealed {
 			t.Errorf("%s().Capabilities() = %+v, want %+v", name, got, sealed)
@@ -164,4 +174,5 @@ var (
 	_ storage.AccessTokenStore               = (*sqlstore.AccessTokenStore)(nil)
 	_ storage.BackchannelAuthenticationStore = (*sqlstore.BackchannelAuthenticationStore)(nil)
 	_ storage.PairwiseSubjectStore           = (*sqlstore.PairwiseSubjectStore)(nil)
+	_ storage.SessionStore                   = (*sqlstore.SessionStore)(nil)
 )

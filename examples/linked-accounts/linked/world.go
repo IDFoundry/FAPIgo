@@ -8,10 +8,13 @@
 // tries to misuse the long-lived access.
 //
 // Everything runs in one process behind a demokit.HostRouter, each party
-// at its own *.localhost host.
+// at its own *.localhost host, with each party's stores in one SQLite
+// database (package sqlstore).
 package linked
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"sync"
@@ -69,20 +72,26 @@ type World struct {
 	net    *demokit.Net
 	router demokit.HostRouter
 	clock  *clock
+	stores stores
 
 	bank       *bank
 	api        *api
 	pocketwise *pocketwise
 }
 
-// New builds the demo for a listener on port, reached through n.
-func New(port int, n *demokit.Net) (*World, error) {
+// New builds the demo for a listener on port, reached through n, with
+// its stores in db (OpenDatabase), whose tables it creates.
+func New(ctx context.Context, port int, n *demokit.Net, db *sql.DB) (*World, error) {
 	w := &World{port: port, net: n, router: demokit.HostRouter{}, clock: &clock{}}
+	var err error
+	if w.stores, err = newStores(ctx, db); err != nil {
+		return nil, fmt.Errorf("stores: %w", err)
+	}
 	apps, err := w.newApps()
 	if err != nil {
 		return nil, fmt.Errorf("client keys: %w", err)
 	}
-	if w.bank, err = w.newBank(apps); err != nil {
+	if w.bank, err = w.newBank(ctx, apps); err != nil {
 		return nil, fmt.Errorf("bank: %w", err)
 	}
 	if w.api, err = w.newAPI(); err != nil {

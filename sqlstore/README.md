@@ -1,7 +1,8 @@
 # sqlstore
 
 Durable stores for a FAPIgo Authorization Server's `server.Dependencies`,
-in PostgreSQL or SQLite through `database/sql`. It's a Go module of its
+and for a relying party's `client.Dependencies.Sessions`, in PostgreSQL
+or SQLite through `database/sql`. It's a Go module of its
 own, `github.com/idfoundry/fapigo/sqlstore`, so FAPIgo itself takes no
 database driver: bring the one you use.
 
@@ -40,6 +41,12 @@ deps := server.Dependencies{
 deps.AccessTokens = server.OpaqueAccessTokens{Store: db.AccessTokens()} // opaque access tokens (JWTs need none)
 deps.Backchannel = db.Backchannel()                                    // CIBA
 deps.PairwiseSubjects, err = pairwise.NewMapping(db.PairwiseSubjects()) // random, mapped pairwise subs
+
+// A relying party (package client):
+clientDeps := client.Dependencies{
+	Sessions: db.Sessions(),
+	// …
+}
 ```
 
 SQLite (for example [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite),
@@ -53,7 +60,8 @@ sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_m
 
 Set `Options.Sealer` to encrypt every record blob the stores write —
 pushed requests, grants behind codes and refresh tokens, opaque access
-tokens, CIBA requests and decisions — with an AEAD bound to its row:
+tokens, CIBA requests and decisions, a relying party's sessions — with
+an AEAD bound to its row:
 
 ```go
 sealer, err := sqlstore.AESGCMSealer(key) // 32 random bytes, from a secrets manager or KMS, never the database
@@ -82,13 +90,16 @@ section.
 | PostgreSQL | yes | yes | yes | no (READ COMMITTED, row locks per key) | with a `Sealer`* |
 | SQLite | yes | yes | no: one host's file | yes | with a `Sealer`* |
 
-\* Transactions, Grants, AccessTokens and Backchannel only, and not while
-`ReadUnsealed` is set; Clients, Replay, Nonces, Revocation and
-PairwiseSubjects never declare it.
+\* Transactions, Grants, AccessTokens, Backchannel and Sessions only,
+and not while `ReadUnsealed` is set; Clients, Replay, Nonces,
+Revocation and PairwiseSubjects never declare it.
 
 So `server.New` accepts the PostgreSQL stores under
 `AssuranceProduction` with either `Deployment`, and the SQLite stores
-with `DeploymentSingleInstance` only.
+with `DeploymentSingleInstance` only. `client.New` accepts `Sessions` on
+either under `AssuranceProduction`, except that a native app's
+`CallbackBindingDeviceLocalStore` refuses PostgreSQL's, a store shared
+between instances: use SQLite there.
 
 ## Running it
 
@@ -100,12 +111,18 @@ with `DeploymentSingleInstance` only.
 - **Sweeping**: stores never delete expired rows. Call
   `db.Sweep(ctx, time.Now())` every few minutes. CIBA requests are kept
   an hour past their expiry, so a late poll gets `expired_token`;
-  pairwise subjects are never swept.
+  sessions until they're consumed or expire; pairwise subjects are
+  never swept.
+- **Resource servers** reading opaque access tokens or revocations use
+  the server's tables (`AccessTokens()`, `Revocation()`, and `Replay()`,
+  whose digests each role namespaces), through a DB with the same
+  `TablePrefix` and `Sealer`. Their DPoP nonce store is the exception:
+  `Nonces()` from a DB with a `TablePrefix` of its own, never the
+  server's, whose nonces it would then accept.
 - **Clients** are rows the operator manages: a `client_id` and a
   versioned JSON configuration, written with `Clients().Put` or
   `MarshalClientConfig`. See the package documentation's Clients
   section for the document's members.
-- **Not yet provided**: the client's session store.
 
 ## Tests
 

@@ -1,11 +1,13 @@
 package linked_test
 
 import (
+	"database/sql"
 	"io"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -34,7 +36,7 @@ func start(t *testing.T) *demo {
 	if err != nil {
 		t.Fatalf("demokit.New: %v", err)
 	}
-	world, err := linked.New(listener.Addr().(*net.TCPAddr).Port, n)
+	world, err := linked.New(t.Context(), listener.Addr().(*net.TCPAddr).Port, n, testDatabase(t))
 	if err != nil {
 		t.Fatalf("linked.New: %v", err)
 	}
@@ -46,6 +48,17 @@ func start(t *testing.T) *demo {
 		t.Fatal(err)
 	}
 	return &demo{t: t, world: world, http: n.Browser(jar)}
+}
+
+// testDatabase is a fresh database for the demo's stores.
+func testDatabase(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := linked.OpenDatabase(filepath.Join(t.TempDir(), "linked.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
 }
 
 func (d *demo) get(host, path string) string {
@@ -149,6 +162,11 @@ func TestLinkAndSync(t *testing.T) {
 
 	d.post("pocketwise.localhost", "/rotate-key", nil)
 	d.post("console.localhost", "/clock", url.Values{"days": {"1"}})
+	// A sweep a day on deletes what has expired, never the live refresh
+	// token.
+	if _, err := d.world.Sweep(t.Context()); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
 	page = d.post("pocketwise.localhost", "/sync", nil)
 	mustContain(t, "a sync after rotating the DPoP key", latestLog(page), `pill ok">ok`, "Read Everyday, Savings")
 }
@@ -206,4 +224,12 @@ func TestConsentExpires(t *testing.T) {
 	page := d.post("pocketwise.localhost", "/sync", nil)
 	mustContain(t, "the sync after 91 days", page, "invalid_grant")
 	mustContain(t, "Connected apps after 91 days", d.get("bank.localhost", "/connected-apps"), `pill bad">expired`)
+
+	// The expired refresh token is swept from the bank's tables: a sync
+	// is still refused, now as a refresh token the bank doesn't know.
+	if n, err := d.world.Sweep(t.Context()); err != nil || n == 0 {
+		t.Fatalf("Sweep after 91 days = %d, %v, want the expired rows deleted", n, err)
+	}
+	page = d.post("pocketwise.localhost", "/sync", nil)
+	mustContain(t, "the sync after the sweep", page, "invalid_grant: refresh_token is invalid, expired, or already used")
 }

@@ -26,7 +26,8 @@ CREATE INDEX {access_tokens_sweep} ON {access_tokens} (sweep_after);
 -- redeemed is 1 once a poll has observed an approval. last_polled_at is
 -- the last counted poll, NULL before the first and after a ping
 -- request's decision (whose next poll the interval doesn't apply to);
--- poll_interval is in nanoseconds.
+-- poll_interval is in nanoseconds. sweep_after is an hour
+-- (BackchannelExpiredRetention) after expires_at.
 CREATE TABLE {backchannel_authentications} (
 	auth_req_id_hash {{blob}} PRIMARY KEY,
 	handle_hash {{blob}} NOT NULL UNIQUE,

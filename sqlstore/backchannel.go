@@ -23,6 +23,15 @@ type BackchannelAuthenticationStore struct{ d *DB }
 // Backchannel returns d's storage.BackchannelAuthenticationStore.
 func (d *DB) Backchannel() *BackchannelAuthenticationStore { return &BackchannelAuthenticationStore{d} }
 
+// BackchannelExpiredRetention is how long Sweep keeps a CIBA request
+// after it expires, so that a client still polling it then is told it
+// expired (*storage.BackchannelAuthenticationExpiredError, which the
+// server answers with expired_token, CIBA Core §11) rather than that
+// its auth_req_id is unknown (invalid_grant). An hour covers a client
+// polling well past its request's lifetime, which FAPI-CIBA caps at 60
+// minutes, while keeping the table from growing without bound.
+const BackchannelExpiredRetention = time.Hour
+
 // backchannelRecordVersion is the version of backchannelRecord's and
 // backchannelDecision's JSON.
 const backchannelRecordVersion = 1
@@ -61,7 +70,8 @@ var (
 )
 
 // CreateBackchannelAuthentication implements
-// storage.BackchannelAuthenticationStore, storing the request pending.
+// storage.BackchannelAuthenticationStore, storing the request pending,
+// for Sweep to delete BackchannelExpiredRetention after it expires.
 func (s *BackchannelAuthenticationStore) CreateBackchannelAuthentication(ctx context.Context, record storage.NewBackchannelAuthentication) error {
 	if !validTextKey(string(record.ClientID)) {
 		return errors.New("sqlstore: create backchannel authentication: client_id isn't valid UTF-8 without NUL")
@@ -80,7 +90,7 @@ func (s *BackchannelAuthenticationStore) CreateBackchannelAuthentication(ctx con
 	if err != nil {
 		return fmt.Errorf("sqlstore: create backchannel authentication: %w", err)
 	}
-	expires := nanos(record.ExpiresAt)
+	expires, sweepAfter := nanos(record.ExpiresAt), nanos(record.ExpiresAt.Add(BackchannelExpiredRetention))
 	key, clientID := string(record.AuthReqIDHash[:]), string(record.ClientID)
 	err = s.d.writeOne(ctx, func(q querier) error {
 		sealedRecord, err := s.d.seal(blobRef{backchannelTable, recordColumn, key, clientID}, plainRecord)
@@ -93,7 +103,7 @@ func (s *BackchannelAuthenticationStore) CreateBackchannelAuthentication(ctx con
 		}
 		_, err = q.ExecContext(ctx, s.d.q("INSERT INTO {backchannel_authentications} (auth_req_id_hash, handle_hash, client_id, delivery_mode, record, decision, status, poll_interval, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
 			record.AuthReqIDHash[:], record.HandleHash[:], clientID, record.DeliveryMode, sealedRecord, sealedDecision,
-			int(storage.BackchannelAuthenticationPending), int64(record.PollInterval), expires, expires)
+			int(storage.BackchannelAuthenticationPending), int64(record.PollInterval), expires, sweepAfter)
 		return err
 	})
 	if err != nil {

@@ -98,8 +98,9 @@ with `DeploymentSingleInstance` only.
   prefixes every table, so these tables can share a database, and a
   `*sql.DB`, with OID4VCgo's sqlstore (`oid4vc_`).
 - **Sweeping**: stores never delete expired rows. Call
-  `db.Sweep(ctx, time.Now())` every few minutes. Pairwise subjects are
-  never swept.
+  `db.Sweep(ctx, time.Now())` every few minutes. CIBA requests are kept
+  an hour past their expiry, so a late poll gets `expired_token`;
+  pairwise subjects are never swept.
 - **Clients** are rows the operator manages: a `client_id` and a
   versioned JSON configuration, written with `Clients().Put` or
   `MarshalClientConfig`. See the package documentation's Clients

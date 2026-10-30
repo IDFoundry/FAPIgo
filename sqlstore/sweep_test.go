@@ -69,10 +69,10 @@ func TestSweep(t *testing.T) {
 			t.Fatalf("Sweep before anything expired = %d, %v, want 0, nil", n, err)
 		}
 		// The unbegun request, the unused code, the refresh token, the
-		// replay digest, the nonce, the short revocation, the access
-		// token and the CIBA request.
-		if n, err := f.d.Sweep(ctx, f.t0.Add(2*time.Minute)); err != nil || n != 8 {
-			t.Fatalf("Sweep after a minute = %d, %v, want 8, nil", n, err)
+		// replay digest, the nonce, the short revocation and the access
+		// token — not the CIBA request, kept past its expiry.
+		if n, err := f.d.Sweep(ctx, f.t0.Add(2*time.Minute)); err != nil || n != 7 {
+			t.Fatalf("Sweep after a minute = %d, %v, want 7, nil", n, err)
 		}
 		checkSweptAfterAMinute(t, f)
 		// The begun request, the used code, the long revocation and the
@@ -82,7 +82,31 @@ func TestSweep(t *testing.T) {
 			t.Fatalf("Sweep after everything expired = %d, %v, want 4, nil", n, err)
 		}
 		checkSweptAfterEverything(t, f)
+		checkCIBARetention(t, f)
 	})
+}
+
+// checkCIBARetention checks that the CIBA request, which expired at a
+// minute, still answers a poll as expired until
+// BackchannelExpiredRetention after that, and Sweep removes it only
+// then.
+func checkCIBARetention(t *testing.T, f sweepFixture) {
+	t.Helper()
+	ctx := context.Background()
+	retained := f.t0.Add(time.Minute + sqlstore.BackchannelExpiredRetention)
+	if n, err := f.d.Sweep(ctx, retained.Add(-time.Second)); err != nil || n != 0 {
+		t.Fatalf("Sweep just before the CIBA request's retention ends = %d, %v, want 0, nil", n, err)
+	}
+	var expired *storage.BackchannelAuthenticationExpiredError
+	if err := pollAt(f.d.Backchannel(), cibaRequest("swept", "poll"), retained.Add(-time.Second)); !errors.As(err, &expired) {
+		t.Fatalf("late poll within the retention = %v, want expired (expired_token)", err)
+	}
+	if n, err := f.d.Sweep(ctx, retained.Add(time.Second)); err != nil || n != 1 {
+		t.Fatalf("Sweep after the CIBA request's retention = %d, %v, want 1, nil", n, err)
+	}
+	if err := pollAt(f.d.Backchannel(), cibaRequest("swept", "poll"), retained.Add(time.Second)); !errors.Is(err, sqlstore.ErrNotFound) {
+		t.Fatalf("poll of a swept CIBA request = %v, want ErrNotFound", err)
+	}
 }
 
 // checkSweptAfterEverything checks f once everything has expired and
@@ -113,8 +137,9 @@ func checkSweptAfterAMinute(t *testing.T, f sweepFixture) {
 	if _, err := f.d.AccessTokens().LookupAccessToken(ctx, storage.AccessTokenLookup{TokenHash: sha256.Sum256([]byte("at"))}); !errors.Is(err, sqlstore.ErrNotFound) {
 		t.Fatalf("LookupAccessToken of a swept token = %v, want ErrNotFound", err)
 	}
-	if err := pollAt(f.d.Backchannel(), cibaRequest("swept", "poll"), f.t0); !errors.Is(err, sqlstore.ErrNotFound) {
-		t.Fatalf("poll of a swept CIBA request = %v, want ErrNotFound", err)
+	var expired *storage.BackchannelAuthenticationExpiredError
+	if err := pollAt(f.d.Backchannel(), cibaRequest("swept", "poll"), f.t0.Add(2*time.Minute)); !errors.As(err, &expired) {
+		t.Fatalf("poll of a CIBA request after its expiry, before its retention ends = %v, want expired (expired_token)", err)
 	}
 	if _, err := f.d.Nonces().Lookup(ctx, storage.NonceLookup{Nonce: "nonce"}); !errors.Is(err, sqlstore.ErrNotFound) {
 		t.Fatalf("Lookup of a swept nonce = %v, want ErrNotFound", err)

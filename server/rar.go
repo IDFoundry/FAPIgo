@@ -23,8 +23,10 @@ const authorizationDetailsParameter = "authorization_details"
 
 // parseRequestedAuthorizationDetails validates params' own
 // "authorization_details" member (if any) against Config.RAR, returning it
-// as validated raw JSON array once RARRegistry.Parse has confirmed its
-// shape and bounds — nil if params carries no such member. Config.RAR ==
+// as validated raw JSON array once RARRegistry.ParseRequest has confirmed
+// its shape and bounds — nil if params carries no such member. Every
+// caller handles details a client submits to start a grant, so this is the
+// one place RARDefinition.ValidateRequest applies. Config.RAR ==
 // nil rejects any request that carries the parameter at all — see
 // Config.RAR's own doc comment for why "unconfigured" is deliberately not
 // the same as "an empty registry accepting nothing extra."
@@ -43,7 +45,7 @@ func (s *Server) parseRequestedAuthorizationDetails(params map[string]json.RawMe
 	if s.cfg.RAR == nil {
 		return nil, fmt.Errorf("authorization_details is not supported by this server")
 	}
-	if _, err := s.cfg.RAR.Parse(raw); err != nil {
+	if _, err := s.cfg.RAR.ParseRequest(raw); err != nil {
 		return nil, err
 	}
 	return raw, nil
@@ -60,6 +62,12 @@ func (s *Server) parseRequestedAuthorizationDetails(params map[string]json.RawMe
 //
 // A non-empty granted with an empty/absent requestedRaw is always
 // rejected: there is nothing it could be a subset of.
+//
+// Both arrays go through RARRegistry.Parse, not ParseRequest: granted may
+// carry members only the server may set (RARDefinition.ValidateRequest),
+// and requestedRaw already passed ParseRequest when the client submitted
+// it, so re-checking it here would only strand an in-flight request when a
+// ValidateRequest is added or tightened between its PAR and its consent.
 func (s *Server) validateGrantedAuthorizationDetails(requestedRaw json.RawMessage, granted []json.RawMessage) (json.RawMessage, error) {
 	if len(granted) == 0 {
 		return nil, nil

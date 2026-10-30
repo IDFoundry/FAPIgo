@@ -50,7 +50,7 @@ func TestDecodeCheckRejectsNonObject(t *testing.T) {
 		Amount string `json:"amount"`
 	}
 	def := RARDefinition[untyped]{Type: "payment", MaxObjects: 1, MaxBytesPerObject: 64}
-	if err := def.decodeCheck(json.RawMessage(`[1]`)); err == nil {
+	if err := def.decodeCheck(json.RawMessage(`[1]`), false); err == nil {
 		t.Error("decodeCheck(array) = nil, want error")
 	}
 }

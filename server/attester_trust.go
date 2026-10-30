@@ -16,6 +16,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientattestation"
+	"github.com/idfoundry/fapigo/internal/depcheck"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -138,8 +139,12 @@ func (r RegisteredAttesterKeys) validate() error {
 //   - hold a key of the type the client's registered attestation
 //     algorithm needs.
 //
-// Extended key usage isn't constrained: no standard value exists for
-// attestation signing. Revocation asks whether a certificate in the
+// No standard extended key usage exists for attestation signing, so
+// none is required, but LeafPolicy (DefaultAttesterLeafPolicy unless
+// set) refuses a signing certificate issued for another role — TLS
+// server or client, OCSP responder, an ISO/IEC 18013-5 mdoc reader or
+// document signer — or reachable only through a CA restricted to such
+// roles; only the chains it accepts are checked further. Revocation asks whether a certificate in the
 // verified chain below its anchor has been revoked, once the
 // attestation's PoP has verified; an anchor itself is withdrawn by an
 // AttesterTrustAnchors (or AttesterAnchorSource) that tracks a trust
@@ -194,6 +199,18 @@ type X5CAttesterChain struct {
 	// refuses the request with server_error. Tokens already issued to
 	// the client stay usable until they expire.
 	Revocation ClientCertificateRevocation
+
+	// LeafPolicy judges, by the role its certificates were issued for,
+	// each verified chain (leaf first, ending at the trust anchor) the
+	// signing certificate has; chains it refuses play no further part,
+	// in the issuer binding or Revocation, and an attestation with none
+	// left is rejected with invalid_client. nil means
+	// DefaultAttesterLeafPolicy{}, which refuses other roles'
+	// certificates, such as TLS servers' and OCSP responders'. Pass an
+	// AttesterLeafPolicyFunc that calls DefaultAttesterLeafPolicy first
+	// to also require an ecosystem's own Wallet Provider purpose, or
+	// AnyAttesterLeaf{} to explicitly decline the role check.
+	LeafPolicy AttesterLeafPolicy
 }
 
 // AttesterIssuerBinding decides what ties an X5CAttesterChain signing
@@ -255,6 +272,9 @@ func (c X5CAttesterChain) validate() error {
 			return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.Revocation: %w", err)
 		}
 	}
+	if found, ok := depcheck.FindTypedNil(c, x5cAttesterChainFieldNames); ok {
+		return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.%s is a nil %s", found.Name, found.Type)
+	}
 	switch c.IssuerBinding {
 	case AttesterIssuerInCertificate, AttesterIssuerByTrustAnchors, AttesterIssuerBoundToAnchor:
 	default:
@@ -276,6 +296,15 @@ func (c X5CAttesterChain) validate() error {
 		return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.TrustAnchors is an AttesterAnchorSource, whose attester bindings TrustAnchors would ignore; set it as Anchors with IssuerBinding AttesterIssuerBoundToAnchor")
 	}
 	return nil
+}
+
+// x5cAttesterChainFieldNames names X5CAttesterChain's interface fields
+// as Go does, for a typed-nil error.
+var x5cAttesterChainFieldNames = map[string]string{
+	"TrustAnchors": "TrustAnchors",
+	"Anchors":      "Anchors",
+	"Revocation":   "Revocation",
+	"LeafPolicy":   "LeafPolicy",
 }
 
 // validateBoundAnchors checks an AttesterIssuerBoundToAnchor
@@ -309,6 +338,9 @@ func (c X5CAttesterChain) attesterKey(ctx context.Context, s *Server, client sto
 	}
 	leaf, chains, err := verifyAttesterChain(ders, roots, s.deps.Clock.Now())
 	if err != nil {
+		return attesterSigner{}, err
+	}
+	if chains, err = approvedAttesterChains(c.LeafPolicy, chains); err != nil {
 		return attesterSigner{}, err
 	}
 	if !keyFitsAlgorithm(leaf.PublicKey, client.ClientAttestationAlgorithm()) {
@@ -528,6 +560,8 @@ func verifyAttesterChain(ders [][]byte, roots *x509.CertPool, now time.Time) (*x
 	for _, c := range certs[1:] {
 		intermediates.AddCert(c)
 	}
+	// ExtKeyUsageAny: no extended key usage marks attestation signing,
+	// so roles are judged per chain by X5CAttesterChain.LeafPolicy.
 	chains, err := leaf.Verify(x509.VerifyOptions{
 		Roots:         roots,
 		Intermediates: intermediates,

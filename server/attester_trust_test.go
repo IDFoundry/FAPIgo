@@ -10,6 +10,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -35,13 +36,15 @@ type testCert struct {
 }
 
 type certOptions struct {
-	parent    *testCert // nil: self-signed
-	isCA      bool
-	notBefore time.Time
-	notAfter  time.Time
-	keyUsage  x509.KeyUsage
-	key       crypto.Signer // nil: fresh P-256
-	uris      []string      // URI subject alternative names
+	parent             *testCert // nil: self-signed
+	isCA               bool
+	notBefore          time.Time
+	notAfter           time.Time
+	keyUsage           x509.KeyUsage
+	key                crypto.Signer // nil: fresh P-256
+	uris               []string      // URI subject alternative names
+	extKeyUsage        []x509.ExtKeyUsage
+	unknownExtKeyUsage []asn1.ObjectIdentifier
 }
 
 var testSerial int64
@@ -77,6 +80,8 @@ func newTestCert(t *testing.T, name string, o certOptions) testCert {
 		KeyUsage:              o.keyUsage,
 		BasicConstraintsValid: true,
 		IsCA:                  o.isCA,
+		ExtKeyUsage:           o.extKeyUsage,
+		UnknownExtKeyUsage:    o.unknownExtKeyUsage,
 	}
 	for _, raw := range o.uris {
 		u, err := url.Parse(raw)
@@ -337,19 +342,22 @@ func TestNewAttesterTrustRequirements(t *testing.T) {
 		trust   server.AttesterTrust
 		wantErr bool
 	}{
-		"required when attestation enabled":     {true, nil, true},
-		"not required when disabled":            {false, nil, false},
-		"registered keys":                       {true, server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{}}, false},
-		"registered keys by pointer":            {true, &server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{}}, false},
-		"registered keys without a key source":  {true, server.RegisteredAttesterKeys{}, true},
-		"nil registered keys pointer":           {true, (*server.RegisteredAttesterKeys)(nil), true},
-		"nil x5c chain pointer":                 {true, (*server.X5CAttesterChain)(nil), true},
-		"x5c chain, issuer in certificate":      {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerInCertificate}, false},
-		"x5c chain, bound by trust anchors":     {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerByTrustAnchors}, false},
-		"x5c chain without issuer binding":      {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}}, true},
-		"x5c chain with unknown issuer binding": {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerBinding(99)}, true},
-		"x5c chain without trust anchors":       {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, IssuerBinding: server.AttesterIssuerInCertificate}, true},
-		"x5c chain with nil static anchor pool": {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{}, IssuerBinding: server.AttesterIssuerInCertificate}, true},
+		"required when attestation enabled":       {true, nil, true},
+		"not required when disabled":              {false, nil, false},
+		"registered keys":                         {true, server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{}}, false},
+		"registered keys by pointer":              {true, &server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{}}, false},
+		"registered keys without a key source":    {true, server.RegisteredAttesterKeys{}, true},
+		"nil registered keys pointer":             {true, (*server.RegisteredAttesterKeys)(nil), true},
+		"nil x5c chain pointer":                   {true, (*server.X5CAttesterChain)(nil), true},
+		"x5c chain, issuer in certificate":        {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerInCertificate}, false},
+		"x5c chain, bound by trust anchors":       {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerByTrustAnchors}, false},
+		"x5c chain without issuer binding":        {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}}, true},
+		"x5c chain with unknown issuer binding":   {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerBinding(99)}, true},
+		"x5c chain without trust anchors":         {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, IssuerBinding: server.AttesterIssuerInCertificate}, true},
+		"x5c chain opting out of the leaf policy": {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerInCertificate, LeafPolicy: server.AnyAttesterLeaf{}}, false},
+		"x5c chain with nil leaf policy func":     {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerInCertificate, LeafPolicy: server.AttesterLeafPolicyFunc(nil)}, true},
+		"x5c chain with nil leaf policy pointer":  {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerInCertificate, LeafPolicy: (*server.DefaultAttesterLeafPolicy)(nil)}, true},
+		"x5c chain with nil static anchor pool":   {true, server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{}, IssuerBinding: server.AttesterIssuerInCertificate}, true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

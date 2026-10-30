@@ -5,7 +5,7 @@ name: govulncheck
 # version every finding matters for. This module has no third-party
 # dependencies (see go.mod), so a finding is a standard-library CVE, and
 # the fix is raising go.mod's go directive (here and in every
-# examples/*/go.mod) to a release that has it. That a newer Go is
+# examples/*/go.mod and sqlstore/go.mod) to a release that has it. That a newer Go is
 # already fixed says nothing about what this module lets its users build
 # with, so this deliberately doesn't scan under the latest release.
 #
@@ -40,3 +40,18 @@ jobs:
           go-version-input: ''
           go-version-file: go.mod
           check-latest: false
+
+  # sqlstore/ is a module of its own, with third-party dependencies (its
+  # tests' database drivers), so a finding there may be one of theirs:
+  # the fix is then raising it in sqlstore/go.mod. Same Go version
+  # discipline as above, from sqlstore/go.mod.
+  govulncheck-sqlstore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-input: ''
+          go-version-file: sqlstore/go.mod
+          check-latest: false
+          cache-dependency-path: sqlstore/go.sum
+          work-dir: sqlstore

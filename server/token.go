@@ -555,7 +555,17 @@ func (s *Server) addNextDPoPNonce(ctx context.Context, client storage.Registered
 // nextDPoPNonce is the DPoP-Nonce a DPoP-bound client should use next,
 // or "" when the server doesn't issue nonces or client isn't DPoP-bound.
 func (s *Server) nextDPoPNonce(ctx context.Context, client storage.RegisteredClient, now time.Time) (string, *Error) {
-	if s.deps.Nonces == nil || client.SenderConstrain() != storage.SenderConstrainDPoP {
+	if client.SenderConstrain() != storage.SenderConstrainDPoP {
+		return "", nil
+	}
+	return s.nextTokenEndpointDPoPNonce(ctx, now)
+}
+
+// nextTokenEndpointDPoPNonce is the DPoP-Nonce the token endpoint's next
+// DPoP proof should carry, or "" when the server doesn't issue nonces:
+// nextDPoPNonce without a client, for VerifyTokenRequestDPoP.
+func (s *Server) nextTokenEndpointDPoPNonce(ctx context.Context, now time.Time) (string, *Error) {
+	if s.deps.Nonces == nil {
 		return "", nil
 	}
 	nextNonce, err := s.issueDPoPNonce(ctx, now)

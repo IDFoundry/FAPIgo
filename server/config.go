@@ -391,7 +391,10 @@ type Limits struct {
 	// DPoP proof, since a PoP JWT has no exp claim of its own and is
 	// meant to be freshly created per request (§10.2 contrasts this
 	// explicitly with the reusable Client Attestation). Required only
-	// when Config.AttestationBasedClientAuthentication is true.
+	// when Config.AttestationBasedClientAuthentication is true. With no
+	// challenge issued, this window is a PoP's only freshness bound, so
+	// AssuranceProduction holds it to at most 5 minutes, as it does
+	// MaxDPoPProofAge; 60 seconds is a sensible value.
 	MaxClientAttestationPoPAge time.Duration
 }
 

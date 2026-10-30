@@ -122,9 +122,11 @@ tests; run anything clients rely on under `AssuranceProduction`.
 code and pushed request lifetimes, clock skew, request object and CIBA
 request lifetimes) to the profile's numbers, and bounds a few it leaves
 open (`MaxDPoPProofAge` at most 5 minutes, `DPoPNonceLifetime` 15,
-`JARMResponseLifetime` 10, `InteractionLifetime` an hour), but not the
-ones it leaves to you: `AccessTokenLifetime`, `RefreshTokenLifetime`,
-and how long a client assertion or attestation may live. It also
+`JARMResponseLifetime` 10, `InteractionLifetime` an hour, and, with
+attestation-based client authentication, `MaxClientAttestationPoPAge`
+5), but not the ones it leaves to you: `AccessTokenLifetime`,
+`RefreshTokenLifetime`, and how long a client assertion or attestation
+may live. It also
 requires `Dependencies.Clock` to be `server.SystemClock{}` (or a clock
 declaring `server.ClockAssurance`) reading the real time. Those are what bound a leaked
 token when nothing else does, so keep them short, and shorter still with

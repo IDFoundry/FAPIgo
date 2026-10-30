@@ -15,6 +15,34 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.66.0
+
+### Production bounds the Client Attestation PoP age (server, *production only*)
+
+**Affects:** a server under `AssuranceProduction` with
+`Config.AttestationBasedClientAuthentication` whose
+`Limits.MaxClientAttestationPoPAge` is over 5 minutes.
+
+**Why:** a Client Attestation PoP JWT has no `exp` and is meant to be
+created fresh for each request (OAuth 2.0 Attestation-Based Client
+Authentication §10.2). The server issues no challenge for it, so its
+`iat` window is its only freshness bound: with a window of hours or
+days, a PoP generated in advance — by malware with brief access to the
+client instance's key, say — authenticates the client long after that
+access has ended. Production now holds it to 5 minutes, the same bound
+as `MaxDPoPProofAge`.
+
+**What fails:** `server.New` returns an error naming
+`limits.max_client_attestation_pop_age`.
+
+**What to change:** set it to at most 5 minutes; 60 seconds is a
+sensible value. Wallets and other attested clients should create a
+fresh PoP for each request rather than reuse one.
+
+```go
+cfg.Limits.MaxClientAttestationPoPAge = 60 * time.Second
+```
+
 ## v0.65.0
 
 ### `Limits.MaxAccessTokenClaimsBytes` is required (server)

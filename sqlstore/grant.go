@@ -26,8 +26,12 @@ func (s *GrantStore) CreateAuthorizationCode(ctx context.Context, code storage.N
 	}
 	expires := nanos(code.ExpiresAt)
 	err := s.d.writeOne(ctx, func(q querier) error {
-		_, err := q.ExecContext(ctx, s.d.q("INSERT INTO {authorization_codes} (code_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
-			code.CodeHash[:], string(code.ClientID), blob(code.Grant), expires, expires)
+		record, err := s.d.seal(blobRef{"authorization_codes", recordColumn, string(code.CodeHash[:]), string(code.ClientID)}, code.Grant)
+		if err != nil {
+			return err
+		}
+		_, err = q.ExecContext(ctx, s.d.q("INSERT INTO {authorization_codes} (code_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
+			code.CodeHash[:], string(code.ClientID), record, expires, expires)
 		return err
 	})
 	if err != nil {
@@ -61,7 +65,11 @@ func (s *GrantStore) RedeemAuthorizationCode(ctx context.Context, redemption sto
 	case err != nil:
 		return storage.RedeemedAuthorizationCode{}, unavailable("redeem authorization code", err)
 	}
-	return storage.RedeemedAuthorizationCode{ClientID: fapi.ClientID(clientID), Grant: rawJSON(record), ExpiresAt: timeOf(expires)}, nil
+	grant, err := s.d.open(blobRef{"authorization_codes", recordColumn, string(redemption.CodeHash[:]), clientID}, record)
+	if err != nil {
+		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("sqlstore: redeem authorization code: %w", err)
+	}
+	return storage.RedeemedAuthorizationCode{ClientID: fapi.ClientID(clientID), Grant: grant, ExpiresAt: timeOf(expires)}, nil
 }
 
 // whyNotRedeemed is RedeemAuthorizationCode's error for a code its
@@ -134,8 +142,12 @@ func (s *GrantStore) CreateRefreshToken(ctx context.Context, token storage.NewRe
 	}
 	expires := nanos(token.ExpiresAt)
 	err := s.d.writeOne(ctx, func(q querier) error {
-		_, err := q.ExecContext(ctx, s.d.q("INSERT INTO {refresh_tokens} (token_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
-			token.TokenHash[:], string(token.ClientID), blob(token.Grant), expires, expires)
+		record, err := s.d.seal(blobRef{"refresh_tokens", recordColumn, string(token.TokenHash[:]), string(token.ClientID)}, token.Grant)
+		if err != nil {
+			return err
+		}
+		_, err = q.ExecContext(ctx, s.d.q("INSERT INTO {refresh_tokens} (token_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
+			token.TokenHash[:], string(token.ClientID), record, expires, expires)
 		return err
 	})
 	if err != nil {
@@ -159,7 +171,11 @@ func (s *GrantStore) RedeemRefreshToken(ctx context.Context, redemption storage.
 	case err != nil:
 		return storage.RedeemedRefreshToken{}, unavailable("redeem refresh token", err)
 	}
-	return storage.RedeemedRefreshToken{ClientID: fapi.ClientID(clientID), Grant: rawJSON(record), ExpiresAt: timeOf(expires)}, nil
+	grant, err := s.d.open(blobRef{"refresh_tokens", recordColumn, string(redemption.TokenHash[:]), clientID}, record)
+	if err != nil {
+		return storage.RedeemedRefreshToken{}, fmt.Errorf("sqlstore: redeem refresh token: %w", err)
+	}
+	return storage.RedeemedRefreshToken{ClientID: fapi.ClientID(clientID), Grant: grant, ExpiresAt: timeOf(expires)}, nil
 }
 
 // RevokeRefreshToken implements storage.GrantStore by deleting the
@@ -179,4 +195,4 @@ func (s *GrantStore) RevokeRefreshToken(ctx context.Context, tokenHash [32]byte)
 
 // Capabilities implements storage.StoreAssurance — see the package
 // documentation.
-func (s *GrantStore) Capabilities() storage.Capabilities { return s.d.capabilities() }
+func (s *GrantStore) Capabilities() storage.Capabilities { return s.d.sealedCapabilities() }

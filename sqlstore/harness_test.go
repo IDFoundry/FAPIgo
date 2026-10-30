@@ -159,9 +159,29 @@ func (s *place) openPool() (*sqlstore.DB, *sql.DB) {
 // handle is a handle on s over db.
 func (s *place) handle(db *sql.DB) *sqlstore.DB {
 	s.t.Helper()
-	d, err := sqlstore.New(db, s.dialect, sqlstore.Options{TablePrefix: s.prefix})
+	return s.handleWith(db, sqlstore.Options{})
+}
+
+// handleWith is a handle on s over db with opts, less their
+// TablePrefix: s's.
+func (s *place) handleWith(db *sql.DB, opts sqlstore.Options) *sqlstore.DB {
+	s.t.Helper()
+	opts.TablePrefix = s.prefix
+	d, err := sqlstore.New(db, s.dialect, opts)
 	if err != nil {
 		s.t.Fatalf("sqlstore.New: %v", err)
+	}
+	return d
+}
+
+// migratedWith returns a migrated handle on s with opts, on the same
+// *sql.DB as s's other handles for PostgreSQL and a new one for SQLite.
+func (s *place) migratedWith(opts sqlstore.Options) *sqlstore.DB {
+	s.t.Helper()
+	_, db := s.open()
+	d := s.handleWith(db, opts)
+	if err := d.Migrate(context.Background()); err != nil {
+		s.t.Fatalf("Migrate: %v", err)
 	}
 	return d
 }

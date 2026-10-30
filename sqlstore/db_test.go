@@ -223,6 +223,22 @@ func TestDatabaseFailureIsStoreUnavailable(t *testing.T) {
 				_, err := d.Sweep(ctx, time.Now())
 				return err
 			},
+			"LookupAccessToken": func() error {
+				_, err := d.AccessTokens().LookupAccessToken(ctx, storage.AccessTokenLookup{TokenHash: digest})
+				return err
+			},
+			"LookupBackchannelAuthentication": func() error {
+				_, err := d.Backchannel().LookupBackchannelAuthentication(ctx, digest)
+				return err
+			},
+			"PollBackchannelAuthentication": func() error {
+				_, err := d.Backchannel().PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{AuthReqIDHash: digest, Now: time.Now()})
+				return err
+			},
+			"LookupPairwiseSubject": func() error {
+				_, err := d.PairwiseSubjects().Lookup(ctx, "i", "s", "b")
+				return err
+			},
 		} {
 			calls[name] = call
 		}
@@ -281,6 +297,11 @@ func checkUnstorableReadsUnknown(t *testing.T, d *sqlstore.DB, key string) {
 	if _, err := d.Transactions().CompleteAuthorization(ctx, storage.CompleteAuthorizationTransaction{Handle: key}); !errors.Is(err, sqlstore.ErrNotFound) {
 		t.Errorf("CompleteAuthorization(%q) = %v, want ErrNotFound", key, err)
 	}
+	for _, args := range [][3]string{{key, "s", "b"}, {"i", key, "b"}, {"i", "s", key}} {
+		if _, err := d.PairwiseSubjects().Lookup(ctx, args[0], args[1], args[2]); !errors.Is(err, storage.ErrPairwiseSubjectNotFound) || !errors.Is(err, sqlstore.ErrNotFound) {
+			t.Errorf("PairwiseSubjects().Lookup(%q) = %v, want ErrPairwiseSubjectNotFound", args, err)
+		}
+	}
 }
 
 // checkUnstorableWritesRefused checks that each write refuses key,
@@ -297,6 +318,12 @@ func checkUnstorableWritesRefused(t *testing.T, d *sqlstore.DB, key string) {
 		"CreateRefreshToken":      d.Grants().CreateRefreshToken(ctx, storage.NewRefreshToken{ClientID: fapi.ClientID(key), ExpiresAt: later}),
 		"UseOnce":                 d.Replay().UseOnce(ctx, storage.ReplayUse{Namespace: storage.ReplayNamespace(key), ExpiresAt: later}),
 		"RecordIssuedAccessToken": d.Grants().RecordIssuedAccessToken(ctx, [32]byte{}, key, later),
+		"CreateAccessToken":       d.AccessTokens().CreateAccessToken(ctx, storage.NewAccessToken{ClientID: fapi.ClientID(key), ExpiresAt: later}),
+		"CreateBackchannelAuthentication": d.Backchannel().CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
+			ClientID: fapi.ClientID(key), DeliveryMode: "poll", ExpiresAt: later,
+		}),
+		"GetOrCreatePairwiseSubject": getOrCreateErr(d, storage.PairwiseSubjectKey{Issuer: "i", Sector: "s", Subject: key}, "b"),
+		"GetOrCreatePairwiseBody":    getOrCreateErr(d, storage.PairwiseSubjectKey{Issuer: "i", Sector: "s", Subject: "u"}, key),
 	} {
 		if err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
 			t.Errorf("%s(%q) = %v, want a refusal", name, key, err)
@@ -378,6 +405,20 @@ func writesOn(d *sqlstore.DB) map[string]func() error {
 			_, err := d.Clients().Delete(ctx, "c")
 			return err
 		},
+		"CreateAccessToken": func() error {
+			return d.AccessTokens().CreateAccessToken(ctx, storage.NewAccessToken{TokenHash: digest, ClientID: "c", ExpiresAt: later})
+		},
+		"CreateBackchannelAuthentication": func() error {
+			return d.Backchannel().CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{AuthReqIDHash: digest, HandleHash: digest, ClientID: "c", DeliveryMode: "poll", ExpiresAt: later})
+		},
+		"DecideBackchannelAuthentication": func() error {
+			_, err := d.Backchannel().DecideBackchannelAuthentication(ctx, storage.DecideBackchannelAuthentication{HandleHash: digest, Status: storage.BackchannelAuthenticationDenied})
+			return err
+		},
+		"GetOrCreatePairwiseSubject": func() error {
+			_, err := d.PairwiseSubjects().GetOrCreate(ctx, storage.PairwiseSubjectKey{Issuer: "i", Sector: "s", Subject: "u"}, "b")
+			return err
+		},
 	}
 }
 
@@ -394,5 +435,35 @@ func TestClosedDatabase(t *testing.T) {
 	}
 	if _, err := d.Sweep(ctx, time.Now()); !errors.Is(err, storage.ErrStoreUnavailable) {
 		t.Errorf("Sweep on a closed database = %v, want ErrStoreUnavailable", err)
+	}
+}
+
+// getOrCreateErr is GetOrCreate's error.
+func getOrCreateErr(d *sqlstore.DB, key storage.PairwiseSubjectKey, candidate string) error {
+	_, err := d.PairwiseSubjects().GetOrCreate(context.Background(), key, candidate)
+	return err
+}
+
+// Writes refuse what the stores can't keep: an access token's unknown
+// sender constraint, a CIBA delivery mode other than poll or ping, and
+// a decision that isn't one.
+func TestInvalidRecordsRefused(t *testing.T) {
+	ctx := context.Background()
+	d := freshDB(t, sqlstore.SQLite)
+	later := time.Now().Add(time.Minute)
+	for name, err := range map[string]error{
+		"CreateAccessToken(unknown sender constrain)": d.AccessTokens().CreateAccessToken(ctx, storage.NewAccessToken{ClientID: "c", SenderConstrain: 9, ExpiresAt: later}),
+		"CreateBackchannelAuthentication(push)": d.Backchannel().CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
+			ClientID: "c", DeliveryMode: "push", ExpiresAt: later,
+		}),
+	} {
+		if err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
+			t.Errorf("%s = %v, want a refusal", name, err)
+		}
+	}
+	for _, status := range []storage.BackchannelAuthenticationStatus{0, storage.BackchannelAuthenticationPending, 9} {
+		if _, err := d.Backchannel().DecideBackchannelAuthentication(ctx, storage.DecideBackchannelAuthentication{Status: status}); err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
+			t.Errorf("DecideBackchannelAuthentication(status %d) = %v, want a refusal", status, err)
+		}
 	}
 }

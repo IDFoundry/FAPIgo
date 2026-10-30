@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // FuzzSignVerifyTamper checks the one property every other JOSE-adjacent
@@ -40,6 +41,9 @@ func FuzzSignVerifyTamper(f *testing.F) {
 	f.Fuzz(func(t *testing.T, payload []byte, segment uint8, bytePos int, mask uint8) {
 		if len(payload) == 0 {
 			return // Sign refuses an empty payload — see its own doc comment for why.
+		}
+		if !strictjson.DecodesLosslessly(payload) {
+			return // nor one that isn't valid UTF-8 or has an unpaired surrogate escape.
 		}
 		token, err := Sign(priv, Header{Algorithm: fapi.ES256, Type: "test+jwt"}, payload)
 		if err != nil {

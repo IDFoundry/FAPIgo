@@ -38,8 +38,12 @@ func (s *TransactionStore) CreatePAR(ctx context.Context, record storage.NewPARR
 	}
 	expires := nanos(record.ExpiresAt)
 	err := s.d.writeOne(ctx, func(q querier) error {
-		_, err := q.ExecContext(ctx, s.d.q("INSERT INTO {par_requests} (reference, client_id, request, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
-			record.Reference, string(record.ClientID), blob(record.Request), expires, expires)
+		request, err := s.d.seal(blobRef{"par_requests", requestColumn, record.Reference, string(record.ClientID)}, record.Request)
+		if err != nil {
+			return err
+		}
+		_, err = q.ExecContext(ctx, s.d.q("INSERT INTO {par_requests} (reference, client_id, request, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
+			record.Reference, string(record.ClientID), request, expires, expires)
 		return err
 	})
 	if err != nil {
@@ -70,11 +74,20 @@ func (s *TransactionStore) BeginAuthorization(ctx context.Context, txn storage.B
 		if err != nil {
 			return err
 		}
-		if _, err := q.ExecContext(ctx, s.d.q("INSERT INTO {interactions} (handle, reference, client_id, request, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?, ?)"),
-			txn.Handle, txn.Reference, clientID, blob(request), handleExpires, handleExpires); err != nil {
+		// The interaction's copy is sealed for its own row.
+		plain, err := s.d.open(blobRef{"par_requests", requestColumn, txn.Reference, clientID}, request)
+		if err != nil {
 			return err
 		}
-		out = storage.PushedAuthorizationRequest{ClientID: fapi.ClientID(clientID), Request: rawJSON(request), ExpiresAt: timeOf(expires)}
+		copied, err := s.d.seal(blobRef{"interactions", requestColumn, txn.Handle, clientID}, plain)
+		if err != nil {
+			return err
+		}
+		if _, err := q.ExecContext(ctx, s.d.q("INSERT INTO {interactions} (handle, reference, client_id, request, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?, ?)"),
+			txn.Handle, txn.Reference, clientID, copied, handleExpires, handleExpires); err != nil {
+			return err
+		}
+		out = storage.PushedAuthorizationRequest{ClientID: fapi.ClientID(clientID), Request: plain, ExpiresAt: timeOf(expires)}
 		return nil
 	})
 	switch {
@@ -115,7 +128,11 @@ func (s *TransactionStore) CompleteAuthorization(ctx context.Context, txn storag
 		if n != 1 {
 			return errRequestURIConsumed
 		}
-		out = storage.CompletedInteraction{ClientID: fapi.ClientID(clientID), Request: rawJSON(request), ExpiresAt: timeOf(expires)}
+		plain, err := s.d.open(blobRef{"interactions", requestColumn, txn.Handle, clientID}, request)
+		if err != nil {
+			return err
+		}
+		out = storage.CompletedInteraction{ClientID: fapi.ClientID(clientID), Request: plain, ExpiresAt: timeOf(expires)}
 		return nil
 	})
 	switch {
@@ -131,4 +148,4 @@ func (s *TransactionStore) CompleteAuthorization(ctx context.Context, txn storag
 
 // Capabilities implements storage.StoreAssurance — see the package
 // documentation.
-func (s *TransactionStore) Capabilities() storage.Capabilities { return s.d.capabilities() }
+func (s *TransactionStore) Capabilities() storage.Capabilities { return s.d.sealedCapabilities() }

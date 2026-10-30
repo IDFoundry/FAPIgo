@@ -7,9 +7,11 @@ import (
 	"crypto/rand"
 	"strings"
 	"testing"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/sqlstore"
 	"github.com/idfoundry/fapigo/storage/memstore"
@@ -23,11 +25,11 @@ func (discardAudit) Record(context.Context, server.AuditEvent) error { return ni
 
 // productionServer builds a server.New configuration and dependencies
 // under AssuranceProduction for deployment, with every store this
-// package provides taken from d. What it doesn't provide yet —
-// signing keys and the client key source — are the library's own
-// production-ready ones; CIBA, whose BackchannelAuthenticationStore
-// isn't here yet, stays off, and access tokens are JWTs, which need no
-// AccessTokenStore.
+// package provides taken from d: CIBA on, with d's
+// BackchannelAuthenticationStore; opaque access tokens in its
+// AccessTokenStore; and pairwise subjects by default, mapped in its
+// PairwiseSubjectStore. What it doesn't provide — signing keys and the
+// client key source — are the library's own production-ready ones.
 func productionServer(t *testing.T, d *sqlstore.DB, deployment server.Deployment) (server.Config, server.Dependencies) {
 	t.Helper()
 	url := func(raw string) fapi.URL { return mustURL(t, raw) }
@@ -51,12 +53,21 @@ func productionServer(t *testing.T, d *sqlstore.DB, deployment server.Deployment
 	if err != nil {
 		t.Fatal(err)
 	}
+	mapping, err := pairwise.NewMapping(d.PairwiseSubjects())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix, err := pairwise.NewPrefix("")
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := server.Config{
 		Issuer:   issuer,
-		Subjects: server.PublicSubjects(),
+		Subjects: server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Prefix: prefix},
 		Endpoints: server.Endpoints{
 			Authorization: url("https://as.example/authorize"), Token: url("https://as.example/token"),
 			PushedAuthorizationRequest: url("https://as.example/par"), JWKS: url("https://as.example/jwks"),
+			BackchannelAuthentication: url("https://as.example/backchannel"),
 		},
 		Profile:    server.ProfileFAPISecurity,
 		Algorithms: server.RecommendedAlgorithms(),
@@ -64,6 +75,10 @@ func productionServer(t *testing.T, d *sqlstore.DB, deployment server.Deployment
 		Assurance:  server.AssuranceProduction,
 		Deployment: deployment,
 	}
+	cfg.Algorithms.BackchannelAuthenticationRequest = server.AlgorithmSet{fapi.ES256}
+	cfg.Limits.BackchannelAuthenticationRequestLifetime = 2 * time.Minute
+	cfg.Limits.MaxBackchannelAuthenticationRequestLifetime = 5 * time.Minute
+	cfg.Limits.BackchannelAuthenticationPollInterval = 5 * time.Second
 	deps := server.Dependencies{
 		Clients:                d.Clients(),
 		Transactions:           d.Transactions(),
@@ -73,7 +88,10 @@ func productionServer(t *testing.T, d *sqlstore.DB, deployment server.Deployment
 		Revocation:             d.Revocation(),
 		ClientKeys:             clientKeys,
 		Keys:                   km,
-		AccessTokens:           server.JWTAccessTokens{Keys: km, Algorithm: fapi.ES256},
+		AccessTokens:           server.OpaqueAccessTokens{Store: d.AccessTokens()},
+		Backchannel:            d.Backchannel(),
+		BackchannelNotifier:    server.NoBackchannelNotifications{},
+		PairwiseSubjects:       mapping,
 		Audit:                  discardAudit{},
 		ClientCertificateTrust: server.ClientCertificateChainVerifiedUpstream{},
 		Clock:                  server.SystemClock{},
@@ -105,10 +123,33 @@ func TestProductionServerAcceptsStores(t *testing.T) {
 				t.Fatalf("server.New(production, horizontally scaled, SQLite stores) = %v, want CrossInstanceConsistent refused", err)
 			}
 		}
-		_, deps = productionServer(t, d, deployment)
-		deps.Replay = memstore.NewReplayStore()
-		if _, err := server.New(cfg, deps); err == nil {
-			t.Fatal("server.New(production, memstore replay store) = nil error, want it refused")
-		}
+		checkMemstoreRefused(t, d, deployment)
 	})
+}
+
+// checkMemstoreRefused checks that swapping any one of the stores for
+// memstore's, which declares nothing, fails AssuranceProduction's gate:
+// it checks each of them.
+func checkMemstoreRefused(t *testing.T, d *sqlstore.DB, deployment server.Deployment) {
+	t.Helper()
+	for name, swap := range map[string]func(*server.Dependencies){
+		"Replay": func(deps *server.Dependencies) { deps.Replay = memstore.NewReplayStore() },
+		"AccessTokens": func(deps *server.Dependencies) {
+			deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
+		},
+		"Backchannel": func(deps *server.Dependencies) { deps.Backchannel = memstore.NewBackchannelAuthenticationStore() },
+		"PairwiseSubjects": func(deps *server.Dependencies) {
+			mapping, err := pairwise.NewMapping(memstore.NewPairwiseSubjectStore())
+			if err != nil {
+				t.Fatal(err)
+			}
+			deps.PairwiseSubjects = mapping
+		},
+	} {
+		cfg, deps := productionServer(t, d, deployment)
+		swap(&deps)
+		if _, err := server.New(cfg, deps); err == nil {
+			t.Errorf("server.New(production, memstore %s) = nil error, want it refused", name)
+		}
+	}
 }

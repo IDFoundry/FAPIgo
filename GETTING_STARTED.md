@@ -50,11 +50,12 @@ persistence and a real key store (KMS/HSM), and swap them in — nothing
 else in this guide changes. For the stores, you may not need to
 implement them either: the separate
 [`github.com/idfoundry/fapigo/sqlstore`](sqlstore) module implements
-the client repository and the transaction, grant, replay, nonce and
-revocation stores on PostgreSQL or SQLite through `database/sql`,
-declares their capabilities, and passes the contract tests — see its
-package documentation for migrations, sweeping and what it doesn't
-provide yet. For `keys.KeyManager` specifically, you may
+the client repository and the transaction, grant, replay, nonce,
+revocation, opaque access token, CIBA and pairwise subject stores on
+PostgreSQL or SQLite through `database/sql`, declares their
+capabilities, passes the contract tests, and can seal the records it
+holds (`Options.Sealer`) — see its package documentation for
+migrations, sealing, sweeping and what it doesn't provide yet. For `keys.KeyManager` specifically, you may
 not need to implement anything at all: `keys.NewKeyManagerFromSigners`
 adapts any `crypto.Signer` — what most HSM/KMS Go client wrappers
 already implement — directly into a `KeyManager`, one `keys.SignerSpec`
@@ -249,7 +250,8 @@ never promise more unlinkability than the deriver gives.
     both of the construction's operations: see [Keeping the
     reversible keys in an HSM or KMS](#keeping-the-reversible-keys-in-an-hsm-or-kms).
   - **`pairwise.NewMapping`** keeps a random `sub` per user and sector
-    in a `storage.PairwiseSubjectStore`, so there's no key whose leak
+    in a `storage.PairwiseSubjectStore` (the `sqlstore` module's
+    `PairwiseSubjects()` is one), so there's no key whose leak
     reverses them all, at the cost of a durable, shared store.
 - **A one-way deriver** (`pairwise.NewHMAC` over a 32-byte secret key):
   nothing in FAPIgo can map a `sub` back, which is the strongest

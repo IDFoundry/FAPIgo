@@ -27,10 +27,17 @@
 //		// ...
 //	}
 //
-// Replay, Nonces and Revocation also serve a resource server
-// (resource.Dependencies' Replay, Nonces and Revocation): give it the
-// same tables, through a DB with the same TablePrefix, so a revocation
-// the server records is seen there.
+// and, for the features that need one, its store:
+//
+//	deps.AccessTokens = server.OpaqueAccessTokens{Store: db.AccessTokens()} // opaque access tokens; JWTs need none
+//	deps.Backchannel = db.Backchannel()                                    // CIBA
+//	deps.PairwiseSubjects, err = pairwise.NewMapping(db.PairwiseSubjects()) // pairwise subs (Config.Subjects), random and mapped
+//
+// Replay, Nonces, Revocation and AccessTokens also serve a resource
+// server (resource.Dependencies' Replay, Nonces and Revocation, and
+// resource.OpaqueAccessTokens' store): give it the same tables, through
+// a DB with the same TablePrefix and Sealer, so a revocation or an
+// access token the server records is seen there.
 //
 // For SQLite, with a driver such as modernc.org/sqlite (pure Go, no
 // cgo), open the file in WAL mode with a busy timeout, so readers don't
@@ -70,7 +77,19 @@
 //     CompleteAuthorization deletes the interaction (DELETE …
 //     RETURNING) and marks its pushed request consumed only if it
 //     wasn't already, in one transaction, so exactly one interaction
-//     per pushed request ever completes.
+//     per pushed request ever completes;
+//   - a CIBA decision is an UPDATE … RETURNING that matches only a
+//     pending request, so exactly one is recorded; a poll locks the
+//     request's row (an UPDATE … RETURNING that changes nothing), then
+//     checks it, records the poll and, for an approval, marks it
+//     redeemed, in one transaction, so exactly one poll observes an
+//     approval, and the poll interval (slow_down) is checked and
+//     recorded atomically;
+//   - a pairwise subject is one INSERT … ON CONFLICT DO NOTHING,
+//     against the table's primary key (issuer, sector, subject) and its
+//     unique (issuer, sector, body), then read back: of concurrent
+//     calls for one user and sector exactly one stores its body, and a
+//     body is never another user's in the same issuer and sector.
 //
 // On SQLite every write runs in a transaction started with BEGIN
 // IMMEDIATE. Expiry is compared against the time the server passes
@@ -85,9 +104,64 @@
 // UTF-8) is answered as unknown by a lookup, and refused by a write.
 //
 // The stores keep what the server hands them: the digests of codes,
-// refresh tokens, request_uri references and interaction handles, never
-// the values themselves, and the server's request and grant records as
-// opaque blobs.
+// refresh tokens, access tokens, auth_req_ids, request_uri references
+// and interaction handles, never the values themselves, and the
+// server's request and grant records as opaque blobs.
+//
+// # Sealing
+//
+// Options.Sealer seals every record blob the stores write with an AEAD
+// — AESGCMSealer (AES-256-GCM), or a Sealer of your own calling a key
+// management service; OID4VCgo's verifier.TransactionSealer is the same
+// interface, so one sealer value serves both:
+//
+//	sealer, err := sqlstore.AESGCMSealer(key) // 32 bytes from crypto/rand, kept outside the database
+//	db, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: sealer})
+//
+// Sealed are the blobs that hold what a copy of the database mustn't
+// reveal: pushed requests and interactions' copies of them (the
+// authorization request, its claims and PKCE challenge), authorization
+// codes' and refresh tokens' grants (the end user, scope, claims and
+// consent), opaque access tokens' records (subject, scope, binding and
+// claims), and CIBA requests and decisions (the request, a ping
+// request's auth_req_id and client notification token — a bearer
+// secret the server presents — and the approved grant). Each is bound,
+// as AEAD additional data, to its table, column, row key, client_id and
+// the DB's TablePrefix, so a sealed blob copied to another row, client,
+// table or prefix fails to open. A sealed blob starts with a format
+// byte (2) that no JSON record starts with.
+//
+// Not sealed, since the stores look rows up, consume and sweep them by
+// them: keys and digests (which reveal nothing of the values they're
+// digests of), client IDs, expiry and sweep times, CIBA status, delivery
+// mode and poll bookkeeping, replay digests, DPoP nonces, revoked keys,
+// pairwise subjects (the issuer, sector, internal subject and body are
+// every lookup's keys), and the clients table (public client metadata,
+// which the operator edits with SQL; it holds no secret). Sealing gives
+// confidentiality, and integrity for each blob; it doesn't make the
+// database tamper-proof: anyone who can write to it can still delete
+// rows, change those columns, or put back a blob the row held before.
+// Keep write access to the database as tight as read access.
+//
+// With a Sealer, a store refuses a blob that isn't sealed, and without
+// one, a sealed blob: either is an error wrapping ErrRecordFormat and
+// storage.ErrStoreUnavailable, as is a blob sealed under another key or
+// altered. To start sealing a database already in use, deploy with
+// Options.ReadUnsealed set too, which reads the blobs written before,
+// run DB.SealRecords, which seals them in place, then deploy without
+// ReadUnsealed: while it's set, anyone who can write to the database
+// could plant a blob the Sealer never sealed, so it's for that
+// migration only.
+//
+// Keep the key outside the database — in a secrets manager or a KMS —
+// and away from its backups, which is what makes them unreadable
+// without it. Losing it makes every sealed record unreadable: clients
+// authorize again, as they would once the records expired.
+// Changing it does the same for the records sealed under the old one;
+// to rotate without that, wrap two keys in a Sealer of your own that
+// seals with the new key and opens with either, until the longest-lived
+// record (a refresh token) sealed under the old one expires. A resource
+// server reading opaque access tokens needs the same Sealer.
 //
 // # Errors
 //
@@ -119,9 +193,13 @@
 //     with server.DeploymentHorizontallyScaled; use them with
 //     server.DeploymentSingleInstance.
 //
-// Neither declares EncryptedAtRest: the records are stored as the
-// server hands them. Encrypt the database's storage, or wait for the
-// record sealing a later release adds.
+// With Options.Sealer set, the stores whose records it seals —
+// Transactions, Grants, AccessTokens and Backchannel — also declare
+// EncryptedAtRest (but not while ReadUnsealed lets unsealed records be
+// read); Clients, Replay, Nonces, Revocation and PairwiseSubjects,
+// whose rows are their lookup keys, never do. Nothing in FAPIgo
+// requires EncryptedAtRest; encrypting the database's storage as well
+// is still worth it.
 //
 // # Clients
 //
@@ -161,15 +239,18 @@
 // still need it: a pushed request until the last interaction begun from
 // it expires, a redeemed authorization code until the tokens its
 // redemption issued expire (so reusing the code still revokes them),
-// and a revocation until the latest expiry it was recorded with.
+// and a revocation until the latest expiry it was recorded with. An
+// opaque access token is kept until it expires, and a CIBA request
+// until BackchannelExpiredRetention (an hour) after it does, so a
+// client that polls it late gets expired_token rather than an unknown
+// auth_req_id's invalid_grant. Pairwise subjects are never swept: a user's
+// identifier for a sector must stay the same for as long as relying
+// parties may hold it.
 //
 // # Not yet provided
 //
-// This release provides the stores above. Not yet: the
-// AccessTokenStore (for server.OpaqueAccessTokens; JWT access tokens
-// need none), the BackchannelAuthenticationStore (for CIBA), the
-// PairwiseSubjectStore (for random, mapped pairwise subjects), the client's
-// SessionStore, and sealing of the stored records. Until then, take
-// those from an implementation of your own, run against its
-// storage.Test*Contract suite.
+// This release provides every store an Authorization Server takes. Not
+// yet: the client's SessionStore (client.Config), which a relying party
+// takes from an implementation of its own until then, run against
+// storage.TestSessionStoreContract.
 package sqlstore

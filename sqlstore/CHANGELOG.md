@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.1.0...sqlstore/v0.2.0) (2026-10-30)
+
+
+### Features
+
+* **sqlstore:** add the client's SessionStore ([8f98d56](https://github.com/IDFoundry/FAPIgo/commit/8f98d5682fab01ab1187934b89b44917e5ebb392))
+
+
+### Bug Fixes
+
+* **sqlstore:** keep a resource server's DPoP nonces apart from the server's ([8f98d56](https://github.com/IDFoundry/FAPIgo/commit/8f98d5682fab01ab1187934b89b44917e5ebb392))
+
 ## 0.1.0 (2026-10-30)
 
 

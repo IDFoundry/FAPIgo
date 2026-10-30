@@ -10,6 +10,8 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
@@ -152,4 +154,94 @@ func checkMemstoreRefused(t *testing.T, d *sqlstore.DB, deployment server.Deploy
 			t.Errorf("server.New(production, memstore %s) = nil error, want it refused", name)
 		}
 	}
+}
+
+// productionClient builds a client.New configuration and dependencies
+// under AssuranceProduction, with d's SessionStore as its sessions
+// store and the library's own production-ready keys, issuer key source
+// and HTTP client.
+func productionClient(t *testing.T, d *sqlstore.DB) (client.Config, client.Dependencies) {
+	t.Helper()
+	url := func(raw string) fapi.URL { return mustURL(t, raw) }
+	issuer, err := fapi.ParseIssuerURL("https://as.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	km, err := keys.NewKeyManagerFromSigners([]keys.SignerSpec{
+		{Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256, Signer: key},
+		{Purpose: keys.DPoPProofSigning, Algorithm: fapi.ES256, Signer: key},
+	}, keys.DeclareCustody(keys.KeyCustody{Durable: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuerKeys, err := keys.NewLocalIssuerKeys(issuer, km)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpClient, err := fapihttp.NewClient(fapihttp.RecommendedTransportConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	algorithms := client.RecommendedAlgorithms()
+	algorithms.IDToken = fapi.ES256
+	cfg := client.Config{
+		Issuer:      issuer,
+		ClientID:    "rp",
+		RedirectURI: "https://rp.example/callback",
+		Endpoints: client.Endpoints{
+			Authorization: url("https://as.example/authorize"), Token: url("https://as.example/token"),
+			PushedAuthorizationRequest: url("https://as.example/par"),
+		},
+		Profile:                        client.ProfileFAPISecurity,
+		Algorithms:                     algorithms,
+		Limits:                         client.RecommendedLimits(),
+		Assurance:                      client.AssuranceProduction,
+		AuthorizationResponseIssPolicy: client.RequireAuthorizationResponseIss,
+	}
+	deps := client.Dependencies{
+		Sessions:   d.Sessions(),
+		Keys:       km,
+		IssuerKeys: issuerKeys,
+		HTTP:       httpClient,
+		Clock:      client.SystemClock{},
+		Random:     rand.Reader,
+	}
+	return cfg, deps
+}
+
+// A relying party whose sessions store is this package's passes
+// client.New's AssuranceProduction gate on either database, sealed or
+// not, where memstore's is refused. A native app binding callbacks to
+// its own on-device store (CallbackBindingDeviceLocalStore) is accepted
+// with SQLite's, and refused with PostgreSQL's, which declares
+// CrossInstanceConsistent: a store shared between instances.
+func TestProductionClientAcceptsSessions(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		p := newPlace(t, dialect)
+		for _, d := range []*sqlstore.DB{p.migrated(), p.migratedWith(sqlstore.Options{Sealer: testSealer(t)})} {
+			cfg, deps := productionClient(t, d)
+			if _, err := client.New(cfg, deps); err != nil {
+				t.Fatalf("client.New(production, %s sessions): %v", dialect, err)
+			}
+		}
+		cfg, deps := productionClient(t, p.migrated())
+		cfg.RedirectURI = "http://127.0.0.1/callback"
+		cfg.CallbackBinding = client.CallbackBindingDeviceLocalStore
+		_, err := client.New(cfg, deps)
+		if dialect == sqlstore.SQLite && err != nil {
+			t.Fatalf("client.New(production, native app, SQLite sessions): %v", err)
+		}
+		if dialect == sqlstore.Postgres && (err == nil || !strings.Contains(err.Error(), "CrossInstanceConsistent")) {
+			t.Fatalf("client.New(production, native app, PostgreSQL sessions) = %v, want CrossInstanceConsistent refused", err)
+		}
+		cfg, deps = productionClient(t, p.migrated())
+		deps.Sessions = memstore.NewSessionStore()
+		if _, err := client.New(cfg, deps); err == nil {
+			t.Fatal("client.New(production, memstore sessions) = nil error, want it refused")
+		}
+	})
 }

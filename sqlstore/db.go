@@ -63,9 +63,10 @@ type Options struct {
 
 	// Sealer, if set, seals every record blob the stores write — the
 	// server's pushed requests, interactions, authorization codes' and
-	// refresh tokens' grants, opaque access tokens' records, and CIBA
-	// requests and decisions — each bound to its table, column, row key,
-	// client and TablePrefix, so a copy of the database reveals none of
+	// refresh tokens' grants, opaque access tokens' records, CIBA
+	// requests and decisions, and a relying party's sessions — each
+	// bound to its table, column, row key, client and TablePrefix, so a
+	// copy of the database reveals none of
 	// them and a sealed blob can't be moved to another row. AESGCMSealer
 	// is one, with a key kept outside the database. The columns the
 	// stores look rows up, consume and sweep them by stay readable — see
@@ -83,10 +84,11 @@ type Options struct {
 	ReadUnsealed bool
 }
 
-// DB holds FAPIgo's Authorization Server stores' tables in one SQL
-// database. Make one with New, create its tables with Migrate, and take
-// its stores from its methods, one per server.Dependencies field. It's
-// safe for concurrent use.
+// DB holds FAPIgo's stores' tables in one SQL database: an
+// Authorization Server's, and a relying party's sessions. Make one with
+// New, create its tables with Migrate, and take its stores from its
+// methods, one per server.Dependencies field, and Sessions for
+// client.Dependencies.Sessions. It's safe for concurrent use.
 type DB struct {
 	db      *sql.DB
 	dialect Dialect

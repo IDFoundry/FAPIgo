@@ -6,8 +6,8 @@ own, `github.com/idfoundry/fapigo/sqlstore`, so FAPIgo itself takes no
 database driver: bring the one you use.
 
 The package documentation ([doc.go](doc.go)) is the reference: setup,
-migrations, atomicity, capabilities, the clients table and sweeping.
-This page is the short version.
+migrations, atomicity, sealing, capabilities, the clients table and
+sweeping. This page is the short version.
 
 ## Setup
 
@@ -17,6 +17,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // or _ "modernc.org/sqlite"
 
+	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/sqlstore"
 )
@@ -34,6 +35,11 @@ deps := server.Dependencies{
 	Revocation:   db.Revocation(),
 	// …
 }
+
+// For the features that need one:
+deps.AccessTokens = server.OpaqueAccessTokens{Store: db.AccessTokens()} // opaque access tokens (JWTs need none)
+deps.Backchannel = db.Backchannel()                                    // CIBA
+deps.PairwiseSubjects, err = pairwise.NewMapping(db.PairwiseSubjects()) // random, mapped pairwise subs
 ```
 
 SQLite (for example [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite),
@@ -43,12 +49,42 @@ pure Go, no cgo) needs WAL mode and a busy timeout:
 sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
 ```
 
+## Sealing records
+
+Set `Options.Sealer` to encrypt every record blob the stores write —
+pushed requests, grants behind codes and refresh tokens, opaque access
+tokens, CIBA requests and decisions — with an AEAD bound to its row:
+
+```go
+sealer, err := sqlstore.AESGCMSealer(key) // 32 random bytes, from a secrets manager or KMS, never the database
+db, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: sealer})
+```
+
+A sealed blob moved to another row, client, table or table prefix,
+altered, or opened under another key is refused (`ErrRecordFormat`, as
+an outage). Lookup keys and digests, client IDs, times, CIBA status,
+replay digests, nonces, revocations, pairwise subjects and the clients
+table stay readable: the stores look rows up by them. The `Sealer`
+interface is OID4VCgo's `verifier.TransactionSealer`, so one sealer
+serves both.
+
+To start sealing a database in use: deploy with `Sealer` and
+`ReadUnsealed: true`, run `db.SealRecords(ctx)`, then deploy without
+`ReadUnsealed`. Losing the key makes sealed records unreadable; to
+rotate it, use a `Sealer` of your own that opens with both keys until
+the old one's records expire. See the package documentation's Sealing
+section.
+
 ## What each database declares
 
 | | Durable | AtomicConsume | CrossInstanceConsistent | SerializableRedemption | EncryptedAtRest |
 |---|---|---|---|---|---|
-| PostgreSQL | yes | yes | yes | no (READ COMMITTED, row locks per key) | no |
-| SQLite | yes | yes | no: one host's file | yes | no |
+| PostgreSQL | yes | yes | yes | no (READ COMMITTED, row locks per key) | with a `Sealer`* |
+| SQLite | yes | yes | no: one host's file | yes | with a `Sealer`* |
+
+\* Transactions, Grants, AccessTokens and Backchannel only, and not while
+`ReadUnsealed` is set; Clients, Replay, Nonces, Revocation and
+PairwiseSubjects never declare it.
 
 So `server.New` accepts the PostgreSQL stores under
 `AssuranceProduction` with either `Deployment`, and the SQLite stores
@@ -62,14 +98,13 @@ with `DeploymentSingleInstance` only.
   prefixes every table, so these tables can share a database, and a
   `*sql.DB`, with OID4VCgo's sqlstore (`oid4vc_`).
 - **Sweeping**: stores never delete expired rows. Call
-  `db.Sweep(ctx, time.Now())` every few minutes.
+  `db.Sweep(ctx, time.Now())` every few minutes. Pairwise subjects are
+  never swept.
 - **Clients** are rows the operator manages: a `client_id` and a
   versioned JSON configuration, written with `Clients().Put` or
   `MarshalClientConfig`. See the package documentation's Clients
   section for the document's members.
-- **Not yet provided**: the access token store (opaque access tokens),
-  the CIBA store, the pairwise subject store, the client's session
-  store and record sealing.
+- **Not yet provided**: the client's session store.
 
 ## Tests
 

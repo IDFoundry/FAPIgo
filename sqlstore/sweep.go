@@ -8,13 +8,15 @@ import (
 // sweptTables are the tables whose rows Sweep deletes once past their
 // sweep_after.
 var sweptTables = []string{
-	"par_requests",        // NewPARRecord.ExpiresAt, or a later interaction's
-	"interactions",        // BeginAuthorizationTransaction.HandleExpiresAt
-	"authorization_codes", // NewAuthorizationCode.ExpiresAt, or a later issued token's
-	"refresh_tokens",      // NewRefreshToken.ExpiresAt
-	"replay",              // ReplayUse.ExpiresAt
-	"dpop_nonces",         // NonceIssuance.ExpiresAt
-	"revocations",         // the latest expiresAt a key was revoked with
+	"par_requests",                // NewPARRecord.ExpiresAt, or a later interaction's
+	"interactions",                // BeginAuthorizationTransaction.HandleExpiresAt
+	"authorization_codes",         // NewAuthorizationCode.ExpiresAt, or a later issued token's
+	"refresh_tokens",              // NewRefreshToken.ExpiresAt
+	"replay",                      // ReplayUse.ExpiresAt
+	"dpop_nonces",                 // NonceIssuance.ExpiresAt
+	"revocations",                 // the latest expiresAt a key was revoked with
+	"access_tokens",               // NewAccessToken.ExpiresAt
+	"backchannel_authentications", // NewBackchannelAuthentication.ExpiresAt
 }
 
 // Sweep deletes every row that expired before now, from every table

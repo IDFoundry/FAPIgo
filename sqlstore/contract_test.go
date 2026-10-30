@@ -41,6 +41,44 @@ func TestRevocationStoreContract(t *testing.T) {
 	})
 }
 
+func TestAccessTokenStoreContract(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		storage.TestAccessTokenStoreContract(t, func() storage.AccessTokenStore { return freshDB(t, dialect).AccessTokens() })
+	})
+}
+
+func TestBackchannelAuthenticationStoreContract(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		storage.TestBackchannelAuthenticationStoreContract(t, func() storage.BackchannelAuthenticationStore { return freshDB(t, dialect).Backchannel() })
+	})
+}
+
+func TestPairwiseSubjectStoreContract(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		storage.TestPairwiseSubjectStoreContract(t, func() storage.PairwiseSubjectStore { return freshDB(t, dialect).PairwiseSubjects() })
+	})
+}
+
+// Every contract suite whose store seals its records passes with a
+// Sealer too.
+func TestSealedStoreContracts(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		sealed := func() *sqlstore.DB { return newPlace(t, dialect).migratedWith(sqlstore.Options{Sealer: testSealer(t)}) }
+		t.Run("Transactions", func(t *testing.T) {
+			storage.TestTransactionStoreContract(t, func() storage.TransactionStore { return sealed().Transactions() })
+		})
+		t.Run("Grants", func(t *testing.T) {
+			storage.TestGrantStoreContract(t, func() storage.GrantStore { return sealed().Grants() })
+		})
+		t.Run("AccessTokens", func(t *testing.T) {
+			storage.TestAccessTokenStoreContract(t, func() storage.AccessTokenStore { return sealed().AccessTokens() })
+		})
+		t.Run("Backchannel", func(t *testing.T) {
+			storage.TestBackchannelAuthenticationStoreContract(t, func() storage.BackchannelAuthenticationStore { return sealed().Backchannel() })
+		})
+	})
+}
+
 func TestClientRepositoryContract(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
 		storage.TestClientRepositoryContract(t, func(clients []storage.RegisteredClient) storage.ClientRepository {
@@ -74,23 +112,43 @@ func configOf(c storage.RegisteredClient) storage.RegisteredClientConfig {
 	}
 }
 
-// The stores declare what server.New's production gate checks.
+// The stores declare what server.New's production gate checks; with a
+// Sealer, those whose records it seals declare EncryptedAtRest too —
+// but not while ReadUnsealed accepts records it never sealed.
 func TestCapabilities(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
-		d := freshDB(t, dialect)
 		want := storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: true}
 		if dialect == sqlstore.SQLite {
 			want = storage.Capabilities{Durable: true, AtomicConsume: true, SerializableRedemption: true}
 		}
-		for name, s := range map[string]storage.StoreAssurance{
-			"Clients": d.Clients(), "Transactions": d.Transactions(), "Grants": d.Grants(),
-			"Replay": d.Replay(), "Nonces": d.Nonces(), "Revocation": d.Revocation(),
-		} {
-			if got := s.Capabilities(); got != want {
-				t.Errorf("%s().Capabilities() = %+v, want %+v", name, got, want)
-			}
-		}
+		encrypted := want
+		encrypted.EncryptedAtRest = true
+		p := newPlace(t, dialect)
+		checkCapabilities(t, p.migrated(), want, want)
+		checkCapabilities(t, p.migratedWith(sqlstore.Options{Sealer: testSealer(t)}), want, encrypted)
+		checkCapabilities(t, p.migratedWith(sqlstore.Options{Sealer: testSealer(t), ReadUnsealed: true}), want, want)
 	})
+}
+
+// checkCapabilities checks that d's stores whose records a Sealer seals
+// declare sealed, and the rest plain.
+func checkCapabilities(t *testing.T, d *sqlstore.DB, plain, sealed storage.Capabilities) {
+	t.Helper()
+	for name, s := range map[string]storage.StoreAssurance{
+		"Clients": d.Clients(), "Replay": d.Replay(), "Nonces": d.Nonces(), "Revocation": d.Revocation(),
+		"PairwiseSubjects": d.PairwiseSubjects(),
+	} {
+		if got := s.Capabilities(); got != plain {
+			t.Errorf("%s().Capabilities() = %+v, want %+v", name, got, plain)
+		}
+	}
+	for name, s := range map[string]storage.StoreAssurance{
+		"Transactions": d.Transactions(), "Grants": d.Grants(), "AccessTokens": d.AccessTokens(), "Backchannel": d.Backchannel(),
+	} {
+		if got := s.Capabilities(); got != sealed {
+			t.Errorf("%s().Capabilities() = %+v, want %+v", name, got, sealed)
+		}
+	}
 }
 
 // Compile-time checks that each store is the interface its accessor
@@ -102,4 +160,8 @@ var (
 	_ storage.ReplayStore      = (*sqlstore.ReplayStore)(nil)
 	_ storage.NonceStore       = (*sqlstore.NonceStore)(nil)
 	_ storage.RevocationStore  = (*sqlstore.RevocationStore)(nil)
+
+	_ storage.AccessTokenStore               = (*sqlstore.AccessTokenStore)(nil)
+	_ storage.BackchannelAuthenticationStore = (*sqlstore.BackchannelAuthenticationStore)(nil)
+	_ storage.PairwiseSubjectStore           = (*sqlstore.PairwiseSubjectStore)(nil)
 )

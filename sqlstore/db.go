@@ -60,6 +60,27 @@ type Options struct {
 	// connection's write lock before failing. Zero means 10 seconds.
 	// Ignored for Postgres.
 	SQLiteBusyTimeout time.Duration
+
+	// Sealer, if set, seals every record blob the stores write — the
+	// server's pushed requests, interactions, authorization codes' and
+	// refresh tokens' grants, opaque access tokens' records, and CIBA
+	// requests and decisions — each bound to its table, column, row key,
+	// client and TablePrefix, so a copy of the database reveals none of
+	// them and a sealed blob can't be moved to another row. AESGCMSealer
+	// is one, with a key kept outside the database. The columns the
+	// stores look rows up, consume and sweep them by stay readable — see
+	// the package documentation's Sealing section.
+	//
+	// With a Sealer, a store refuses a blob that isn't sealed (ErrRecordFormat),
+	// unless ReadUnsealed is set; without one, it refuses a sealed blob.
+	Sealer Sealer
+
+	// ReadUnsealed lets a DB with a Sealer read blobs written before it
+	// had one, while SealRecords seals them: set it only for that
+	// migration, then clear it, since while it's set anyone who can write
+	// to the database can plant a blob the Sealer never sealed. It
+	// requires Sealer.
+	ReadUnsealed bool
 }
 
 // DB holds FAPIgo's Authorization Server stores' tables in one SQL
@@ -78,6 +99,9 @@ type DB struct {
 	sqliteWrites sync.Mutex
 
 	queries sync.Map // query template → the dialect's query
+
+	sealer       Sealer
+	readUnsealed bool
 }
 
 const defaultTablePrefix = "fapigo_"
@@ -108,7 +132,10 @@ func New(db *sql.DB, dialect Dialect, opts Options) (*DB, error) {
 	if busy == 0 {
 		busy = 10 * time.Second
 	}
-	return &DB{db: db, dialect: dialect, prefix: prefix, busy: busy}, nil
+	if opts.ReadUnsealed && opts.Sealer == nil {
+		return nil, errors.New("sqlstore: ReadUnsealed without a Sealer")
+	}
+	return &DB{db: db, dialect: dialect, prefix: prefix, busy: busy, sealer: opts.Sealer, readUnsealed: opts.ReadUnsealed}, nil
 }
 
 // Dialect is the database's dialect.
@@ -121,6 +148,15 @@ func (d *DB) capabilities() storage.Capabilities {
 		return storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: true}
 	}
 	return storage.Capabilities{Durable: true, AtomicConsume: true, SerializableRedemption: true}
+}
+
+// sealedCapabilities is what a store whose records Options.Sealer seals
+// declares: capabilities, and EncryptedAtRest with a Sealer — but not
+// while ReadUnsealed lets rows written before it stay unsealed.
+func (d *DB) sealedCapabilities() storage.Capabilities {
+	c := d.capabilities()
+	c.EncryptedAtRest = d.sealer != nil && !d.readUnsealed
+	return c
 }
 
 // querier is what a store runs its statements on: the *sql.DB itself,

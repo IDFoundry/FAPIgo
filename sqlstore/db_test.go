@@ -190,6 +190,7 @@ func TestDatabaseFailureIsStoreUnavailable(t *testing.T) {
 		d, _ := p.open() // tables never created: every statement fails
 		digest := sha256.Sum256([]byte("x"))
 		later := time.Now().Add(time.Minute)
+		calls := writesOn(d)
 		for name, call := range map[string]func() error{
 			"UseOnce": func() error {
 				return d.Replay().UseOnce(ctx, storage.ReplayUse{Namespace: "n", Digest: digest, ExpiresAt: later})
@@ -223,6 +224,9 @@ func TestDatabaseFailureIsStoreUnavailable(t *testing.T) {
 				return err
 			},
 		} {
+			calls[name] = call
+		}
+		for name, call := range calls {
 			if err := call(); !errors.Is(err, storage.ErrStoreUnavailable) || errors.Is(err, sqlstore.ErrNotFound) {
 				t.Errorf("%s on missing tables = %v, want an error wrapping storage.ErrStoreUnavailable only", name, err)
 			}
@@ -340,4 +344,55 @@ func TestRecordIssuedForUnknownCode(t *testing.T) {
 			t.Errorf("RecordIssuedRefreshToken(unknown code) = %v, want ErrNotFound", err)
 		}
 	})
+}
+
+// writesOn is a call of each of d's writes, for
+// TestDatabaseFailureIsStoreUnavailable.
+func writesOn(d *sqlstore.DB) map[string]func() error {
+	ctx := context.Background()
+	later := time.Now().Add(time.Minute)
+	digest := sha256.Sum256([]byte("x"))
+	return map[string]func() error{
+		"CreatePAR": func() error {
+			return d.Transactions().CreatePAR(ctx, storage.NewPARRecord{Reference: "r", ClientID: "c", ExpiresAt: later})
+		},
+		"CreateAuthorizationCode": func() error {
+			return d.Grants().CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{CodeHash: digest, ClientID: "c", ExpiresAt: later})
+		},
+		"RecordIssuedAccessToken":  func() error { return d.Grants().RecordIssuedAccessToken(ctx, digest, "k", later) },
+		"RecordIssuedRefreshToken": func() error { return d.Grants().RecordIssuedRefreshToken(ctx, digest, digest, later) },
+		"CreateRefreshToken": func() error {
+			return d.Grants().CreateRefreshToken(ctx, storage.NewRefreshToken{TokenHash: digest, ClientID: "c", ExpiresAt: later})
+		},
+		"RedeemRefreshToken": func() error {
+			_, err := d.Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: digest})
+			return err
+		},
+		"RevokeRefreshToken": func() error { return d.Grants().RevokeRefreshToken(ctx, digest) },
+		"Issue":              func() error { return d.Nonces().Issue(ctx, storage.NonceIssuance{Nonce: "n", ExpiresAt: later}) },
+		"Revoke":             func() error { return d.Revocation().Revoke(ctx, "k", later) },
+		"Put": func() error {
+			return d.Clients().Put(ctx, storage.RegisteredClientConfig{ID: "c", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/cb"}, ClientAssertionAlgorithm: fapi.ES256})
+		},
+		"Delete": func() error {
+			_, err := d.Clients().Delete(ctx, "c")
+			return err
+		},
+	}
+}
+
+// Migrate, CheckSchema and Sweep report a database they can't reach.
+func TestClosedDatabase(t *testing.T) {
+	ctx := context.Background()
+	d, db := newPlace(t, sqlstore.SQLite).openPool()
+	_ = db.Close()
+	if err := d.Migrate(ctx); err == nil {
+		t.Error("Migrate on a closed database = nil error, want an error")
+	}
+	if err := d.CheckSchema(ctx); err == nil {
+		t.Error("CheckSchema on a closed database = nil error, want an error")
+	}
+	if _, err := d.Sweep(ctx, time.Now()); !errors.Is(err, storage.ErrStoreUnavailable) {
+		t.Errorf("Sweep on a closed database = %v, want ErrStoreUnavailable", err)
+	}
 }

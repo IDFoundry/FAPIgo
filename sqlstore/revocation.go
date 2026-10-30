@@ -43,7 +43,7 @@ func (s *RevocationStore) IsRevoked(ctx context.Context, key string) (bool, erro
 		return false, nil // never revoked: Revoke refuses it
 	}
 	var n int
-	if err := s.d.db.QueryRowContext(ctx, s.d.q("SELECT COUNT(*) FROM {revocations} WHERE revocation_key = ?"), key).Scan(&n); err != nil {
+	if err := s.d.queryRow(ctx, "SELECT COUNT(*) FROM {revocations} WHERE revocation_key = ?", key).Scan(&n); err != nil {
 		return false, unavailable("check revocation", err)
 	}
 	return n > 0, nil

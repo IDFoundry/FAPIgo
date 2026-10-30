@@ -71,7 +71,7 @@ func (s *GrantStore) whyNotRedeemed(ctx context.Context, codeHash [32]byte) erro
 	var redeemed int
 	var accessKey sql.NullString
 	var refreshHash []byte
-	err := s.d.db.QueryRowContext(ctx, s.d.q("SELECT client_id, redeemed, issued_access_token_key, issued_refresh_token_hash FROM {authorization_codes} WHERE code_hash = ?"),
+	err := s.d.queryRow(ctx, "SELECT client_id, redeemed, issued_access_token_key, issued_refresh_token_hash FROM {authorization_codes} WHERE code_hash = ?",
 		codeHash[:]).Scan(&clientID, &redeemed, &accessKey, &refreshHash)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -151,7 +151,7 @@ func (s *GrantStore) RedeemRefreshToken(ctx context.Context, redemption storage.
 	var clientID string
 	var record []byte
 	var expires int64
-	err := s.d.db.QueryRowContext(ctx, s.d.q("SELECT client_id, record, expires_at FROM {refresh_tokens} WHERE token_hash = ?"),
+	err := s.d.queryRow(ctx, "SELECT client_id, record, expires_at FROM {refresh_tokens} WHERE token_hash = ?",
 		redemption.TokenHash[:]).Scan(&clientID, &record, &expires)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):

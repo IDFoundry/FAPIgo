@@ -159,6 +159,12 @@ func (d *DB) q(template string) string {
 	return query
 }
 
+// queryRow runs template, one of this package's queries, on the
+// database itself, outside any transaction.
+func (d *DB) queryRow(ctx context.Context, template string, args ...any) *sql.Row {
+	return d.db.QueryRowContext(ctx, d.q(template), args...) // NOSONAR: go:S2077 — template is a constant query of this package's; q substitutes only the validated TablePrefix and placeholders, and every value is a bound argument.
+}
+
 // write runs fn in a transaction, committing it if fn returns nil and
 // rolling it back otherwise. On Postgres the rows fn's statements lock
 // stay locked until then; on SQLite the transaction holds the
@@ -208,7 +214,7 @@ func (d *DB) sqliteWrite(ctx context.Context, fn func(q querier) error) (err err
 		}
 		_ = conn.Close()
 	}()
-	if _, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = "+strconv.FormatInt(d.busy.Milliseconds(), 10)); err != nil {
+	if _, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = "+strconv.FormatInt(d.busy.Milliseconds(), 10)); err != nil { // NOSONAR: go:S2077 — the only value is an integer New validated; PRAGMA takes no bound arguments.
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {

@@ -35,7 +35,7 @@ func (r *ClientRepository) ResolveClient(ctx context.Context, id fapi.ClientID) 
 		return storage.RegisteredClient{}, fmt.Errorf("sqlstore: resolve client: %w", notFound("client"))
 	}
 	var config []byte
-	err := r.d.db.QueryRowContext(ctx, r.d.q("SELECT config FROM {clients} WHERE client_id = ?"), string(id)).Scan(&config)
+	err := r.d.queryRow(ctx, "SELECT config FROM {clients} WHERE client_id = ?", string(id)).Scan(&config)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return storage.RegisteredClient{}, fmt.Errorf("sqlstore: resolve client %q: %w", id, notFound("client"))

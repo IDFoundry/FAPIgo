@@ -42,7 +42,7 @@ func (s *NonceStore) Lookup(ctx context.Context, lookup storage.NonceLookup) (st
 		return storage.NonceRecord{}, fmt.Errorf("sqlstore: look up DPoP nonce: %w", notFound("nonce"))
 	}
 	var expires int64
-	err := s.d.db.QueryRowContext(ctx, s.d.q("SELECT expires_at FROM {dpop_nonces} WHERE nonce = ?"), lookup.Nonce).Scan(&expires)
+	err := s.d.queryRow(ctx, "SELECT expires_at FROM {dpop_nonces} WHERE nonce = ?", lookup.Nonce).Scan(&expires)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return storage.NonceRecord{}, fmt.Errorf("sqlstore: look up DPoP nonce: %w", notFound("nonce"))

@@ -248,28 +248,35 @@ func TestCancelledContextIsReported(t *testing.T) {
 // unknown on every dialect, not as an outage, and refused on write.
 func TestUnstorableTextKeys(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
-		ctx := context.Background()
 		d := freshDB(t, dialect)
-		later := time.Now().Add(time.Minute)
 		for _, key := range []string{"a\x00b", "\xff"} {
-			if _, err := d.Nonces().Lookup(ctx, storage.NonceLookup{Nonce: key}); !errors.Is(err, sqlstore.ErrNotFound) {
-				t.Errorf("Lookup(%q) = %v, want ErrNotFound", key, err)
-			}
-			if revoked, err := d.Revocation().IsRevoked(ctx, key); err != nil || revoked {
-				t.Errorf("IsRevoked(%q) = %v, %v, want false, nil", key, revoked, err)
-			}
-			if _, err := d.Clients().ResolveClient(ctx, fapi.ClientID(key)); !errors.Is(err, sqlstore.ErrNotFound) {
-				t.Errorf("ResolveClient(%q) = %v, want ErrNotFound", key, err)
-			}
-			if _, err := d.Transactions().BeginAuthorization(ctx, storage.BeginAuthorizationTransaction{Reference: key, Handle: "h", HandleExpiresAt: later, Now: time.Now()}); !errors.Is(err, sqlstore.ErrNotFound) {
-				t.Errorf("BeginAuthorization(%q) = %v, want ErrNotFound", key, err)
-			}
-			if _, err := d.Transactions().CompleteAuthorization(ctx, storage.CompleteAuthorizationTransaction{Handle: key}); !errors.Is(err, sqlstore.ErrNotFound) {
-				t.Errorf("CompleteAuthorization(%q) = %v, want ErrNotFound", key, err)
-			}
+			checkUnstorableReadsUnknown(t, d, key)
 			checkUnstorableWritesRefused(t, d, key)
 		}
 	})
+}
+
+// checkUnstorableReadsUnknown checks that each lookup answers key as
+// unknown.
+func checkUnstorableReadsUnknown(t *testing.T, d *sqlstore.DB, key string) {
+	t.Helper()
+	ctx := context.Background()
+	later := time.Now().Add(time.Minute)
+	if _, err := d.Nonces().Lookup(ctx, storage.NonceLookup{Nonce: key}); !errors.Is(err, sqlstore.ErrNotFound) {
+		t.Errorf("Lookup(%q) = %v, want ErrNotFound", key, err)
+	}
+	if revoked, err := d.Revocation().IsRevoked(ctx, key); err != nil || revoked {
+		t.Errorf("IsRevoked(%q) = %v, %v, want false, nil", key, revoked, err)
+	}
+	if _, err := d.Clients().ResolveClient(ctx, fapi.ClientID(key)); !errors.Is(err, sqlstore.ErrNotFound) {
+		t.Errorf("ResolveClient(%q) = %v, want ErrNotFound", key, err)
+	}
+	if _, err := d.Transactions().BeginAuthorization(ctx, storage.BeginAuthorizationTransaction{Reference: key, Handle: "h", HandleExpiresAt: later, Now: time.Now()}); !errors.Is(err, sqlstore.ErrNotFound) {
+		t.Errorf("BeginAuthorization(%q) = %v, want ErrNotFound", key, err)
+	}
+	if _, err := d.Transactions().CompleteAuthorization(ctx, storage.CompleteAuthorizationTransaction{Handle: key}); !errors.Is(err, sqlstore.ErrNotFound) {
+		t.Errorf("CompleteAuthorization(%q) = %v, want ErrNotFound", key, err)
+	}
 }
 
 // checkUnstorableWritesRefused checks that each write refuses key,

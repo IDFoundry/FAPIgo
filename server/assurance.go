@@ -110,8 +110,11 @@ const (
 	// at most 60 minutes — and to this module's bounds on the windows
 	// those numbers leave open: MaxDPoPProofAge at most 5 minutes (RFC
 	// 9449 §11.1's "seconds or minutes"), DPoPNonceLifetime at most 15
-	// minutes, JARMResponseLifetime at most 10 minutes (JARM §2.1) and
-	// InteractionLifetime at most an hour.
+	// minutes, JARMResponseLifetime at most 10 minutes (JARM §2.1),
+	// InteractionLifetime at most an hour and, with
+	// AttestationBasedClientAuthentication, MaxClientAttestationPoPAge
+	// at most 5 minutes (a PoP JWT has no exp and is meant to be fresh
+	// per request, draft-12 §10.2).
 	// Dependencies.Clock must declare ClockAssurance (SystemClock does),
 	// and read within Limits.MaxClockSkew of time.Now when New runs: a
 	// fixed or offset test clock would stop everything from expiring.

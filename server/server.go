@@ -423,6 +423,14 @@ const (
 	// period on the order of seconds or minutes)". Five minutes is the
 	// top of that range; RecommendedLimits uses 60 seconds.
 	fapiMaxDPoPProofAge = 5 * time.Minute
+	// draft-ietf-oauth-attestation-based-client-auth §10.2: a Client
+	// Attestation PoP JWT has no exp and is meant to be created fresh
+	// for each request. With no challenge issued, its iat window is its
+	// only freshness bound, so a long window lets a PoP made in advance
+	// authenticate the client long after access to the key has ended.
+	// It mirrors fapiMaxDPoPProofAge: five minutes is the top of RFC
+	// 9449 §11.1's "seconds or minutes".
+	fapiMaxClientAttestationPoPAge = 5 * time.Minute
 	// RFC 9449 §8 and §11.1 give a nonce no number: it limits how long
 	// a proof made for it stays usable, so it's held to a few multiples
 	// of the proof age.
@@ -437,17 +445,18 @@ const (
 )
 
 // validateFAPILimits refuses Limits outside the FAPI 2.0 Security
-// Profile's fixed numbers, and, with CIBA enabled, FAPI-CIBA's request
-// lifetime, reporting every one (errors.Join), so a production
+// Profile's fixed numbers, with CIBA enabled FAPI-CIBA's request
+// lifetime, and with attestation-based client authentication enabled
+// the Client Attestation PoP age, reporting every one (errors.Join), so a production
 // deployment can't drift out of the profile by configuration.
 // RecommendedLimits is within all of them.
-func validateFAPILimits(l Limits, cibaEnabled bool) error {
-	return errors.Join(fapiLimitErrors(l, cibaEnabled)...)
+func validateFAPILimits(l Limits, cibaEnabled, attestationEnabled bool) error {
+	return errors.Join(fapiLimitErrors(l, cibaEnabled, attestationEnabled)...)
 }
 
 // fapiLimitErrors is validateFAPILimits' list of every limit out of
 // bounds.
-func fapiLimitErrors(l Limits, cibaEnabled bool) []error {
+func fapiLimitErrors(l Limits, cibaEnabled, attestationEnabled bool) []error {
 	var errs []error
 	if l.AuthorizationCodeLifetime > fapiMaxAuthorizationCodeLifetime {
 		errs = append(errs, fmt.Errorf("server: config: limits.authorization_code_lifetime must be at most %v under AssuranceProduction (FAPI 2.0 §5.3.2.1)", fapiMaxAuthorizationCodeLifetime))
@@ -464,14 +473,16 @@ func fapiLimitErrors(l Limits, cibaEnabled bool) []error {
 	if cibaEnabled && l.MaxBackchannelAuthenticationRequestLifetime > fapiMaxBackchannelAuthenticationRequestLifetime {
 		errs = append(errs, fmt.Errorf("server: config: limits.max_backchannel_authentication_request_lifetime must be at most %v under AssuranceProduction (FAPI-CIBA §5.2.2)", fapiMaxBackchannelAuthenticationRequestLifetime))
 	}
-	return append(errs, validateProductionLifetimes(l)...)
+	return append(errs, validateProductionLifetimes(l, attestationEnabled)...)
 }
 
 // validateProductionLifetimes is validateFAPILimits' half for the
 // limits no FAPI 2.0 number fixes, held under AssuranceProduction to
-// the bounds RFC 9449, JARM and this module set (see the constants
-// above).
-func validateProductionLifetimes(l Limits) []error {
+// the bounds RFC 9449, JARM, attestation-based client authentication
+// and this module set (see the constants above). The Client Attestation
+// PoP age is checked only with attestationEnabled, the only time it's
+// used.
+func validateProductionLifetimes(l Limits, attestationEnabled bool) []error {
 	var errs []error
 	if l.MaxDPoPProofAge > fapiMaxDPoPProofAge {
 		errs = append(errs, fmt.Errorf("server: config: limits.max_dpop_proof_age must be at most %v under AssuranceProduction (RFC 9449 §11.1)", fapiMaxDPoPProofAge))
@@ -484,6 +495,9 @@ func validateProductionLifetimes(l Limits) []error {
 	}
 	if l.InteractionLifetime > fapiMaxInteractionLifetime {
 		errs = append(errs, fmt.Errorf("server: config: limits.interaction_lifetime must be at most %v under AssuranceProduction", fapiMaxInteractionLifetime))
+	}
+	if attestationEnabled && l.MaxClientAttestationPoPAge > fapiMaxClientAttestationPoPAge {
+		errs = append(errs, fmt.Errorf("server: config: limits.max_client_attestation_pop_age must be at most %v under AssuranceProduction (draft-ietf-oauth-attestation-based-client-auth §10.2)", fapiMaxClientAttestationPoPAge))
 	}
 	return errs
 }
@@ -498,7 +512,7 @@ func validateAssurance(cfg Config, cibaEnabled bool) error {
 	if cfg.Assurance != AssuranceProduction {
 		return nil
 	}
-	if err := validateFAPILimits(cfg.Limits, cibaEnabled); err != nil {
+	if err := validateFAPILimits(cfg.Limits, cibaEnabled, cfg.AttestationBasedClientAuthentication); err != nil {
 		return err
 	}
 	if err := rejectLoopbackURL("issuer", cfg.Issuer); err != nil {

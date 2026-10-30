@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.67.0](https://github.com/IDFoundry/FAPIgo/compare/v0.66.0...v0.67.0) (2026-10-30)
+
+
+### Features
+
+* **extension:** judge token-request narrowing with RARDefinition.ValidateNarrowing ([59264ed](https://github.com/IDFoundry/FAPIgo/commit/59264edec394cf2d63a1c9b3c54201b3ee5eb091))
+
 ## [0.66.0](https://github.com/IDFoundry/FAPIgo/compare/v0.65.1...v0.66.0) (2026-10-30)
 
 

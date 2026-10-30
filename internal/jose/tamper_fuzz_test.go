@@ -45,46 +45,61 @@ func FuzzSignVerifyTamper(f *testing.F) {
 		if !strictjson.DecodesLosslessly(payload) {
 			return // nor one that isn't valid UTF-8 or has an unpaired surrogate escape.
 		}
-		token, err := Sign(priv, Header{Algorithm: fapi.ES256, Type: "test+jwt"}, payload)
-		if err != nil {
-			t.Fatalf("Sign: %v", err)
-		}
-
-		compact, err := ParseCompact(token)
-		if err != nil {
-			t.Fatalf("ParseCompact(own Sign output): %v", err)
-		}
-		if err := compact.Verify(&priv.PublicKey, fapi.ES256); err != nil {
-			t.Fatalf("Verify(untampered): %v", err)
-		}
-		if !bytes.Equal(compact.Payload, payload) {
-			t.Fatalf("round-trip payload mismatch: got %q, want %q", compact.Payload, payload)
-		}
-
-		parts := strings.Split(token, ".")
-		if len(parts) != 3 {
-			t.Fatalf("own Sign output did not split into 3 segments: %q", token)
-		}
-		segIdx := int(segment) % 3
-		raw, err := base64.RawURLEncoding.DecodeString(parts[segIdx])
-		if err != nil || len(raw) == 0 {
+		token := signAndVerifyUntampered(t, priv, payload)
+		tampered, ok := flipOneByte(t, token, segment, bytePos, mask)
+		if !ok {
 			return
 		}
-		if mask == 0 {
-			mask = 1
-		}
-		pos := ((bytePos % len(raw)) + len(raw)) % len(raw)
-		raw[pos] ^= mask
-		parts[segIdx] = base64.RawURLEncoding.EncodeToString(raw)
-		tampered := strings.Join(parts, ".")
-
 		tc, err := ParseCompact(tampered)
 		if err != nil {
 			return
 		}
 		if err := tc.Verify(&priv.PublicKey, fapi.ES256); err == nil {
-			t.Fatalf("Verify succeeded after single-byte tamper: segment=%d pos=%d mask=%#x original=%q tampered=%q",
-				segIdx, pos, mask, token, tampered)
+			t.Fatalf("Verify succeeded after single-byte tamper: original=%q tampered=%q", token, tampered)
 		}
 	})
+}
+
+// signAndVerifyUntampered signs payload and checks the untampered token
+// parses, verifies and round-trips it, returning the token.
+func signAndVerifyUntampered(t *testing.T, priv *ecdsa.PrivateKey, payload []byte) string {
+	t.Helper()
+	token, err := Sign(priv, Header{Algorithm: fapi.ES256, Type: "test+jwt"}, payload)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	compact, err := ParseCompact(token)
+	if err != nil {
+		t.Fatalf("ParseCompact(own Sign output): %v", err)
+	}
+	if err := compact.Verify(&priv.PublicKey, fapi.ES256); err != nil {
+		t.Fatalf("Verify(untampered): %v", err)
+	}
+	if !bytes.Equal(compact.Payload, payload) {
+		t.Fatalf("round-trip payload mismatch: got %q, want %q", compact.Payload, payload)
+	}
+	return token
+}
+
+// flipOneByte XORs mask (or 1, if mask is zero) into one decoded byte of
+// one of token's three segments, chosen by segment and bytePos, and
+// re-encodes it. It reports false when that segment decodes to nothing.
+func flipOneByte(t *testing.T, token string, segment uint8, bytePos int, mask uint8) (string, bool) {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("own Sign output did not split into 3 segments: %q", token)
+	}
+	segIdx := int(segment) % 3
+	raw, err := base64.RawURLEncoding.DecodeString(parts[segIdx])
+	if err != nil || len(raw) == 0 {
+		return "", false
+	}
+	if mask == 0 {
+		mask = 1
+	}
+	pos := ((bytePos % len(raw)) + len(raw)) % len(raw)
+	raw[pos] ^= mask
+	parts[segIdx] = base64.RawURLEncoding.EncodeToString(raw)
+	return strings.Join(parts, "."), true
 }

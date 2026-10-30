@@ -61,5 +61,7 @@ var (
 	// requested at all, more objects of that type were granted than were
 	// requested, or the granted object isn't an acceptable narrowing
 	// (RARDefinition.ValidateGrant) of any still-unmatched requested one.
+	// RARRegistry.ValidateNarrowing returns it likewise for a token
+	// request's object that exceeds the grant.
 	ErrRARGrantExceedsRequest = errors.New("extension: granted authorization_details exceeds what was requested")
 )

@@ -41,7 +41,12 @@ client to name later: refuse a client-supplied value there, and the
 server can still add one at approval. `ValidateGrant` decides what
 counts as an acceptable narrowing at approval (a lower amount, fewer
 accounts); left nil, a granted object must match what was requested
-exactly.
+exactly. `ValidateNarrowing` decides what a client may ask for when a
+later token request narrows the grant; left nil, `ValidateGrant` decides
+that too. Set it when `ValidateGrant` lets the server add a member at
+approval: consent may add one, but a token request should only keep or
+drop what was granted, never add a value of the client's own choosing to
+a grant that holds none.
 
 ## Authorization server: register, gate, approve
 
@@ -88,8 +93,8 @@ The client credentials grant has no one to approve, so what the
 **Narrowing at the token endpoint.** A token request (code exchange,
 refresh, CIBA poll) may carry its own `authorization_details` asking
 for part of the grant (RFC 9396 §6). The server compares it with the
-grant the way it compares a grant with the request (`ValidateGrant`, or
-an exact match), issues the access token with only what was asked for,
+grant the way it compares a grant with the request (`ValidateNarrowing`,
+else `ValidateGrant`, else an exact match), issues the access token with only what was asked for,
 and refuses anything malformed or wider with
 `invalid_authorization_details`. An empty array gets a token without
 details; no parameter gets the whole grant. The refresh token always

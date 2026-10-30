@@ -711,7 +711,16 @@ Whether a narrower grant is acceptable is, per type, decided by
 `RARDefinition.ValidateGrant(requested, granted T) error` — nil requires
 byte-for-byte (canonically re-encoded) equality; set, it can permit real
 field-level narrowing (e.g. a lower payment amount). `RARRegistry.ValidateGrant`
-does the per-type matching this drives. `RARDefinition.Validate` runs on every
+does the per-type matching this drives. It judges what the server grants
+(consent, a `RARPolicy`'s decision); a client's token-request
+`authorization_details` narrowing its grant (code exchange, CIBA token,
+refresh — `accessTokenGrant`, via `validateNarrowedAuthorizationDetails`)
+goes through `RARRegistry.ValidateNarrowing` instead, the same matching
+driven by `RARDefinition.ValidateNarrowing(granted, narrowed T) error`,
+which falls back to `ValidateGrant(granted, narrowed)` and then to exact
+match. The split exists because a `ValidateGrant` that lets consent add a
+server-minted member would otherwise let a client add one of its own
+choosing at the token endpoint. `RARDefinition.Validate` runs on every
 parse, requested and granted alike; `RARDefinition.ValidateRequest` runs
 only through `RARRegistry.ParseRequest`, which the server uses solely
 where a client starts a grant (`parseRequestedAuthorizationDetails`: PAR,

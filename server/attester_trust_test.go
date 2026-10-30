@@ -176,10 +176,9 @@ func TestX5CAttesterChainAcceptsChainToTrustAnchor(t *testing.T) {
 		x5c  json.RawMessage
 		kid  string
 	}{
-		"leaf issued by the anchor":      {leafFromRoot, x5cOf(leafFromRoot), ""},
-		"leaf through an intermediate":   {leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate), ""},
-		"kid present but ignored":        {leafFromRoot, x5cOf(leafFromRoot), "not-a-registered-key"},
-		"anchor wrongly included in x5c": {leafFromRoot, x5cOf(leafFromRoot, root), ""},
+		"leaf issued by the anchor":    {leafFromRoot, x5cOf(leafFromRoot), ""},
+		"leaf through an intermediate": {leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate), ""},
+		"kid present but ignored":      {leafFromRoot, x5cOf(leafFromRoot), "not-a-registered-key"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -236,6 +235,53 @@ func TestX5CAttesterChainRejectsUntrustedAttestation(t *testing.T) {
 			if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
 				t.Fatalf("error code = %q, want %q (err %v)", code, server.ErrorInvalidClient, err)
 			}
+		})
+	}
+}
+
+// TestX5CAttesterChainRefusesAnchorInX5C covers HAIP 1.0 keeping the
+// trust anchor out of x5c: a self-signed certificate below the leaf,
+// configured as an anchor or not, and a configured anchor that is not
+// self-signed (an intermediate trusted directly), under both a
+// TrustAnchors pool and AttesterIssuerBoundToAnchor, are refused, while
+// the leaf alone or with its intermediates is accepted.
+func TestX5CAttesterChainRefusesAnchorInX5C(t *testing.T) {
+	root := newTestCert(t, "root", certOptions{isCA: true})
+	intermediate := newTestCert(t, "intermediate", certOptions{parent: &root, isCA: true})
+	stray := newTestCert(t, "unrelated self-signed", certOptions{isCA: true})
+	san := []string{testAttesterIssuer}
+	leafFromRoot := newTestCert(t, "attester", certOptions{parent: &root, uris: san})
+	leafFromIntermediate := newTestCert(t, "attester", certOptions{parent: &intermediate, uris: san})
+
+	pool := func(anchors ...testCert) server.AttesterTrust {
+		return server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(anchors...)}, IssuerBinding: server.AttesterIssuerByTrustAnchors}
+	}
+	bound := func(anchors ...testCert) server.AttesterTrust {
+		list := make(server.StaticAttesterAnchors, len(anchors))
+		for i, a := range anchors {
+			list[i] = server.AttesterAnchor{Certificate: a.cert, Issuers: []string{testAttesterIssuer}}
+		}
+		return boundChain(list)
+	}
+	for name, tc := range map[string]struct {
+		trust  server.AttesterTrust
+		leaf   attesterLeaf
+		wantOK bool
+	}{
+		"leaf, intermediate, root":                      {pool(root), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate, root)}, false},
+		"leaf, root":                                    {pool(root), attesterLeaf{leafFromRoot, x5cOf(leafFromRoot, root)}, false},
+		"leaf, root, bound":                             {bound(root), attesterLeaf{leafFromRoot, x5cOf(leafFromRoot, root)}, false},
+		"intermediate anchor in x5c, pool":              {pool(intermediate), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, false},
+		"intermediate anchor in x5c, bound":             {bound(intermediate), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, false},
+		"intermediate anchor in x5c, root also anchor":  {pool(root, intermediate), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, false},
+		"self-signed certificate that is not an anchor": {pool(root), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate, stray)}, false},
+		"leaf, intermediate":                            {pool(root), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, true},
+		"leaf, intermediate, bound":                     {bound(root), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, true},
+		"leaf directly under the anchor":                {pool(root), attesterLeaf{leafFromRoot, x5cOf(leafFromRoot)}, true},
+		"leaf directly under an intermediate anchor":    {bound(intermediate), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate)}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			checkAttesterLeaf(t, newHarnessWithAttesterTrust(t, nil, tc.trust), tc.leaf, tc.wantOK)
 		})
 	}
 }

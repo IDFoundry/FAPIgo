@@ -86,6 +86,38 @@ fresh PoP for each request rather than reuse one.
 cfg.Limits.MaxClientAttestationPoPAge = 60 * time.Second
 ```
 
+### `X5CAttesterChain` refuses a trust anchor in `x5c` (server)
+
+**Affects:** a server whose `Dependencies.AttesterTrust` is
+`server.X5CAttesterChain`, when a wallet's attestation `x5c` includes,
+after the signing certificate, a self-signed certificate (typically the
+root) or a certificate that is itself one of the client's configured
+anchors (such as an intermediate configured as an anchor, through
+`TrustAnchors` or `Anchors`).
+
+**Why:** HAIP 1.0 keeps the trust anchor out of `x5c`, and
+`X5CAttesterChain`'s documentation already said so, but only a
+self-signed signing certificate was refused: every other `x5c`
+certificate was used as an intermediate, so `[leaf, intermediate,
+root]` verified. The anchor added no trust, since the chain still had
+to end at a configured anchor, but verifiers that enforce HAIP refuse
+the same attestation, so one deployment disagreed with itself.
+
+**What fails:** nothing at startup. An attestation whose `x5c` carries
+a self-signed certificate below the signing certificate, or a
+certificate equal to the anchor a verified chain ends at, is refused
+with `invalid_client`. There is no option to keep the old behaviour.
+
+**What to change:** have the wallet (or its Wallet Provider) send
+`x5c` as the signing certificate followed by its intermediates only,
+leaving out the root and any certificate the server trusts as an
+anchor:
+
+```go
+// x5c: signing certificate, then intermediates, never the anchor.
+x5c := [][]byte{leaf.Raw, intermediate.Raw}
+```
+
 ## v0.65.0
 
 ### `Limits.MaxAccessTokenClaimsBytes` is required (server)

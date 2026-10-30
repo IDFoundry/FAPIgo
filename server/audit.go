@@ -68,6 +68,11 @@ const (
 	// AuditEventIssueAccessToken records the outcome of an
 	// IssueAccessToken call.
 	AuditEventIssueAccessToken
+
+	// AuditEventVerifyTokenRequestDPoP records the outcome of a
+	// VerifyTokenRequestDPoP call. Its ClientID is always "": the
+	// request has no authenticated client.
+	AuditEventVerifyTokenRequestDPoP
 )
 
 // AuditOutcome is a closed set of outcomes for an AuditEvent.

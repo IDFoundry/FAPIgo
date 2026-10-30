@@ -147,6 +147,71 @@ func (s *Server) verifyExtensionGrantBinding(ctx context.Context, client storage
 	return TokenBinding{Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), NextDPoPNonce: nextNonce, verifiedFor: client.ID()}, nil
 }
 
+// DPoPProofBinding is what VerifyTokenRequestDPoP verified: the DPoP key
+// a token request without an authenticated client proved possession of.
+//
+// It is deliberately not a TokenBinding, so IssueAccessToken and
+// IssueRefreshToken don't accept it: those issue tokens for an
+// authenticated client, and this server issues none to a client that
+// didn't authenticate (FAPI 2.0 allows only confidential clients). The
+// embedder issues its own access token, bound to Thumbprint.
+type DPoPProofBinding struct {
+	// Thumbprint is the DPoP key's RFC 7638 JWK thumbprint: the "jkt"
+	// of the issued access token's "cnf" claim (RFC 9449 §6.1).
+	Thumbprint string
+
+	// NextDPoPNonce, when not "", is the DPoP-Nonce to send with the
+	// token response (RFC 9449 §8), as TokenResult.NextDPoPNonce is for
+	// this server's own grants.
+	NextDPoPNonce string
+}
+
+// VerifyTokenRequestDPoP verifies req's DPoP proof (RFC 9449) for a grant
+// this server doesn't serve (Config.AdditionalGrantTypes) that has no
+// authenticated client — OpenID4VCI 1.0 §6.1's pre-authorized code
+// grant without client authentication, for example, outside FAPI. It
+// is VerifyTokenRequestBinding's DPoP check without a client: exactly
+// one DPoP proof, for POST to Endpoints.Token or its MTLSEndpoints
+// alias, within Limits.MaxDPoPProofAge and MaxClockSkew, not seen
+// before — one replay record with this server's own token requests and
+// VerifyTokenRequestBinding, so a proof is accepted at only one of them
+// — and, when Dependencies.Nonces is set, carrying a current nonce:
+// otherwise the error is ErrorUseDPoPNonce, carrying a fresh one for its
+// DPoP-Nonce header, as WriteJSON sends it.
+//
+// It checks only the proof. A request that authenticates a client — one
+// carrying a client_assertion or client attestation, say — is the
+// caller's to refuse when the grant expected none, or to serve with
+// AuthenticateAttestedClient and VerifyTokenRequestBinding instead; so
+// is the grant itself. Errors are *Error, as at this server's token
+// endpoint. Every call records an AuditEventVerifyTokenRequestDPoP,
+// with no client ID.
+func (s *Server) VerifyTokenRequestDPoP(ctx context.Context, req TokenEndpointRequest) (DPoPProofBinding, error) {
+	binding, err := s.verifyClientlessDPoP(ctx, req)
+	if err != nil {
+		s.audit(ctx, AuditEventVerifyTokenRequestDPoP, "", AuditOutcomeFailure, string(err.Code()))
+		return DPoPProofBinding{}, err
+	}
+	s.audit(ctx, AuditEventVerifyTokenRequestDPoP, "", AuditOutcomeSuccess, "")
+	return binding, nil
+}
+
+func (s *Server) verifyClientlessDPoP(ctx context.Context, req TokenEndpointRequest) (DPoPProofBinding, *Error) {
+	proof, err := resolveDPoPProof(req.parts.DPoPProofs)
+	if err != nil {
+		return DPoPProofBinding{}, err
+	}
+	verified, err := s.verifyTokenRequestDPoP(ctx, proof)
+	if err != nil {
+		return DPoPProofBinding{}, err
+	}
+	nextNonce, err := s.nextTokenEndpointDPoPNonce(ctx, s.deps.Clock.Now())
+	if err != nil {
+		return DPoPProofBinding{}, err
+	}
+	return DPoPProofBinding{Thumbprint: verified.Thumbprint.String(), NextDPoPNonce: nextNonce}, nil
+}
+
 // ownGrantTypes are the grant types this package serves itself, and
 // forbiddenGrantTypes those the FAPI 2.0 Security Profile rules out: the
 // resource owner password credentials grant, and the implicit flow.

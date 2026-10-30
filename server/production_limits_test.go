@@ -45,6 +45,41 @@ func TestNewBoundsProductionLifetimes(t *testing.T) {
 	}
 }
 
+// TestNewBoundsProductionClientAttestationPoPAge covers
+// MaxClientAttestationPoPAge, which AssuranceProduction bounds only with
+// attestation-based client authentication enabled: accepted at 5
+// minutes and refused just past it, while AssuranceDevelopment, or
+// production with attestation disabled, leaves it to the embedder.
+func TestNewBoundsProductionClientAttestationPoPAge(t *testing.T) {
+	const bound, want = 5 * time.Minute, "limits.max_client_attestation_pop_age"
+	over := bound + time.Second
+	cfg := validAttestationConfig(t)
+	asProduction(&cfg)
+	cfg.Deployment = server.DeploymentSingleInstance
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.ClientAttestationStatus = server.NoClientAttestationStatusCheck{}
+
+	cfg.Limits.MaxClientAttestationPoPAge = bound
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, %s = %v): %v", want, bound, err)
+	}
+	cfg.Limits.MaxClientAttestationPoPAge = over
+	if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("New(production, %s = %v) = %v, want it refused", want, over, err)
+	}
+	dev := cfg
+	dev.Assurance = server.AssuranceDevelopment
+	if _, err := server.New(dev, deps); err != nil {
+		t.Fatalf("New(development, %s = %v) = %v, want it accepted", want, over, err)
+	}
+	disabled, disabledDeps := productionConfigAndDeps(t)
+	disabled.Limits.MaxClientAttestationPoPAge = time.Hour
+	if _, err := server.New(disabled, disabledDeps); err != nil {
+		t.Fatalf("New(production, attestation disabled, %s = 1h) = %v, want it accepted", want, err)
+	}
+}
+
 // undeclaredClock is a Clock that doesn't declare server.ClockAssurance.
 type undeclaredClock struct{ now time.Time }
 

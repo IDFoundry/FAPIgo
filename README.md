@@ -174,7 +174,11 @@ so integrating `server` doesn't require writing real persistence and
 key management from scratch just to see it run. `server.RecommendedLimits()`
 and `server.RecommendedAlgorithms()` do the same for `Config`'s algorithm
 and duration fields, each grounded in a specific FAPI 2.0 Security
-Profile Final or RFC 9449 requirement where one exists.
+Profile Final or RFC 9449 requirement where one exists. For production,
+the separate [`sqlstore`](sqlstore/README.md) module provides durable
+PostgreSQL and SQLite implementations of the client repository and the
+transaction, grant, replay, nonce and revocation stores, passing the
+same contract tests and declaring what production assurance checks.
 
 Access tokens can be issued as self-contained JWTs (RFC 9068 — the
 default, `server.JWTAccessTokens`/`resource.JWTAccessTokens`) or as

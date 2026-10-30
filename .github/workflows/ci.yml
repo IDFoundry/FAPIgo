@@ -11,6 +11,20 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # For the sqlstore coverage step below: see the sqlstore job.
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
+        env:
+          # A throwaway server reachable only from this job: no password.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -65,6 +79,17 @@ jobs:
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
 
+      # sqlstore/ is a module of its own, so the run above never covers
+      # it. Its coverage, against SQLite and the service container's
+      # PostgreSQL, goes to SonarQube and Codecov beside coverage.out
+      # (sonar.go.coverage.reportPaths). The sqlstore job below is the
+      # module's own gate; this run only measures.
+      - name: go test sqlstore (coverage)
+        working-directory: sqlstore
+        env:
+          FAPIGO_SQLSTORE_POSTGRES_DSN: postgres://postgres@localhost:5432/postgres?sslmode=disable
+        run: go test -coverprofile=coverage.out ./...
+
       # Uploads the same coverage.out the step above already produced —
       # a second, independent coverage view (trend graphs, per-PR diff
       # comments, the README badge) alongside SonarQube's own gate
@@ -75,7 +100,7 @@ jobs:
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage.out
+          files: coverage.out,sqlstore/coverage.out
           fail_ci_if_error: false
 
       # A second run, in Go's own -json event format rather than
@@ -117,7 +142,7 @@ jobs:
       # this repo's tests, so it can't see coverage at all; that's the
       # whole reason this step exists.
       - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        uses: SonarSource/sonarqube-scan-action@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # v8.4.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         # GitHub gives a pull request from a fork no secrets, so the
@@ -125,6 +150,75 @@ jobs:
         # this required job on every outside contribution. Skip it for
         # those; pushes, internal and Dependabot pull requests still scan.
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+  # sqlstore/ is its own Go module, so the library takes no database
+  # driver: every store contract against SQLite and, in the service
+  # container, PostgreSQL (FAPIGO_SQLSTORE_POSTGRES_DSN, which the tests
+  # require under CI rather than skip), with -race. govulncheck.yml
+  # scans it too.
+  sqlstore:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sqlstore
+    services:
+      postgres:
+        # Pinned by digest. Dependabot doesn't update service images:
+        # move it by hand (and the test job's copy above).
+        image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
+        env:
+          # A throwaway server reachable only from this job: no password.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      FAPIGO_SQLSTORE_POSTGRES_DSN: postgres://postgres@localhost:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sqlstore/go.mod
+          check-latest: true
+          cache-dependency-path: sqlstore/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      # Its module path sits under the library's, so Go would let it
+      # import the library's internal packages, which a release of it
+      # built against a FAPIgo release mustn't depend on.
+      - name: public API only
+        run: |
+          internal=$(go list -f '{{range .Imports}}{{.}} {{end}}{{range .TestImports}}{{.}} {{end}}{{range .XTestImports}}{{.}} {{end}}' ./... | tr ' ' '\n' | grep '^github.com/idfoundry/fapigo/internal' || true)
+          if [ -n "$internal" ]; then
+            echo "sqlstore must use FAPIgo's public API only; found: $internal"
+            exit 1
+          fi
+
+      - name: go test (race, SQLite and PostgreSQL)
+        run: go test -race ./...
+
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.12
+          working-directory: sqlstore
+
+      # go.mod's replace builds against this checkout, but a consumer of
+      # a released sqlstore gets the FAPIgo version go.mod requires (a
+      # dependency's replace is ignored). Test against exactly that, so
+      # sqlstore never relies on FAPIgo API that isn't released yet: a
+      # change needing new API waits for the FAPIgo release that has it,
+      # then raises the requirement.
+      - name: go test against the required FAPIgo release
+        run: |
+          go mod edit -dropreplace github.com/idfoundry/fapigo
+          GOFLAGS=-mod=mod go test ./...
 
   # Every other job runs go.mod's own minimum Go version (exactly, via
   # go-version-file), which is what keeps that minimum honest — but it

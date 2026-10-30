@@ -51,6 +51,16 @@ automatically — see `release-please-config.json` and
 `0.x.0`, not straight to `1.0.0` — that jump is a deliberate, manual
 decision, not something a commit message alone should trigger.
 
+`sqlstore/` is a Go module of its own, released and tagged separately
+(`sqlstore/vX.Y.Z`, its own release PR and `sqlstore/CHANGELOG.md`):
+a commit touching only `sqlstore/` releases it and not the library,
+so keep a change to `sqlstore/` in its own commit (`feat(sqlstore): …`),
+apart from changes elsewhere. It builds against the FAPIgo release its
+`go.mod` requires — CI tests it with the in-repo `replace` dropped — so
+a change that needs new library API lands in the library first, and
+`sqlstore` raises its requirement once that's released. Its tests need
+PostgreSQL as well as SQLite: see [sqlstore/README.md](sqlstore/README.md).
+
 ## Before you open a PR
 
 - `gofmt -l .`, `go vet ./...`, `go build ./...`, `go test -race ./...`,
@@ -62,7 +72,8 @@ decision, not something a commit message alone should trigger.
   with. This module has no third-party dependencies, so a finding is
   almost always a standard-library CVE fixed in a newer Go patch
   release, not something to fix in this repo's own code — raise the
-  `go` directive in `go.mod` and every `examples/*/go.mod` instead.
+  `go` directive in `go.mod`, `sqlstore/go.mod` and every
+  `examples/*/go.mod` instead.
 - CI runs the tests under the minimum Go version in `go.mod` and again
   under the latest stable release, and the standard library can behave
   differently between them. If your local toolchain is newer than

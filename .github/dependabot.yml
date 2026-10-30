@@ -9,6 +9,13 @@ updates:
     schedule:
       interval: weekly
 
+  # sqlstore/ is a module of its own: the database drivers its tests
+  # use, and the FAPIgo release it requires.
+  - package-ecosystem: gomod
+    directory: /sqlstore
+    schedule:
+      interval: weekly
+
   # Keeps every action the workflows use current — the one real
   # dependency surface this repo has. Each is pinned to a full commit
   # SHA with its version as a trailing comment (`@<sha> # vX.Y.Z`),

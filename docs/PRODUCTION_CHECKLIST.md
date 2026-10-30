@@ -22,9 +22,11 @@ are things no constructor can check.
   `TestBackchannelAuthenticationStoreContract` (CIBA). With
   `DeploymentHorizontallyScaled`, every instance must share them.
   The [`sqlstore`](../sqlstore) module provides the client repository,
-  transaction, grant, replay, nonce and revocation stores on PostgreSQL
-  (any deployment) or SQLite (`DeploymentSingleInstance` only), already
-  passing those contracts; run its `Migrate` and, periodically, `Sweep`.
+  transaction, grant, replay, nonce, revocation, opaque access token,
+  CIBA and pairwise subject stores on PostgreSQL (any deployment) or
+  SQLite (`DeploymentSingleInstance` only), already passing those
+  contracts; run its `Migrate` and, periodically, `Sweep`, and consider
+  its `Options.Sealer` to encrypt the records it holds.
   [Step 1](../GETTING_STARTED.md#1-dependencies-use-the-reference-implementations-to-start)
 - [ ] **Durable signing keys** that declare `keys.KeyCustodyAssurance`
   (`keys.NewKeyManagerFromSigners` with `keys.DeclareCustody`), and a

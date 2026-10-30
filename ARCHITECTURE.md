@@ -710,7 +710,14 @@ Whether a narrower grant is acceptable is, per type, decided by
 `RARDefinition.ValidateGrant(requested, granted T) error` — nil requires
 byte-for-byte (canonically re-encoded) equality; set, it can permit real
 field-level narrowing (e.g. a lower payment amount). `RARRegistry.ValidateGrant`
-does the per-type matching this drives. `RARGet`/`RARSet` are the RAR
+does the per-type matching this drives. `RARDefinition.Validate` runs on every
+parse, requested and granted alike; `RARDefinition.ValidateRequest` runs
+only through `RARRegistry.ParseRequest`, which the server uses solely
+where a client starts a grant (`parseRequestedAuthorizationDetails`: PAR,
+CIBA, client_credentials), so a member only the authorization server may
+set can be refused from a client without refusing the server's own grant.
+Granted details, token-endpoint narrowing, refresh re-checks, embedder
+issuance and the re-parse of a stored request at consent all use `Parse`. `RARGet`/`RARSet` are the RAR
 counterparts of `Get`/`Set` — a client builds one detail object with
 `extension.RARSet(Definition, value)`, which also stamps the
 definition's own `Type` into the result, so a caller's value type never

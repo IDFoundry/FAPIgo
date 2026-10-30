@@ -31,10 +31,17 @@ var paymentType = extension.RARDefinition[paymentInitiation]{
 registry, err := extension.NewRARRegistry(4096, 4, paymentType) // total bytes, nesting depth
 ```
 
-`Validate` adds your own checks to the type's shape. `ValidateGrant`
-decides what counts as an acceptable narrowing at approval (a lower
-amount, fewer accounts); left nil, a granted object must match what was
-requested exactly.
+`Validate` adds your own checks to the type's shape, on requested and
+granted objects alike. `ValidateRequest` adds checks that apply only to
+what a client asks for when it starts a grant (at PAR, a CIBA request or
+a client credentials token request), not to what the server grants or to
+a later token request narrowing that grant. Use it for a member only the
+server may set, such as an identifier it mints into the grant for the
+client to name later: refuse a client-supplied value there, and the
+server can still add one at approval. `ValidateGrant` decides what
+counts as an acceptable narrowing at approval (a lower amount, fewer
+accounts); left nil, a granted object must match what was requested
+exactly.
 
 ## Authorization server: register, gate, approve
 

@@ -31,8 +31,28 @@ type RARDefinition[T any] struct {
 	MaxBytesPerObject int
 
 	// Validate, if non-nil, applies extra semantic checks beyond T's JSON
-	// shape.
+	// shape. It runs on every detail object of this type the registry
+	// parses: those a client requests and those an authorization server
+	// grants alike.
 	Validate func(T) error
+
+	// ValidateRequest, if non-nil, applies extra semantic checks, after
+	// Validate, only to the detail objects a client submits to start a
+	// grant — a pushed authorization request, a CIBA backchannel
+	// authentication request, or a client_credentials token request
+	// (RARRegistry.ParseRequest). It does not run on granted details, on
+	// a token request narrowing an existing grant, on a refresh's
+	// re-check of a grant, or on details an embedder issues directly.
+	//
+	// Use it for a member only the authorization server may set: one it
+	// adds to the granted details itself, such as an identifier it mints
+	// for the client to name later (OpenID4VCI's credential_identifiers,
+	// for example). Refusing such a member in Validate would also refuse
+	// the server's own grant; refusing it here keeps a client from
+	// choosing a value that, with a policy that grants what was requested
+	// (such as server.AllowRequestedAuthorizationDetails) and the default
+	// exact-match ValidateGrant, would otherwise survive into the grant.
+	ValidateRequest func(T) error
 
 	// ValidateGrant, if non-nil, decides whether a granted detail object
 	// (typically a resource owner's narrowed subset of what a client
@@ -58,7 +78,7 @@ type registeredRAR interface {
 	rarType() string
 	maxObjects() int
 	maxBytesPerObject() int
-	decodeCheck(raw json.RawMessage) error
+	decodeCheck(raw json.RawMessage, request bool) error
 	validateGrant(requestedRaw, grantedRaw json.RawMessage) error
 }
 
@@ -69,8 +89,9 @@ func (d RARDefinition[T]) maxBytesPerObject() int { return d.MaxBytesPerObject }
 // decodeCheck decodes raw into T strictly: a member T doesn't declare
 // is an error. The "type" member is the exception when T doesn't declare
 // it: it's the discriminator every detail object carries, which RARSet
-// adds itself so that T need not.
-func (d RARDefinition[T]) decodeCheck(raw json.RawMessage) error {
+// adds itself so that T need not. request also applies ValidateRequest,
+// after Validate.
+func (d RARDefinition[T]) decodeCheck(raw json.RawMessage, request bool) error {
 	if !declaresTypeMember(reflect.TypeFor[T]()) {
 		var err error
 		if raw, err = withoutTypeMember(raw); err != nil {
@@ -91,6 +112,11 @@ func (d RARDefinition[T]) decodeCheck(raw json.RawMessage) error {
 	}
 	if d.Validate != nil {
 		if err := d.Validate(v); err != nil {
+			return fmt.Errorf("extension: authorization_details type %q: %w", d.Type, err)
+		}
+	}
+	if request && d.ValidateRequest != nil {
+		if err := d.ValidateRequest(v); err != nil {
 			return fmt.Errorf("extension: authorization_details type %q: %w", d.Type, err)
 		}
 	}
@@ -257,8 +283,24 @@ type rarObjectHead struct {
 // array — against the registry: total size and nesting depth bounds,
 // a single JSON array, then per object: a registered type, no duplicate top-level JSON
 // members, its own size and per-type object-count bounds, and strict
-// decoding against its RARDefinition's type.
+// decoding against its RARDefinition's type, including its Validate.
+// Parse does not apply ValidateRequest; ParseRequest does.
 func (r *RARRegistry) Parse(raw json.RawMessage) (RARValues, error) {
+	return r.parse(raw, false)
+}
+
+// ParseRequest is Parse for the authorization_details a client submits
+// to start a grant: it also applies each object's
+// RARDefinition.ValidateRequest, after Validate. Details the
+// authorization server grants, or that a later request echoes from an
+// existing grant, go through Parse instead, so a member only the server
+// may set is refused when a client supplies it but not when the server
+// grants it.
+func (r *RARRegistry) ParseRequest(raw json.RawMessage) (RARValues, error) {
+	return r.parse(raw, true)
+}
+
+func (r *RARRegistry) parse(raw json.RawMessage, request bool) (RARValues, error) {
 	if len(raw) > r.maxTotalBytes {
 		return RARValues{}, ErrRARTooLarge
 	}
@@ -300,7 +342,7 @@ func (r *RARRegistry) Parse(raw json.RawMessage) (RARValues, error) {
 		if counts[head.Type] > def.maxObjects() {
 			return RARValues{}, fmt.Errorf("%w: type %q", ErrRARTooManyObjects, head.Type)
 		}
-		if err := def.decodeCheck(objRaw); err != nil {
+		if err := def.decodeCheck(objRaw, request); err != nil {
 			return RARValues{}, err
 		}
 		values.byType[head.Type] = append(values.byType[head.Type], objRaw)

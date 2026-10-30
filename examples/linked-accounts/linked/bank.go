@@ -1,6 +1,7 @@
 package linked
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"encoding/json"
@@ -17,7 +18,6 @@ import (
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
-	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 const (
@@ -53,7 +53,7 @@ type connection struct {
 	RevokedAt              time.Time
 }
 
-func (w *World) newBank(apps apps) (*bank, error) {
+func (w *World) newBank(ctx context.Context, apps apps) (*bank, error) {
 	issuer, err := fapi.ParseIssuerURL(w.URL(bankHost, ""))
 	if err != nil {
 		return nil, err
@@ -91,10 +91,12 @@ func (w *World) newBank(apps apps) (*bank, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The bank's stores, in its own tables (stores.bank).
+	store := w.stores.bank
 	var registered []storage.RegisteredClient
 	var specs []ephemeral.ClientKeySpec
 	for _, a := range []app{apps.pocketwise, apps.thriftly} {
-		client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		cfg := storage.RegisteredClientConfig{
 			ID:                       a.clientID,
 			RedirectURIs:             []fapi.RegisteredRedirectURI{a.redirectURI(w)},
 			ClientAuthMethod:         storage.ClientAuthMethodPrivateKeyJWT,
@@ -104,8 +106,14 @@ func (w *World) newBank(apps apps) (*bank, error) {
 			// RFC 9396 §10: the apps may ask for account access only.
 			AuthorizationDetailsTypes: []string{accountAccessType.Type},
 			Display:                   storage.ClientDisplay{Name: a.name},
-		})
+		}
+		client, err := storage.NewRegisteredClient(cfg)
 		if err != nil {
+			return nil, err
+		}
+		// The clients table is the bank's to manage: Put registers (or
+		// replaces) a client, as an operator's tooling would.
+		if err := store.Clients().Put(ctx, cfg); err != nil {
 			return nil, err
 		}
 		registered = append(registered, client)
@@ -141,23 +149,24 @@ func (w *World) newBank(apps apps) (*bank, error) {
 		Assurance: server.AssuranceDevelopment, RAR: registry,
 	}
 	b.deps = server.Dependencies{
-		Clients:      memstore.NewClientRepository(registered),
-		Transactions: memstore.NewTransactionStore(),
-		Grants:       memstore.NewGrantStore(),
-		Replay:       memstore.NewReplayStore(),
+		Clients:      store.Clients(),
+		Transactions: store.Transactions(),
+		// Authorization codes and the 90-day refresh tokens.
+		Grants:       store.Grants(),
+		Replay:       store.Replay(),
 		ClientKeys:   clientKeys,
 		Keys:         manager,
 		AccessTokens: accessTokens,
 		// The revocation store the bank and its API share: RevokeGrant
 		// writes to it, and both read it.
-		Revocation: memstore.NewRevocationStore(),
+		Revocation: store.Revocation(),
 		// DPoP server nonces (RFC 9449 §8): a DPoP proof at PAR or the
 		// token endpoint must carry a nonce the bank handed out, so a
 		// proof made ahead of time, or captured, is refused. A client's
 		// first call is answered use_dpop_nonce with one; it retries
 		// once and reuses it. (A production server.New requires this, or
 		// server.NoDPoPNonces{} to decline.)
-		Nonces: memstore.NewNonceStore(),
+		Nonces: store.Nonces(),
 		// No client authenticates with a CA-issued certificate
 		// (tls_client_auth), so refuse that method outright.
 		ClientCertificateTrust: server.NoPKIClientAuthentication{},

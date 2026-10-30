@@ -12,15 +12,19 @@
 //
 // It keeps the demo CA and TLS certificate in a state directory (-state,
 // default .linked-state), so a browser told to trust the CA once stays
-// that way; -reset starts over with a new one. Everything else — keys,
-// registrations, grants — is in memory and starts fresh each run.
+// that way; -reset starts over with a new one. The parties' stores —
+// registrations, grants, refresh tokens, revocations, sessions — are in
+// a SQLite database there too (linked.db), started afresh each run,
+// since the keys are generated at startup.
 package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -66,10 +70,16 @@ func run(ctx context.Context, port int, state string, open bool, chrome string) 
 	if err != nil {
 		return err
 	}
-	world, err := linked.New(port, n)
+	db, err := openDatabase(state)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	world, err := linked.New(ctx, port, n, db)
 	if err != nil {
 		return fmt.Errorf("build the demo: %w", err)
 	}
+	go world.SweepEvery(ctx, time.Minute, log.Printf)
 	listeners, err := demokit.Listen(port)
 	if err != nil {
 		return err
@@ -106,6 +116,18 @@ func run(ctx context.Context, port int, state string, open bool, chrome string) 
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
 	return err
+}
+
+// openDatabase opens a fresh linked.db in state: the last run's records
+// were made with keys that are gone.
+func openDatabase(state string) (*sql.DB, error) {
+	path := filepath.Join(state, "linked.db")
+	for _, f := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+	}
+	return linked.OpenDatabase(path)
 }
 
 func printBanner(console, caPath string, opened bool) {

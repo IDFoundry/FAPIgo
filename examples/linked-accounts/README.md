@@ -18,10 +18,13 @@ A **demo clock** fast-forwards time, and an **attack lab** tries to
 misuse the long-lived access.
 
 Everything runs in one process, on your machine, each party at its own
-`*.localhost` host.
+`*.localhost` host. The parties keep their records — the bank's client
+registrations, grants, 90-day refresh tokens and revocations, and the
+apps' sign-in sessions — in a SQLite database, through FAPIgo's
+[`sqlstore`](../../sqlstore/README.md) module.
 
-> This is a demo. Every store is in memory, every key is generated at
-> startup, and the bank, apps, people and accounts are made up.
+> This is a demo. Every key is generated at startup, the database starts
+> afresh each run, and the bank, apps, people and accounts are made up.
 
 This is a separate Go module. It builds against this checkout of the
 library (`replace` in `go.mod`), and release-please ignores it.
@@ -64,6 +67,30 @@ your system:
 `-reset` deletes `.linked-state/` and issues a new CA; remove the old
 one from your trust store if you'd trusted it. `-state` moves the
 directory.
+
+### The database
+
+The demo keeps its stores in `.linked-state/linked.db`, a SQLite file
+(through `modernc.org/sqlite`, pure Go, so there's nothing to install),
+deleted and created afresh each time it starts, since the keys its
+records were made with are gone. It creates its tables with `Migrate`
+at startup, and runs `Sweep` every minute against the demo clock, so
+fast-forwarding past the consent's 90 days lets the sweep delete the
+expired refresh token. While the demo runs, or after you stop it, look
+inside:
+
+```sh
+sqlite3 .linked-state/linked.db '.tables'
+sqlite3 .linked-state/linked.db 'SELECT hex(token_hash), client_id, expires_at FROM bank_refresh_tokens'
+```
+
+Each party has its own table prefix in the one file: `bank_` for the
+bank's authorization server, `bank_api_` for its API's own DPoP nonces
+(never the bank's: RFC 9449 keeps the two apart), and `pocketwise_` and
+`thriftly_` for each app's sessions. Every prefix gets every table,
+used or not. The bank's refresh tokens and grants are opaque, versioned
+records the library owns; a real deployment would also seal them
+(`sqlstore.Options.Sealer`).
 
 ## Who's who
 
@@ -120,9 +147,9 @@ Everything here uses FAPIgo's public API only.
 
 | Piece | FAPIgo |
 |---|---|
-| Alder Bank | `server.Server` with `Config.RAR`, both apps registered with `AuthorizationDetailsTypes` for `account_access`, and `Dependencies.AuthorizationCodeRARPolicy` set to `server.AllowRequestedAuthorizationDetails`; `Limits.RefreshTokenLifetime` of 90 days; the token endpoint serving `ExchangeAuthorizationCode` and `RefreshAccessToken`; the consent page answering with `GrantedAuthorization.AuthorizationDetails` (the chosen accounts) and `GrantID`; Connected apps calling `Server.RevokeGrant`; `Dependencies.Revocation` a `memstore.RevocationStore` the API reads too |
-| The account information API | `serverresource.NewVerifier`, which also refuses an access token whose grant was revoked; the shared accounts from the token's `authorization_details` claim (`extension.ParseGrantedRAR`, `RARGet`) |
-| Pocketwise | `client.NewFromDiscovery`; `BeginAuthorization` with `offline_access` and `AuthorizationDetails`; `CompleteAuthorization`; `RefreshTokens` for every sync; the tokens kept between syncs sealed for the customer with `client.TokenSetSealer`, as they'd sit in a database; `ProtectedResource` for the API |
+| Alder Bank | `server.Server` with `Config.RAR`, both apps registered with `AuthorizationDetailsTypes` for `account_access`, and `Dependencies.AuthorizationCodeRARPolicy` set to `server.AllowRequestedAuthorizationDetails`; `Limits.RefreshTokenLifetime` of 90 days; the token endpoint serving `ExchangeAuthorizationCode` and `RefreshAccessToken`; the consent page answering with `GrantedAuthorization.AuthorizationDetails` (the chosen accounts) and `GrantID`; Connected apps calling `Server.RevokeGrant`; `Dependencies` from `sqlstore` on SQLite, `Clients().Put` registering both apps, and `Revocation()` the API reads too |
+| The account information API | `serverresource.NewVerifier`, which also refuses an access token whose grant was revoked, with DPoP nonces from its own `sqlstore` tables (`Options.Nonces`); the shared accounts from the token's `authorization_details` claim (`extension.ParseGrantedRAR`, `RARGet`) |
+| Pocketwise | `client.NewFromDiscovery`, with `Dependencies.Sessions` from `sqlstore`; `BeginAuthorization` with `offline_access` and `AuthorizationDetails`; `CompleteAuthorization`; `RefreshTokens` for every sync; the tokens kept between syncs sealed for the customer with `client.TokenSetSealer`, as they'd sit in a database; `ProtectedResource` for the API |
 | The demo clock | one `Now()` behind `server.Dependencies.Clock` and `client.Dependencies.Clock` |
 
 The code:
@@ -132,6 +159,7 @@ The code:
 - [`linked/api.go`](linked/api.go) — the account information API.
 - [`linked/rar.go`](linked/rar.go) — the `account_access` detail type.
 - [`linked/apps.go`](linked/apps.go) — the customer, the two apps, and the rotating DPoP key.
+- [`linked/store.go`](linked/store.go) — each party's `sqlstore` tables, migrated at startup, and the periodic sweep.
 - [`linked/e2e_test.go`](linked/e2e_test.go) — linking, syncing, every attack, revocation and expiry, driven end to end.
 
 ## What's simplified
@@ -141,3 +169,7 @@ The code:
 - Syncs happen when you press the button, not on a schedule.
 - The demo clock moves the bank, its API and Pocketwise together. TLS
   certificates still use real time.
+- Every party shares one SQLite file, each under its own table prefix;
+  a real bank and real apps would each have a database of their own,
+  PostgreSQL for more than one instance. The records aren't sealed,
+  and the bank and Pocketwise run under `AssuranceDevelopment`.

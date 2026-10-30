@@ -113,6 +113,12 @@ between instances: use SQLite there.
   an hour past their expiry, so a late poll gets `expired_token`;
   sessions until they're consumed or expire; pairwise subjects are
   never swept.
+- **Resource servers** reading opaque access tokens or revocations use
+  the server's tables (`AccessTokens()`, `Revocation()`, and `Replay()`,
+  whose digests each role namespaces), through a DB with the same
+  `TablePrefix` and `Sealer`. Their DPoP nonce store is the exception:
+  `Nonces()` from a DB with a `TablePrefix` of its own, never the
+  server's, whose nonces it would then accept.
 - **Clients** are rows the operator manages: a `client_id` and a
   versioned JSON configuration, written with `Clients().Put` or
   `MarshalClientConfig`. See the package documentation's Clients

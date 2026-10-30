@@ -15,6 +15,7 @@ import (
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/serverresource"
 	"github.com/idfoundry/fapigo/sqlstore"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
@@ -242,6 +243,34 @@ func TestProductionClientAcceptsSessions(t *testing.T) {
 		deps.Sessions = memstore.NewSessionStore()
 		if _, err := client.New(cfg, deps); err == nil {
 			t.Fatal("client.New(production, memstore sessions) = nil error, want it refused")
+		}
+	})
+}
+
+// A resource server's DPoP nonce store mustn't be the authorization
+// server's: serverresource.NewVerifier refuses the server's own
+// Nonces() from the same DB — the one value Nonces returns on every
+// call — and accepts Nonces from a DB with a TablePrefix of its own,
+// alongside the server's own tables for revocations and opaque access
+// tokens.
+func TestResourceServerNonces(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		p := newPlace(t, dialect)
+		d := p.migrated()
+		deployment := server.DeploymentHorizontallyScaled
+		if dialect == sqlstore.SQLite {
+			deployment = server.DeploymentSingleInstance
+		}
+		cfg, deps := productionServer(t, d, deployment)
+		resourceURLs := []fapi.URL{mustURL(t, "https://as.example/userinfo")}
+		_, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{ResourceURLs: resourceURLs, Nonces: d.Nonces()})
+		if err == nil || !strings.Contains(err.Error(), "must not be the server's own") {
+			t.Fatalf("NewVerifier(the server's own Nonces()) = %v, want it refused", err)
+		}
+		rs := newPlace(t, dialect)
+		rs.path = p.path
+		if _, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{ResourceURLs: resourceURLs, Nonces: rs.migrated().Nonces()}); err != nil {
+			t.Fatalf("NewVerifier(Nonces under another TablePrefix): %v", err)
 		}
 	})
 }

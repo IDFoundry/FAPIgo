@@ -42,11 +42,26 @@
 //		// ...
 //	}
 //
-// Replay, Nonces, Revocation and AccessTokens also serve a resource
-// server (resource.Dependencies' Replay, Nonces and Revocation, and
-// resource.OpaqueAccessTokens' store): give it the same tables, through
-// a DB with the same TablePrefix and Sealer, so a revocation or an
-// access token the server records is seen there.
+// Revocation and AccessTokens also serve a resource server
+// (resource.Dependencies.Revocation and resource.OpaqueAccessTokens'
+// store), as does Replay (resource.Dependencies.Replay, whose digests
+// each role keeps in a namespace of its own): give it the same tables,
+// through a DB with the same TablePrefix and Sealer, so a revocation or
+// an access token the server records is seen there. Its DPoP nonce
+// store (resource.Dependencies.Nonces, serverresource.Options.Nonces)
+// is the exception: never the server's, whose nonces it would then
+// accept (RFC 9449 §8, §9), but Nonces from a DB with a TablePrefix of
+// its own:
+//
+//	rsDB, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{TablePrefix: "fapigo_rs_"})
+//	err = rsDB.Migrate(ctx)
+//	verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{
+//		ResourceURLs: resourceURLs,
+//		Nonces:       rsDB.Nonces(),
+//	})
+//
+// (serverresource.NewVerifier refuses the server's own db.Nonces(), but
+// can't tell two DBs with one TablePrefix apart.)
 //
 // For SQLite, with a driver such as modernc.org/sqlite (pure Go, no
 // cgo), open the file in WAL mode with a busy timeout, so readers don't

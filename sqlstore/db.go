@@ -104,6 +104,8 @@ type DB struct {
 
 	sealer       Sealer
 	readUnsealed bool
+
+	nonces *NonceStore // Nonces' one value
 }
 
 const defaultTablePrefix = "fapigo_"
@@ -137,7 +139,9 @@ func New(db *sql.DB, dialect Dialect, opts Options) (*DB, error) {
 	if opts.ReadUnsealed && opts.Sealer == nil {
 		return nil, errors.New("sqlstore: ReadUnsealed without a Sealer")
 	}
-	return &DB{db: db, dialect: dialect, prefix: prefix, busy: busy, sealer: opts.Sealer, readUnsealed: opts.ReadUnsealed}, nil
+	d := &DB{db: db, dialect: dialect, prefix: prefix, busy: busy, sealer: opts.Sealer, readUnsealed: opts.ReadUnsealed}
+	d.nonces = &NonceStore{d}
+	return d, nil
 }
 
 // Dialect is the database's dialect.

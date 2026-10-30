@@ -9,12 +9,18 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// NonceStore is a storage.NonceStore: server.Dependencies.Nonces, and a
-// resource server's DPoP nonce store too.
+// NonceStore is a storage.NonceStore: server.Dependencies.Nonces, or a
+// resource server's DPoP nonce store — never both from one DB. A nonce
+// store is keyed by the nonce alone, so the authorization server and a
+// resource server sharing one would each accept the other's nonces,
+// which RFC 9449 keeps apart (§8, §9): give the resource server's a DB
+// with a TablePrefix of its own.
 type NonceStore struct{ d *DB }
 
-// Nonces returns d's storage.NonceStore.
-func (d *DB) Nonces() *NonceStore { return &NonceStore{d} }
+// Nonces returns d's storage.NonceStore: the same one on every call, so
+// that serverresource.NewVerifier, which refuses the server's own
+// Dependencies.Nonces as its Options.Nonces, recognizes it.
+func (d *DB) Nonces() *NonceStore { return d.nonces }
 
 // Issue implements storage.NonceStore. Issuing a nonce again sets its
 // expiry to the new one.

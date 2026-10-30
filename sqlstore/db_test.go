@@ -235,6 +235,10 @@ func TestDatabaseFailureIsStoreUnavailable(t *testing.T) {
 				_, err := d.Backchannel().PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{AuthReqIDHash: digest, Now: time.Now()})
 				return err
 			},
+			"ConsumeSession": func() error {
+				_, err := d.Sessions().Consume(ctx, storage.SessionConsumption{State: "s"})
+				return err
+			},
 			"LookupPairwiseSubject": func() error {
 				_, err := d.PairwiseSubjects().Lookup(ctx, "i", "s", "b")
 				return err
@@ -297,6 +301,9 @@ func checkUnstorableReadsUnknown(t *testing.T, d *sqlstore.DB, key string) {
 	if _, err := d.Transactions().CompleteAuthorization(ctx, storage.CompleteAuthorizationTransaction{Handle: key}); !errors.Is(err, sqlstore.ErrNotFound) {
 		t.Errorf("CompleteAuthorization(%q) = %v, want ErrNotFound", key, err)
 	}
+	if _, err := d.Sessions().Consume(ctx, storage.SessionConsumption{State: key}); !errors.Is(err, sqlstore.ErrNotFound) {
+		t.Errorf("Consume(%q) = %v, want ErrNotFound", key, err)
+	}
 	for _, args := range [][3]string{{key, "s", "b"}, {"i", key, "b"}, {"i", "s", key}} {
 		if _, err := d.PairwiseSubjects().Lookup(ctx, args[0], args[1], args[2]); !errors.Is(err, storage.ErrPairwiseSubjectNotFound) || !errors.Is(err, sqlstore.ErrNotFound) {
 			t.Errorf("PairwiseSubjects().Lookup(%q) = %v, want ErrPairwiseSubjectNotFound", args, err)
@@ -324,6 +331,7 @@ func checkUnstorableWritesRefused(t *testing.T, d *sqlstore.DB, key string) {
 		}),
 		"GetOrCreatePairwiseSubject": getOrCreateErr(d, storage.PairwiseSubjectKey{Issuer: "i", Sector: "s", Subject: key}, "b"),
 		"GetOrCreatePairwiseBody":    getOrCreateErr(d, storage.PairwiseSubjectKey{Issuer: "i", Sector: "s", Subject: "u"}, key),
+		"CreateSession":              d.Sessions().Create(ctx, storage.NewSession{State: key, ExpiresAt: later}),
 	} {
 		if err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
 			t.Errorf("%s(%q) = %v, want a refusal", name, key, err)
@@ -418,6 +426,9 @@ func writesOn(d *sqlstore.DB) map[string]func() error {
 		"GetOrCreatePairwiseSubject": func() error {
 			_, err := d.PairwiseSubjects().GetOrCreate(ctx, storage.PairwiseSubjectKey{Issuer: "i", Sector: "s", Subject: "u"}, "b")
 			return err
+		},
+		"CreateSession": func() error {
+			return d.Sessions().Create(ctx, storage.NewSession{State: "s", ExpiresAt: later})
 		},
 	}
 }

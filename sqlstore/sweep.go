@@ -17,6 +17,7 @@ var sweptTables = []string{
 	"revocations",                 // the latest expiresAt a key was revoked with
 	"access_tokens",               // NewAccessToken.ExpiresAt
 	"backchannel_authentications", // NewBackchannelAuthentication.ExpiresAt + BackchannelExpiredRetention
+	sessionsTable,                 // NewSession.ExpiresAt
 }
 
 // Sweep deletes every row that expired before now, from every table
@@ -32,10 +33,11 @@ var sweptTables = []string{
 // request until BackchannelExpiredRetention after it expires (so that a
 // late poll is told it expired).
 //
-// Pass the server's own time (server.Dependencies.Clock). Running Sweep
-// late only keeps rows longer; passing a time ahead of the server's
-// would forget replay digests and revocations the server still relies
-// on.
+// Pass the server's own time (server.Dependencies.Clock, or a relying
+// party's client.Dependencies.Clock for a DB holding only its
+// sessions). Running Sweep late only keeps rows longer; passing a time
+// ahead of the server's would forget replay digests and revocations the
+// server still relies on.
 func (d *DB) Sweep(ctx context.Context, now time.Time) (int64, error) {
 	var total int64
 	for _, name := range sweptTables {

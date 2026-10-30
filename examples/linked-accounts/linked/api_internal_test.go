@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -67,7 +68,12 @@ func testWorld(t *testing.T) *World {
 	if err != nil {
 		t.Fatalf("demokit.New: %v", err)
 	}
-	w, err := New(8443, n)
+	db, err := OpenDatabase(filepath.Join(t.TempDir(), "linked.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	w, err := New(t.Context(), 8443, n, db)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

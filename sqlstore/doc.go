@@ -1,5 +1,6 @@
 // Package sqlstore holds durable implementations of the storage
 // interfaces a FAPIgo Authorization Server (server.Dependencies) needs,
+// and of a relying party's session store (client.Dependencies.Sessions),
 // in a PostgreSQL or SQLite database reached through database/sql. It
 // is a Go module of its own, github.com/idfoundry/fapigo/sqlstore, so
 // FAPIgo itself takes no database driver: bring the driver you use.
@@ -33,11 +34,34 @@
 //	deps.Backchannel = db.Backchannel()                                    // CIBA
 //	deps.PairwiseSubjects, err = pairwise.NewMapping(db.PairwiseSubjects()) // pairwise subs (Config.Subjects), random and mapped
 //
-// Replay, Nonces, Revocation and AccessTokens also serve a resource
-// server (resource.Dependencies' Replay, Nonces and Revocation, and
-// resource.OpaqueAccessTokens' store): give it the same tables, through
-// a DB with the same TablePrefix and Sealer, so a revocation or an
-// access token the server records is seen there.
+// A relying party (package client) takes its session store from a DB
+// the same way, for client.Dependencies.Sessions:
+//
+//	deps := client.Dependencies{
+//		Sessions: db.Sessions(),
+//		// ...
+//	}
+//
+// Revocation and AccessTokens also serve a resource server
+// (resource.Dependencies.Revocation and resource.OpaqueAccessTokens'
+// store), as does Replay (resource.Dependencies.Replay, whose digests
+// each role keeps in a namespace of its own): give it the same tables,
+// through a DB with the same TablePrefix and Sealer, so a revocation or
+// an access token the server records is seen there. Its DPoP nonce
+// store (resource.Dependencies.Nonces, serverresource.Options.Nonces)
+// is the exception: never the server's, whose nonces it would then
+// accept (RFC 9449 §8, §9), but Nonces from a DB with a TablePrefix of
+// its own:
+//
+//	rsDB, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{TablePrefix: "fapigo_rs_"})
+//	err = rsDB.Migrate(ctx)
+//	verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{
+//		ResourceURLs: resourceURLs,
+//		Nonces:       rsDB.Nonces(),
+//	})
+//
+// (serverresource.NewVerifier refuses the server's own db.Nonces(), but
+// can't tell two DBs with one TablePrefix apart.)
 //
 // For SQLite, with a driver such as modernc.org/sqlite (pure Go, no
 // cgo), open the file in WAL mode with a busy timeout, so readers don't
@@ -85,6 +109,9 @@
 //     redeemed, in one transaction, so exactly one poll observes an
 //     approval, and the poll interval (slow_down) is checked and
 //     recorded atomically;
+//   - a relying party's session is consumed by one DELETE … RETURNING,
+//     in a transaction that also opens its record, so exactly one
+//     Consume of a state returns it;
 //   - a pairwise subject is one INSERT … ON CONFLICT DO NOTHING,
 //     against the table's primary key (issuer, sector, subject) and its
 //     unique (issuer, sector, body), then read back: of concurrent
@@ -125,15 +152,18 @@
 // consent), opaque access tokens' records (subject, scope, binding and
 // claims), and CIBA requests and decisions (the request, a ping
 // request's auth_req_id and client notification token — a bearer
-// secret the server presents — and the approved grant). Each is bound,
-// as AEAD additional data, to its table, column, row key, client_id and
-// the DB's TablePrefix, so a sealed blob copied to another row, client,
-// table or prefix fails to open. A sealed blob starts with a format
+// secret the server presents — and the approved grant), and a relying
+// party's sessions (the PKCE verifier and nonce it later presents and
+// checks). Each is bound, as AEAD additional data, to its table,
+// column, row key, client_id (the empty string for a session, whose
+// row has none) and the DB's TablePrefix, so a sealed blob copied to
+// another row, client, table or prefix fails to open. A sealed blob starts with a format
 // byte (2) that no JSON record starts with.
 //
 // Not sealed, since the stores look rows up, consume and sweep them by
 // them: keys and digests (which reveal nothing of the values they're
-// digests of), client IDs, expiry and sweep times, CIBA status, delivery
+// digests of, though a session's state is the value itself, which the
+// authorization request carried in the clear), client IDs, expiry and sweep times, CIBA status, delivery
 // mode and poll bookkeeping, replay digests, DPoP nonces, revoked keys,
 // pairwise subjects (the issuer, sector, internal subject and body are
 // every lookup's keys), and the clients table (public client metadata,
@@ -177,7 +207,8 @@
 // # Capabilities
 //
 // Every store declares storage.StoreAssurance capabilities, which
-// server.New checks under AssuranceProduction:
+// server.New, and client.New for Sessions, check under
+// AssuranceProduction:
 //
 //   - Postgres: Durable, AtomicConsume and CrossInstanceConsistent. Rows
 //     are committed to the database, the consumes above are atomic
@@ -193,10 +224,16 @@
 //     with server.DeploymentHorizontallyScaled; use them with
 //     server.DeploymentSingleInstance.
 //
+// client.New requires only Durable and AtomicConsume of a session
+// store, so it accepts Sessions on either database — except that a
+// native app's CallbackBindingDeviceLocalStore refuses a store that
+// declares CrossInstanceConsistent, which PostgreSQL's does: use
+// SQLite, a file on the device, there.
+//
 // With Options.Sealer set, the stores whose records it seals —
-// Transactions, Grants, AccessTokens and Backchannel — also declare
-// EncryptedAtRest (but not while ReadUnsealed lets unsealed records be
-// read); Clients, Replay, Nonces, Revocation and PairwiseSubjects,
+// Transactions, Grants, AccessTokens, Backchannel and Sessions — also
+// declare EncryptedAtRest (but not while ReadUnsealed lets unsealed
+// records be read); Clients, Replay, Nonces, Revocation and PairwiseSubjects,
 // whose rows are their lookup keys, never do. Nothing in FAPIgo
 // requires EncryptedAtRest; encrypting the database's storage as well
 // is still worth it.
@@ -243,14 +280,8 @@
 // opaque access token is kept until it expires, and a CIBA request
 // until BackchannelExpiredRetention (an hour) after it does, so a
 // client that polls it late gets expired_token rather than an unknown
-// auth_req_id's invalid_grant. Pairwise subjects are never swept: a user's
+// auth_req_id's invalid_grant. A relying party's session is kept until
+// it's consumed or expires. Pairwise subjects are never swept: a user's
 // identifier for a sector must stay the same for as long as relying
 // parties may hold it.
-//
-// # Not yet provided
-//
-// This release provides every store an Authorization Server takes. Not
-// yet: the client's SessionStore (client.Config), which a relying party
-// takes from an implementation of its own until then, run against
-// storage.TestSessionStoreContract.
 package sqlstore

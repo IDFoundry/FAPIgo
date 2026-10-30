@@ -19,7 +19,6 @@ import (
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
-	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 const (
@@ -85,11 +84,11 @@ func (w *World) newPocketwise(apps apps) *pocketwise {
 	// One 32-byte key and the default name: New can't fail.
 	session, _ := sessioncookie.New([][]byte{sessionKey}, sessioncookie.Options{})
 	p := &pocketwise{
-		w: w, keys: &rotatingDPoPKeys{base: apps.pocketwise.keys}, sessions: memstore.NewSessionStore(), trace: &trace{},
+		w: w, keys: &rotatingDPoPKeys{base: apps.pocketwise.keys}, sessions: w.stores.pocketwise.Sessions(), trace: &trace{},
 		tokenKey: tokenKey, session: session,
 	}
 	p.client = &lazyClient{w: w, clientID: pocketwiseClientID, keys: p.keys, redirect: w.URL(pocketwiseHost, callbackPath), sessions: p.sessions}
-	p.thriftly = &lazyClient{w: w, clientID: thriftlyClientID, keys: apps.thriftly.keys, redirect: string(apps.thriftly.redirectURI(w)), sessions: memstore.NewSessionStore()}
+	p.thriftly = &lazyClient{w: w, clientID: thriftlyClientID, keys: apps.thriftly.keys, redirect: string(apps.thriftly.redirectURI(w)), sessions: w.stores.thriftly.Sessions()}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", p.home)

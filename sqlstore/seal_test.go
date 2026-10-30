@@ -190,9 +190,10 @@ func TestUnsealedRecordsMigration(t *testing.T) {
 
 		n, err := migrating.SealRecords(ctx)
 		// The refresh token, and writeOneOfEach's pushed request,
-		// interaction, code, access token and CIBA record and decision.
-		if err != nil || n != 7 {
-			t.Fatalf("SealRecords = %d, %v, want 7, nil", n, err)
+		// interaction, code, access token, CIBA record and decision, and
+		// session.
+		if err != nil || n != 8 {
+			t.Fatalf("SealRecords = %d, %v, want 8, nil", n, err)
 		}
 		if n, err := migrating.SealRecords(ctx); err != nil || n != 0 {
 			t.Fatalf("SealRecords again = %d, %v, want 0, nil", n, err)
@@ -221,6 +222,7 @@ func writeOneOfEach(t *testing.T, d *sqlstore.DB) {
 		AuthReqIDHash: sha256.Sum256([]byte("o")), HandleHash: sha256.Sum256([]byte("o")), ClientID: "o", Request: secretGrant,
 		DeliveryMode: "poll", ExpiresAt: later,
 	}))
+	must(t, d.Sessions().Create(ctx, storage.NewSession{State: "o", Record: secretGrant, ExpiresAt: later}))
 }
 
 // checkOneOfEach reads back what writeOneOfEach wrote.
@@ -238,6 +240,9 @@ func checkOneOfEach(t *testing.T, d *sqlstore.DB) {
 	}
 	if got, err := d.Backchannel().PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{AuthReqIDHash: sha256.Sum256([]byte("o")), Now: time.Now()}); err != nil || !bytes.Equal(got.Request, secretGrant) {
 		t.Errorf("PollBackchannelAuthentication = %+v, %v", got, err)
+	}
+	if got, err := d.Sessions().Consume(ctx, storage.SessionConsumption{State: "o"}); err != nil || !bytes.Equal(got.Record, secretGrant) {
+		t.Errorf("Consume = %s, %v", got.Record, err)
 	}
 }
 

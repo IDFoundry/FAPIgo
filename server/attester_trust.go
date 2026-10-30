@@ -135,6 +135,11 @@ func (r RegisteredAttesterKeys) validate() error {
 //     the trust anchor out of "x5c" and rejects self-signed signing
 //     certificates wherever else it uses x5c, so the signing key can be
 //     rotated or revoked without redistributing anchors;
+//   - come with intermediates only: "x5c" must not include the trust
+//     anchor (HAIP 1.0), so an attestation is refused when any other
+//     "x5c" certificate is self-signed, or equals the anchor a verified
+//     chain ends at — even an anchor that is not self-signed, such as
+//     an intermediate configured as an anchor;
 //   - permit digital signatures, if it restricts key usage at all;
 //   - hold a key of the type the client's registered attestation
 //     algorithm needs.
@@ -557,7 +562,12 @@ func verifyAttesterChain(ders [][]byte, roots *x509.CertPool, now time.Time) (*x
 		return nil, nil, errors.New("attester certificate key usage does not permit digital signatures")
 	}
 	intermediates := x509.NewCertPool()
-	for _, c := range certs[1:] {
+	for i, c := range certs[1:] {
+		// HAIP 1.0 keeps the trust anchor out of x5c; a self-signed
+		// certificate there can only be an anchor, configured or not.
+		if isSelfSigned(c) {
+			return nil, nil, fmt.Errorf("attester x5c must not include the trust anchor (HAIP 1.0): x5c certificate %d is self-signed", i+1)
+		}
 		intermediates.AddCert(c)
 	}
 	// ExtKeyUsageAny: no extended key usage marks attestation signing,
@@ -571,7 +581,30 @@ func verifyAttesterChain(ders [][]byte, roots *x509.CertPool, now time.Time) (*x
 	if err != nil {
 		return nil, nil, fmt.Errorf("attester certificate chain does not verify: %w", err)
 	}
+	if err := checkX5CExcludesAnchors(certs[1:], chains); err != nil {
+		return nil, nil, err
+	}
 	return leaf, chains, nil
+}
+
+// checkX5CExcludesAnchors refuses x5c certificates (below the leaf)
+// equal to the anchor any verified chain ends at — an anchor that is not
+// self-signed, such as an intermediate configured as an anchor. It looks
+// at every verified chain, not only those LeafPolicy or the issuer
+// binding later keep, so an x5c that carries an anchor is refused
+// whichever chain would otherwise be used. A pool's anchors can't be
+// listed, so only those a chain reached are compared.
+func checkX5CExcludesAnchors(extra []*x509.Certificate, chains [][]*x509.Certificate) error {
+	for _, chain := range chains {
+		// x509.Certificate.Verify never returns an empty chain.
+		anchor := chain[len(chain)-1]
+		for i, c := range extra {
+			if c.Equal(anchor) {
+				return fmt.Errorf("attester x5c must not include the trust anchor (HAIP 1.0): x5c certificate %d is an anchor", i+1)
+			}
+		}
+	}
+	return nil
 }
 
 // isSelfSigned reports whether cert is signed by its own key —

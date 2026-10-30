@@ -47,7 +47,14 @@ by accident. When you're ready for a real deployment, this
 is the seam: implement the same interfaces (`storage.ClientRepository`
 and friends, `keys.KeyManager`, `keys.ClientKeySource`) against real
 persistence and a real key store (KMS/HSM), and swap them in — nothing
-else in this guide changes. For `keys.KeyManager` specifically, you may
+else in this guide changes. For the stores, you may not need to
+implement them either: the separate
+[`github.com/idfoundry/fapigo/sqlstore`](sqlstore) module implements
+the client repository and the transaction, grant, replay, nonce and
+revocation stores on PostgreSQL or SQLite through `database/sql`,
+declares their capabilities, and passes the contract tests — see its
+package documentation for migrations, sweeping and what it doesn't
+provide yet. For `keys.KeyManager` specifically, you may
 not need to implement anything at all: `keys.NewKeyManagerFromSigners`
 adapts any `crypto.Signer` — what most HSM/KMS Go client wrappers
 already implement — directly into a `KeyManager`, one `keys.SignerSpec`

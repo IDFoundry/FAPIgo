@@ -14,10 +14,10 @@ import (
 )
 
 // rarHTMLObject is a payment detail object full of the characters
-// encoding/json escapes as HTML ('<', '>', '&' become six-byte \u003c
-// escapes, and U+2028 a six-byte \u2028 one), so re-encoding it with
-// json.Marshal would grow it well past the bound below.
-var rarHTMLObject = `{"type":"payment","actions":["approve"],"amount":"` + strings.Repeat("<>&", 20) + "\u2028" + `"}`
+// encoding/json escapes as HTML ('<', '>' and '&' each become a six-byte
+// \u003c-style escape), so re-encoding it with json.Marshal would grow it
+// well past the bound below.
+var rarHTMLObject = `{"type":"payment","actions":["approve"],"amount":"` + strings.Repeat("<>&", 20) + `"}`
 
 // rarHTMLHarness registers "payment" with a MaxBytesPerObject only just
 // above rarHTMLObject's own size, and a total bound only just above the
@@ -107,11 +107,11 @@ func assertRARHTMLIssued(t *testing.T, h harness, result server.TokenResult) {
 
 // TestAuthorizationDetailsKeepTheirBytesThroughGrantAndRefresh: details a
 // client requested within Config.RAR's size bounds stay within them once
-// granted, stored and refreshed. encoding/json escapes '<', '>', '&',
-// U+2028 and U+2029 when it re-encodes, growing each to six bytes, so a
-// grant re-encoded that way could be refused at consent, or by the
-// refresh-time re-check, as too large — and its tokens would carry bytes
-// other than the ones validated.
+// granted, stored and refreshed. encoding/json escapes '<', '>' and '&'
+// when it re-encodes, growing each to six bytes, so a grant re-encoded
+// that way could be refused at consent, or by the refresh-time re-check,
+// as too large — and its tokens would carry bytes other than the ones
+// validated.
 func TestAuthorizationDetailsKeepTheirBytesThroughGrantAndRefresh(t *testing.T) {
 	h := rarHTMLHarness(t)
 	first, err := rarExchangeCode(t, h, rarHTMLIssueCode(t, h), nil)

@@ -217,6 +217,30 @@ jobs:
             name: FuzzResourcesFromParameters
           - pkg: ./server
             name: FuzzSplitResourceParameters
+          - pkg: ./fapihttp
+            name: FuzzParseByteSequence
+          - pkg: ./fapihttp
+            name: FuzzForwardedClientCertificate
+          - pkg: ./client
+            name: FuzzParseBackchannelNotification
+          - pkg: ./client
+            name: FuzzDecodeUserInfoResponse
+          - pkg: ./federation
+            name: FuzzFederationRequestsFromHTTP
+          - pkg: ./server
+            name: FuzzParseHandles
+          - pkg: ./internal/jose
+            name: FuzzJWKSetRoles
+          - pkg: ./keys
+            name: FuzzParseJWKSDocument
+          - pkg: ./extension
+            name: FuzzRARRegistryParseRequest
+          - pkg: ./extension
+            name: FuzzRARValidateNarrowing
+          - pkg: ./server
+            name: FuzzAttesterLeafPolicy
+          - pkg: ./server
+            name: FuzzVerifyAttesterChain
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

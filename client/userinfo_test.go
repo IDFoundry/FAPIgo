@@ -572,6 +572,45 @@ func TestFetchUserInfoRejectsMissingSubClaim(t *testing.T) {
 	}
 }
 
+// TestFetchUserInfoRejectsLossyPlainJSON: encoding/json reads invalid
+// UTF-8, and an unpaired surrogate escape, as U+FFFD, so a plain-JSON
+// UserInfo response whose sub is "end-user-1\xff" would otherwise match
+// an ID token whose sub is "end-user-1\uFFFD". Such a body is refused
+// outright, as a signed one already is, wherever the lossy string is.
+func TestFetchUserInfoRejectsLossyPlainJSON(t *testing.T) {
+	replaced := userInfoTestSubject + "\uFFFD"
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"invalid UTF-8 in sub", `{"sub":"` + userInfoTestSubject + "\xff" + `"}`},
+		{"unpaired surrogate escape in sub", `{"sub":"` + userInfoTestSubject + `\ud800"}`},
+		{"invalid UTF-8 in another claim", `{"sub":"` + replaced + `","name":"Ada` + "\xff" + `"}`},
+		{"unpaired surrogate escape in another claim", `{"sub":"` + replaced + `","name":"Ada\udc00"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer ts.Close()
+
+			tokens := userInfoTestTokens()
+			tokens.IDTokenClaims.Subject = replaced
+			c := newUserInfoTestClient(t, ts, nil, nil, nil)
+			_, err := c.FetchUserInfo(context.Background(), tokens)
+			if err == nil {
+				t.Fatalf("FetchUserInfo(%q) = nil error, want error", tt.body)
+			}
+			if code := clientErrorCode(t, err); code != client.ErrorInvalidResponse {
+				t.Errorf("Code() = %q, want %q", code, client.ErrorInvalidResponse)
+			}
+		})
+	}
+}
+
 func TestFetchUserInfoRejectsWhenNoIDToken(t *testing.T) {
 	tracker := &trackingHTTPClient{}
 	cfg := validConfig(t)

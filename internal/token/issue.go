@@ -12,6 +12,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/claimnames"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // jtiSize is the byte length of the random value used to build an
@@ -150,7 +151,7 @@ func IssueAccessToken(p AccessTokenParams) (token string, jti string, err error)
 		claims[k] = encoded
 	}
 
-	payload, err := json.Marshal(claims)
+	payload, err := strictjson.MarshalUnescaped(claims)
 	if err != nil {
 		return "", "", fmt.Errorf("token: marshal claims: %w", err)
 	}
@@ -285,7 +286,7 @@ func IssueIDToken(p IDTokenParams) (string, error) {
 		claims[k] = encoded
 	}
 
-	payload, err := json.Marshal(claims)
+	payload, err := strictjson.MarshalUnescaped(claims)
 	if err != nil {
 		return "", fmt.Errorf("token: marshal claims: %w", err)
 	}

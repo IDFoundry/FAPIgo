@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // IssueRefreshTokenRequest is a grant the embedder served itself, for
@@ -192,7 +193,9 @@ func (s *Server) embedderAuthorizationDetails(req embedderGrantRequest) (json.Ra
 	if s.cfg.RAR == nil {
 		return nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not supported by this server", nil)
 	}
-	raw, _ := json.Marshal(req.AuthorizationDetails) // marshaling a []json.RawMessage cannot fail
+	// Unescaped, as checkAuthorizationDetailsSubset encodes a grant: the
+	// details are checked, stored and issued as the embedder gave them.
+	raw, _ := strictjson.MarshalUnescaped(req.AuthorizationDetails) // marshaling a []json.RawMessage cannot fail
 	if _, err := s.cfg.RAR.Parse(raw); err != nil {
 		return nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is invalid", err)
 	}

@@ -111,12 +111,13 @@ func parseByteSequence(value string) ([]byte, error) {
 		return nil, errors.New("the value isn't a byte sequence (:base64:)")
 	}
 	body := value[1 : len(value)-1]
-	if body == "" {
-		return nil, errors.New("the byte sequence is empty")
-	}
 	// Up to two "=" of padding, only at the end; RFC 8941 §4.2.7 asks a
 	// parser not to fail when it is missing.
 	unpadded := strings.TrimRight(body, "=")
+	if unpadded == "" {
+		// Padding alone ("=", "==") carries no more bytes than "::".
+		return nil, errors.New("the byte sequence is empty")
+	}
 	if len(body)-len(unpadded) > 2 || strings.ContainsRune(unpadded, '=') {
 		return nil, errors.New("the byte sequence's padding is malformed")
 	}

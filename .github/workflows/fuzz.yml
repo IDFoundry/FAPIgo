@@ -44,6 +44,14 @@ name: Fuzz
 # satisfied it's a real bug fixed or worth tracking — commit into the
 # repo as a permanent regression corpus entry; this workflow never
 # commits back on its own.
+#
+# So that a red run gets noticed, the alert job (at the end, via
+# .github/scripts/fuzz-alert.sh) opens an issue labelled "fuzz" when a
+# default-branch run fails, listing the failing targets and how to
+# replay each one's artifact, or comments on the open one; the next
+# passing run closes it. The failing input goes into the fix's commit as
+# a seed under <pkg>/testdata/fuzz/<FuzzName>/, so plain go test replays
+# it from then on.
 
 on:
   schedule:
@@ -277,3 +285,33 @@ jobs:
           name: fuzz-failure-${{ matrix.target.name }}
           path: '**/testdata/fuzz/${{ matrix.target.name }}/'
           retention-days: 30
+
+  # Nothing else alerts on a red nightly run, and it never runs against a
+  # PR, so report each default-branch run on an issue labelled "fuzz":
+  # open one (or comment on the open one) naming the failing targets and
+  # how to reproduce them, and close it on the next run that passes. Runs
+  # dispatched on other branches report nothing.
+  alert:
+    needs: fuzz
+    if: always() && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # to check out the script below
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Report on the fuzz issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESULT: ${{ needs.fuzz.result }}
+        run: .github/scripts/fuzz-alert.sh "$RESULT"

@@ -371,6 +371,11 @@ func (s *Server) tokenRequestAuthorizationDetails(params map[string]string) (req
 	if s.cfg.RAR == nil {
 		return requestedAuthorizationDetails{}, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not supported by this server", nil)
 	}
+	// The client's own value, so refused as RARRegistry.ParseRequest
+	// refuses one; Parse, which judges the grant it narrows, doesn't.
+	if !strictjson.DecodesLosslessly([]byte(raw)) {
+		return requestedAuthorizationDetails{}, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details must be valid UTF-8, without unpaired surrogate escapes", nil)
+	}
 	if _, err := s.cfg.RAR.Parse(json.RawMessage(raw)); err != nil {
 		return requestedAuthorizationDetails{}, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is invalid", err)
 	}

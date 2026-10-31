@@ -148,6 +148,12 @@ a client can choose to equal a user's identifier.
   one, and no member may appear twice.
 - **Bounds:** the whole array's size and nesting depth, and each type's
   object count and object size.
+- **Exact text:** details a client sends (at PAR, a CIBA request, a
+  client credentials or other token request) are refused with
+  `invalid_authorization_details` when they aren't valid UTF-8 or hold an
+  unpaired surrogate escape such as `\ud800`, which Go's JSON decoder
+  would silently read as U+FFFD. `RARRegistry.ParseRequest` refuses them;
+  `Parse`, which reads details already granted or stored, doesn't.
 
 ## See it running
 

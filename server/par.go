@@ -577,6 +577,9 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
 			return nil, nil, nil, newError(ErrorInvalidRequest, 400, "a signed request object is required", nil)
 		}
+		if err := checkPlainClaimsParameter(params); err != nil {
+			return nil, nil, nil, requestError(ErrorInvalidRequest, err)
+		}
 		plain := plainParamsToJSON(params)
 		tokenClaims, err := s.checkExtensions(ctx, client, plain, extension.SourcePlainParameter)
 		if err != nil {

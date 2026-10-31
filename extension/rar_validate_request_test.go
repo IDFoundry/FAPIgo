@@ -94,3 +94,32 @@ func TestRARRegistryParseIgnoresValidateRequest(t *testing.T) {
 		t.Fatalf("details = %+v, want the minted member kept", details)
 	}
 }
+
+// ParseRequest refuses authorization_details encoding/json would alter —
+// invalid UTF-8, or an unpaired surrogate escape — while Parse, which
+// reads details already stored or granted, still accepts them, so a
+// grant or request stored before ParseRequest refused them is still
+// read. Non-ASCII that decodes as written is accepted by both.
+func TestRARRegistryParseRequestRefusesLossyJSON(t *testing.T) {
+	var calls []string
+	reg, err := extension.NewRARRegistry(4096, 4, mintedDef(&calls))
+	if err != nil {
+		t.Fatalf("NewRARRegistry: %v", err)
+	}
+	detail := func(amount string) json.RawMessage {
+		return json.RawMessage(`[{"type":"minted","amount":` + amount + `}]`)
+	}
+	for _, amount := range []string{"\"SGD \xff\"", `"SGD \ud800"`, `"SGD \udc00"`, `"\ud83d"`} {
+		if _, err := reg.ParseRequest(detail(amount)); err == nil {
+			t.Errorf("ParseRequest(%q) accepted it, want an error", amount)
+		}
+		if _, err := reg.Parse(detail(amount)); err != nil {
+			t.Errorf("Parse(%q) = %v, want it read as stored", amount, err)
+		}
+	}
+	for _, amount := range []string{`"SGD €"`, `"é"`, `"😀"`, `"😀"`, `"é"`} {
+		if _, err := reg.ParseRequest(detail(amount)); err != nil {
+			t.Errorf("ParseRequest(%q) = %v, want it accepted", amount, err)
+		}
+	}
+}

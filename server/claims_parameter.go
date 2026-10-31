@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/idfoundry/fapigo/internal/strictjson"
 )
@@ -39,6 +40,15 @@ func validateClaimsParameter(params map[string]json.RawMessage) error {
 	if len(object) > maxClaimsParameterBytes {
 		return fmt.Errorf("claims must not exceed %d bytes", maxClaimsParameterBytes)
 	}
+	// encoding/json reads invalid UTF-8 and an unpaired surrogate escape
+	// as U+FFFD, so a requested sub or acr would then match a value the
+	// client never sent. Both raw and the object a string raw holds are
+	// checked: an escape in the string ("\\ud800") only becomes one in
+	// the object. Only the client's request is refused here, not a
+	// stored request read again later.
+	if !strictjson.DecodesLosslessly(raw) || !strictjson.DecodesLosslessly(object) {
+		return errClaimsNotLossless
+	}
 	top, ok := claimsMembers(object)
 	if !ok {
 		return errors.New("claims must be a JSON object")
@@ -54,6 +64,21 @@ func validateClaimsParameter(params map[string]json.RawMessage) error {
 		if err := validateClaimsLocationValue(member, value); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// errClaimsNotLossless refuses a "claims" parameter encoding/json
+// wouldn't decode as written.
+var errClaimsNotLossless = errors.New("claims must be valid UTF-8, without unpaired surrogate escapes")
+
+// checkPlainClaimsParameter refuses a plain form "claims" value that
+// isn't valid UTF-8. plainParamsToJSON's json.Marshal replaces invalid
+// bytes with U+FFFD, so validateClaimsParameter, which sees only its
+// result, can't tell; it checks escapes, which survive.
+func checkPlainClaimsParameter(params map[string]string) error {
+	if v, ok := params["claims"]; ok && !utf8.ValidString(v) {
+		return errClaimsNotLossless
 	}
 	return nil
 }

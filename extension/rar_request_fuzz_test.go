@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // fuzzCredentialDetail declares no "type" field, so its objects take
@@ -52,8 +53,10 @@ var fuzzCredentialDef = extension.RARDefinition[fuzzCredentialDetail]{
 //
 //   - ValidateRequest runs only after Validate has accepted a value;
 //   - ParseRequest accepts only what Parse accepts, with the same
-//     values, and refuses what Parse accepts only for ValidateRequest's
-//     own reason, exactly when an object sets the server-only member;
+//     values; of what Parse accepts, it refuses all that encoding/json
+//     would alter (invalid UTF-8, an unpaired surrogate escape), and
+//     otherwise only for ValidateRequest's own reason, exactly when an
+//     object sets the server-only member;
 //   - every object Parse accepts passes its type's Validate, and the
 //     accepted values survive MarshalJSON and UnmarshalJSON (how a
 //     server stores them with an interaction) unchanged for RARGet.
@@ -69,6 +72,8 @@ func FuzzRARRegistryParseRequest(f *testing.F) {
 	f.Add([]byte(`[{"type":"credential","limit":1e400}]`))
 	f.Add([]byte(`[{"type":"account_information","actions":["list_accounts"]},{"type":"credential","limit":2}]`))
 	f.Add([]byte(`[{"type":"credential","type":"account_information"}]`))
+	f.Add([]byte(`[{"type":"credential","actions":["\ud800"]}]`))
+	f.Add([]byte("[{\"type\":\"credential\",\"actions\":[\"\xff\"]}]"))
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		parsed, parseErr := reg.Parse(raw)
 		requested, requestErr := reg.ParseRequest(raw)
@@ -78,6 +83,12 @@ func FuzzRARRegistryParseRequest(f *testing.F) {
 		if parseErr != nil {
 			if requestErr == nil {
 				t.Fatalf("ParseRequest accepted %q, which Parse refuses: %v", raw, parseErr)
+			}
+			return
+		}
+		if !strictjson.DecodesLosslessly(raw) {
+			if requestErr == nil {
+				t.Fatalf("ParseRequest accepted %q, which encoding/json would alter", raw)
 			}
 			return
 		}

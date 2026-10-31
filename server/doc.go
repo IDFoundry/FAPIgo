@@ -84,7 +84,8 @@
 //     essential values requested through the "claims" parameter (OIDC
 //     Core §5.5.1.1). The "claims" parameter itself is bounded, at
 //     16 KiB, 256 claims per location and 32 essential acr values;
-//     beyond any of those the request is invalid_request. A request
+//     beyond any of those, or when it isn't valid UTF-8 or holds an
+//     unpaired surrogate escape, the request is invalid_request. A request
 //     naming its end user, by an id_token_hint this server issued to
 //     the client or a "claims" sub value
 //     (InteractionRequest.RequiredSubject), is answered with

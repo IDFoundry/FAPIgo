@@ -340,6 +340,13 @@ func (r *RARRegistry) Parse(raw json.RawMessage) (RARValues, error) {
 // existing grant, go through Parse instead, so a member only the server
 // may set is refused when a client supplies it but not when the server
 // grants it.
+//
+// ParseRequest also refuses raw that encoding/json wouldn't decode as
+// written: invalid UTF-8, or a \u escape of an unpaired UTF-16
+// surrogate, either of which encoding/json silently reads as U+FFFD
+// (RFC 8259 §8.1, §8.2). Such details would compare equal to different
+// ones, and the token they were granted into couldn't be signed. Parse
+// doesn't refuse them, so details already stored are still read.
 func (r *RARRegistry) ParseRequest(raw json.RawMessage) (RARValues, error) {
 	return r.parse(raw, true)
 }
@@ -347,6 +354,9 @@ func (r *RARRegistry) ParseRequest(raw json.RawMessage) (RARValues, error) {
 func (r *RARRegistry) parse(raw json.RawMessage, request bool) (RARValues, error) {
 	if len(raw) > r.maxTotalBytes {
 		return RARValues{}, ErrRARTooLarge
+	}
+	if request && !strictjson.DecodesLosslessly(raw) {
+		return RARValues{}, errors.New("extension: authorization_details must be valid UTF-8, without unpaired surrogate escapes")
 	}
 	if err := checkJSONDepth(raw, r.maxDepth); err != nil {
 		return RARValues{}, err

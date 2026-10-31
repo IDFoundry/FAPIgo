@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.67.1](https://github.com/IDFoundry/FAPIgo/compare/v0.67.0...v0.67.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **fapihttp:** refuse a forwarded byte sequence of padding alone ([3ced2c2](https://github.com/IDFoundry/FAPIgo/commit/3ced2c26db86c8422c8e24ef209d14eebb053149))
+
 ## [0.67.0](https://github.com/IDFoundry/FAPIgo/compare/v0.66.0...v0.67.0) (2026-10-30)
 
 

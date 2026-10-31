@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.67.2](https://github.com/IDFoundry/FAPIgo/compare/v0.67.1...v0.67.2) (2026-10-31)
+
+
+### Bug Fixes
+
+* **client:** refuse a plain-JSON UserInfo response that doesn't decode losslessly ([1cd6fbc](https://github.com/IDFoundry/FAPIgo/commit/1cd6fbcef859db2d51372dfba5ac45edf3129ece))
+* **server:** keep authorization_details bytes unescaped when re-encoding ([989e26b](https://github.com/IDFoundry/FAPIgo/commit/989e26bf3d06126de52abdc2728537a2c285c382))
+* **server:** refuse client JSON that encoding/json would decode lossily ([6c594f4](https://github.com/IDFoundry/FAPIgo/commit/6c594f4c3a99a33357ea0a8994c743bcb82c8ae9))
+
 ## [0.67.1](https://github.com/IDFoundry/FAPIgo/compare/v0.67.0...v0.67.1) (2026-10-31)
 
 

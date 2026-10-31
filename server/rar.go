@@ -8,6 +8,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -96,7 +97,10 @@ func (s *Server) checkAuthorizationDetailsSubset(baseRaw json.RawMessage, subset
 		return nil, fmt.Errorf("authorization_details is not supported by this server")
 	}
 
-	subsetRaw, _ := json.Marshal(subset) // marshaling a []json.RawMessage cannot fail
+	// Unescaped, so the array is checked, stored and issued as the bytes
+	// it arrived as: json.Marshal's HTML escaping could grow it past
+	// Config.RAR's bounds here, or at a later re-check of the grant.
+	subsetRaw, _ := strictjson.MarshalUnescaped(subset) // marshaling a []json.RawMessage cannot fail
 
 	baseValues, err := s.cfg.RAR.Parse(baseRaw)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/internal/claimvalues"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/internal/token"
 )
 
@@ -443,7 +444,7 @@ func encodeRequestRecord(r requestRecord) (json.RawMessage, error) {
 	if err := requireUTF8Keys(r.Parameters, r.TokenClaims); err != nil {
 		return nil, err
 	}
-	return json.Marshal(r)
+	return strictjson.MarshalUnescaped(r)
 }
 
 func decodeRequestRecord(raw json.RawMessage) (requestRecord, error) {
@@ -466,7 +467,7 @@ func encodeGrantRecord(g grantRecord) (json.RawMessage, error) {
 	if err := requireUTF8Keys(g.TokenClaims, g.IDTokenClaims); err != nil {
 		return nil, err
 	}
-	return json.Marshal(g)
+	return strictjson.MarshalUnescaped(g)
 }
 
 // requireUTF8 and requireUTF8Keys refuse to encode a record whose

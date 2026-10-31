@@ -727,7 +727,14 @@ where a client starts a grant (`parseRequestedAuthorizationDetails`: PAR,
 CIBA, client_credentials), so a member only the authorization server may
 set can be refused from a client without refusing the server's own grant.
 Granted details, token-endpoint narrowing, refresh re-checks, embedder
-issuance and the re-parse of a stored request at consent all use `Parse`. `RARGet`/`RARSet` are the RAR
+issuance and the re-parse of a stored request at consent all use `Parse`.
+`ParseRequest` also refuses details that aren't valid UTF-8 or hold an
+unpaired surrogate escape (`strictjson.DecodesLosslessly`), which
+encoding/json would read as U+FFFD, so they would compare equal to other
+details and the token carrying them couldn't be signed; token-endpoint
+narrowing, also the client's own value, checks the same before its
+`Parse`. Stored and granted details aren't re-checked, so nothing already
+stored is stranded. `RARGet`/`RARSet` are the RAR
 counterparts of `Get`/`Set` — a client builds one detail object with
 `extension.RARSet(Definition, value)`, which also stamps the
 definition's own `Type` into the result, so a caller's value type never

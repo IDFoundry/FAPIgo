@@ -46,6 +46,12 @@ func rarGrantAll(t *testing.T, values extension.RARValues) []json.RawMessage {
 // authorization code.
 func rarIssueCode(t *testing.T, h harness) string {
 	t.Helper()
+	return rarIssueCodeFor(t, h, rarTokenRequestGranted)
+}
+
+// rarIssueCodeFor is rarIssueCode for a request for details.
+func rarIssueCodeFor(t *testing.T, h harness, details string) string {
+	t.Helper()
 	push, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: []server.FormParameter{
 			formParam("client_assertion", h.clientAssertion(t)),
@@ -56,7 +62,7 @@ func rarIssueCode(t *testing.T, h harness) string {
 			formParam("code_challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
 			formParam("code_challenge_method", "S256"),
 			formParam("state", "opaque-state"),
-			formParam("authorization_details", rarTokenRequestGranted),
+			formParam("authorization_details", details),
 		}},
 	})
 	if err != nil {

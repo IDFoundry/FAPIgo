@@ -353,3 +353,41 @@ func TestMalformedRecordsAreUnreadable(t *testing.T) {
 		must(t, err)
 	})
 }
+
+// RotatingSealer seals with its current Sealer and opens with any of
+// them, so records sealed under the previous key stay readable while new
+// ones are sealed under the new key; a key it doesn't hold is refused.
+func TestRotatingSealer(t *testing.T) {
+	ctx := context.Background()
+	oldKey, newKey := testSealer(t), testSealer(t)
+	p := newPlace(t, sqlstore.SQLite)
+	before := p.migratedWith(sqlstore.Options{Sealer: oldKey})
+	oldHash := createRefreshToken(t, before, "old")
+
+	rotating, err := sqlstore.RotatingSealer(newKey, oldKey)
+	must(t, err)
+	after := p.migratedWith(sqlstore.Options{Sealer: rotating})
+	newHash := createRefreshToken(t, after, "new")
+	for name, hash := range map[string][32]byte{"old": oldHash, "new": newHash} {
+		if _, err := after.Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: hash}); err != nil {
+			t.Errorf("RedeemRefreshToken(%s key's record) through the rotating sealer = %v", name, err)
+		}
+	}
+	// The new record is sealed under the new key alone.
+	_, err = p.migratedWith(sqlstore.Options{Sealer: newKey}).Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: newHash})
+	must(t, err)
+	_, err = before.Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: newHash})
+	wantUnreadable(t, "RedeemRefreshToken(new record, old key only)", err)
+
+	other, err := sqlstore.RotatingSealer(testSealer(t), testSealer(t))
+	must(t, err)
+	_, err = p.migratedWith(sqlstore.Options{Sealer: other}).Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: oldHash})
+	wantUnreadable(t, "RedeemRefreshToken(under keys the rotating sealer doesn't hold)", err)
+
+	if _, err := sqlstore.RotatingSealer(nil); err == nil {
+		t.Error("RotatingSealer(nil) = nil error, want an error")
+	}
+	if _, err := sqlstore.RotatingSealer(newKey, nil); err == nil {
+		t.Error("RotatingSealer(current, nil) = nil error, want an error")
+	}
+}

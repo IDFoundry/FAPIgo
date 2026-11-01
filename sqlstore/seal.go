@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/idfoundry/fapigo/storage"
@@ -28,10 +29,22 @@ type Sealer interface {
 
 // AESGCMSealer is a Sealer that seals with AES-256-GCM under key (32
 // bytes, from a cryptographically secure source, kept outside the
-// database), with a random nonce from crypto/rand for each seal.
+// database), with a random 96-bit nonce from crypto/rand for each seal.
+//
+// Random nonces bound how much one key may seal: NIST SP 800-38D
+// (§8.3) allows at most 2^32 seals with random 96-bit nonces under one
+// key, beyond which a repeated nonce — which would let anyone who can
+// read and write the database forge sealed records — becomes too
+// likely. A server seals a few records per authorization (the pushed
+// request, the interaction's copy, the code, an opaque access token, a
+// refresh token) and two per refresh, so a busy one can reach 2^32 in
+// weeks: at 1,000 seals a second, in about seven weeks. Rotate the key
+// well before then (say, at a quarter of the budget, or monthly at that
+// rate), with RotatingSealer.
+//
 // Changing the key makes the blobs sealed under the previous one
-// unreadable; to rotate it, open with both until those records expire,
-// with a Sealer of your own.
+// unreadable; to rotate it, seal with the new key and open with both,
+// until the records sealed under the old one expire: RotatingSealer.
 func AESGCMSealer(key []byte) (Sealer, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("sqlstore: record sealer: key is %d bytes, want 32 (AES-256)", len(key))
@@ -45,6 +58,41 @@ func AESGCMSealer(key []byte) (Sealer, error) {
 		return nil, fmt.Errorf("sqlstore: record sealer: %w", err)
 	}
 	return gcmSealer{aead}, nil
+}
+
+// RotatingSealer is a Sealer for rotating keys: it seals with current,
+// and opens with current or, failing that, each of previous in turn.
+// To rotate, make the new key current and the old one previous, deploy
+// every instance with it, and drop the old key once every record it
+// sealed has expired — the longest-lived are refresh tokens, so after
+// the refresh token lifetime (plus the time to deploy). The sealed
+// blobs' format is current's, unchanged, so the database needs nothing
+// to switch to it, and a blob sealed under no key it holds is refused
+// as before. Every open of an old record tries current first; with an
+// AEAD such as AESGCMSealer, that failure is cheap.
+func RotatingSealer(current Sealer, previous ...Sealer) (Sealer, error) {
+	if current == nil || slices.Contains(previous, nil) {
+		return nil, errors.New("sqlstore: rotating sealer: nil Sealer")
+	}
+	return rotatingSealer{append([]Sealer{current}, previous...)}, nil
+}
+
+type rotatingSealer struct{ sealers []Sealer }
+
+func (s rotatingSealer) Seal(plaintext, additionalData []byte) ([]byte, error) {
+	return s.sealers[0].Seal(plaintext, additionalData)
+}
+
+func (s rotatingSealer) Open(sealed, additionalData []byte) ([]byte, error) {
+	var errs []error
+	for _, sealer := range s.sealers {
+		plain, err := sealer.Open(sealed, additionalData)
+		if err == nil {
+			return plain, nil
+		}
+		errs = append(errs, err)
+	}
+	return nil, errors.Join(errs...)
 }
 
 type gcmSealer struct{ aead cipher.AEAD }

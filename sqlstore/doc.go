@@ -215,9 +215,11 @@
 // without it. Losing it makes every sealed record unreadable: clients
 // authorize again, as they would once the records expired.
 // Changing it does the same for the records sealed under the old one;
-// to rotate without that, wrap two keys in a Sealer of your own that
-// seals with the new key and opens with either, until the longest-lived
-// record (a refresh token) sealed under the old one expires. A resource
+// to rotate without that, use RotatingSealer, which seals with the new
+// key and opens with either, until the longest-lived record (a refresh
+// token) sealed under the old one expires. AESGCMSealer's random nonces
+// allow 2^32 seals per key (NIST SP 800-38D), which a busy server can
+// reach in weeks: rotate before then — see AESGCMSealer. A resource
 // server reading opaque access tokens needs the same Sealer.
 //
 // # Errors

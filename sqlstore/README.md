@@ -85,8 +85,11 @@ To start sealing a database in use: deploy with `Sealer` and
 `ReadUnsealed: true`, run `db.SealRecords(ctx)`, then deploy without
 `ReadUnsealed`. `SealRecords` trusts what it finds, so run it on a
 database whose contents you trust. Losing the key makes sealed records
-unreadable; to rotate it, use a `Sealer` of your own that opens with
-both keys until the old one's records expire. See the package documentation's Sealing section.
+unreadable. `AESGCMSealer` allows 2^32 seals per key (random nonces,
+NIST SP 800-38D), which a busy server reaches in weeks: rotate before
+then with `sqlstore.RotatingSealer(newSealer, oldSealer)`, which seals
+with the new key and opens with either until the old one's records
+expire. See the package documentation's Sealing section.
 
 ### Upgrading from v0.2
 

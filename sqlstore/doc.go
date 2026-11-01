@@ -157,8 +157,16 @@
 // checks). Each is bound, as AEAD additional data, to its table,
 // column, row key, client_id (the empty string for a session, whose
 // row has none) and the DB's TablePrefix, so a sealed blob copied to
-// another row, client, table or prefix fails to open. A sealed blob starts with a format
-// byte (2) that no JSON record starts with.
+// another row, client, table or prefix fails to open; and to the
+// columns of its row that change what it means but never change once
+// it's written: its expires_at, an interaction's reference (the pushed
+// request completing it consumes), and a CIBA request's handle_hash,
+// delivery_mode and poll_interval. So a database writer without the key
+// can't make a token or code outlive its expiry, have a user's
+// approval through one CIBA handle land on another request, or have an
+// interaction consume another pushed request: the blob no longer
+// opens. A sealed blob starts with a format byte (3) that no JSON
+// record starts with.
 //
 // Not sealed, since the stores look rows up, consume and sweep them by
 // them: keys and digests (which reveal nothing of the values they're
@@ -168,10 +176,26 @@
 // pairwise subjects (the issuer, sector, internal subject and body are
 // every lookup's keys), and the clients table (public client metadata,
 // which the operator edits with SQL; it holds no secret). Sealing gives
-// confidentiality, and integrity for each blob; it doesn't make the
-// database tamper-proof: anyone who can write to it can still delete
-// rows, change those columns, or put back a blob the row held before.
+// confidentiality, and integrity for each blob and the columns bound to
+// it; it doesn't make the database tamper-proof: anyone who can write
+// to it can still delete rows (a revocation, or a pending request),
+// change the columns that do change — whether a code is redeemed, a
+// pushed request consumed, a CIBA request's status — or put back a row
+// it held before, such as a refresh token deleted when it was revoked.
 // Keep write access to the database as tight as read access.
+//
+// sqlstore v0.2 and earlier sealed blobs with format byte 2 and
+// additional data that bound neither the expiry nor those other
+// columns. A store still opens them, without that binding, so a
+// database upgraded from v0.2 keeps working. Run DB.SealRecords once
+// after upgrading every instance: it re-seals them in the current
+// format, binding them like the rest. (Until it has, or they've
+// expired, a database writer can still change those columns of their
+// rows.) A store of v0.2 can't open a blob sealed in the current format,
+// so upgrade every instance sharing a database together: a record one
+// upgraded instance seals is unreadable (an outage) to one that isn't
+// yet, and rolling back to v0.2 makes the records sealed since
+// unreadable.
 //
 // With a Sealer, a store refuses a blob that isn't sealed, and without
 // one, a sealed blob: either is an error wrapping ErrRecordFormat and
@@ -181,7 +205,10 @@
 // run DB.SealRecords, which seals them in place, then deploy without
 // ReadUnsealed: while it's set, anyone who can write to the database
 // could plant a blob the Sealer never sealed, so it's for that
-// migration only.
+// migration only. SealRecords seals every unsealed blob it finds, one
+// planted before it ran included, which from then on opens as if the
+// server had written it: run it on a database whose contents you
+// trust.
 //
 // Keep the key outside the database — in a secrets manager or a KMS —
 // and away from its backups, which is what makes them unreadable

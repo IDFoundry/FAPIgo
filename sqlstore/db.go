@@ -65,9 +65,10 @@ type Options struct {
 	// server's pushed requests, interactions, authorization codes' and
 	// refresh tokens' grants, opaque access tokens' records, CIBA
 	// requests and decisions, and a relying party's sessions — each
-	// bound to its table, column, row key, client and TablePrefix, so a
-	// copy of the database reveals none of
-	// them and a sealed blob can't be moved to another row. AESGCMSealer
+	// bound to its table, column, row key, client and TablePrefix, and
+	// its row's expiry, so a copy of the database reveals none of them,
+	// a sealed blob can't be moved to another row, and its row's expiry
+	// can't be changed. AESGCMSealer
 	// is one, with a key kept outside the database. The columns the
 	// stores look rows up, consume and sweep them by stay readable — see
 	// the package documentation's Sealing section.

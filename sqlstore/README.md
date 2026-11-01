@@ -73,7 +73,9 @@ db, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: seale
 
 A sealed blob moved to another row, client, table or table prefix,
 altered, or opened under another key is refused (`ErrRecordFormat`, as
-an outage). Lookup keys and digests, client IDs, times, CIBA status,
+an outage), as is one whose row's expiry (or an interaction's pushed
+request, or a CIBA request's handle, delivery mode or interval) was
+changed. Lookup keys and digests, client IDs, times, CIBA status,
 replay digests, nonces, revocations, pairwise subjects and the clients
 table stay readable: the stores look rows up by them. The `Sealer`
 interface is OID4VCgo's `verifier.TransactionSealer`, so one sealer
@@ -81,10 +83,20 @@ serves both.
 
 To start sealing a database in use: deploy with `Sealer` and
 `ReadUnsealed: true`, run `db.SealRecords(ctx)`, then deploy without
-`ReadUnsealed`. Losing the key makes sealed records unreadable; to
-rotate it, use a `Sealer` of your own that opens with both keys until
-the old one's records expire. See the package documentation's Sealing
-section.
+`ReadUnsealed`. `SealRecords` trusts what it finds, so run it on a
+database whose contents you trust. Losing the key makes sealed records
+unreadable; to rotate it, use a `Sealer` of your own that opens with
+both keys until the old one's records expire. See the package documentation's Sealing section.
+
+### Upgrading from v0.2
+
+Blobs sealed by v0.2 and earlier (format byte 2) didn't bind their
+row's expiry and the other columns above. They still open, so an
+upgraded database keeps working; run `db.SealRecords(ctx)` once after
+upgrading every instance to re-seal them in the current format (byte 3)
+and bind them too. Upgrade every instance sharing a database at once: a
+v0.2 instance can't open what an upgraded one seals, and rolling back
+to v0.2 leaves the records sealed since unreadable.
 
 ## What each database declares
 

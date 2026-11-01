@@ -102,8 +102,8 @@ func TestSealedRecordsAreNotInTheClear(t *testing.T) {
 		_, db := p.open()
 		hash := createRefreshToken(t, d, "a")
 		stored := rawColumn(t, p, db, "refresh_tokens", "record", "a")
-		if len(stored) == 0 || stored[0] != 2 || bytes.Contains(stored, []byte("user-secret")) {
-			t.Fatalf("stored record = %q, want it sealed (starting with byte 2), without the grant in the clear", stored)
+		if len(stored) == 0 || stored[0] != 3 || bytes.Contains(stored, []byte("user-secret")) {
+			t.Fatalf("stored record = %q, want it sealed (starting with byte 3), without the grant in the clear", stored)
 		}
 		got, err := d.Grants().RedeemRefreshToken(context.Background(), storage.RefreshTokenRedemption{TokenHash: hash})
 		if err != nil || !bytes.Equal(got.Grant, secretGrant) {
@@ -200,7 +200,7 @@ func TestUnsealedRecordsMigration(t *testing.T) {
 		}
 		must(t, redeem(sealed))
 		checkOneOfEach(t, sealed)
-		if stored := rawColumn(t, p, db, "refresh_tokens", "record", "a"); stored[0] != 2 {
+		if stored := rawColumn(t, p, db, "refresh_tokens", "record", "a"); stored[0] != 3 {
 			t.Fatalf("record after SealRecords = %q, want it sealed", stored)
 		}
 		wantUnreadable(t, "RedeemRefreshToken(sealed, by a DB without a Sealer)", redeem(plain))
@@ -273,6 +273,10 @@ func TestSealerFailures(t *testing.T) {
 	err = plain.Grants().CreateRefreshToken(ctx, storage.NewRefreshToken{ClientID: "b", Grant: json.RawMessage("\x02{}"), ExpiresAt: time.Now()})
 	if err == nil {
 		t.Fatal("CreateRefreshToken(a grant starting with byte 2, no Sealer) = nil error, want a refusal")
+	}
+	err = plain.Grants().CreateRefreshToken(ctx, storage.NewRefreshToken{ClientID: "b", Grant: json.RawMessage("\x03{}"), ExpiresAt: time.Now()})
+	if err == nil {
+		t.Fatal("CreateRefreshToken(a grant starting with byte 3, no Sealer) = nil error, want a refusal")
 	}
 	if _, err := plain.SealRecords(ctx); err == nil {
 		t.Fatal("SealRecords without a Sealer = nil error, want an error")

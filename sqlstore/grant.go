@@ -27,7 +27,7 @@ func (s *GrantStore) CreateAuthorizationCode(ctx context.Context, code storage.N
 	}
 	expires := nanos(code.ExpiresAt)
 	err := s.d.writeOne(ctx, func(q querier) error {
-		record, err := s.d.seal(blobRef{"authorization_codes", recordColumn, string(code.CodeHash[:]), string(code.ClientID)}, code.Grant)
+		record, err := s.d.seal(blobRef{"authorization_codes", recordColumn, string(code.CodeHash[:]), string(code.ClientID), expires, nil}, code.Grant)
 		if err != nil {
 			return err
 		}
@@ -66,7 +66,7 @@ func (s *GrantStore) RedeemAuthorizationCode(ctx context.Context, redemption sto
 	case err != nil:
 		return storage.RedeemedAuthorizationCode{}, unavailable("redeem authorization code", err)
 	}
-	grant, err := s.d.open(blobRef{"authorization_codes", recordColumn, string(redemption.CodeHash[:]), clientID}, record)
+	grant, err := s.d.open(blobRef{"authorization_codes", recordColumn, string(redemption.CodeHash[:]), clientID, expires, nil}, record)
 	if err != nil {
 		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("sqlstore: redeem authorization code: %w", err)
 	}
@@ -165,7 +165,7 @@ func (s *GrantStore) CreateRefreshToken(ctx context.Context, token storage.NewRe
 	}
 	expires := nanos(token.ExpiresAt)
 	err := s.d.writeOne(ctx, func(q querier) error {
-		record, err := s.d.seal(blobRef{"refresh_tokens", recordColumn, string(token.TokenHash[:]), string(token.ClientID)}, token.Grant)
+		record, err := s.d.seal(blobRef{"refresh_tokens", recordColumn, string(token.TokenHash[:]), string(token.ClientID), expires, nil}, token.Grant)
 		if err != nil {
 			return err
 		}
@@ -194,7 +194,7 @@ func (s *GrantStore) RedeemRefreshToken(ctx context.Context, redemption storage.
 	case err != nil:
 		return storage.RedeemedRefreshToken{}, unavailable("redeem refresh token", err)
 	}
-	grant, err := s.d.open(blobRef{"refresh_tokens", recordColumn, string(redemption.TokenHash[:]), clientID}, record)
+	grant, err := s.d.open(blobRef{"refresh_tokens", recordColumn, string(redemption.TokenHash[:]), clientID, expires, nil}, record)
 	if err != nil {
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("sqlstore: redeem refresh token: %w", err)
 	}

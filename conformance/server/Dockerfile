@@ -1,7 +1,7 @@
 # Builds cmd/conformance-as for the docker-compose setup in this
 # directory. Build context is the repo root (../.. from here) since the
 # binary needs the whole module.
-FROM golang:1.27@sha256:e432b43af23a9328d56a7c499be0476810aa344acbcf65fc7c455d4ff5a40602 AS build
+FROM golang:1.27@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b AS build
 WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/conformance-as ./cmd/conformance-as

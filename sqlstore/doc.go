@@ -256,9 +256,14 @@
 // display with name, logo_uri, policy_uri and tos_uri, and so on); each
 // enumeration is its wire value (what its type's String returns and its
 // Parse function reads: "private_key_jwt", "PS256", "pairwise"); each
-// URL a string. An omitted member is the field's zero value. A member
-// the version doesn't define is refused, so a misspelt one can't be
-// silently dropped. MarshalClientConfig writes the document from a
+// URL a string. An omitted member is the field's zero value. Nothing in
+// the document is silently dropped or altered: a member the version
+// doesn't define is refused, as are a member given twice in one object
+// (encoding/json would keep the last; a reviewer, or another JSON
+// parser, may read the first), a member spelt in another case
+// ("ALLOWED_SCOPES", which encoding/json would read as allowed_scopes),
+// and text that isn't valid UTF-8 or escapes an unpaired surrogate
+// (which would read back as U+FFFD). MarshalClientConfig writes the document from a
 // RegisteredClientConfig, ParseClientConfig reads it, and Put and
 // Delete manage rows, Put refusing a configuration
 // storage.NewRegisteredClient refuses. ResolveClient builds the client

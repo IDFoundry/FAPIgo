@@ -206,9 +206,13 @@ func endpointURL(s string) (fapi.URL, error) { return fapi.ParseEndpointURL(s) }
 // ParseClientConfig decodes data, a clients table configuration
 // document, as client id's storage.RegisteredClientConfig. It refuses
 // any other version than ClientConfigVersion, a member it doesn't know
-// (a misspelt one would otherwise be silently dropped), and a wire value
-// its field's type doesn't define, each with an error wrapping
-// ErrClientConfig. It doesn't validate the configuration as a whole:
+// (a misspelt one would otherwise be silently dropped), a member given
+// twice in one object or spelt in another case (encoding/json would keep
+// the last, or read it as the member it case-folds to, where a reviewer
+// or another JSON parser may read the first), text that isn't valid
+// UTF-8 or escapes an unpaired surrogate (which would read back as
+// U+FFFD), and a wire value its field's type doesn't define, each with
+// an error wrapping ErrClientConfig. It doesn't validate the configuration as a whole:
 // storage.NewRegisteredClient does.
 func ParseClientConfig(id fapi.ClientID, data []byte) (storage.RegisteredClientConfig, error) {
 	doc, err := decodeClientConfig(data)
@@ -267,11 +271,15 @@ func ParseClientConfig(id fapi.ClientID, data []byte) (storage.RegisteredClientC
 }
 
 // decodeClientConfig strictly decodes data as a version 1 document: one
-// JSON object, with no unknown member.
+// JSON object, with no unknown, duplicate or case-variant member, that
+// decodes losslessly (checkStrictJSON).
 func decodeClientConfig(data []byte) (clientConfigV1, error) {
+	var doc clientConfigV1
+	if err := checkStrictJSON(data, doc); err != nil {
+		return clientConfigV1{}, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
-	var doc clientConfigV1
 	if err := dec.Decode(&doc); err != nil {
 		return clientConfigV1{}, err
 	}

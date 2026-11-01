@@ -236,8 +236,14 @@ func RARGet[T any](values RARValues, def RARDefinition[T]) ([]RARDetail[T], erro
 // validate data an authorization server doesn't trust from a client:
 // RARSet runs on the sending side, encoding data the caller just
 // constructed itself, so there is nothing to validate against.
+//
+// RARSet doesn't HTML-escape '<', '>' and '&' as json.Marshal does.
+// That escaping grows each to six bytes, so details a consent page
+// reads with RARGet and grants re-encoded with RARSet could grow past
+// the MaxBytesPerObject and registry bounds the request was validated
+// within, and be refused when the grant is completed.
 func RARSet[T any](def RARDefinition[T], v T) (json.RawMessage, error) {
-	encoded, err := json.Marshal(v)
+	encoded, err := strictjson.MarshalUnescaped(v)
 	if err != nil {
 		return nil, fmt.Errorf("extension: authorization_details type %q: %w", def.Type, err)
 	}
@@ -251,14 +257,14 @@ func RARSet[T any](def RARDefinition[T], v T) (json.RawMessage, error) {
 		// object either.
 		return nil, fmt.Errorf("extension: authorization_details type %q: value must encode as a JSON object", def.Type)
 	}
-	typeValue, _ := json.Marshal(def.Type) // marshaling a string cannot fail
+	typeValue, _ := strictjson.MarshalUnescaped(def.Type) // marshaling a string cannot fail
 	obj["type"] = typeValue
 	// Every value in obj is already valid JSON — either captured verbatim
 	// by the Unmarshal above (each json.RawMessage decode target only
 	// ever holds one already-well-formed sub-value) or typeValue,
 	// freshly marshaled just above — so re-marshaling the map cannot
 	// fail.
-	out, _ := json.Marshal(obj)
+	out, _ := strictjson.MarshalUnescaped(obj)
 	return out, nil
 }
 

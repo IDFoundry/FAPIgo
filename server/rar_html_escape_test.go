@@ -16,18 +16,23 @@ import (
 // rarHTMLObject is a payment detail object full of the characters
 // encoding/json escapes as HTML ('<', '>' and '&' each become a six-byte
 // \u003c-style escape), so re-encoding it with json.Marshal would grow it
-// well past the bound below.
-var rarHTMLObject = `{"type":"payment","actions":["approve"],"amount":"` + strings.Repeat("<>&", 20) + `"}`
+// well past the bound below. Its members are in the order
+// extension.RARSet encodes them, so a grant re-encoded with RARSet is
+// byte for byte the object requested.
+var rarHTMLObject = `{"actions":["approve"],"amount":"` + strings.Repeat("<>&", 20) + `","type":"payment"}`
+
+// rarHTMLDef is the "payment" definition rarHTMLHarness registers, with a
+// MaxBytesPerObject only just above rarHTMLObject's own size.
+var rarHTMLDef = extension.RARDefinition[testPaymentDetail]{
+	Type: "payment", MaxObjects: 1, MaxBytesPerObject: len(rarHTMLObject) + 8,
+}
 
 // rarHTMLHarness registers "payment" with a MaxBytesPerObject only just
 // above rarHTMLObject's own size, and a total bound only just above the
 // one-object array's.
 func rarHTMLHarness(t *testing.T) harness {
 	t.Helper()
-	def := extension.RARDefinition[testPaymentDetail]{
-		Type: "payment", MaxObjects: 1, MaxBytesPerObject: len(rarHTMLObject) + 8,
-	}
-	registry, err := extension.NewRARRegistry(len(rarHTMLObject)+16, 4, def)
+	registry, err := extension.NewRARRegistry(len(rarHTMLObject)+16, 4, rarHTMLDef)
 	if err != nil {
 		t.Fatalf("NewRARRegistry: %v", err)
 	}
@@ -38,6 +43,15 @@ func rarHTMLHarness(t *testing.T) harness {
 // rarHTMLIssueCode pushes a request for exactly rarHTMLObject, grants it
 // as the end user was shown it, and returns the authorization code.
 func rarHTMLIssueCode(t *testing.T, h harness) string {
+	t.Helper()
+	return rarHTMLIssueCodeGranting(t, h, func(*testing.T, server.InteractionRequest) []json.RawMessage {
+		return []json.RawMessage{json.RawMessage(rarHTMLObject)}
+	})
+}
+
+// rarHTMLIssueCodeGranting is rarHTMLIssueCode, granting the
+// authorization_details grant returns for the interaction.
+func rarHTMLIssueCodeGranting(t *testing.T, h harness, grant func(*testing.T, server.InteractionRequest) []json.RawMessage) string {
 	t.Helper()
 	push, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: []server.FormParameter{
@@ -73,7 +87,7 @@ func rarHTMLIssueCode(t *testing.T, h harness) string {
 		Handle: interaction.Handle,
 		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{
 			Scope:                []string{"openid", "accounts", "offline_access"},
-			AuthorizationDetails: []json.RawMessage{json.RawMessage(rarHTMLObject)},
+			AuthorizationDetails: grant(t, interaction.Interaction),
 		}),
 	})
 	if err != nil {
@@ -135,14 +149,38 @@ func TestAuthorizationDetailsKeepTheirBytesThroughGrantAndRefresh(t *testing.T) 
 	}
 }
 
+// TestAuthorizationDetailsKeepTheirBytesThroughRARSet is
+// TestAuthorizationDetailsKeepTheirBytesThroughGrantAndRefresh for a
+// consent page that reads the requested details with extension.RARGet
+// and grants them re-encoded with extension.RARSet, as the RAR guide
+// does: RARSet mustn't grow them past the bounds they were validated
+// against by escaping '<', '>' and '&'.
+func TestAuthorizationDetailsKeepTheirBytesThroughRARSet(t *testing.T) {
+	h := rarHTMLHarness(t)
+	code := rarHTMLIssueCodeGranting(t, h, func(t *testing.T, interaction server.InteractionRequest) []json.RawMessage {
+		t.Helper()
+		details, err := extension.RARGet(interaction.AuthorizationDetails, rarHTMLDef)
+		if err != nil || len(details) != 1 {
+			t.Fatalf("RARGet = %v, %v; want the one requested object", details, err)
+		}
+		granted, err := extension.RARSet(rarHTMLDef, details[0].Fields)
+		if err != nil {
+			t.Fatalf("RARSet: %v", err)
+		}
+		return []json.RawMessage{granted}
+	})
+	result, err := rarExchangeCode(t, h, code, nil)
+	if err != nil {
+		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	}
+	assertRARHTMLIssued(t, h, result)
+}
+
 // TestEmbedderAuthorizationDetailsKeepTheirBytes is
 // TestAuthorizationDetailsKeepTheirBytesThroughGrantAndRefresh for
 // details an embedder grants itself (IssueRefreshTokenRequest.AuthorizationDetails).
 func TestEmbedderAuthorizationDetailsKeepTheirBytes(t *testing.T) {
-	def := extension.RARDefinition[testPaymentDetail]{
-		Type: "payment", MaxObjects: 1, MaxBytesPerObject: len(rarHTMLObject) + 8,
-	}
-	registry, err := extension.NewRARRegistry(len(rarHTMLObject)+16, 4, def)
+	registry, err := extension.NewRARRegistry(len(rarHTMLObject)+16, 4, rarHTMLDef)
 	if err != nil {
 		t.Fatalf("NewRARRegistry: %v", err)
 	}

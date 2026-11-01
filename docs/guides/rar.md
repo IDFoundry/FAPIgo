@@ -46,7 +46,19 @@ later token request narrows the grant; left nil, `ValidateGrant` decides
 that too. Set it when `ValidateGrant` lets the server add a member at
 approval: consent may add one, but a token request should only keep or
 drop what was granted, never add a value of the client's own choosing to
-a grant that holds none.
+a grant that holds none. Leaving it nil there fails open: `ValidateGrant`
+can't tell a client's token request from the server's own grant, so it
+would accept the client's value. A type with a member the server mints
+must set `ValidateNarrowing`.
+
+The hooks see objects decoded into your Go type, so they can't tell a
+member that's absent, or `null`, from one holding its zero value: a
+missing `actions` list passes a "subset of the requested actions" check,
+while a resource server may read it as no restriction at all.
+Floating-point numbers are compared after rounding to `float64`, while
+the token carries the digits as sent. Where that matters, require the member in
+`Validate`, or give it a pointer, `json.Number` or `json.RawMessage`
+type.
 
 ## Authorization server: register, gate, approve
 
@@ -99,6 +111,17 @@ and refuses anything malformed or wider with
 `invalid_authorization_details`. An empty array gets a token without
 details; no parameter gets the whole grant. The refresh token always
 keeps the whole grant, so a later refresh can ask for any of it.
+Objects are matched greedily, in the order the client sends them: with a
+hook that accepts more than an exact match, the client may be refused a
+narrowing that it could have had by sending the same objects in another
+order. Matching never accepts more than the grant allows.
+
+**Issuing tokens yourself.** `Server.IssueAccessToken` and
+`IssueRefreshToken` grant the `AuthorizationDetails` you pass them
+after checking them with `Parse`, not `ParseRequest`: you decide what
+to grant, so `ValidateRequest` doesn't run. If you forward details a
+client sent you (an OpenID4VCI pre-authorized code token request, for
+example), run `RARRegistry.ParseRequest` on them yourself first.
 
 ## Client: ask with the same definition
 

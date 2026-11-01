@@ -15,6 +15,80 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.68.0
+
+### `DefaultAttesterLeafPolicy` refuses more signing roles (server)
+
+**Affects:** a server whose `Dependencies.AttesterTrust` is
+`server.X5CAttesterChain` with the default `LeafPolicy` (nil or
+`server.DefaultAttesterLeafPolicy{}`, including inside an
+`AttesterLeafPolicyFunc`), when an attester's signing certificate
+lists one of these extended key usages, or chains to the anchor only
+through a CA whose extended key usage lists nothing but such roles:
+
+- ISO/IEC 18013-5 mDL JWS signer (`1.0.18013.5.1.3`) or VICAL signer
+  (`1.0.18013.5.1.8`);
+- ISO/IEC TS 23220-4 mdoc document signer (`1.0.23220.4.1.2`) or mdoc
+  reader authentication (`1.0.23220.4.1.6`);
+- RFC 9336 document signing (`1.3.6.1.5.5.7.3.36`);
+- RFC 6187 SSH client or server (`1.3.6.1.5.5.7.3.21`,
+  `1.3.6.1.5.5.7.3.22`).
+
+**Why:** the default policy refuses certificates issued for another
+role that signs things, so an anchor that also certifies those roles
+can't turn their keys into attestation keys. v0.66.0 listed only the
+mDL document signer and mdoc reader purposes of ISO/IEC 18013-5. It
+missed the mDL JWS signer, which signs JWTs just as an attester does,
+the same purposes on the ISO/IEC 23220-4 arc, and the IETF document
+signing and SSH purposes.
+
+**What fails:** nothing at startup. An attestation signed by such a
+certificate is refused with `invalid_client`. Purposes the policy
+doesn't list, such as an ecosystem's own Wallet Provider purpose, are
+accepted as before.
+
+**What to change:** issue the attester a dedicated attestation signing
+certificate without another role's extended key usage. If the anchors
+certify nothing but attesters, you may opt out with
+`LeafPolicy: server.AnyAttesterLeaf{}`, or write a
+`server.AttesterLeafPolicyFunc` that applies your own role rules
+instead of calling `DefaultAttesterLeafPolicy`:
+
+```go
+deps.AttesterTrust = server.X5CAttesterChain{
+	// ...
+	LeafPolicy: server.AnyAttesterLeaf{},
+}
+```
+
+### `X5CAttesterChain` refuses a re-issued or cross-signed anchor in `x5c` (server)
+
+**Affects:** a server whose `Dependencies.AttesterTrust` is
+`server.X5CAttesterChain`, when a wallet's attestation `x5c` carries,
+after the signing certificate, a certificate with the same subject and
+public key as an anchor a verified chain ends at, but not
+byte-identical to it: a copy re-issued by the anchor's own issuer, or
+cross-signed by another CA.
+
+**Why:** HAIP 1.0 keeps the trust anchor out of `x5c`. v0.66.0 refused
+an anchor in `x5c` only when its DER bytes matched the configured
+anchor exactly, so another certificate for the same CA (same subject,
+same key) got through. Path building treats such a certificate as the
+anchor itself, so the check now compares subject and public key.
+
+**What fails:** nothing at startup. Such an attestation is refused
+with `invalid_client`. There is no option to keep the old behaviour.
+
+**What to change:** have the wallet (or its Wallet Provider) send
+`x5c` as the signing certificate followed by its intermediates only,
+leaving out every certificate for a CA the server trusts as an
+anchor, including cross-signed copies:
+
+```go
+// x5c: signing certificate, then intermediates, never the anchor.
+x5c := [][]byte{leaf.Raw, intermediate.Raw}
+```
+
 ## v0.66.0
 
 ### `X5CAttesterChain` refuses other roles' signing certificates (server)

@@ -15,6 +15,7 @@ import (
 var (
 	oidMDLDocumentSigner = asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 2}
 	oidMdocReaderAuth    = asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 6}
+	oidDocumentSigning   = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 36}
 	oidWalletProvider    = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 99999, 1, 1} // a private purpose
 )
 
@@ -42,11 +43,19 @@ func roleLeaves(t *testing.T, root testCert) (refused, accepted map[string]attes
 		"OCSP responder":                  leaf("ocsp", certOptions{extKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageOCSPSigning}}),
 		"mdoc reader":                     leaf("mdoc reader", certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{oidMdocReaderAuth}}),
 		"mDL document signer":             leaf("mdl ds", certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{oidMDLDocumentSigner}}),
+		"mDL JWS signer":                  leaf("mdl jws", certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{{1, 0, 18013, 5, 1, 3}}}),
+		"mDL VICAL signer":                leaf("mdl vical", certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{{1, 0, 18013, 5, 1, 8}}}),
+		"mdoc document signer":            leaf("mdoc ds", certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{{1, 0, 23220, 4, 1, 2}}}),
+		"mdoc reader (ISO/IEC 23220-4)":   leaf("mdoc reader 23220", certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{{1, 0, 23220, 4, 1, 6}}}),
+		"document signing":                leaf("document signing", certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{oidDocumentSigning}}),
+		"SSH client":                      leaf("ssh client", certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{{1, 3, 6, 1, 5, 5, 7, 3, 21}}}),
+		"SSH server":                      leaf("ssh server", certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{{1, 3, 6, 1, 5, 5, 7, 3, 22}}}),
 		"only path through a TLS-only CA": {underTLSCA, x5cOf(underTLSCA, tlsCA)},
 	}
 	accepted = map[string]attesterLeaf{
 		"no extended key usage": leaf("plain", certOptions{}),
 		"private purpose only":  leaf("private", certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{oidWalletProvider}}),
+		"unlisted ISO arc":      leaf("unlisted", certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{{1, 0, 18013, 5, 1, 7}}}),
 		"anyExtendedKeyUsage":   leaf("any", certOptions{extKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}),
 	}
 	return refused, accepted
@@ -84,8 +93,9 @@ func checkAttesterLeaf(t *testing.T, h harness, l attesterLeaf, wantOK bool) {
 
 // TestX5CAttesterChainDefaultLeafPolicy covers the default role policy:
 // with LeafPolicy nil, a certificate issued for another role (TLS, OCSP,
-// an ISO/IEC 18013-5 role, or under a TLS-only CA) can't sign an
-// attestation, while a certificate naming no other role can.
+// an ISO/IEC 18013-5 or 23220-4 role, document signing, SSH, or under
+// a TLS-only CA) can't sign an attestation, while a certificate naming
+// no other role, or only a purpose the policy doesn't list, can.
 func TestX5CAttesterChainDefaultLeafPolicy(t *testing.T) {
 	root := newTestCert(t, "ecosystem CA", certOptions{isCA: true})
 	refused, accepted := roleLeaves(t, root)
@@ -221,6 +231,7 @@ func TestDefaultAttesterLeafPolicyRoles(t *testing.T) {
 		"anyExtendedKeyUsage and TLS leaf":  {leafUnder(plainCA, certOptions{extKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageAny, x509.ExtKeyUsageServerAuth}}), false},
 		"private purpose and mdoc reader":   {leafUnder(plainCA, certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{oidWalletProvider, oidMdocReaderAuth}}), false},
 		"CA restricted to mDL signing":      {leafUnder(ca(certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{oidMDLDocumentSigner}}), certOptions{}), false},
+		"CA restricted to document signing": {leafUnder(ca(certOptions{unknownExtKeyUsage: []asn1.ObjectIdentifier{oidDocumentSigning}}), certOptions{}), false},
 		"CA restricted to TLS and OCSP":     {leafUnder(ca(certOptions{extKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageOCSPSigning}}), certOptions{}), false},
 		"anchor restricted to TLS":          {[]*x509.Certificate{newTestCert(t, "leaf", certOptions{parent: &root}).cert, ca(certOptions{extKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}).cert}, false},
 		"CA with TLS and a private purpose": {leafUnder(ca(certOptions{extKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, unknownExtKeyUsage: []asn1.ObjectIdentifier{oidWalletProvider}}), certOptions{}), true},

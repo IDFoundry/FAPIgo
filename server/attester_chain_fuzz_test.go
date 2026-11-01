@@ -27,21 +27,35 @@ func (b *fuzzBytes) next() byte {
 }
 
 // fuzzEKUOIDs are the UnknownExtKeyUsage OIDs FuzzAttesterLeafPolicy
-// draws from: both ISO/IEC 18013-5 roles, OIDs one arc either side of
-// them, and an ecosystem's own purpose.
+// draws from: the other signing roles the default refuses, OIDs one arc
+// either side of some of them, and an ecosystem's own purpose.
 var fuzzEKUOIDs = []asn1.ObjectIdentifier{
 	{1, 0, 18013, 5, 1, 2},
+	{1, 0, 18013, 5, 1, 3},
 	{1, 0, 18013, 5, 1, 6},
+	{1, 0, 18013, 5, 1, 8},
+	{1, 0, 23220, 4, 1, 2},
+	{1, 0, 23220, 4, 1, 6},
+	{1, 3, 6, 1, 5, 5, 7, 3, 21},
+	{1, 3, 6, 1, 5, 5, 7, 3, 22},
+	{1, 3, 6, 1, 5, 5, 7, 3, 36},
 	{1, 0, 18013, 5, 1},
 	{1, 0, 18013, 5, 1, 2, 1},
 	{1, 0, 18013, 5, 1, 7},
+	{1, 0, 23220, 4, 1, 3},
+	{1, 3, 6, 1, 5, 5, 7, 3, 37},
 	{1, 3, 6, 1, 4, 1, 99999, 1},
 }
 
 // fuzzAttesterCert is a certificate struct (never DER: the policy reads
-// only parsed fields) with extended key usages drawn from b.
+// only parsed fields) with extended key usages, and a subject and
+// public key for the anchor rule, drawn from b.
 func fuzzAttesterCert(b *fuzzBytes, i int) *x509.Certificate {
-	cert := &x509.Certificate{Subject: pkix.Name{CommonName: string(rune('a' + i))}, Raw: []byte{b.next() % 4}}
+	cert := &x509.Certificate{
+		Subject:                 pkix.Name{CommonName: string(rune('a' + i))},
+		RawSubject:              []byte{1 + b.next()%3},
+		RawSubjectPublicKeyInfo: []byte{1 + b.next()%3},
+	}
 	for range b.next() % 4 {
 		// 0 is anyExtendedKeyUsage; values past crypto/x509's named ones
 		// are refused like any other non-Any purpose.
@@ -53,15 +67,21 @@ func fuzzAttesterCert(b *fuzzBytes, i int) *x509.Certificate {
 	return cert
 }
 
-// isISO18013RoleOracle is isISO18013Role written out by dotted form.
-func isISO18013RoleOracle(oid asn1.ObjectIdentifier) bool {
-	s := oid.String()
-	return s == "1.0.18013.5.1.2" || s == "1.0.18013.5.1.6"
+// isOtherSigningRoleOracle is isOtherSigningRole written out by dotted
+// form, from the documented list.
+func isOtherSigningRoleOracle(oid asn1.ObjectIdentifier) bool {
+	switch oid.String() {
+	case "1.0.18013.5.1.2", "1.0.18013.5.1.3", "1.0.18013.5.1.6", "1.0.18013.5.1.8",
+		"1.0.23220.4.1.2", "1.0.23220.4.1.6",
+		"1.3.6.1.5.5.7.3.36", "1.3.6.1.5.5.7.3.21", "1.3.6.1.5.5.7.3.22":
+		return true
+	}
+	return false
 }
 
 // attesterChainRefusedOracle is DefaultAttesterLeafPolicy's documented
 // rule, independently: refuse an empty chain, a signing certificate
-// listing any purpose but anyExtendedKeyUsage or an ISO/IEC 18013-5
+// listing any purpose but anyExtendedKeyUsage or another signing
 // role, and a chain through a CA whose extended key usage is present
 // and lists neither anyExtendedKeyUsage nor a purpose other than those.
 func attesterChainRefusedOracle(chain []*x509.Certificate) bool {
@@ -70,12 +90,12 @@ func attesterChainRefusedOracle(chain []*x509.Certificate) bool {
 	}
 	leaf := chain[0]
 	if slices.ContainsFunc(leaf.ExtKeyUsage, func(e x509.ExtKeyUsage) bool { return e != x509.ExtKeyUsageAny }) ||
-		slices.ContainsFunc(leaf.UnknownExtKeyUsage, isISO18013RoleOracle) {
+		slices.ContainsFunc(leaf.UnknownExtKeyUsage, isOtherSigningRoleOracle) {
 		return true
 	}
 	for _, ca := range chain[1:] {
 		listsAny := slices.Contains(ca.ExtKeyUsage, x509.ExtKeyUsageAny)
-		listsOwnPurpose := slices.ContainsFunc(ca.UnknownExtKeyUsage, func(o asn1.ObjectIdentifier) bool { return !isISO18013RoleOracle(o) })
+		listsOwnPurpose := slices.ContainsFunc(ca.UnknownExtKeyUsage, func(o asn1.ObjectIdentifier) bool { return !isOtherSigningRoleOracle(o) })
 		listsSome := len(ca.ExtKeyUsage)+len(ca.UnknownExtKeyUsage) > 0
 		if listsSome && !listsAny && !listsOwnPurpose {
 			return true
@@ -94,7 +114,8 @@ func attesterChainRefusedOracle(chain []*x509.Certificate) bool {
 //   - approvedAttesterChains keeps exactly the chains the policy
 //     accepts, in order, and fails closed when it keeps none;
 //   - checkX5CExcludesAnchors refuses exactly when an x5c certificate
-//     below the leaf equals the last certificate of some chain.
+//     below the leaf has the subject and public key of the last
+//     certificate of some chain.
 func FuzzAttesterLeafPolicy(f *testing.F) {
 	f.Add([]byte{})
 	f.Add([]byte{1, 0, 0, 0})
@@ -155,10 +176,17 @@ func checkX5CAnchorRule(t *testing.T, extra []*x509.Certificate, chains [][]*x50
 			nonEmpty = append(nonEmpty, c)
 		}
 	}
-	want := false
+	// A certificate is identified, for path building, by its subject
+	// and public key together.
+	type identity struct{ subject, key string }
+	anchors := map[identity]bool{}
 	for _, c := range nonEmpty {
-		want = want || slices.ContainsFunc(extra, func(e *x509.Certificate) bool { return bytes.Equal(e.Raw, c[len(c)-1].Raw) })
+		a := c[len(c)-1]
+		anchors[identity{string(a.RawSubject), string(a.RawSubjectPublicKeyInfo)}] = true
 	}
+	want := slices.ContainsFunc(extra, func(e *x509.Certificate) bool {
+		return anchors[identity{string(e.RawSubject), string(e.RawSubjectPublicKeyInfo)}]
+	})
 	if err := checkX5CExcludesAnchors(extra, nonEmpty); (err != nil) != want {
 		t.Fatalf("checkX5CExcludesAnchors = %v, want refusal %v", err, want)
 	}

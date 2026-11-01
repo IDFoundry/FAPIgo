@@ -214,9 +214,13 @@
 //     are committed to the database, the consumes above are atomic
 //     statements or row-locked transactions, and every instance sharing
 //     the database sees the same rows. Not SerializableRedemption: the
-//     stores run at the database's default READ COMMITTED isolation,
-//     relying on row locks for each key rather than on SERIALIZABLE
-//     isolation between keys.
+//     stores write at READ COMMITTED isolation, relying on row locks for
+//     each key rather than on SERIALIZABLE isolation between keys. Each
+//     write is a transaction that asks for READ COMMITTED explicitly, so
+//     a database, role or DSN whose default_transaction_isolation is
+//     REPEATABLE READ or SERIALIZABLE doesn't turn a lost race (a reused
+//     code, a consumed session) into a serialization failure, answered
+//     as an outage.
 //   - SQLite: Durable, AtomicConsume and SerializableRedemption, since
 //     SQLite's transactions are serializable. Not
 //     CrossInstanceConsistent: a database file on one host can't back a

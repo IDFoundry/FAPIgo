@@ -207,15 +207,30 @@ func (d *DB) queryRow(ctx context.Context, template string, args ...any) *sql.Ro
 	return d.db.QueryRowContext(ctx, d.q(template), args...) // NOSONAR: go:S2077 — template is a constant query of this package's; q substitutes only the validated TablePrefix and placeholders, and every value is a bound argument.
 }
 
+// readCommitted is the isolation level of every Postgres write
+// transaction. The stores' statements are written for it: a statement
+// that waits on a row another transaction locked re-checks its WHERE
+// against the row as committed, so of concurrent consumes the losers
+// see the winner's change and get their typed outcome (already
+// redeemed, already consumed, already decided). Under REPEATABLE READ or
+// SERIALIZABLE — a database's, role's or connection's
+// default_transaction_isolation, which a transaction otherwise
+// inherits — they would fail with a serialization error (SQLSTATE
+// 40001) instead, an outage, and a reused code's tokens wouldn't be
+// revoked. Pinning the level, rather than retrying on 40001, keeps each
+// consume one attempt, as on READ COMMITTED databases.
+var readCommitted = &sql.TxOptions{Isolation: sql.LevelReadCommitted}
+
 // write runs fn in a transaction, committing it if fn returns nil and
-// rolling it back otherwise. On Postgres the rows fn's statements lock
-// stay locked until then; on SQLite the transaction holds the
-// database's write lock from its start.
+// rolling it back otherwise. On Postgres the transaction is READ
+// COMMITTED, whatever the database's default (readCommitted), and the
+// rows fn's statements lock stay locked until then; on SQLite the
+// transaction holds the database's write lock from its start.
 func (d *DB) write(ctx context.Context, fn func(q querier) error) error {
 	if d.dialect == SQLite {
 		return d.sqliteWrite(ctx, fn)
 	}
-	tx, err := d.db.BeginTx(ctx, nil)
+	tx, err := d.db.BeginTx(ctx, readCommitted)
 	if err != nil {
 		return err
 	}
@@ -226,15 +241,12 @@ func (d *DB) write(ctx context.Context, fn func(q querier) error) error {
 	return tx.Commit()
 }
 
-// writeOne runs fn, which makes one change in one statement: on the
-// database itself for Postgres, where a statement is atomic, and as
-// write does for SQLite, which then waits its busy timeout for the
-// write lock.
+// writeOne runs fn, which makes one change in one statement, as write
+// does: in a READ COMMITTED transaction on Postgres, since a statement
+// run on its own would take the database's default isolation level,
+// and with the write lock on SQLite, waiting its busy timeout for it.
 func (d *DB) writeOne(ctx context.Context, fn func(q querier) error) error {
-	if d.dialect == SQLite {
-		return d.sqliteWrite(ctx, fn)
-	}
-	return fn(d.db)
+	return d.write(ctx, fn)
 }
 
 // sqliteWrite is write for SQLite. database/sql's BeginTx can't ask for

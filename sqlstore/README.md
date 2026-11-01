@@ -59,6 +59,12 @@ pure Go, no cgo) needs WAL mode and a busy timeout:
 sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
 ```
 
+On a new file, the first connection switches it to WAL mode as it
+opens, and a connection another process opens at that moment fails with
+`SQLITE_BUSY`. `Migrate` waits that out, so run it first in each
+process (or once, from a deployment step, before starting them) before
+anything else uses the file.
+
 ## Sealing records
 
 Set `Options.Sealer` to encrypt every record blob the stores write —

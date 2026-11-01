@@ -70,13 +70,23 @@
 //
 //	sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
 //
+// List busy_timeout first, so it applies to the pragmas after it. On a
+// new file, the first connection switches the file to WAL mode (which
+// lasts) as it opens, holding the write lock without waiting the busy
+// timeout, so a connection another process opens at that moment fails
+// with SQLITE_BUSY. Migrate retries that, so every process can run it at
+// startup; but run Migrate before anything else uses a new file — or
+// create and migrate the file once, from a deployment step, before
+// starting the processes that share it.
+//
 // # Migrations
 //
 // The schema is versioned, its migrations embedded in the package.
 // Nothing migrates implicitly — New doesn't touch the database: Migrate
 // applies the migrations the database lacks, each in a transaction,
 // once between any number of processes running it at once (a Postgres
-// advisory lock; SQLite's write lock). Run it from a deployment step
+// advisory lock; SQLite's write lock, waiting out a new file's switch
+// to WAL mode — see Setup). Run it from a deployment step
 // with a role that may create tables, or at startup; CheckSchema, at
 // startup, fails fast where the schema is behind. Both refuse a schema
 // a newer release of this package has migrated further, whose changes

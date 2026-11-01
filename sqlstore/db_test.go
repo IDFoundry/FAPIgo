@@ -89,6 +89,29 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	})
 }
 
+// Migrate is safe from several processes at once on a brand-new SQLite
+// file too, opened with the DSN the package documentation recommends:
+// switching a new file to WAL mode takes its write lock as each
+// connection opens, failing with SQLITE_BUSY for the others, which
+// Migrate waits out.
+func TestConcurrentFirstMigrate(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		for range 5 {
+			p := newPlace(t, dialect)
+			var wg sync.WaitGroup
+			errs := make([]error, 6)
+			for i := range errs {
+				h, _ := p.openPool()
+				wg.Go(func() { errs[i] = h.Migrate(context.Background()) })
+			}
+			wg.Wait()
+			if err := errors.Join(errs...); err != nil {
+				t.Fatalf("concurrent first Migrate: %v", err)
+			}
+		}
+	})
+}
+
 // CheckSchema refuses a database Migrate hasn't run on, one missing a
 // migration, and one a newer release migrated further; Migrate refuses
 // the last too.

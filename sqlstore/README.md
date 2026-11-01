@@ -59,6 +59,12 @@ pure Go, no cgo) needs WAL mode and a busy timeout:
 sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
 ```
 
+On a new file, the first connection switches it to WAL mode as it
+opens, and a connection another process opens at that moment fails with
+`SQLITE_BUSY`. `Migrate` waits that out, so run it first in each
+process (or once, from a deployment step, before starting them) before
+anything else uses the file.
+
 ## Sealing records
 
 Set `Options.Sealer` to encrypt every record blob the stores write —
@@ -73,7 +79,9 @@ db, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: seale
 
 A sealed blob moved to another row, client, table or table prefix,
 altered, or opened under another key is refused (`ErrRecordFormat`, as
-an outage). Lookup keys and digests, client IDs, times, CIBA status,
+an outage), as is one whose row's expiry (or an interaction's pushed
+request, or a CIBA request's handle, delivery mode or interval) was
+changed. Lookup keys and digests, client IDs, times, CIBA status,
 replay digests, nonces, revocations, pairwise subjects and the clients
 table stay readable: the stores look rows up by them. The `Sealer`
 interface is OID4VCgo's `verifier.TransactionSealer`, so one sealer
@@ -81,10 +89,23 @@ serves both.
 
 To start sealing a database in use: deploy with `Sealer` and
 `ReadUnsealed: true`, run `db.SealRecords(ctx)`, then deploy without
-`ReadUnsealed`. Losing the key makes sealed records unreadable; to
-rotate it, use a `Sealer` of your own that opens with both keys until
-the old one's records expire. See the package documentation's Sealing
-section.
+`ReadUnsealed`. `SealRecords` trusts what it finds, so run it on a
+database whose contents you trust. Losing the key makes sealed records
+unreadable. `AESGCMSealer` allows 2^32 seals per key (random nonces,
+NIST SP 800-38D), which a busy server reaches in weeks: rotate before
+then with `sqlstore.RotatingSealer(newSealer, oldSealer)`, which seals
+with the new key and opens with either until the old one's records
+expire. See the package documentation's Sealing section.
+
+### Upgrading from v0.2
+
+Blobs sealed by v0.2 and earlier (format byte 2) didn't bind their
+row's expiry and the other columns above. They still open, so an
+upgraded database keeps working; run `db.SealRecords(ctx)` once after
+upgrading every instance to re-seal them in the current format (byte 3)
+and bind them too. Upgrade every instance sharing a database at once: a
+v0.2 instance can't open what an upgraded one seals, and rolling back
+to v0.2 leaves the records sealed since unreadable.
 
 ## What each database declares
 
@@ -121,7 +142,11 @@ between instances: use SQLite there.
   whose digests each role namespaces), through a DB with the same
   `TablePrefix` and `Sealer`. Their DPoP nonce store is the exception:
   `Nonces()` from a DB with a `TablePrefix` of its own, never the
-  server's, whose nonces it would then accept.
+  server's, whose nonces it would then accept. Give a resource server a
+  database role of its own: `SELECT` on the server's `access_tokens`,
+  `revocations` and `schema_migrations`, `SELECT`/`INSERT` on `replay`,
+  and its own prefix's tables; and let only the server `Sweep` the
+  tables they share.
 - **Clients** are rows the operator manages: a `client_id` and a
   versioned JSON configuration, written with `Clients().Put` or
   `MarshalClientConfig`. See the package documentation's Clients

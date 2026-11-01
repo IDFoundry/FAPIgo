@@ -11,6 +11,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // jtiSize is the byte length of the random value used to build an
@@ -116,7 +117,10 @@ func Create(p CreateParams) (string, error) {
 		claims[k] = encoded
 	}
 
-	payload, err := json.Marshal(claims)
+	// Without HTML escaping: json.Marshal would escape <, > and & in
+	// every json.RawMessage parameter too, so authorization_details the
+	// server keeps byte for byte would arrive as \u003c and so on.
+	payload, err := strictjson.MarshalUnescaped(claims)
 	if err != nil {
 		return "", fmt.Errorf("requestobject: marshal claims: %w", err)
 	}

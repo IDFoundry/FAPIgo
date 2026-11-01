@@ -292,6 +292,9 @@ func productionAccessTokenAssurance(resolver AccessTokenResolver) (AccessTokenAs
 		if declared.IssuerKeys == nil && declared.Store == nil {
 			return AccessTokenAssurance{}, fmt.Errorf("resource: dependencies: access_tokens' AccessTokenAssurance must name its IssuerKeys or Store under AssuranceProduction")
 		}
+		if found, ok := depcheck.FindTypedNil(declared, map[string]string{"IssuerKeys": "IssuerKeys", "Store": "Store"}); ok {
+			return AccessTokenAssurance{}, fmt.Errorf("resource: dependencies: access_tokens' AccessTokenAssurance.%s is a nil %s", found.Name, found.Type)
+		}
 		return declared, nil
 	}
 	return AccessTokenAssurance{}, fmt.Errorf("resource: dependencies: access_tokens must be JWTAccessTokens, OpaqueAccessTokens, or implement resource.AccessTokenResolverAssurance under AssuranceProduction")

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/depcheck"
 	"github.com/idfoundry/fapigo/internal/resourceerr"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
@@ -227,6 +228,11 @@ func NewJWTAccessTokens(issuerKeys keys.IssuerKeySource, issuer fapi.URL, audien
 // NewVerifier, which refuses a JWTAccessTokens{...} literal it would
 // fail (or, for a nil IssuerKeys, panic) on every request.
 func (j JWTAccessTokens) validate() error {
+	// A typed nil (a nil *keys.JWKSIssuerKeySource, say) isn't == nil, so it
+	// would pass the check below and panic on the first request.
+	if found, ok := depcheck.FindTypedNil(j, map[string]string{"IssuerKeys": "issuer keys"}); ok {
+		return fmt.Errorf("%s is a nil %s", found.Name, found.Type)
+	}
 	switch {
 	case j.IssuerKeys == nil:
 		return errors.New("issuer keys is required")
@@ -390,6 +396,11 @@ func NewOpaqueAccessTokens(store storage.AccessTokenStore, issuer fapi.URL) (Opa
 // NewVerifier, which refuses an OpaqueAccessTokens{} literal that would
 // panic, or refuse every token, on every request.
 func (o OpaqueAccessTokens) validate() error {
+	// A typed nil (a nil *memstore.AccessTokenStore, say) isn't == nil,
+	// so it would pass the check below and panic on the first request.
+	if found, ok := depcheck.FindTypedNil(o, nil); ok {
+		return fmt.Errorf("%s is a nil %s", found.Name, found.Type)
+	}
 	switch {
 	case o.Store == nil:
 		return errors.New("store is required")

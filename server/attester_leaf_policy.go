@@ -65,9 +65,16 @@ func (f AttesterLeafPolicyFunc) CheckAttesterChain(chain []*x509.Certificate) er
 //     server-gated-crypto and code-signing purposes — even alongside
 //     other purposes, since the certificate then also serves that role
 //     and its key may be held where that role is;
-//   - a signing certificate whose extended key usage lists an
-//     ISO/IEC 18013-5 role: mDL document signer (1.0.18013.5.1.2) or
-//     mdoc reader authentication (1.0.18013.5.1.6);
+//   - a signing certificate whose extended key usage lists one of
+//     these other signing roles, which crypto/x509 doesn't name:
+//     ISO/IEC 18013-5 mDL document signer (1.0.18013.5.1.2), mDL JWS
+//     signer for server retrieval (1.0.18013.5.1.3), mdoc reader
+//     authentication (1.0.18013.5.1.6) or VICAL signer
+//     (1.0.18013.5.1.8); ISO/IEC TS 23220-4 mdoc document signer
+//     (1.0.23220.4.1.2) or mdoc reader authentication
+//     (1.0.23220.4.1.6); RFC 9336 document signing
+//     (id-kp-documentSigning); or RFC 6187 SSH client or server
+//     authentication (id-kp-secureShellClient, id-kp-secureShellServer);
 //   - a chain through a CA certificate (an intermediate or the anchor)
 //     whose extended key usage lists only such purposes, such as a CA
 //     restricted to issuing TLS certificates, so a certificate under it
@@ -92,8 +99,8 @@ func (DefaultAttesterLeafPolicy) CheckAttesterChain(chain []*x509.Certificate) e
 		}
 	}
 	for _, oid := range leaf.UnknownExtKeyUsage {
-		if isISO18013Role(oid) {
-			return fmt.Errorf("attester certificate's extended key usage lists an ISO/IEC 18013-5 role (%s)", oid)
+		if name, ok := otherSigningRole(oid); ok {
+			return fmt.Errorf("attester certificate's extended key usage lists another role (%s, %s)", name, oid)
 		}
 	}
 	for _, ca := range chain[1:] {
@@ -118,15 +125,41 @@ func (AnyAttesterLeaf) CheckAttesterChain([]*x509.Certificate) error {
 	return nil
 }
 
-// ISO/IEC 18013-5 Annex B extended key usages, which crypto/x509 leaves
-// in UnknownExtKeyUsage.
-var (
-	oidMDLDocumentSigner = asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 2}
-	oidMdocReaderAuth    = asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 6}
-)
+// otherSigningRoles are the extended key usages, left in
+// UnknownExtKeyUsage by crypto/x509, of roles whose keys sign something
+// other than attestations.
+var otherSigningRoles = []struct {
+	oid  asn1.ObjectIdentifier
+	name string
+}{
+	// ISO/IEC 18013-5 Annex B (id-mdl-kp) and Annex C (VICAL).
+	{asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 2}, "mDL document signer"},
+	{asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 3}, "mDL JWS signer"},
+	{asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 6}, "mdoc reader authentication"},
+	{asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 8}, "mDL VICAL signer"},
+	// ISO/IEC TS 23220-4 Annex B, the same purposes on the mdoc arc.
+	{asn1.ObjectIdentifier{1, 0, 23220, 4, 1, 2}, "mdoc document signer"},
+	{asn1.ObjectIdentifier{1, 0, 23220, 4, 1, 6}, "mdoc reader authentication"},
+	// RFC 9336 and RFC 6187, under id-kp (1.3.6.1.5.5.7.3).
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 36}, "document signing"},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 21}, "SSH client"},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 22}, "SSH server"},
+}
 
-func isISO18013Role(oid asn1.ObjectIdentifier) bool {
-	return oid.Equal(oidMDLDocumentSigner) || oid.Equal(oidMdocReaderAuth)
+// otherSigningRole names the role oid is the extended key usage of, if
+// it is one of otherSigningRoles.
+func otherSigningRole(oid asn1.ObjectIdentifier) (string, bool) {
+	for _, r := range otherSigningRoles {
+		if oid.Equal(r.oid) {
+			return r.name, true
+		}
+	}
+	return "", false
+}
+
+func isOtherSigningRole(oid asn1.ObjectIdentifier) bool {
+	_, ok := otherSigningRole(oid)
+	return ok
 }
 
 // restrictedToOtherRoles reports whether ca's extended key usage is
@@ -137,7 +170,7 @@ func restrictedToOtherRoles(ca *x509.Certificate) bool {
 		return false
 	}
 	return !slices.Contains(ca.ExtKeyUsage, x509.ExtKeyUsageAny) &&
-		!slices.ContainsFunc(ca.UnknownExtKeyUsage, func(oid asn1.ObjectIdentifier) bool { return !isISO18013Role(oid) })
+		!slices.ContainsFunc(ca.UnknownExtKeyUsage, func(oid asn1.ObjectIdentifier) bool { return !isOtherSigningRole(oid) })
 }
 
 // extKeyUsageName names eku for an error message.

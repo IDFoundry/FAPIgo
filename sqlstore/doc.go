@@ -63,6 +63,19 @@
 // (serverresource.NewVerifier refuses the server's own db.Nonces(), but
 // can't tell two DBs with one TablePrefix apart.)
 //
+// A resource server needs far less of the database than the server
+// does, and is often run in more places, so give it a database role of
+// its own with just that, rather than the server's: SELECT on the
+// server's access_tokens, revocations and schema_migrations (for
+// CheckSchema) tables, SELECT and INSERT on its replay table, and its
+// own TablePrefix's tables (which its Migrate creates, so that once,
+// with CREATE on the schema, or by a deployment step). With the
+// server's role, a resource server that's compromised could delete a
+// revocation or rewrite the server's codes and refresh tokens. Only the
+// server sweeps the tables they share: a resource server runs Sweep on
+// its own DB alone, since a Sweep with a clock ahead of the server's
+// would drop replay digests and revocations the server still needs.
+//
 // For SQLite, with a driver such as modernc.org/sqlite (pure Go, no
 // cgo), open the file in WAL mode with a busy timeout, so readers don't
 // wait on writers and a connection waits its turn for the write lock

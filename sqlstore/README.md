@@ -142,7 +142,11 @@ between instances: use SQLite there.
   whose digests each role namespaces), through a DB with the same
   `TablePrefix` and `Sealer`. Their DPoP nonce store is the exception:
   `Nonces()` from a DB with a `TablePrefix` of its own, never the
-  server's, whose nonces it would then accept.
+  server's, whose nonces it would then accept. Give a resource server a
+  database role of its own: `SELECT` on the server's `access_tokens`,
+  `revocations` and `schema_migrations`, `SELECT`/`INSERT` on `replay`,
+  and its own prefix's tables; and let only the server `Sweep` the
+  tables they share.
 - **Clients** are rows the operator manages: a `client_id` and a
   versioned JSON configuration, written with `Clients().Put` or
   `MarshalClientConfig`. See the package documentation's Clients

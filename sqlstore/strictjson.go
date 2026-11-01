@@ -155,31 +155,34 @@ func decodesLosslessly(raw []byte) bool {
 	high := false // the escape before was a high surrogate, which must be followed directly by a low one
 	for rest := raw; ; {
 		i := bytes.IndexByte(rest, '\\')
-		switch {
-		case i < 0:
+		if i < 0 {
 			return !high
-		case high && i > 0:
+		}
+		if high && i > 0 {
 			return false
 		}
-		escape := rest[i+1:]
-		if len(escape) == 0 || escape[0] != 'u' {
-			if high {
-				return false
-			}
-			rest = escape[min(1, len(escape)):] // past the escaped character
-			continue
-		}
-		r, ok := escapedRune(escape)
-		if !ok {
+		var ok bool
+		if rest, high, ok = nextEscape(rest[i+1:], high); !ok {
 			return false
 		}
-		rest = escape[5:]
-		isHigh, isLow := r >= 0xd800 && r < 0xdc00, r >= 0xdc00 && r <= 0xdfff
-		if isLow != high {
-			return false // a low surrogate on its own, or a high one followed by anything else
-		}
-		high = isHigh
 	}
+}
+
+// nextEscape reads the escape escape starts with (the text after a
+// backslash), given whether the escape before it was a high surrogate.
+// It returns the text after it, whether it's a high surrogate, and
+// whether it decodes as written: a low surrogate must follow a high one
+// directly, and only a high one.
+func nextEscape(escape []byte, high bool) (rest []byte, isHigh, ok bool) {
+	if len(escape) == 0 || escape[0] != 'u' {
+		return escape[min(1, len(escape)):], false, !high
+	}
+	r, ok := escapedRune(escape)
+	if !ok {
+		return nil, false, false
+	}
+	isLow := r >= 0xdc00 && r <= 0xdfff
+	return escape[5:], r >= 0xd800 && r < 0xdc00, isLow == high
 }
 
 // escapedRune reads escape, the text after a backslash starting with u,

@@ -44,8 +44,9 @@ own keys, by issuer (a `keys.AttesterKeySource` such as
 `server.X5CAttesterChain` to verify the attestation's `x5c` chain. That
 `x5c` carries the signing certificate and its intermediates only, as
 HAIP 1.0 requires: an attestation whose `x5c` also includes a trust
-anchor (any self-signed certificate, or a configured anchor) is
-`invalid_client`. With
+anchor (any self-signed certificate, or a certificate with a
+configured anchor's subject and public key, such as a cross-signed
+copy of it) is `invalid_client`. With
 a trust list shared by several attesters, use its
 `AttesterIssuerBoundToAnchor` binding, so each anchor vouches only for
 the attesters it's bound to. Its `LeafPolicy`, by default

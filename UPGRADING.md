@@ -61,6 +61,34 @@ deps.AttesterTrust = server.X5CAttesterChain{
 }
 ```
 
+### `X5CAttesterChain` refuses a re-issued or cross-signed anchor in `x5c` (server)
+
+**Affects:** a server whose `Dependencies.AttesterTrust` is
+`server.X5CAttesterChain`, when a wallet's attestation `x5c` carries,
+after the signing certificate, a certificate with the same subject and
+public key as an anchor a verified chain ends at, but not
+byte-identical to it: a copy re-issued by the anchor's own issuer, or
+cross-signed by another CA.
+
+**Why:** HAIP 1.0 keeps the trust anchor out of `x5c`. v0.66.0 refused
+an anchor in `x5c` only when its DER bytes matched the configured
+anchor exactly, so another certificate for the same CA (same subject,
+same key) got through. Path building treats such a certificate as the
+anchor itself, so the check now compares subject and public key.
+
+**What fails:** nothing at startup. Such an attestation is refused
+with `invalid_client`. There is no option to keep the old behaviour.
+
+**What to change:** have the wallet (or its Wallet Provider) send
+`x5c` as the signing certificate followed by its intermediates only,
+leaving out every certificate for a CA the server trusts as an
+anchor, including cross-signed copies:
+
+```go
+// x5c: signing certificate, then intermediates, never the anchor.
+x5c := [][]byte{leaf.Raw, intermediate.Raw}
+```
+
 ## v0.66.0
 
 ### `X5CAttesterChain` refuses other roles' signing certificates (server)

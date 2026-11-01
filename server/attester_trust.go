@@ -137,9 +137,10 @@ func (r RegisteredAttesterKeys) validate() error {
 //     rotated or revoked without redistributing anchors;
 //   - come with intermediates only: "x5c" must not include the trust
 //     anchor (HAIP 1.0), so an attestation is refused when any other
-//     "x5c" certificate is self-signed, or equals the anchor a verified
-//     chain ends at — even an anchor that is not self-signed, such as
-//     an intermediate configured as an anchor;
+//     "x5c" certificate is self-signed, or has the subject and public
+//     key of the anchor a verified chain ends at — even an anchor that
+//     is not self-signed, such as an intermediate configured as an
+//     anchor, and even a re-issued or cross-signed copy of it;
 //   - permit digital signatures, if it restricts key usage at all;
 //   - hold a key of the type the client's registered attestation
 //     algorithm needs.
@@ -588,18 +589,22 @@ func verifyAttesterChain(ders [][]byte, roots *x509.CertPool, now time.Time) (*x
 }
 
 // checkX5CExcludesAnchors refuses x5c certificates (below the leaf)
-// equal to the anchor any verified chain ends at — an anchor that is not
-// self-signed, such as an intermediate configured as an anchor. It looks
-// at every verified chain, not only those LeafPolicy or the issuer
-// binding later keep, so an x5c that carries an anchor is refused
-// whichever chain would otherwise be used. A pool's anchors can't be
-// listed, so only those a chain reached are compared.
+// for the anchor any verified chain ends at — an anchor that is not
+// self-signed, such as an intermediate configured as an anchor. A
+// certificate with the anchor's subject and public key is the anchor
+// for path building, whatever else differs, so a copy re-issued by the
+// anchor's own issuer or cross-signed by another CA is refused just as
+// the configured certificate is. It looks at every verified chain, not
+// only those LeafPolicy or the issuer binding later keep, so an x5c
+// that carries an anchor is refused whichever chain would otherwise be
+// used. A pool's anchors can't be listed, so only those a chain reached
+// are compared.
 func checkX5CExcludesAnchors(extra []*x509.Certificate, chains [][]*x509.Certificate) error {
 	for _, chain := range chains {
 		// x509.Certificate.Verify never returns an empty chain.
 		anchor := chain[len(chain)-1]
 		for i, c := range extra {
-			if c.Equal(anchor) {
+			if bytes.Equal(c.RawSubject, anchor.RawSubject) && bytes.Equal(c.RawSubjectPublicKeyInfo, anchor.RawSubjectPublicKeyInfo) {
 				return fmt.Errorf("attester x5c must not include the trust anchor (HAIP 1.0): x5c certificate %d is an anchor", i+1)
 			}
 		}

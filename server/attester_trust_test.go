@@ -286,6 +286,36 @@ func TestX5CAttesterChainRefusesAnchorInX5C(t *testing.T) {
 	}
 }
 
+// TestX5CAttesterChainRefusesReissuedAnchorInX5C covers an anchor that
+// is not self-signed (an intermediate trusted directly) reaching x5c as
+// another certificate for the same subject and key: re-issued by the
+// anchor's own parent, or cross-signed by an unrelated root. Either
+// copy is the anchor, so HAIP 1.0 keeps it out of x5c just as it does
+// the configured certificate itself.
+func TestX5CAttesterChainRefusesReissuedAnchorInX5C(t *testing.T) {
+	root := newTestCert(t, "offline root", certOptions{isCA: true})
+	anchor := newTestCert(t, "attester CA", certOptions{parent: &root, isCA: true})
+	reissued := newTestCert(t, "attester CA", certOptions{parent: &root, isCA: true, key: anchor.key})
+	otherRoot := newTestCert(t, "other root", certOptions{isCA: true})
+	crossSigned := newTestCert(t, "attester CA", certOptions{parent: &otherRoot, isCA: true, key: anchor.key})
+	otherKey := newTestCert(t, "attester CA", certOptions{parent: &root, isCA: true})
+	leaf := newTestCert(t, "attester", certOptions{parent: &anchor})
+	for name, tc := range map[string]struct {
+		x5c    json.RawMessage
+		wantOK bool
+	}{
+		"anchor itself":                     {x5cOf(leaf, anchor), false},
+		"anchor re-issued by its parent":    {x5cOf(leaf, reissued), false},
+		"anchor cross-signed by other root": {x5cOf(leaf, crossSigned), false},
+		"same subject, another key":         {x5cOf(leaf, otherKey), true},
+		"leaf alone":                        {x5cOf(leaf), true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			checkAttesterLeaf(t, leafPolicyHarness(t, anchor, nil), attesterLeaf{leaf, tc.x5c}, tc.wantOK)
+		})
+	}
+}
+
 // TestX5CAttesterChainChecksValidityAtServerClock covers certificate
 // validity being judged at the server's injected Clock, not the wall
 // clock. The server's clock is set a month in the past, so each case

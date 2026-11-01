@@ -48,9 +48,14 @@ var fuzzEKUOIDs = []asn1.ObjectIdentifier{
 }
 
 // fuzzAttesterCert is a certificate struct (never DER: the policy reads
-// only parsed fields) with extended key usages drawn from b.
+// only parsed fields) with extended key usages, and a subject and
+// public key for the anchor rule, drawn from b.
 func fuzzAttesterCert(b *fuzzBytes, i int) *x509.Certificate {
-	cert := &x509.Certificate{Subject: pkix.Name{CommonName: string(rune('a' + i))}, Raw: []byte{b.next() % 4}}
+	cert := &x509.Certificate{
+		Subject:                 pkix.Name{CommonName: string(rune('a' + i))},
+		RawSubject:              []byte{1 + b.next()%3},
+		RawSubjectPublicKeyInfo: []byte{1 + b.next()%3},
+	}
 	for range b.next() % 4 {
 		// 0 is anyExtendedKeyUsage; values past crypto/x509's named ones
 		// are refused like any other non-Any purpose.
@@ -109,7 +114,8 @@ func attesterChainRefusedOracle(chain []*x509.Certificate) bool {
 //   - approvedAttesterChains keeps exactly the chains the policy
 //     accepts, in order, and fails closed when it keeps none;
 //   - checkX5CExcludesAnchors refuses exactly when an x5c certificate
-//     below the leaf equals the last certificate of some chain.
+//     below the leaf has the subject and public key of the last
+//     certificate of some chain.
 func FuzzAttesterLeafPolicy(f *testing.F) {
 	f.Add([]byte{})
 	f.Add([]byte{1, 0, 0, 0})
@@ -170,10 +176,17 @@ func checkX5CAnchorRule(t *testing.T, extra []*x509.Certificate, chains [][]*x50
 			nonEmpty = append(nonEmpty, c)
 		}
 	}
-	want := false
+	// A certificate is identified, for path building, by its subject
+	// and public key together.
+	type identity struct{ subject, key string }
+	anchors := map[identity]bool{}
 	for _, c := range nonEmpty {
-		want = want || slices.ContainsFunc(extra, func(e *x509.Certificate) bool { return bytes.Equal(e.Raw, c[len(c)-1].Raw) })
+		a := c[len(c)-1]
+		anchors[identity{string(a.RawSubject), string(a.RawSubjectPublicKeyInfo)}] = true
 	}
+	want := slices.ContainsFunc(extra, func(e *x509.Certificate) bool {
+		return anchors[identity{string(e.RawSubject), string(e.RawSubjectPublicKeyInfo)}]
+	})
 	if err := checkX5CExcludesAnchors(extra, nonEmpty); (err != nil) != want {
 		t.Fatalf("checkX5CExcludesAnchors = %v, want refusal %v", err, want)
 	}

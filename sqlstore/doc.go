@@ -281,7 +281,9 @@
 // still need it: a pushed request until the last interaction begun from
 // it expires, a redeemed authorization code until the tokens its
 // redemption issued expire (so reusing the code still revokes them),
-// and a revocation until the latest expiry it was recorded with. An
+// and at least RedeemedCodeRetention (an hour) past its own expiry, so
+// that a Sweep running while the server issues those tokens can't
+// remove it before the server records them, and a revocation until the latest expiry it was recorded with. An
 // opaque access token is kept until it expires, and a CIBA request
 // until BackchannelExpiredRetention (an hour) after it does, so a
 // client that polls it late gets expired_token rather than an unknown

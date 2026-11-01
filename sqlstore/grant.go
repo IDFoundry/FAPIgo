@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -56,8 +57,8 @@ func (s *GrantStore) RedeemAuthorizationCode(ctx context.Context, redemption sto
 	var record []byte
 	var expires int64
 	err := s.d.writeOne(ctx, func(q querier) error {
-		return q.QueryRowContext(ctx, s.d.q("UPDATE {authorization_codes} SET redeemed = 1 WHERE code_hash = ? AND redeemed = 0 AND (? = '' OR client_id = ?) RETURNING client_id, record, expires_at"),
-			redemption.CodeHash[:], string(redemption.ClientID), string(redemption.ClientID)).Scan(&clientID, &record, &expires)
+		return q.QueryRowContext(ctx, s.d.q("UPDATE {authorization_codes} SET redeemed = 1, sweep_after = "+redeemedSweep+" WHERE code_hash = ? AND redeemed = 0 AND (? = '' OR client_id = ?) RETURNING client_id, record, expires_at"),
+			redeemedSweepArgs(redemption.CodeHash[:], string(redemption.ClientID), string(redemption.ClientID))...).Scan(&clientID, &record, &expires)
 	})
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -70,6 +71,28 @@ func (s *GrantStore) RedeemAuthorizationCode(ctx context.Context, redemption sto
 		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("sqlstore: redeem authorization code: %w", err)
 	}
 	return storage.RedeemedAuthorizationCode{ClientID: fapi.ClientID(clientID), Grant: grant, ExpiresAt: timeOf(expires)}, nil
+}
+
+// RedeemedCodeRetention is how long past its expiry Sweep keeps an
+// authorization code once it's redeemed, at least. The server records
+// the tokens a redemption issues (RecordIssuedAccessToken,
+// RecordIssuedRefreshToken) only after it has issued them, and those
+// calls keep the code until the tokens expire; until then, this keeps a
+// code redeemed in the last moments before its expiry from being swept
+// in between, which would make its reuse look like an unknown code
+// rather than a reuse, and so revoke nothing (RFC 6749 §4.1.2).
+const RedeemedCodeRetention = time.Hour
+
+// redeemedSweep is the SQL expression that keeps a redeemed code's
+// sweep_after at least RedeemedCodeRetention past its expires_at (or
+// as it is, for an expiry so late the sum would overflow), with
+// redeemedSweepArgs' arguments.
+const redeemedSweep = "CASE WHEN expires_at > ? THEN sweep_after WHEN sweep_after < expires_at + ? THEN expires_at + ? ELSE sweep_after END"
+
+// redeemedSweepArgs is redeemedSweep's arguments, followed by rest.
+func redeemedSweepArgs(rest ...any) []any {
+	retention := int64(RedeemedCodeRetention)
+	return append([]any{int64(math.MaxInt64) - retention, retention, retention}, rest...)
 }
 
 // whyNotRedeemed is RedeemAuthorizationCode's error for a code its

@@ -147,8 +147,8 @@ func (r RegisteredAttesterKeys) validate() error {
 // No standard extended key usage exists for attestation signing, so
 // none is required, but LeafPolicy (DefaultAttesterLeafPolicy unless
 // set) refuses a signing certificate issued for another role — TLS
-// server or client, OCSP responder, an ISO/IEC 18013-5 mdoc reader or
-// document signer — or reachable only through a CA restricted to such
+// server or client, OCSP responder, an ISO/IEC 18013-5 or 23220-4
+// mdoc role, document signing, SSH — or reachable only through a CA restricted to such
 // roles; only the chains it accepts are checked further. Revocation asks whether a certificate in the
 // verified chain below its anchor has been revoked, once the
 // attestation's PoP has verified; an anchor itself is withdrawn by an

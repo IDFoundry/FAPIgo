@@ -51,7 +51,8 @@ a trust list shared by several attesters, use its
 the attesters it's bound to. Its `LeafPolicy`, by default
 `server.DefaultAttesterLeafPolicy{}`, refuses a signing certificate
 issued for another role (a TLS server or client, an OCSP responder, an
-mdoc reader or document signer), or chaining only through a CA
+ISO/IEC 18013-5 or 23220-4 mdoc reader, document signer, JWS or VICAL
+signer, RFC 9336 document signing, or SSH), or chaining only through a CA
 restricted to such roles, so an anchor that also certifies those can't
 turn their keys into attestation keys. Wrap it in a
 `server.AttesterLeafPolicyFunc` to also require your ecosystem's own

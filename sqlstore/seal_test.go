@@ -102,8 +102,8 @@ func TestSealedRecordsAreNotInTheClear(t *testing.T) {
 		_, db := p.open()
 		hash := createRefreshToken(t, d, "a")
 		stored := rawColumn(t, p, db, "refresh_tokens", "record", "a")
-		if len(stored) == 0 || stored[0] != 2 || bytes.Contains(stored, []byte("user-secret")) {
-			t.Fatalf("stored record = %q, want it sealed (starting with byte 2), without the grant in the clear", stored)
+		if len(stored) == 0 || stored[0] != 3 || bytes.Contains(stored, []byte("user-secret")) {
+			t.Fatalf("stored record = %q, want it sealed (starting with byte 3), without the grant in the clear", stored)
 		}
 		got, err := d.Grants().RedeemRefreshToken(context.Background(), storage.RefreshTokenRedemption{TokenHash: hash})
 		if err != nil || !bytes.Equal(got.Grant, secretGrant) {
@@ -200,7 +200,7 @@ func TestUnsealedRecordsMigration(t *testing.T) {
 		}
 		must(t, redeem(sealed))
 		checkOneOfEach(t, sealed)
-		if stored := rawColumn(t, p, db, "refresh_tokens", "record", "a"); stored[0] != 2 {
+		if stored := rawColumn(t, p, db, "refresh_tokens", "record", "a"); stored[0] != 3 {
 			t.Fatalf("record after SealRecords = %q, want it sealed", stored)
 		}
 		wantUnreadable(t, "RedeemRefreshToken(sealed, by a DB without a Sealer)", redeem(plain))
@@ -273,6 +273,10 @@ func TestSealerFailures(t *testing.T) {
 	err = plain.Grants().CreateRefreshToken(ctx, storage.NewRefreshToken{ClientID: "b", Grant: json.RawMessage("\x02{}"), ExpiresAt: time.Now()})
 	if err == nil {
 		t.Fatal("CreateRefreshToken(a grant starting with byte 2, no Sealer) = nil error, want a refusal")
+	}
+	err = plain.Grants().CreateRefreshToken(ctx, storage.NewRefreshToken{ClientID: "b", Grant: json.RawMessage("\x03{}"), ExpiresAt: time.Now()})
+	if err == nil {
+		t.Fatal("CreateRefreshToken(a grant starting with byte 3, no Sealer) = nil error, want a refusal")
 	}
 	if _, err := plain.SealRecords(ctx); err == nil {
 		t.Fatal("SealRecords without a Sealer = nil error, want an error")
@@ -348,4 +352,42 @@ func TestMalformedRecordsAreUnreadable(t *testing.T) {
 		_, err = d.Backchannel().DecideBackchannelAuthentication(ctx, storage.DecideBackchannelAuthentication{HandleHash: r.HandleHash, Status: storage.BackchannelAuthenticationDenied})
 		must(t, err)
 	})
+}
+
+// RotatingSealer seals with its current Sealer and opens with any of
+// them, so records sealed under the previous key stay readable while new
+// ones are sealed under the new key; a key it doesn't hold is refused.
+func TestRotatingSealer(t *testing.T) {
+	ctx := context.Background()
+	oldKey, newKey := testSealer(t), testSealer(t)
+	p := newPlace(t, sqlstore.SQLite)
+	before := p.migratedWith(sqlstore.Options{Sealer: oldKey})
+	oldHash := createRefreshToken(t, before, "old")
+
+	rotating, err := sqlstore.RotatingSealer(newKey, oldKey)
+	must(t, err)
+	after := p.migratedWith(sqlstore.Options{Sealer: rotating})
+	newHash := createRefreshToken(t, after, "new")
+	for name, hash := range map[string][32]byte{"old": oldHash, "new": newHash} {
+		if _, err := after.Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: hash}); err != nil {
+			t.Errorf("RedeemRefreshToken(%s key's record) through the rotating sealer = %v", name, err)
+		}
+	}
+	// The new record is sealed under the new key alone.
+	_, err = p.migratedWith(sqlstore.Options{Sealer: newKey}).Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: newHash})
+	must(t, err)
+	_, err = before.Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: newHash})
+	wantUnreadable(t, "RedeemRefreshToken(new record, old key only)", err)
+
+	other, err := sqlstore.RotatingSealer(testSealer(t), testSealer(t))
+	must(t, err)
+	_, err = p.migratedWith(sqlstore.Options{Sealer: other}).Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: oldHash})
+	wantUnreadable(t, "RedeemRefreshToken(under keys the rotating sealer doesn't hold)", err)
+
+	if _, err := sqlstore.RotatingSealer(nil); err == nil {
+		t.Error("RotatingSealer(nil) = nil error, want an error")
+	}
+	if _, err := sqlstore.RotatingSealer(newKey, nil); err == nil {
+		t.Error("RotatingSealer(current, nil) = nil error, want an error")
+	}
 }

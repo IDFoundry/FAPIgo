@@ -86,7 +86,7 @@ func TestSealedSessions(t *testing.T) {
 		must(t, d.Sessions().Create(ctx, storage.NewSession{State: "a", Record: secretGrant, ExpiresAt: later}))
 		must(t, d.Sessions().Create(ctx, storage.NewSession{State: "b", Record: secretGrant, ExpiresAt: later}))
 		stored := rawSession(t, p, db, "a")
-		if len(stored) == 0 || stored[0] != 2 || bytes.Contains(stored, []byte("user-secret")) {
+		if len(stored) == 0 || stored[0] != 3 || bytes.Contains(stored, []byte("user-secret")) {
 			t.Fatalf("stored session = %q, want it sealed, without the record in the clear", stored)
 		}
 

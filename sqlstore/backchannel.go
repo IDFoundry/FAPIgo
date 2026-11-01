@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -92,12 +93,13 @@ func (s *BackchannelAuthenticationStore) CreateBackchannelAuthentication(ctx con
 	}
 	expires, sweepAfter := nanos(record.ExpiresAt), nanos(record.ExpiresAt.Add(BackchannelExpiredRetention))
 	key, clientID := string(record.AuthReqIDHash[:]), string(record.ClientID)
+	bound := backchannelBound{record.HandleHash[:], record.DeliveryMode, int64(record.PollInterval), expires}
 	err = s.d.writeOne(ctx, func(q querier) error {
-		sealedRecord, err := s.d.seal(blobRef{backchannelTable, recordColumn, key, clientID}, plainRecord)
+		sealedRecord, err := s.d.seal(bound.ref(recordColumn, key, clientID), plainRecord)
 		if err != nil {
 			return err
 		}
-		sealedDecision, err := s.d.seal(blobRef{backchannelTable, decisionColumn, key, clientID}, plainDecision)
+		sealedDecision, err := s.d.seal(bound.ref(decisionColumn, key, clientID), plainDecision)
 		if err != nil {
 			return err
 		}
@@ -118,15 +120,16 @@ func (s *BackchannelAuthenticationStore) LookupBackchannelAuthentication(ctx con
 	var key []byte
 	var clientID string
 	var stored []byte
-	err := s.d.queryRow(ctx, "SELECT auth_req_id_hash, client_id, record FROM {backchannel_authentications} WHERE handle_hash = ?",
-		handleHash[:]).Scan(&key, &clientID, &stored)
+	bound := backchannelBound{handleHash: handleHash[:]}
+	err := s.d.queryRow(ctx, "SELECT auth_req_id_hash, client_id, record, delivery_mode, poll_interval, expires_at FROM {backchannel_authentications} WHERE handle_hash = ?",
+		handleHash[:]).Scan(&key, &clientID, &stored, &bound.deliveryMode, &bound.pollInterval, &bound.expires)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return storage.LookedUpBackchannelAuthentication{}, fmt.Errorf("sqlstore: look up backchannel authentication: %w", notFound("handle"))
 	case err != nil:
 		return storage.LookedUpBackchannelAuthentication{}, unavailable("look up backchannel authentication", err)
 	}
-	record, err := s.openRecord(string(key), clientID, stored)
+	record, err := s.openRecord(bound.ref(recordColumn, string(key), clientID), stored)
 	if err != nil {
 		return storage.LookedUpBackchannelAuthentication{}, fmt.Errorf("sqlstore: look up backchannel authentication: %w", err)
 	}
@@ -152,25 +155,26 @@ func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(ctx con
 	var out storage.DecidedBackchannelAuthentication
 	err = s.d.write(ctx, func(q querier) error {
 		var key []byte
-		var clientID, deliveryMode string
+		var clientID string
 		var stored []byte
-		if err := q.QueryRowContext(ctx, s.d.q("UPDATE {backchannel_authentications} SET status = ?, last_polled_at = CASE WHEN delivery_mode = ? THEN NULL ELSE last_polled_at END WHERE handle_hash = ? AND status = ? RETURNING auth_req_id_hash, client_id, delivery_mode, record"),
-			int(decision.Status), "ping", decision.HandleHash[:], int(storage.BackchannelAuthenticationPending)).Scan(&key, &clientID, &deliveryMode, &stored); err != nil {
+		bound := backchannelBound{handleHash: decision.HandleHash[:]}
+		if err := q.QueryRowContext(ctx, s.d.q("UPDATE {backchannel_authentications} SET status = ?, last_polled_at = CASE WHEN delivery_mode = ? THEN NULL ELSE last_polled_at END WHERE handle_hash = ? AND status = ? RETURNING auth_req_id_hash, client_id, delivery_mode, record, poll_interval, expires_at"),
+			int(decision.Status), "ping", decision.HandleHash[:], int(storage.BackchannelAuthenticationPending)).Scan(&key, &clientID, &bound.deliveryMode, &stored, &bound.pollInterval, &bound.expires); err != nil {
 			return err
 		}
-		sealed, err := s.d.seal(blobRef{backchannelTable, decisionColumn, string(key), clientID}, plainDecision)
+		sealed, err := s.d.seal(bound.ref(decisionColumn, string(key), clientID), plainDecision)
 		if err != nil {
 			return err
 		}
 		if _, err := q.ExecContext(ctx, s.d.q("UPDATE {backchannel_authentications} SET decision = ? WHERE auth_req_id_hash = ?"), sealed, key); err != nil {
 			return err
 		}
-		record, err := s.openRecord(string(key), clientID, stored)
+		record, err := s.openRecord(bound.ref(recordColumn, string(key), clientID), stored)
 		if err != nil {
 			return err
 		}
 		out = storage.DecidedBackchannelAuthentication{
-			ClientID: fapi.ClientID(clientID), DeliveryMode: deliveryMode,
+			ClientID: fapi.ClientID(clientID), DeliveryMode: bound.deliveryMode,
 			ClientNotificationToken: fapi.NewSecret(record.ClientNotificationToken), AuthReqID: record.AuthReqID,
 		}
 		return nil
@@ -201,6 +205,8 @@ func (s *BackchannelAuthenticationStore) whyUndecided(ctx context.Context, handl
 // it.
 type polledRow struct {
 	clientID         string
+	handleHash       []byte
+	deliveryMode     string
 	record, decision []byte
 	status, redeemed int
 	interval         int64
@@ -262,8 +268,8 @@ func (s *BackchannelAuthenticationStore) PollBackchannelAuthentication(ctx conte
 // back; slow_down comes with a nil error, so its poll is recorded.
 func (s *BackchannelAuthenticationStore) pollLocked(ctx context.Context, q querier, poll storage.PollBackchannelAuthentication, refusal *error) (storage.PolledBackchannelAuthentication, error) {
 	var r polledRow
-	if err := q.QueryRowContext(ctx, s.d.q("UPDATE {backchannel_authentications} SET sweep_after = sweep_after WHERE auth_req_id_hash = ? RETURNING client_id, record, decision, status, redeemed, poll_interval, last_polled_at, expires_at"),
-		poll.AuthReqIDHash[:]).Scan(&r.clientID, &r.record, &r.decision, &r.status, &r.redeemed, &r.interval, &r.lastPolled, &r.expires); err != nil {
+	if err := q.QueryRowContext(ctx, s.d.q("UPDATE {backchannel_authentications} SET sweep_after = sweep_after WHERE auth_req_id_hash = ? RETURNING client_id, handle_hash, delivery_mode, record, decision, status, redeemed, poll_interval, last_polled_at, expires_at"),
+		poll.AuthReqIDHash[:]).Scan(&r.clientID, &r.handleHash, &r.deliveryMode, &r.record, &r.decision, &r.status, &r.redeemed, &r.interval, &r.lastPolled, &r.expires); err != nil {
 		return storage.PolledBackchannelAuthentication{}, err
 	}
 	if *refusal = r.refusal(poll); *refusal != nil {
@@ -284,11 +290,12 @@ func (s *BackchannelAuthenticationStore) pollLocked(ctx context.Context, q queri
 
 // polled is what a poll of r, keyed by key, returns.
 func (s *BackchannelAuthenticationStore) polled(key string, r polledRow) (storage.PolledBackchannelAuthentication, error) {
-	record, err := s.openRecord(key, r.clientID, r.record)
+	bound := backchannelBound{r.handleHash, r.deliveryMode, r.interval, r.expires}
+	record, err := s.openRecord(bound.ref(recordColumn, key, r.clientID), r.record)
 	if err != nil {
 		return storage.PolledBackchannelAuthentication{}, err
 	}
-	plain, err := s.d.open(blobRef{backchannelTable, decisionColumn, key, r.clientID}, r.decision)
+	plain, err := s.d.open(bound.ref(decisionColumn, key, r.clientID), r.decision)
 	if err != nil {
 		return storage.PolledBackchannelAuthentication{}, err
 	}
@@ -302,10 +309,26 @@ func (s *BackchannelAuthenticationStore) polled(key string, r polledRow) (storag
 	}, nil
 }
 
-// openRecord opens and decodes the record column of the request keyed
-// by key.
-func (s *BackchannelAuthenticationStore) openRecord(key, clientID string, stored []byte) (backchannelRecord, error) {
-	plain, err := s.d.open(blobRef{backchannelTable, recordColumn, key, clientID}, stored)
+// backchannelBound is what a request's sealed blobs are bound to
+// besides their row's key and client: its row's handle_hash,
+// delivery_mode, poll_interval and expires_at columns, which never
+// change once it's created.
+type backchannelBound struct {
+	handleHash   []byte
+	deliveryMode string
+	pollInterval int64
+	expires      int64
+}
+
+// ref names the column of the request keyed by key, client clientID's,
+// that b binds.
+func (b backchannelBound) ref(column, key, clientID string) blobRef {
+	return blobRef{backchannelTable, column, key, clientID, b.expires, []string{string(b.handleHash), b.deliveryMode, strconv.FormatInt(b.pollInterval, 10)}}
+}
+
+// openRecord opens and decodes stored, the record column ref names.
+func (s *BackchannelAuthenticationStore) openRecord(ref blobRef, stored []byte) (backchannelRecord, error) {
+	plain, err := s.d.open(ref, stored)
 	if err != nil {
 		return backchannelRecord{}, err
 	}

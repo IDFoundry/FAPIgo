@@ -34,7 +34,7 @@ func (s *SessionStore) Create(ctx context.Context, session storage.NewSession) e
 	}
 	expires := nanos(session.ExpiresAt)
 	err := s.d.writeOne(ctx, func(q querier) error {
-		record, err := s.d.seal(blobRef{sessionsTable, recordColumn, session.State, ""}, session.Record)
+		record, err := s.d.seal(blobRef{sessionsTable, recordColumn, session.State, "", expires, nil}, session.Record)
 		if err != nil {
 			return err
 		}
@@ -65,7 +65,7 @@ func (s *SessionStore) Consume(ctx context.Context, consumption storage.SessionC
 			Scan(&stored, &expires); err != nil {
 			return err
 		}
-		record, err := s.d.open(blobRef{sessionsTable, recordColumn, consumption.State, ""}, stored)
+		record, err := s.d.open(blobRef{sessionsTable, recordColumn, consumption.State, "", expires, nil}, stored)
 		if err != nil {
 			return err
 		}

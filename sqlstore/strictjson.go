@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -148,57 +147,47 @@ func elemType(t reflect.Type) reflect.Type {
 // no \u escape of an unpaired UTF-16 surrogate: the strings encoding/json
 // would otherwise alter, replacing each with U+FFFD (RFC 8259 §8.1,
 // §8.2). A backslash only appears inside a JSON string, so raw is
-// scanned for escapes without parsing it.
+// scanned escape by escape without parsing it.
 func decodesLosslessly(raw []byte) bool {
 	if !utf8.Valid(raw) {
 		return false
 	}
-	for i := 0; i < len(raw); i++ {
-		if raw[i] != '\\' {
+	high := false // the escape before was a high surrogate, which must be followed directly by a low one
+	for rest := raw; ; {
+		i := bytes.IndexByte(rest, '\\')
+		switch {
+		case i < 0:
+			return !high
+		case high && i > 0:
+			return false
+		}
+		escape := rest[i+1:]
+		if len(escape) == 0 || escape[0] != 'u' {
+			if high {
+				return false
+			}
+			rest = escape[min(1, len(escape)):] // past the escaped character
 			continue
 		}
-		i++ // the escaped character
-		if i >= len(raw) || raw[i] != 'u' {
-			continue
-		}
-		n, ok := unicodeEscapeLength(raw, i-1)
+		r, ok := escapedRune(escape)
 		if !ok {
 			return false
 		}
-		i += n - 2 // past the escape (or surrogate pair); the loop adds one
+		rest = escape[5:]
+		isHigh, isLow := r >= 0xd800 && r < 0xdc00, r >= 0xdc00 && r <= 0xdfff
+		if isLow != high {
+			return false // a low surrogate on its own, or a high one followed by anything else
+		}
+		high = isHigh
 	}
-	return true
 }
 
-// unicodeEscapeLength returns the length of the \u escape starting at
-// raw[i] (its backslash), or of the surrogate pair it starts, and
-// whether it decodes as written: a high surrogate must be followed
-// directly by an escaped low one, and a low one can't stand alone.
-func unicodeEscapeLength(raw []byte, i int) (int, bool) {
-	r, ok := hexRune(raw, i+2)
-	switch {
-	case !ok:
-		return 0, false
-	case !utf16.IsSurrogate(r):
-		return 6, true
-	case r >= 0xdc00:
-		return 0, false // a low surrogate on its own
-	}
-	low, ok := hexRune(raw, i+8)
-	if !ok || raw[i+6] != '\\' || raw[i+7] != 'u' || low < 0xdc00 || low > 0xdfff {
+// escapedRune reads escape, the text after a backslash starting with u,
+// as its four hex digits' code unit.
+func escapedRune(escape []byte) (rune, bool) {
+	if len(escape) < 5 {
 		return 0, false
 	}
-	return 12, true
-}
-
-// hexRune reads the four hex digits of a \u escape starting at raw[i].
-func hexRune(raw []byte, i int) (rune, bool) {
-	if i < 0 || i+4 > len(raw) {
-		return 0, false
-	}
-	n, err := strconv.ParseUint(string(raw[i:i+4]), 16, 16)
-	if err != nil {
-		return 0, false
-	}
-	return rune(n), true
+	n, err := strconv.ParseUint(string(escape[1:5]), 16, 16)
+	return rune(n), err == nil
 }

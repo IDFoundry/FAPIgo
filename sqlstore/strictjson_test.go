@@ -33,6 +33,9 @@ func TestCheckStrictJSON(t *testing.T) {
 		`{"a":"\ud800"}`:                                                                   false,
 		`{"a":"\udc00"}`:                                                                   false,
 		`{"a":"\ud83dx"}`:                                                                  false,
+		`{"a":"\ud83d\ud83d"}`:                                                             false,
+		`{"a":"\ud83d\n"}`:                                                                 false,
+		`{"a":"x\ud83d"}`:                                                                  false,
 		`{"a":"\u00"}`:                                                                     false,
 		"{\"a\":\"\xff\"}":                                                                 false,
 	} {

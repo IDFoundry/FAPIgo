@@ -1,16 +1,17 @@
 name: govulncheck
 
-# Scans this module for known vulnerabilities under the Go version its
-# go.mod declares: the oldest Go anyone using it may build with, so the
-# version every finding matters for. This module has no third-party
-# dependencies (see go.mod), so a finding is a standard-library CVE, and
-# the fix is raising go.mod's go directive (here and in every
-# examples/*/go.mod and sqlstore/go.mod) to a release that has it. That a newer Go is
-# already fixed says nothing about what this module lets its users build
-# with, so this deliberately doesn't scan under the latest release.
+# Scans this module, sqlstore/ and each examples/ module for known
+# vulnerabilities under the Go version its go.mod declares: the oldest
+# Go anyone using it may build with, so the version every finding
+# matters for. This module has no third-party dependencies (see go.mod),
+# so a finding here is a standard-library CVE, and the fix is raising
+# go.mod's go directive (here and in every examples/*/go.mod and
+# sqlstore/go.mod) to a release that has it. That a newer Go is already
+# fixed says nothing about what this module lets its users build with,
+# so this deliberately doesn't scan under the latest release.
 #
-# Runs on every pull request and push to main (as the required
-# "govulncheck" check), and daily, because an advisory is often
+# Runs on every pull request and push to main (the main job as the
+# required "govulncheck" check), and daily, because an advisory is often
 # published while nothing changes here: the scheduled run is what turns
 # red first.
 
@@ -24,6 +25,13 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # The govulncheck release the sqlstore and examples jobs run (the
+  # action the main job uses installs its own). Raise it by hand: it's
+  # the scanner only, and the vulnerability database it reads is always
+  # current.
+  GOVULNCHECK_VERSION: v1.9.0
 
 jobs:
   govulncheck:
@@ -41,17 +49,60 @@ jobs:
           go-version-file: go.mod
           check-latest: false
 
-  # sqlstore/ is a module of its own, with third-party dependencies (its
-  # tests' database drivers), so a finding there may be one of theirs:
-  # the fix is then raising it in sqlstore/go.mod. Same Go version
+  # sqlstore/ is a module of its own whose third-party dependencies are
+  # its tests' database drivers: imported only from _test.go files, so
+  # only -test scans them (without it the scan never reaches a driver,
+  # or the golang.org/x modules they pull in). A finding there is the
+  # fix of raising that dependency in sqlstore/go.mod. govulncheck-action
+  # passes its package input as a single argument, so it can't add -test:
+  # govulncheck runs directly instead, at a pinned release (go run
+  # verifies it against the checksum database). Same Go version
   # discipline as above, from sqlstore/go.mod.
   govulncheck-sqlstore:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sqlstore
     steps:
-      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-input: ''
           go-version-file: sqlstore/go.mod
           check-latest: false
           cache-dependency-path: sqlstore/go.sum
-          work-dir: sqlstore
+
+      - name: go version
+        run: go version
+
+      - name: govulncheck -test
+        run: go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" -test ./...
+
+  # Each example, and the demokit package they share, is a module of its
+  # own (ci.yml's examples job), and one at least (linked-accounts, a
+  # SQLite driver through sqlstore) takes third-party dependencies, so
+  # each is scanned like sqlstore above: test code included, under its
+  # own go.mod's Go version.
+  govulncheck-examples:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [examples/internal/demokit, examples/federated-union, examples/decoupled-checkout, examples/payment-consent, examples/payroll-run, examples/identity-check, examples/linked-accounts]
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          check-latest: false
+          cache-dependency-path: ${{ matrix.module }}/go.mod
+
+      - name: go version
+        run: go version
+
+      - name: govulncheck -test
+        run: go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" -test ./...

@@ -44,6 +44,20 @@ updates:
     schedule:
       interval: weekly
 
+  # The PostgreSQL image ci.yml's sqlstore job runs as a service
+  # container. Dependabot can't update a workflow's service image, so
+  # .github/postgres/Dockerfile carries the same pin for it to move, and
+  # ci.yml's lint job fails until the new digest is copied to ci.yml.
+  # Only the digest and minor tags move here: which PostgreSQL major the
+  # stores are tested against is a decision, not a routine update.
+  - package-ecosystem: docker
+    directory: /.github/postgres
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
+
   # The conformance suite scripts' Python packages
   # (conformance/requirements-suite.in, compiled with hashes to
   # requirements-suite.txt). Test tooling only: nothing here ships.

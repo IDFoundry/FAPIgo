@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.68.0](https://github.com/IDFoundry/FAPIgo/compare/v0.67.2...v0.68.0) (2026-11-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** X5CAttesterChain refuses an attestation whose x5c carries, below the signing certificate, a certificate with the subject and public key of the anchor a verified chain ends at, even when it is not byte-identical to the configured anchor. Send x5c as the signing certificate and its intermediates only. See UPGRADING.md for v0.68.0.
+* **server:** X5CAttesterChain with the default LeafPolicy refuses an attestation whose signing certificate lists the ISO/IEC 18013-5 mDL JWS or VICAL signer, ISO/IEC TS 23220-4 mdoc document signer or reader, RFC 9336 document signing, or RFC 6187 SSH extended key usage, or that chains only through a CA restricted to such roles. Issue attesters a dedicated certificate, or set LeafPolicy to AnyAttesterLeaf or your own AttesterLeafPolicyFunc. See UPGRADING.md for v0.68.0.
+
+### Bug Fixes
+
+* **client:** send authorization_details without HTML escaping ([9988f69](https://github.com/IDFoundry/FAPIgo/commit/9988f6945a5b08a272b8c1001b13aa51f5f3ed33))
+* **extension:** encode RARSet output without HTML escaping ([7b25c0c](https://github.com/IDFoundry/FAPIgo/commit/7b25c0cf632e56c6e8b02c4eff6676a1eaeda7e2))
+* **resource:** refuse typed-nil access-token key sources and stores ([4e31c30](https://github.com/IDFoundry/FAPIgo/commit/4e31c30f63740c171e605838262478bd8709bb33))
+* **server:** refuse a re-issued or cross-signed anchor in attester x5c ([6ce2b00](https://github.com/IDFoundry/FAPIgo/commit/6ce2b00689be0c1fa4d862b5e5af88dc9fda44e9))
+* **server:** refuse more signing roles in DefaultAttesterLeafPolicy ([db7e273](https://github.com/IDFoundry/FAPIgo/commit/db7e2736991e871b8101d5b4c34d00e201406c00))
+* **server:** refuse typed-nil trust fields before validating them ([0403b7e](https://github.com/IDFoundry/FAPIgo/commit/0403b7e855213c3d6a09b516970981baa551a59c))
+
 ## [0.67.2](https://github.com/IDFoundry/FAPIgo/compare/v0.67.1...v0.67.2) (2026-10-31)
 
 

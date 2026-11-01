@@ -161,10 +161,16 @@ For a deployment keeping its stores in the
   revocations share the server's prefix (and `Sealer`); a resource
   server's DPoP nonces get a prefix of their own; servers with
   different issuers never share one.
+- [ ] *(yours)* **A least-privilege database role for each resource
+  server:** `SELECT` on the server's `access_tokens`, `revocations` and
+  `schema_migrations`, `SELECT`/`INSERT` on `replay`, and its own
+  prefix's tables; only the authorization server sweeps the tables they
+  share.
 - [ ] *(yours)* **A sealing key kept outside the database** and its
-  backups (`Options.Sealer`, `AESGCMSealer`), with a rotation plan: a
-  `Sealer` of your own that opens with the old and new keys until the
-  old one's records expire.
+  backups (`Options.Sealer`, `AESGCMSealer`), with a rotation plan:
+  `RotatingSealer`, which opens with the old and new keys until the old
+  one's records expire, well before a key's 2^32 seals (weeks, on a busy
+  server).
 - [ ] **`ReadUnsealed` only while migrating** an existing database to
   sealing: deploy with it, run `SealRecords`, then deploy without it.
 - [ ] *(yours)* **Write access to the database as tight as read

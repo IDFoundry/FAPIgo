@@ -10,7 +10,7 @@ import (
 var sweptTables = []string{
 	"par_requests",                // NewPARRecord.ExpiresAt, or a later interaction's
 	"interactions",                // BeginAuthorizationTransaction.HandleExpiresAt
-	"authorization_codes",         // NewAuthorizationCode.ExpiresAt, or a later issued token's
+	"authorization_codes",         // NewAuthorizationCode.ExpiresAt; once redeemed, + RedeemedCodeRetention, or a later issued token's
 	"refresh_tokens",              // NewRefreshToken.ExpiresAt
 	"replay",                      // ReplayUse.ExpiresAt
 	"dpop_nonces",                 // NonceIssuance.ExpiresAt
@@ -29,7 +29,9 @@ var sweptTables = []string{
 // A row is kept until everything that may still need it has expired: a
 // pushed request until the last interaction begun from it, a redeemed
 // authorization code until the tokens its redemption issued (so that
-// reusing the code still revokes them, RFC 6749 §4.1.2), and a CIBA
+// reusing the code still revokes them, RFC 6749 §4.1.2) and at least
+// RedeemedCodeRetention past its own expiry (so that it's still there
+// when the server records those tokens), and a CIBA
 // request until BackchannelExpiredRetention after it expires (so that a
 // late poll is told it expired).
 //

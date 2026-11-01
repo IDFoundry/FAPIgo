@@ -51,7 +51,7 @@ func (s *AccessTokenStore) CreateAccessToken(ctx context.Context, tok storage.Ne
 	}
 	expires := nanos(tok.ExpiresAt)
 	err = s.d.writeOne(ctx, func(q querier) error {
-		record, err := s.d.seal(blobRef{"access_tokens", recordColumn, string(tok.TokenHash[:]), string(tok.ClientID)}, plain)
+		record, err := s.d.seal(blobRef{"access_tokens", recordColumn, string(tok.TokenHash[:]), string(tok.ClientID), expires, nil}, plain)
 		if err != nil {
 			return err
 		}
@@ -80,7 +80,7 @@ func (s *AccessTokenStore) LookupAccessToken(ctx context.Context, lookup storage
 	case err != nil:
 		return storage.LookedUpAccessToken{}, unavailable("look up access token", err)
 	}
-	out, err := s.d.decodeAccessToken(string(lookup.TokenHash[:]), clientID, stored)
+	out, err := s.d.decodeAccessToken(string(lookup.TokenHash[:]), clientID, expires, stored)
 	if err != nil {
 		return storage.LookedUpAccessToken{}, fmt.Errorf("sqlstore: look up access token: %w", err)
 	}
@@ -89,9 +89,9 @@ func (s *AccessTokenStore) LookupAccessToken(ctx context.Context, lookup storage
 }
 
 // decodeAccessToken opens and decodes the record column of client
-// clientID's access token keyed by key.
-func (d *DB) decodeAccessToken(key, clientID string, stored []byte) (storage.LookedUpAccessToken, error) {
-	plain, err := d.open(blobRef{"access_tokens", recordColumn, key, clientID}, stored)
+// clientID's access token keyed by key, expiring at expires.
+func (d *DB) decodeAccessToken(key, clientID string, expires int64, stored []byte) (storage.LookedUpAccessToken, error) {
+	plain, err := d.open(blobRef{"access_tokens", recordColumn, key, clientID, expires, nil}, stored)
 	if err != nil {
 		return storage.LookedUpAccessToken{}, err
 	}

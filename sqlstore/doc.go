@@ -63,6 +63,19 @@
 // (serverresource.NewVerifier refuses the server's own db.Nonces(), but
 // can't tell two DBs with one TablePrefix apart.)
 //
+// A resource server needs far less of the database than the server
+// does, and is often run in more places, so give it a database role of
+// its own with just that, rather than the server's: SELECT on the
+// server's access_tokens, revocations and schema_migrations (for
+// CheckSchema) tables, SELECT and INSERT on its replay table, and its
+// own TablePrefix's tables (which its Migrate creates, so that once,
+// with CREATE on the schema, or by a deployment step). With the
+// server's role, a resource server that's compromised could delete a
+// revocation or rewrite the server's codes and refresh tokens. Only the
+// server sweeps the tables they share: a resource server runs Sweep on
+// its own DB alone, since a Sweep with a clock ahead of the server's
+// would drop replay digests and revocations the server still needs.
+//
 // For SQLite, with a driver such as modernc.org/sqlite (pure Go, no
 // cgo), open the file in WAL mode with a busy timeout, so readers don't
 // wait on writers and a connection waits its turn for the write lock
@@ -70,13 +83,23 @@
 //
 //	sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
 //
+// List busy_timeout first, so it applies to the pragmas after it. On a
+// new file, the first connection switches the file to WAL mode (which
+// lasts) as it opens, holding the write lock without waiting the busy
+// timeout, so a connection another process opens at that moment fails
+// with SQLITE_BUSY. Migrate retries that, so every process can run it at
+// startup; but run Migrate before anything else uses a new file — or
+// create and migrate the file once, from a deployment step, before
+// starting the processes that share it.
+//
 // # Migrations
 //
 // The schema is versioned, its migrations embedded in the package.
 // Nothing migrates implicitly — New doesn't touch the database: Migrate
 // applies the migrations the database lacks, each in a transaction,
 // once between any number of processes running it at once (a Postgres
-// advisory lock; SQLite's write lock). Run it from a deployment step
+// advisory lock; SQLite's write lock, waiting out a new file's switch
+// to WAL mode — see Setup). Run it from a deployment step
 // with a role that may create tables, or at startup; CheckSchema, at
 // startup, fails fast where the schema is behind. Both refuse a schema
 // a newer release of this package has migrated further, whose changes
@@ -157,8 +180,16 @@
 // checks). Each is bound, as AEAD additional data, to its table,
 // column, row key, client_id (the empty string for a session, whose
 // row has none) and the DB's TablePrefix, so a sealed blob copied to
-// another row, client, table or prefix fails to open. A sealed blob starts with a format
-// byte (2) that no JSON record starts with.
+// another row, client, table or prefix fails to open; and to the
+// columns of its row that change what it means but never change once
+// it's written: its expires_at, an interaction's reference (the pushed
+// request completing it consumes), and a CIBA request's handle_hash,
+// delivery_mode and poll_interval. So a database writer without the key
+// can't make a token or code outlive its expiry, have a user's
+// approval through one CIBA handle land on another request, or have an
+// interaction consume another pushed request: the blob no longer
+// opens. A sealed blob starts with a format byte (3) that no JSON
+// record starts with.
 //
 // Not sealed, since the stores look rows up, consume and sweep them by
 // them: keys and digests (which reveal nothing of the values they're
@@ -168,10 +199,26 @@
 // pairwise subjects (the issuer, sector, internal subject and body are
 // every lookup's keys), and the clients table (public client metadata,
 // which the operator edits with SQL; it holds no secret). Sealing gives
-// confidentiality, and integrity for each blob; it doesn't make the
-// database tamper-proof: anyone who can write to it can still delete
-// rows, change those columns, or put back a blob the row held before.
+// confidentiality, and integrity for each blob and the columns bound to
+// it; it doesn't make the database tamper-proof: anyone who can write
+// to it can still delete rows (a revocation, or a pending request),
+// change the columns that do change — whether a code is redeemed, a
+// pushed request consumed, a CIBA request's status — or put back a row
+// it held before, such as a refresh token deleted when it was revoked.
 // Keep write access to the database as tight as read access.
+//
+// sqlstore v0.2 and earlier sealed blobs with format byte 2 and
+// additional data that bound neither the expiry nor those other
+// columns. A store still opens them, without that binding, so a
+// database upgraded from v0.2 keeps working. Run DB.SealRecords once
+// after upgrading every instance: it re-seals them in the current
+// format, binding them like the rest. (Until it has, or they've
+// expired, a database writer can still change those columns of their
+// rows.) A store of v0.2 can't open a blob sealed in the current format,
+// so upgrade every instance sharing a database together: a record one
+// upgraded instance seals is unreadable (an outage) to one that isn't
+// yet, and rolling back to v0.2 makes the records sealed since
+// unreadable.
 //
 // With a Sealer, a store refuses a blob that isn't sealed, and without
 // one, a sealed blob: either is an error wrapping ErrRecordFormat and
@@ -181,16 +228,21 @@
 // run DB.SealRecords, which seals them in place, then deploy without
 // ReadUnsealed: while it's set, anyone who can write to the database
 // could plant a blob the Sealer never sealed, so it's for that
-// migration only.
+// migration only. SealRecords seals every unsealed blob it finds, one
+// planted before it ran included, which from then on opens as if the
+// server had written it: run it on a database whose contents you
+// trust.
 //
 // Keep the key outside the database — in a secrets manager or a KMS —
 // and away from its backups, which is what makes them unreadable
 // without it. Losing it makes every sealed record unreadable: clients
 // authorize again, as they would once the records expired.
 // Changing it does the same for the records sealed under the old one;
-// to rotate without that, wrap two keys in a Sealer of your own that
-// seals with the new key and opens with either, until the longest-lived
-// record (a refresh token) sealed under the old one expires. A resource
+// to rotate without that, use RotatingSealer, which seals with the new
+// key and opens with either, until the longest-lived record (a refresh
+// token) sealed under the old one expires. AESGCMSealer's random nonces
+// allow 2^32 seals per key (NIST SP 800-38D), which a busy server can
+// reach in weeks: rotate before then — see AESGCMSealer. A resource
 // server reading opaque access tokens needs the same Sealer.
 //
 // # Errors
@@ -214,9 +266,13 @@
 //     are committed to the database, the consumes above are atomic
 //     statements or row-locked transactions, and every instance sharing
 //     the database sees the same rows. Not SerializableRedemption: the
-//     stores run at the database's default READ COMMITTED isolation,
-//     relying on row locks for each key rather than on SERIALIZABLE
-//     isolation between keys.
+//     stores write at READ COMMITTED isolation, relying on row locks for
+//     each key rather than on SERIALIZABLE isolation between keys. Each
+//     write is a transaction that asks for READ COMMITTED explicitly, so
+//     a database, role or DSN whose default_transaction_isolation is
+//     REPEATABLE READ or SERIALIZABLE doesn't turn a lost race (a reused
+//     code, a consumed session) into a serialization failure, answered
+//     as an outage.
 //   - SQLite: Durable, AtomicConsume and SerializableRedemption, since
 //     SQLite's transactions are serializable. Not
 //     CrossInstanceConsistent: a database file on one host can't back a
@@ -256,9 +312,14 @@
 // display with name, logo_uri, policy_uri and tos_uri, and so on); each
 // enumeration is its wire value (what its type's String returns and its
 // Parse function reads: "private_key_jwt", "PS256", "pairwise"); each
-// URL a string. An omitted member is the field's zero value. A member
-// the version doesn't define is refused, so a misspelt one can't be
-// silently dropped. MarshalClientConfig writes the document from a
+// URL a string. An omitted member is the field's zero value. Nothing in
+// the document is silently dropped or altered: a member the version
+// doesn't define is refused, as are a member given twice in one object
+// (encoding/json would keep the last; a reviewer, or another JSON
+// parser, may read the first), a member spelt in another case
+// ("ALLOWED_SCOPES", which encoding/json would read as allowed_scopes),
+// and text that isn't valid UTF-8 or escapes an unpaired surrogate
+// (which would read back as U+FFFD). MarshalClientConfig writes the document from a
 // RegisteredClientConfig, ParseClientConfig reads it, and Put and
 // Delete manage rows, Put refusing a configuration
 // storage.NewRegisteredClient refuses. ResolveClient builds the client
@@ -276,7 +337,9 @@
 // still need it: a pushed request until the last interaction begun from
 // it expires, a redeemed authorization code until the tokens its
 // redemption issued expire (so reusing the code still revokes them),
-// and a revocation until the latest expiry it was recorded with. An
+// and at least RedeemedCodeRetention (an hour) past its own expiry, so
+// that a Sweep running while the server issues those tokens can't
+// remove it before the server records them, and a revocation until the latest expiry it was recorded with. An
 // opaque access token is kept until it expires, and a CIBA request
 // until BackchannelExpiredRetention (an hour) after it does, so a
 // client that polls it late gets expired_token rather than an unknown

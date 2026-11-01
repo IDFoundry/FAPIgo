@@ -38,7 +38,7 @@ func (s *TransactionStore) CreatePAR(ctx context.Context, record storage.NewPARR
 	}
 	expires := nanos(record.ExpiresAt)
 	err := s.d.writeOne(ctx, func(q querier) error {
-		request, err := s.d.seal(blobRef{"par_requests", requestColumn, record.Reference, string(record.ClientID)}, record.Request)
+		request, err := s.d.seal(blobRef{"par_requests", requestColumn, record.Reference, string(record.ClientID), expires, nil}, record.Request)
 		if err != nil {
 			return err
 		}
@@ -75,11 +75,11 @@ func (s *TransactionStore) BeginAuthorization(ctx context.Context, txn storage.B
 			return err
 		}
 		// The interaction's copy is sealed for its own row.
-		plain, err := s.d.open(blobRef{"par_requests", requestColumn, txn.Reference, clientID}, request)
+		plain, err := s.d.open(blobRef{"par_requests", requestColumn, txn.Reference, clientID, expires, nil}, request)
 		if err != nil {
 			return err
 		}
-		copied, err := s.d.seal(blobRef{"interactions", requestColumn, txn.Handle, clientID}, plain)
+		copied, err := s.d.seal(interactionRef(txn.Handle, clientID, txn.Reference, handleExpires), plain)
 		if err != nil {
 			return err
 		}
@@ -128,7 +128,7 @@ func (s *TransactionStore) CompleteAuthorization(ctx context.Context, txn storag
 		if n != 1 {
 			return errRequestURIConsumed
 		}
-		plain, err := s.d.open(blobRef{"interactions", requestColumn, txn.Handle, clientID}, request)
+		plain, err := s.d.open(interactionRef(txn.Handle, clientID, reference, expires), request)
 		if err != nil {
 			return err
 		}

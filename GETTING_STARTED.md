@@ -642,20 +642,31 @@ What to decide when you deploy it:
   client sessions), each bound to its row, so a copy of the database
   reveals none of them. Keep the key outside the database and its
   backups; losing it makes sealed records unreadable, so clients
-  authorize again. To rotate it, use a `Sealer` of your own that seals
-  with the new key and opens with either, until the longest-lived
-  record sealed under the old one (a refresh token) expires. To start
-  sealing a database already in use: deploy with `Sealer` and
-  `ReadUnsealed: true`, run `db.SealRecords(ctx)` once, then deploy
-  again without `ReadUnsealed`, which while set lets anyone who can
-  write to the database plant a record the sealer never sealed.
+  authorize again. `AESGCMSealer` allows 2^32 seals per key (random
+  nonces, NIST SP 800-38D), which a busy server reaches in weeks, so
+  rotate the key before then with `sqlstore.RotatingSealer(newSealer,
+  oldSealer)`: it seals with the new key and opens with either, until
+  the longest-lived record sealed under the old one (a refresh token)
+  expires. To start sealing a database already in use: deploy with
+  `Sealer` and `ReadUnsealed: true`, run `db.SealRecords(ctx)` once,
+  then deploy again without `ReadUnsealed`, which while set lets anyone
+  who can write to the database plant a record the sealer never sealed.
+  `SealRecords` seals whatever unsealed records it finds, so run it on a
+  database whose contents you trust. After upgrading from sqlstore v0.2,
+  run it once too: it re-seals the records v0.2 sealed so that they're
+  bound to their expiry, as new ones are.
 - **Resource servers.** One reading opaque access tokens or revocations
   (step 7) uses the server's tables: `AccessTokens()`, `Revocation()`
   and `Replay()` through a DB with the same `*sql.DB` (or database),
   `TablePrefix` and `Sealer` — `serverresource.NewVerifier` does that
   for you from the server's `Dependencies`. Its DPoP nonce store must
   not be the server's (RFC 9449 keeps the two roles' nonces apart):
-  give it `Nonces()` from a DB with a prefix of its own.
+  give it `Nonces()` from a DB with a prefix of its own. Give it a
+  database role of its own, too: `SELECT` on the server's
+  `access_tokens`, `revocations` and `schema_migrations` tables,
+  `SELECT` and `INSERT` on `replay`, and its own prefix's tables — not
+  the server's role, which can delete revocations and rewrite codes. Only
+  the server runs `Sweep` on the tables they share.
 
   ```go
   rsDB, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{TablePrefix: "fapigo_rs_"})

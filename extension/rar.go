@@ -52,6 +52,8 @@ type RARDefinition[T any] struct {
 	// choosing a value that, with a policy that grants what was requested
 	// (such as server.AllowRequestedAuthorizationDetails) and the default
 	// exact-match ValidateGrant, would otherwise survive into the grant.
+	// A definition with such a member almost always needs
+	// ValidateNarrowing too: see its doc.
 	ValidateRequest func(T) error
 
 	// ValidateGrant, if non-nil, decides whether a granted detail object
@@ -67,6 +69,17 @@ type RARDefinition[T any] struct {
 	// consent, a server's RARPolicy decision. A client asking at the
 	// token endpoint for less than its grant holds is judged by
 	// ValidateNarrowing instead, falling back to ValidateGrant.
+	//
+	// The hook sees requested and granted decoded into T, so it can't
+	// tell a member that's absent, or null, from one holding T's zero
+	// value: a nil "actions" slice passes a "subset of the requested
+	// actions" check, while a resource server may read the absent member
+	// as no restriction at all. Floating-point members are compared
+	// after rounding to float64. Where that matters, make Validate
+	// require the member, or give it a pointer, json.Number or
+	// json.RawMessage type in T, so the hook sees what was sent. The
+	// same holds for ValidateNarrowing, where the client chooses the
+	// narrowed bytes the access token then carries.
 	ValidateGrant func(requested, granted T) error
 
 	// ValidateNarrowing, if non-nil, decides whether a detail object a
@@ -86,7 +99,8 @@ type RARDefinition[T any] struct {
 	// Without ValidateNarrowing, a grant that holds no such member would
 	// let a token request add one of the client's own choosing, since
 	// ValidateGrant can't tell a client's narrowing from the server's
-	// grant.
+	// grant: the fallback fails open at the token endpoint. A definition
+	// with a server-minted member must set ValidateNarrowing.
 	ValidateNarrowing func(granted, narrowed T) error
 }
 
@@ -236,8 +250,14 @@ func RARGet[T any](values RARValues, def RARDefinition[T]) ([]RARDetail[T], erro
 // validate data an authorization server doesn't trust from a client:
 // RARSet runs on the sending side, encoding data the caller just
 // constructed itself, so there is nothing to validate against.
+//
+// RARSet doesn't HTML-escape '<', '>' and '&' as json.Marshal does.
+// That escaping grows each to six bytes, so details a consent page
+// reads with RARGet and grants re-encoded with RARSet could grow past
+// the MaxBytesPerObject and registry bounds the request was validated
+// within, and be refused when the grant is completed.
 func RARSet[T any](def RARDefinition[T], v T) (json.RawMessage, error) {
-	encoded, err := json.Marshal(v)
+	encoded, err := strictjson.MarshalUnescaped(v)
 	if err != nil {
 		return nil, fmt.Errorf("extension: authorization_details type %q: %w", def.Type, err)
 	}
@@ -251,14 +271,14 @@ func RARSet[T any](def RARDefinition[T], v T) (json.RawMessage, error) {
 		// object either.
 		return nil, fmt.Errorf("extension: authorization_details type %q: value must encode as a JSON object", def.Type)
 	}
-	typeValue, _ := json.Marshal(def.Type) // marshaling a string cannot fail
+	typeValue, _ := strictjson.MarshalUnescaped(def.Type) // marshaling a string cannot fail
 	obj["type"] = typeValue
 	// Every value in obj is already valid JSON — either captured verbatim
 	// by the Unmarshal above (each json.RawMessage decode target only
 	// ever holds one already-well-formed sub-value) or typeValue,
 	// freshly marshaled just above — so re-marshaling the map cannot
 	// fail.
-	out, _ := json.Marshal(obj)
+	out, _ := strictjson.MarshalUnescaped(obj)
 	return out, nil
 }
 
@@ -432,6 +452,13 @@ func (r *RARRegistry) ValidateGrant(requested, granted RARValues) error {
 // granted object it's matched against, falling back to its ValidateGrant
 // hook, then to exact match. Use it rather than ValidateGrant wherever the
 // client, not the authorization server, chooses the narrower objects.
+//
+// Matching is greedy in array order, as ValidateGrant's is, and here the
+// client chooses that order: with a hook that accepts more than an exact
+// match (a lower amount, say), narrowed objects in one order may be
+// refused while the same objects in another order are accepted. It never
+// accepts a narrowing that a matcher trying every assignment would
+// refuse: an accepted narrowing is one valid assignment.
 //
 // Like ValidateGrant's granted, narrowed must already have been produced
 // by this same registry's own Parse.

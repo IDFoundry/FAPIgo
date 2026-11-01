@@ -117,6 +117,9 @@ func (r RegisteredAttesterKeys) validate() error {
 	if r.Keys == nil {
 		return errors.New("server: dependencies: attester trust: RegisteredAttesterKeys needs Keys, the attesters' own key source (e.g. keys.StaticAttesterKeys)")
 	}
+	if found, ok := depcheck.FindTypedNil(r, map[string]string{"Keys": "Keys"}); ok {
+		return fmt.Errorf("server: dependencies: attester trust: RegisteredAttesterKeys.%s is a nil %s", found.Name, found.Type)
+	}
 	return nil
 }
 
@@ -273,13 +276,15 @@ func (c X5CAttesterChain) validate() error {
 	if c.Revocation == nil {
 		return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.Revocation is required (pass ClientCertificateCRLs{...} or NoClientCertificateRevocationCheck{} to explicitly decline)")
 	}
+	// Before Revocation's own validate: a typed nil there (a nil
+	// *ClientCertificateCRLs) would panic in it.
+	if found, ok := depcheck.FindTypedNil(c, x5cAttesterChainFieldNames); ok {
+		return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.%s is a nil %s", found.Name, found.Type)
+	}
 	if v, ok := c.Revocation.(interface{ validate() error }); ok {
 		if err := v.validate(); err != nil {
 			return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.Revocation: %w", err)
 		}
-	}
-	if found, ok := depcheck.FindTypedNil(c, x5cAttesterChainFieldNames); ok {
-		return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.%s is a nil %s", found.Name, found.Type)
 	}
 	switch c.IssuerBinding {
 	case AttesterIssuerInCertificate, AttesterIssuerByTrustAnchors, AttesterIssuerBoundToAnchor:

@@ -445,6 +445,22 @@ func TestRARSetRoundTripsThroughRegistryParseAndRARGet(t *testing.T) {
 	}
 }
 
+// TestRARSetDoesNotEscapeHTML: RARSet keeps '<', '>' and '&' as they
+// are, in the value's members and in def.Type alike, rather than growing
+// each to a six-byte \u003c-style escape as json.Marshal does — an
+// object read with RARGet and re-encoded with RARSet must stay within
+// the bounds it was validated against.
+func TestRARSetDoesNotEscapeHTML(t *testing.T) {
+	def := extension.RARDefinition[bareInstructedAmount]{Type: "a<b>&c", MaxObjects: 1, MaxBytesPerObject: 128}
+	raw, err := extension.RARSet(def, bareInstructedAmount{InstructedAmt: "<1&2>"})
+	if err != nil {
+		t.Fatalf("RARSet: %v", err)
+	}
+	if want := `{"instructed_amount":"<1&2>","type":"a<b>&c"}`; string(raw) != want {
+		t.Fatalf("RARSet = %s, want %s", raw, want)
+	}
+}
+
 func TestRARSetRejectsNonObjectValue(t *testing.T) {
 	def := extension.RARDefinition[string]{Type: "payment_initiation", MaxObjects: 1, MaxBytesPerObject: 128}
 	if _, err := extension.RARSet(def, "not an object"); err == nil {

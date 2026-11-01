@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/idfoundry/fapigo/internal/depcheck"
 )
 
 // ClientCertificateTrust decides how chain-of-trust for a client
@@ -141,6 +143,11 @@ func (t TrustedClientCAs) validate() error {
 	}
 	if t.Revocation == nil {
 		return errors.New("trusted client CAs: revocation is required (pass ClientCertificateCRLs{...} or NoClientCertificateRevocationCheck{} to explicitly decline)")
+	}
+	// Before Revocation's own validate: a typed nil there (a nil
+	// *ClientCertificateCRLs) would panic in it.
+	if found, ok := depcheck.FindTypedNil(t, nil); ok {
+		return fmt.Errorf("trusted client CAs: %s is a nil %s", found.Name, found.Type)
 	}
 	if v, ok := t.Revocation.(interface{ validate() error }); ok {
 		if err := v.validate(); err != nil {

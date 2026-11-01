@@ -50,6 +50,10 @@ type IssueRefreshTokenRequest struct {
 	// ID token. AuthorizationDetails must parse under Config.RAR, in
 	// types the client is registered for; no RARPolicy is consulted,
 	// since the embedder decided what to grant.
+	// They're parsed with RARRegistry.Parse, not ParseRequest, so no
+	// RARDefinition.ValidateRequest runs: an embedder forwarding a
+	// client's own authorization_details should run
+	// Config.RAR.ParseRequest on them first.
 	Scope                []string
 	AuthorizationDetails []json.RawMessage
 

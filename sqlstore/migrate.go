@@ -107,7 +107,42 @@ func (d *DB) statements(m migration) []string {
 //
 // Nothing migrates implicitly — New doesn't: run it from a deployment
 // step, or at startup before serving, as a role that may create tables.
+//
+// On SQLite, a connection to a new file opened with journal_mode(WAL)
+// in its DSN switches the file to WAL mode as it opens, taking the
+// write lock without waiting the busy timeout, so connections other
+// processes open at that moment fail with SQLITE_BUSY. Migrate retries
+// such a failure until Options.SQLiteBusyTimeout has passed, so
+// processes starting together on a new file can each run it; whatever
+// else they do with the database before it has been migrated may still
+// fail that way.
 func (d *DB) Migrate(ctx context.Context) error {
+	if d.dialect != SQLite {
+		return d.migrate(ctx)
+	}
+	deadline := time.Now().Add(d.busy)
+	for wait := 5 * time.Millisecond; ; wait = min(2*wait, 250*time.Millisecond) {
+		err := d.migrate(ctx)
+		if err == nil || !sqliteBusy(err) || time.Now().Add(wait).After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("sqlstore: migrate: %w", ctx.Err())
+		case <-time.After(wait):
+		}
+	}
+}
+
+// sqliteBusy reports whether err is SQLite's SQLITE_BUSY (database is
+// locked), as its drivers word it.
+func sqliteBusy(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "SQLITE_BUSY") || strings.Contains(msg, "database is locked")
+}
+
+// migrate is Migrate, once.
+func (d *DB) migrate(ctx context.Context) error {
 	for _, m := range migrations {
 		if err := d.write(ctx, func(q querier) error { return d.apply(ctx, q, m) }); err != nil {
 			return fmt.Errorf("sqlstore: migrate: %w", err)

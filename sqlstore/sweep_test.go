@@ -78,11 +78,12 @@ func TestSweep(t *testing.T) {
 			t.Fatalf("Sweep after a minute = %d, %v, want 8, nil", n, err)
 		}
 		checkSweptAfterAMinute(t, f)
-		// The begun request, the used code, the long revocation, the
-		// digest recorded again and the live session (the completed
-		// interaction is gone already).
-		if n, err := f.d.Sweep(ctx, f.t0.Add(30*time.Minute)); err != nil || n != 5 {
-			t.Fatalf("Sweep after everything expired = %d, %v, want 5, nil", n, err)
+		// The begun request, the long revocation, the digest recorded
+		// again and the live session (the completed interaction is gone
+		// already) — not the used code, kept RedeemedCodeRetention past
+		// its expiry.
+		if n, err := f.d.Sweep(ctx, f.t0.Add(30*time.Minute)); err != nil || n != 4 {
+			t.Fatalf("Sweep after everything expired = %d, %v, want 4, nil", n, err)
 		}
 		checkSweptAfterEverything(t, f)
 		checkCIBARetention(t, f)
@@ -104,8 +105,10 @@ func checkCIBARetention(t *testing.T, f sweepFixture) {
 	if err := pollAt(f.d.Backchannel(), cibaRequest("swept", "poll"), retained.Add(-time.Second)); !errors.As(err, &expired) {
 		t.Fatalf("late poll within the retention = %v, want expired (expired_token)", err)
 	}
-	if n, err := f.d.Sweep(ctx, retained.Add(time.Second)); err != nil || n != 1 {
-		t.Fatalf("Sweep after the CIBA request's retention = %d, %v, want 1, nil", n, err)
+	// With the used code, which expired at a minute too and is kept
+	// RedeemedCodeRetention, also an hour, past that.
+	if n, err := f.d.Sweep(ctx, retained.Add(time.Second)); err != nil || n != 2 {
+		t.Fatalf("Sweep after the CIBA request's and the used code's retention = %d, %v, want 2, nil", n, err)
 	}
 	if err := pollAt(f.d.Backchannel(), cibaRequest("swept", "poll"), retained.Add(time.Second)); !errors.Is(err, sqlstore.ErrNotFound) {
 		t.Fatalf("poll of a swept CIBA request = %v, want ErrNotFound", err)
@@ -158,4 +161,50 @@ func checkSweptAfterAMinute(t *testing.T, f sweepFixture) {
 			t.Fatalf("IsRevoked(%s) = %v, %v, want %v, nil", key, revoked, err, want)
 		}
 	}
+}
+
+// A code redeemed just before it expires outlives a Sweep run between
+// its redemption and the server's RecordIssued* calls, so a reuse is
+// still reported as one (and revokes what it issued), not as an unknown
+// code; once RedeemedCodeRetention and its tokens have passed, it's
+// swept.
+func TestRedeemedCodeOutlivesSweepBeforeRecordIssued(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		ctx := context.Background()
+		d := freshDB(t, dialect)
+		g := d.Grants()
+		t0 := time.Now()
+		hash := sha256.Sum256([]byte("edge"))
+		must(t, g.CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{CodeHash: hash, ClientID: "c", Grant: secretGrant, ExpiresAt: t0.Add(time.Second)}))
+		_, err := g.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{CodeHash: hash, ClientID: "c"})
+		must(t, err)
+		if n, err := d.Sweep(ctx, t0.Add(1001*time.Millisecond)); err != nil || n != 0 {
+			t.Fatalf("Sweep just past the code's expiry = %d, %v, want 0, nil", n, err)
+		}
+		must(t, g.RecordIssuedAccessToken(ctx, hash, "jti-1", t0.Add(time.Minute)))
+		_, err = g.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{CodeHash: hash, ClientID: "c"})
+		var reused *storage.AuthorizationCodeAlreadyRedeemedError
+		if !errors.As(err, &reused) || reused.IssuedAccessTokenKey != "jti-1" {
+			t.Fatalf("reuse = %v, want *AuthorizationCodeAlreadyRedeemedError with the access token", err)
+		}
+		if n, err := d.Sweep(ctx, t0.Add(time.Second+sqlstore.RedeemedCodeRetention+time.Millisecond)); err != nil || n != 1 {
+			t.Fatalf("Sweep after RedeemedCodeRetention = %d, %v, want 1, nil", n, err)
+		}
+	})
+}
+
+// A redeemed code whose expiry is the latest a BIGINT holds keeps it:
+// RedeemedCodeRetention doesn't overflow.
+func TestRedeemedCodeRetentionAtTheEndOfTime(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		ctx := context.Background()
+		d := freshDB(t, dialect)
+		hash := sha256.Sum256([]byte("forever"))
+		must(t, d.Grants().CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{CodeHash: hash, ClientID: "c", ExpiresAt: time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC)}))
+		_, err := d.Grants().RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{CodeHash: hash})
+		must(t, err)
+		if n, err := d.Sweep(ctx, time.Date(2262, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil || n != 0 {
+			t.Fatalf("Sweep = %d, %v, want 0, nil", n, err)
+		}
+	})
 }

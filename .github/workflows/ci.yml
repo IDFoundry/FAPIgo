@@ -11,20 +11,16 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # For the sqlstore coverage step below: see the sqlstore job.
-    services:
-      postgres:
-        image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
-        env:
-          # A throwaway server reachable only from this job: no password.
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 30
+    # sqlstore's coverage comes from the sqlstore job (see the download
+    # step below), so this job never runs sqlstore's third-party database
+    # drivers: it holds CODECOV_TOKEN and SONAR_TOKEN (a Dependabot secret
+    # too, so a dependency-bump pull request gets it), and any code run in
+    # a step could reach a later step's secrets (through $GITHUB_ENV, say).
+    # It still runs when the sqlstore job fails, so its own checks always
+    # report, and then fails at the end: a sqlstore failure keeps failing
+    # this required check, as when it ran sqlstore's tests itself.
+    needs: sqlstore
+    if: ${{ !cancelled() }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -80,17 +76,18 @@ jobs:
         run: go tool cover -func=coverage.out | tail -1
 
       # sqlstore/ is a module of its own, so the run above never covers
-      # it. Its coverage, against SQLite and the service container's
-      # PostgreSQL, goes to SonarQube and Codecov beside coverage.out
-      # (sonar.go.coverage.reportPaths). The sqlstore job below is the
-      # module's own gate; this run only measures.
-      - name: go test sqlstore (coverage)
-        working-directory: sqlstore
-        env:
-          FAPIGO_SQLSTORE_POSTGRES_DSN: postgres://postgres@localhost:5432/postgres?sslmode=disable
-        run: go test -coverprofile=coverage.out ./...
+      # it. The sqlstore job measures its coverage (against SQLite and
+      # PostgreSQL) and hands over only the profile, which goes to
+      # SonarQube and Codecov beside coverage.out
+      # (sonar.go.coverage.reportPaths).
+      - name: sqlstore coverage (from the sqlstore job)
+        if: needs.sqlstore.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sqlstore-coverage
+          path: sqlstore
 
-      # Uploads the same coverage.out the step above already produced —
+      # Uploads the coverage.out the steps above produced —
       # a second, independent coverage view (trend graphs, per-PR diff
       # comments, the README badge) alongside SonarQube's own gate
       # below, not a replacement for it. CODECOV_TOKEN is a repo secret
@@ -151,6 +148,14 @@ jobs:
         # those; pushes, internal and Dependabot pull requests still scan.
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
+      - name: sqlstore job passed
+        if: needs.sqlstore.result != 'success'
+        env:
+          RESULT: ${{ needs.sqlstore.result }}
+        run: |
+          echo "::error title=sqlstore job failed::the sqlstore job's result was $RESULT"
+          exit 1
+
   # sqlstore/ is its own Go module, so the library takes no database
   # driver: every store contract against SQLite and, in the service
   # container, PostgreSQL (FAPIGO_SQLSTORE_POSTGRES_DSN, which the tests
@@ -163,8 +168,10 @@ jobs:
         working-directory: sqlstore
     services:
       postgres:
-        # Pinned by digest. Dependabot doesn't update service images:
-        # move it by hand (and the test job's copy above).
+        # Pinned by digest. Dependabot can't update a workflow's service
+        # image, but it does update .github/postgres/Dockerfile's copy of
+        # this pin, and the lint job fails until the two match: when a
+        # Dependabot pull request moves that one, copy it here.
         image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
         env:
           # A throwaway server reachable only from this job: no password.
@@ -201,8 +208,18 @@ jobs:
             exit 1
           fi
 
+      # Its coverage profile goes to the test job, for SonarQube and
+      # Codecov: only the profile, a data file, so the drivers' code
+      # never runs in a job holding those tokens.
       - name: go test (race, SQLite and PostgreSQL)
-        run: go test -race ./...
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sqlstore-coverage
+          path: sqlstore/coverage.out
+          if-no-files-found: error
+          retention-days: 1
 
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
@@ -291,6 +308,12 @@ jobs:
       # fuzzed, so a mismatch fails this job instead.
       - name: Check fuzz.yml lists every fuzz target
         run: .github/scripts/check-fuzz-matrix.sh
+
+      # Dependabot can't update the sqlstore job's Postgres service image,
+      # so .github/postgres/Dockerfile carries the same pin where it can,
+      # and this fails until a digest it moves is copied to ci.yml.
+      - name: Check the Postgres service image matches .github/postgres/Dockerfile
+        run: .github/scripts/check-postgres-pin.sh
 
       # Config lives in .golangci.yml — gosec (security), bodyclose,
       # plus golangci-lint's own "standard" set (errcheck, staticcheck,

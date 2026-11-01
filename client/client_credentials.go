@@ -9,6 +9,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -90,7 +91,7 @@ func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 
 	var authorizationDetailsJSON string
 	if len(req.AuthorizationDetails) > 0 {
-		encoded, err := json.Marshal(req.AuthorizationDetails)
+		encoded, err := strictjson.MarshalUnescaped(req.AuthorizationDetails)
 		if err != nil {
 			return ClientCredentialsTokenResult{}, newError(ErrorInternal, "failed to encode authorization_details", err)
 		}

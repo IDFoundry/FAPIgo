@@ -19,6 +19,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/internal/pkce"
 	"github.com/idfoundry/fapigo/internal/requestobject"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -505,7 +506,7 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 
 	var authorizationDetailsRaw json.RawMessage
 	if len(authorizationDetails) > 0 {
-		encoded, err := json.Marshal(authorizationDetails)
+		encoded, err := strictjson.MarshalUnescaped(authorizationDetails)
 		if err != nil {
 			return nil, nil, newError(ErrorInternal, "failed to encode authorization_details", err)
 		}

@@ -16,6 +16,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/internal/requestobject"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/internal/timeutil"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -339,7 +340,7 @@ func backchannelRequestParameters(req BeginBackchannelAuthenticationRequest) (ma
 		objectParams["requested_expiry"] = encoded
 	}
 	if len(req.AuthorizationDetails) > 0 {
-		encoded, err := json.Marshal(req.AuthorizationDetails)
+		encoded, err := strictjson.MarshalUnescaped(req.AuthorizationDetails)
 		if err != nil {
 			return nil, newError(ErrorInternal, "failed to encode authorization_details", err)
 		}

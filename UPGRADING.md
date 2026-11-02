@@ -95,6 +95,7 @@ example letters and digits:
 
 ```go
 req.BindingMessage = "W4SCT"
+```
 
 ### `X5CAttesterChain` limits the RSA keys of `x5c` certificates (server)
 

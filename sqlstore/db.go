@@ -32,7 +32,8 @@ const (
 	// database/sql driver (modernc.org/sqlite, say, which needs no cgo).
 	// Every write runs in a transaction started with BEGIN IMMEDIATE,
 	// taking the database's write lock up front. Open it with a busy
-	// timeout and in WAL mode — see the package documentation.
+	// timeout and in WAL mode — see the package documentation; Migrate
+	// and CheckSchema refuse a database that isn't in WAL mode.
 	SQLite
 )
 
@@ -58,7 +59,12 @@ type Options struct {
 
 	// SQLiteBusyTimeout is how long a SQLite write waits for another
 	// connection's write lock before failing. Zero means 10 seconds.
-	// Ignored for Postgres.
+	// Ignored for Postgres. It applies to this package's writes only,
+	// which set it on their connection: a read waits as long as the
+	// busy_timeout in the DSN says, which is why the DSN needs one too.
+	// In WAL mode, which Migrate and CheckSchema require, a read doesn't
+	// wait for a write at all; it waits only on the rare moments WAL
+	// mode can't serve it, such as a new file's switch to WAL.
 	SQLiteBusyTimeout time.Duration
 
 	// Sealer, if set, seals every record blob the stores write — the

@@ -59,6 +59,12 @@ pure Go, no cgo) needs WAL mode and a busy timeout:
 sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
 ```
 
+`Migrate` and `CheckSchema` refuse a SQLite database that isn't in WAL
+mode: without it, a read made while a write commits fails with
+`SQLITE_BUSY`, and under concurrent requests most fail as outages.
+`Options.SQLiteBusyTimeout` covers sqlstore's writes; reads get the
+DSN's `busy_timeout`, so give the DSN both.
+
 On a new file, the first connection switches it to WAL mode as it
 opens, and a connection another process opens at that moment fails with
 `SQLITE_BUSY`. `Migrate` waits that out, so run it first in each
@@ -76,6 +82,10 @@ an AEAD bound to its row:
 sealer, err := sqlstore.AESGCMSealer(key) // 32 random bytes, from a secrets manager or KMS, never the database
 db, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: sealer})
 ```
+
+`AESGCMSealer` refuses a key that's certainly not random: one byte
+repeated (an all-zero placeholder), or all printable text (a
+passphrase, or a hex or base64 key not yet decoded: decode it first).
 
 A sealed blob moved to another row, client, table or table prefix,
 altered, or opened under another key is refused (`ErrRecordFormat`, as
@@ -106,6 +116,60 @@ upgrading every instance to re-seal them in the current format (byte 3)
 and bind them too. Upgrade every instance sharing a database at once: a
 v0.2 instance can't open what an upgraded one seals, and rolling back
 to v0.2 leaves the records sealed since unreadable.
+
+## Upgrading from v0.3
+
+v0.4 refuses configurations v0.3 accepted:
+
+- **A sealing key that isn't random.** `AESGCMSealer` returns an error
+  for a key that's one byte repeated (all zeros, say) or all printable
+  text: a passphrase, or a hex or base64 key passed without decoding
+  it. Such a key gave no confidentiality, and let anyone who could
+  guess it and write to the database forge sealed records. Generate 32
+  bytes with `crypto/rand`, and decode an encoded key before passing
+  it:
+
+  ```go
+  key, err := hex.DecodeString(os.Getenv("FAPIGO_SEAL_KEY")) // `openssl rand -hex 32`
+  sealer, err := sqlstore.AESGCMSealer(key)
+  ```
+
+  The records sealed under the old key open only under it, and
+  `AESGCMSealer` no longer takes it. Either let them go (as with a lost
+  key, clients authorize again), or open them with a `Sealer` of your
+  own over the old key, in `RotatingSealer(newSealer, oldKeySealer)`,
+  until the longest-lived of them (a refresh token) expires. It reads
+  `AESGCMSealer`'s format, a 12-byte nonce then the ciphertext:
+
+  ```go
+  type oldKeySealer struct{ aead cipher.AEAD } // cipher.NewGCM(aes.NewCipher(oldKey))
+
+  func (s oldKeySealer) Seal(plaintext, additionalData []byte) ([]byte, error) {
+  	return nil, errors.New("the old key only opens")
+  }
+
+  func (s oldKeySealer) Open(sealed, additionalData []byte) ([]byte, error) {
+  	if len(sealed) < s.aead.NonceSize() {
+  		return nil, errors.New("sealed data is too short")
+  	}
+  	n := s.aead.NonceSize()
+  	return s.aead.Open(nil, sealed[:n], sealed[n:], additionalData)
+  }
+  ```
+
+  `RotatingSealer` also refuses two `AESGCMSealer`s over the same key.
+- **A SQLite database not in WAL mode.** `Migrate` and `CheckSchema`
+  return an error unless `PRAGMA journal_mode` is `wal`. Without it, a
+  read made while a write commits failed with `SQLITE_BUSY`, answered
+  as an outage: under concurrent requests, most of them. Open the file
+  with both pragmas, `busy_timeout` first:
+
+  ```go
+  sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
+  ```
+
+  The first connection opened that way switches the file to WAL mode,
+  which lasts.
 
 ## What each database declares
 
@@ -142,15 +206,49 @@ between instances: use SQLite there.
   whose digests each role namespaces), through a DB with the same
   `TablePrefix` and `Sealer`. Their DPoP nonce store is the exception:
   `Nonces()` from a DB with a `TablePrefix` of its own, never the
-  server's, whose nonces it would then accept. Give a resource server a
-  database role of its own: `SELECT` on the server's `access_tokens`,
-  `revocations` and `schema_migrations`, `SELECT`/`INSERT` on `replay`,
-  and its own prefix's tables; and let only the server `Sweep` the
-  tables they share.
+  server's, whose nonces it would then accept. A resource server in a
+  process of its own takes all four from
+  `sqlstore.ResourceServer(serverDB, rsDB)`, which reads each from the
+  right DB: one whose `Revocation()` came from its own prefix, as its
+  `Nonces()` must, never sees the server's revocations, and nothing
+  fails.
+
+  ```go
+  stores, err := sqlstore.ResourceServer(serverDB, rsDB) // rsDB: TablePrefix "fapigo_rs_", say
+  deps := resource.Dependencies{
+  	AccessTokens: resource.OpaqueAccessTokens{Store: stores.AccessTokens, Issuer: issuer, Audience: audience}, // or JWTs
+  	Replay:       stores.Replay,
+  	Revocation:   stores.Revocation,
+  	Nonces:       stores.Nonces,
+  	// …
+  }
+  ```
+
+  Give a resource server a database role of its own: `SELECT` on the
+  server's `access_tokens`, `revocations` and `schema_migrations`,
+  `SELECT`/`INSERT` on `replay`, and its own prefix's tables; and let
+  only the server `Sweep` the tables they share.
 - **Clients** are rows the operator manages: a `client_id` and a
   versioned JSON configuration, written with `Clients().Put` or
   `MarshalClientConfig`. See the package documentation's Clients
   section for the document's members.
+- **Client keys** live in the same document, as a `jwks_uri` or an
+  inline `jwks`, so the clients table is the one registry: write them
+  with `Clients().PutWithKeys` (or `MarshalClientConfigWithKeys`) and
+  serve them with `db.ClientKeys(fetcher)` as
+  `server.Dependencies.ClientKeys`. A client added or rekeyed at
+  runtime authenticates on its next request, without a restart.
+
+  ```go
+  deps.ClientKeys, err = db.ClientKeys(fetcher) // a hardened fapihttp.Client; nil if no client has a jwks_uri
+  err = db.Clients().PutWithKeys(ctx, cfg, sqlstore.ClientKeyRegistration{JWKS: jwks})
+  ```
+- **Check each client against the server**: `Put` checks only what
+  `storage.NewRegisteredClient` does. Run
+  `srv.CheckClientRegistration` on every client at startup and after
+  each `Put`, for what only the server knows (RAR types it doesn't
+  register, `AllowedResources` without resource indicators, CIBA ping
+  without a notifier); `Clients().All(ctx)` lists them.
 
 ## Tests
 

@@ -2,12 +2,14 @@ package sqlstore
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -15,7 +17,10 @@ import (
 // document MarshalClientConfig writes and ParseClientConfig reads: its
 // "version" member. A field storage.RegisteredClientConfig gains later
 // becomes a new optional member of this version; a change an older
-// reader would misread gets a new version.
+// reader would misread gets a new version. The jwks_uri and jwks
+// members (ClientKeyRegistration) are such members, added in sqlstore
+// v0.4: a v0.3 reader refuses a document that has them, as it refuses
+// any member it doesn't know.
 const ClientConfigVersion = 1
 
 // ErrClientConfig is what ParseClientConfig returns, wrapped, for a
@@ -71,6 +76,58 @@ type clientConfigV1 struct {
 	Display     *clientDisplayV1 `json:"display,omitempty"`
 	SubjectType string           `json:"subject_type,omitempty"`
 	Sector      string           `json:"sector,omitempty"`
+
+	// The client's keys (ClientKeyRegistration), which DB.ClientKeys
+	// serves: not part of storage.RegisteredClientConfig.
+	JWKSURI string          `json:"jwks_uri,omitempty"`
+	JWKS    json.RawMessage `json:"jwks,omitempty"`
+}
+
+// ClientKeyRegistration is where a client's keys are registered, in
+// the clients table's configuration document beside its
+// storage.RegisteredClientConfig: its jwks_uri, or its inline JWK Set
+// (jwks), as in OAuth 2.0 Dynamic Client Registration (RFC 7591 §2),
+// which forbids registering both. DB.ClientKeys serves them to the
+// server. A client registered with neither has no keys: one that
+// authenticates with a TLS client certificate, say, and signs nothing.
+type ClientKeyRegistration struct {
+	// JWKSURI is the https URL the client publishes its JWK Set at,
+	// fetched (and cached) by DB.ClientKeys' fapihttp.Client.
+	JWKSURI fapi.URL
+
+	// JWKS is the client's JWK Set document, a JSON object with a
+	// "keys" array of public keys.
+	JWKS json.RawMessage
+}
+
+// IsZero reports whether reg registers no keys.
+func (reg ClientKeyRegistration) IsZero() bool {
+	return reg.JWKSURI.IsZero() && len(reg.JWKS) == 0
+}
+
+// check refuses reg unless it registers at most one of its members, an
+// https JWKSURI or a JWKS that's a JSON object. It doesn't parse the
+// keys: checkJWKS does.
+func (reg ClientKeyRegistration) check() error {
+	if !reg.JWKSURI.IsZero() && len(reg.JWKS) > 0 {
+		return errors.New("jwks_uri and jwks are both registered (RFC 7591 §2 allows one)")
+	}
+	if !reg.JWKSURI.IsZero() {
+		if _, err := fapi.ParseEndpointURL(reg.JWKSURI.String()); err != nil {
+			return fmt.Errorf("jwks_uri: %w", err)
+		}
+	}
+	if len(reg.JWKS) > 0 {
+		if trimmed := bytes.TrimLeft(reg.JWKS, " \t\r\n"); len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(reg.JWKS) {
+			return errors.New("jwks: not a JSON object")
+		}
+		// As the document holding it is read: a member twice, or text
+		// that doesn't decode losslessly, is refused there.
+		if err := checkStrictJSON(reg.JWKS, map[string]any(nil)); err != nil {
+			return fmt.Errorf("jwks: %w", err)
+		}
+	}
+	return nil
 }
 
 // clientDisplayV1 is storage.ClientDisplay in clientConfigV1.
@@ -115,15 +172,32 @@ func urlString(u fapi.URL) string {
 }
 
 // MarshalClientConfig encodes cfg, less its ID, as the clients table's
-// configuration document (version ClientConfigVersion). It refuses a
-// configuration with AutomaticFederationRegistration set: that's
-// federation.AutomaticClientRepository's to set, never a stored
-// client's.
+// configuration document (version ClientConfigVersion), registering no
+// keys. It refuses a configuration with AutomaticFederationRegistration
+// set: that's federation.AutomaticClientRepository's to set, never a
+// stored client's.
 func MarshalClientConfig(cfg storage.RegisteredClientConfig) ([]byte, error) {
+	return MarshalClientConfigWithKeys(cfg, ClientKeyRegistration{})
+}
+
+// MarshalClientConfigWithKeys is MarshalClientConfig for a client whose
+// keys the document registers too, as its jwks_uri or jwks member,
+// for DB.ClientKeys. It refuses a registration with both, a jwks_uri
+// that isn't an https URL, and a jwks that isn't a JWK Set with a key
+// the server can use. The document keeps jwks compacted.
+func MarshalClientConfigWithKeys(cfg storage.RegisteredClientConfig, reg ClientKeyRegistration) ([]byte, error) {
 	if cfg.AutomaticFederationRegistration {
 		return nil, fmt.Errorf("%w: AutomaticFederationRegistration is set only by federation.AutomaticClientRepository", ErrClientConfig)
 	}
+	if err := reg.check(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrClientConfig, err)
+	}
+	if err := checkJWKS(cfg.ID, reg.JWKS); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrClientConfig, err)
+	}
 	doc := clientConfigV1{
+		JWKSURI:                                   urlString(reg.JWKSURI),
+		JWKS:                                      reg.JWKS,
 		Version:                                   ClientConfigVersion,
 		ApplicationType:                           wire(cfg.ApplicationType),
 		ClientAuthMethod:                          wire(cfg.ClientAuthMethod),
@@ -267,7 +341,66 @@ func ParseClientConfig(id fapi.ClientID, data []byte) (storage.RegisteredClientC
 	if p.err != nil {
 		return storage.RegisteredClientConfig{}, fmt.Errorf("%w: %w", ErrClientConfig, p.err)
 	}
+	if _, err := docKeys(doc); err != nil {
+		return storage.RegisteredClientConfig{}, fmt.Errorf("%w: %w", ErrClientConfig, err)
+	}
 	return cfg, nil
+}
+
+// ParseClientKeys decodes data, a clients table configuration document,
+// as ParseClientConfig does, and returns the keys it registers: its
+// jwks_uri or jwks member, or neither. It refuses what ParseClientConfig
+// refuses, a document registering both, a jwks_uri that isn't an https
+// URL, and a jwks that isn't a JSON object, each with an error wrapping
+// ErrClientConfig. It doesn't parse the keys themselves:
+// DB.ClientKeys does, as MarshalClientConfigWithKeys and
+// ClientRepository.PutWithKeys do before writing them.
+func ParseClientKeys(data []byte) (ClientKeyRegistration, error) {
+	doc, err := decodeClientConfig(data)
+	if err != nil {
+		return ClientKeyRegistration{}, fmt.Errorf("%w: %w", ErrClientConfig, err)
+	}
+	reg, err := docKeys(doc)
+	if err != nil {
+		return ClientKeyRegistration{}, fmt.Errorf("%w: %w", ErrClientConfig, err)
+	}
+	return reg, nil
+}
+
+// docKeys is the ClientKeyRegistration in doc, checked.
+func docKeys(doc clientConfigV1) (ClientKeyRegistration, error) {
+	reg := ClientKeyRegistration{JWKS: doc.JWKS}
+	if doc.JWKSURI != "" {
+		u, err := fapi.ParseEndpointURL(doc.JWKSURI)
+		if err != nil {
+			return ClientKeyRegistration{}, fmt.Errorf("jwks_uri: %w", err)
+		}
+		reg.JWKSURI = u
+	}
+	if err := reg.check(); err != nil {
+		return ClientKeyRegistration{}, err
+	}
+	return reg, nil
+}
+
+// checkJWKS refuses inline, client id's JWK Set, unless it parses as
+// DB.ClientKeys parses it, with at least one key the server can use.
+// Empty inline registers no JWK Set, which it accepts.
+func checkJWKS(id fapi.ClientID, inline json.RawMessage) error {
+	if len(inline) == 0 {
+		return nil
+	}
+	lookup := func(context.Context, fapi.ClientID) (fapi.URL, []byte, error) { return fapi.URL{}, inline, nil }
+	source, err := keys.NewClientJWKSSource(nil, lookup)
+	if err != nil {
+		return err
+	}
+	// Any algorithm: resolving parses the whole set, and an empty match
+	// isn't an error.
+	if _, err := source.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{ClientID: id, Algorithm: fapi.ES256}); err != nil {
+		return fmt.Errorf("jwks: %w", err)
+	}
+	return nil
 }
 
 // decodeClientConfig strictly decodes data as a version 1 document: one

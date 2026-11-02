@@ -596,7 +596,7 @@ deps := server.Dependencies{
 	AccessTokens:           accessTokens,
 	Backchannel:            db.Backchannel(), // only for CIBA
 	PairwiseSubjects:       mapping,
-	ClientKeys:             clientKeys,
+	ClientKeys:             clientKeys, // db.ClientKeys(fetcher): each client's jwks or jwks_uri in its clients row
 	Keys:                   keyManager, // keys.NewKeyManagerFromSigners, with keys.DeclareCustody
 	Audit:                  auditSink,
 	ClientCertificateTrust: server.NoPKIClientAuthentication{},
@@ -663,7 +663,10 @@ What to decide when you deploy it:
   `TablePrefix` and `Sealer` — `serverresource.NewVerifier` does that
   for you from the server's `Dependencies`. Its DPoP nonce store must
   not be the server's (RFC 9449 keeps the two roles' nonces apart):
-  give it `Nonces()` from a DB with a prefix of its own. Give it a
+  give it `Nonces()` from a DB with a prefix of its own. A resource
+  server in a process of its own takes all of these from
+  `sqlstore.ResourceServer(serverDB, rsDB)`, so its `Revocation` can't
+  come from its own prefix, where the server never writes. Give it a
   database role of its own, too: `SELECT` on the server's
   `access_tokens`, `revocations` and `schema_migrations` tables,
   `SELECT` and `INSERT` on `replay`, and its own prefix's tables — not

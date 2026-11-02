@@ -63,6 +63,26 @@
 // (serverresource.NewVerifier refuses the server's own db.Nonces(), but
 // can't tell two DBs with one TablePrefix apart.)
 //
+// A resource server in a process of its own, which builds
+// resource.Dependencies itself, needs both DBs, and the shortest path
+// is the wrong one: the same rsDB for everything, whose Revocation reads
+// a table the server never writes, so a grant the server revokes is
+// never revoked there, with nothing failing. Take its stores from
+// ResourceServer instead, which takes each from the right DB and
+// refuses two on one TablePrefix:
+//
+//	serverDB, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: sealer}) // the server's tables
+//	rsDB, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{TablePrefix: "fapigo_rs_"})
+//	err = rsDB.Migrate(ctx)
+//	stores, err := sqlstore.ResourceServer(serverDB, rsDB)
+//	deps := resource.Dependencies{
+//		AccessTokens: resource.OpaqueAccessTokens{Store: stores.AccessTokens, Issuer: issuer, Audience: audience}, // or JWTAccessTokens
+//		Replay:       stores.Replay,
+//		Revocation:   stores.Revocation,
+//		Nonces:       stores.Nonces,
+//		// ...
+//	}
+//
 // A resource server needs far less of the database than the server
 // does, and is often run in more places, so give it a database role of
 // its own with just that, rather than the server's: SELECT on the
@@ -83,6 +103,12 @@
 //
 //	sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
 //
+// Migrate and CheckSchema refuse a database that isn't in WAL mode:
+// without it, a read made while a write commits fails with SQLITE_BUSY
+// unless its connection has a busy timeout, and under concurrent
+// requests most of them would fail as outages. Options.SQLiteBusyTimeout
+// covers this package's writes, which set it on their connection;
+// reads get the DSN's busy_timeout, so give the DSN both.
 // List busy_timeout first, so it applies to the pragmas after it. On a
 // new file, the first connection switches the file to WAL mode (which
 // lasts) as it opens, holding the write lock without waiting the busy
@@ -167,6 +193,11 @@
 //
 //	sealer, err := sqlstore.AESGCMSealer(key) // 32 bytes from crypto/rand, kept outside the database
 //	db, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: sealer})
+//
+// AESGCMSealer refuses a key that's certainly not random, as FAPIgo's
+// other sealers do: one byte repeated (an all-zero placeholder), or all
+// printable text (a passphrase, or a hex or base64 key not yet decoded:
+// decode it first).
 //
 // Sealed are the blobs that hold what a copy of the database mustn't
 // reveal: pushed requests and interactions' copies of them (the
@@ -327,6 +358,40 @@
 // that doesn't make a valid client is answered as an outage
 // (ErrClientConfig, wrapping storage.ErrStoreUnavailable), not as an
 // unknown client.
+//
+// The document holds the client's keys too, so the clients table is the
+// one registry of clients and their keys: a jwks_uri member (an https
+// URL) or an inline jwks member (a JWK Set), never both (RFC 7591 §2),
+// which PutWithKeys and MarshalClientConfigWithKeys write
+// (ClientKeyRegistration) and DB.ClientKeys serves as
+// server.Dependencies.ClientKeys:
+//
+//	clientKeys, err := db.ClientKeys(fetcher) // fapihttp.Client, hardened for production; nil if no client has a jwks_uri
+//	deps.ClientKeys = clientKeys
+//	err = db.Clients().PutWithKeys(ctx, cfg, sqlstore.ClientKeyRegistration{JWKS: jwks})
+//
+// A client added or rekeyed at runtime authenticates with its new keys
+// on its next request, with no restart. Put registers a client with no
+// keys, replacing any (for a client that signs nothing, such as one
+// authenticating with a TLS client certificate). These members are
+// new in sqlstore v0.4: an earlier release refuses a row that has them.
+//
+// Put checks a client only as storage.NewRegisteredClient does. What
+// only the server can check — Rich Authorization Request types its
+// Config.RAR doesn't register, AllowedResources while it accepts no
+// resource indicators, CIBA ping delivery without a notifier — is
+// server.Server.CheckClientRegistration's: run it on each client after
+// Put, and on every client at startup, since the operator's tooling
+// writing the table may hold no *server.Server. All lists them:
+//
+//	for client, err := range db.Clients().All(ctx) {
+//		if err == nil {
+//			err = srv.CheckClientRegistration(client)
+//		}
+//		if err != nil {
+//			return err
+//		}
+//	}
 //
 // # Sweeping
 //

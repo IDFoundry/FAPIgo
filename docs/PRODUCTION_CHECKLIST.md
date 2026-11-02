@@ -171,6 +171,8 @@ For a deployment keeping its stores in the
   `RotatingSealer`, which opens with the old and new keys until the old
   one's records expire, well before a key's 2^32 seals (weeks, on a busy
   server).
+- [ ] *(yours)* **`CheckClientRegistration` on every client** at
+  startup (`Clients().All`) and after each `Clients().Put`.
 - [ ] **`ReadUnsealed` only while migrating** an existing database to
   sealing: deploy with it, run `SealRecords`, then deploy without it.
 - [ ] *(yours)* **Write access to the database as tight as read

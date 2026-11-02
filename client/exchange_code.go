@@ -233,6 +233,9 @@ func (c IDTokenClaims) AsMap() map[string]any {
 // that in fact succeeded. After a failure, start over with
 // BeginAuthorization.
 func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationResponse) (TokenSet, error) {
+	if err := c.checkTrustChain(); err != nil {
+		return TokenSet{}, err
+	}
 	if resp.issuer != c.cfg.Issuer.String() || resp.clientID != c.cfg.ClientID.String() {
 		return TokenSet{}, newError(ErrorInvalidRequest, "the authorization response was validated by a client for a different issuer or client ID", nil)
 	}

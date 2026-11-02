@@ -167,18 +167,31 @@ func requireAutomaticRegistration(raw json.RawMessage) error {
 	return nil
 }
 
-// ErrTrustChainExpired is returned by BeginAuthorization,
-// BeginBackchannelAuthentication, RequestClientCredentialsToken and
-// RefreshTokens on a Client NewFromDiscovery built from
-// DiscoverViaFederation's metadata, once the authorization server's
-// Trust Chain has expired. OpenID Federation 1.0 §12.3 says an RP "MUST
-// NOT use it past the expiration of the Trust Chain" and that "the
-// trust in the OP MUST be successfully reevaluated before continuing";
-// §11 has every participant "support refreshing a Trust Chain when it
-// expires". Resolve the chain again with DiscoverViaFederation and
+// ErrTrustChainExpired is wrapped by the *Error (code
+// ErrorTrustChainExpired) that every Client method sending a request to
+// the authorization server, or trusting what it signed, returns once
+// the authorization server's Trust Chain has expired, for a Client
+// NewFromDiscovery built from DiscoverViaFederation's metadata:
+// BeginAuthorization, HandleAuthorizationResponse, CompleteAuthorization,
+// ExchangeCode, BeginBackchannelAuthentication,
+// PollBackchannelAuthentication, RequestClientCredentialsToken,
+// RefreshTokens, FetchUserInfo, RevokeToken, VerifyIssuerJWS and
+// ClientAttestationHeaders. Each refuses before sending anything.
+// OpenID Federation 1.0 §12.3 says an RP "MUST NOT use it past the
+// expiration of the Trust Chain" and that "the trust in the OP MUST be
+// successfully reevaluated before continuing to make requests to the
+// OP"; §11 has every participant "support refreshing a Trust Chain when
+// it expires". Resolve the chain again with DiscoverViaFederation and
 // build a new Client from the result, before TrustChainExpiresAt to
-// avoid the error. A flow already begun (CompleteAuthorization,
-// ExchangeCode, PollBackchannelToken) isn't interrupted.
+// avoid the error. A flow begun on the old Client (an authorization
+// session, a backchannel session, a TokenSet) can be finished on the
+// new one, which accepts it for the same issuer and client ID.
+//
+// ResourceClient (ProtectedResource, ClientCredentialsResource) isn't
+// gated: its requests go to resource servers, which judge the access
+// token themselves, not to the authorization server. Don't point one at
+// the authorization server's own endpoints; FetchUserInfo is the gated
+// way to call UserInfo.
 var ErrTrustChainExpired = errors.New("client: the authorization server's Trust Chain has expired: resolve it again with DiscoverViaFederation and build a new Client")
 
 // TrustChainExpiresAt is when the authorization server's Trust Chain
@@ -189,11 +202,12 @@ func (c *Client) TrustChainExpiresAt() (expiresAt time.Time, ok bool) {
 	return c.trustChainExpiresAt, !c.trustChainExpiresAt.IsZero()
 }
 
-// checkTrustChain returns ErrTrustChainExpired once the Trust Chain this
-// Client was built from has expired.
+// checkTrustChain returns an *Error wrapping ErrTrustChainExpired once
+// the Trust Chain this Client was built from has expired.
 func (c *Client) checkTrustChain() error {
 	if c.trustChainExpiresAt.IsZero() || c.deps.Clock.Now().Before(c.trustChainExpiresAt) {
 		return nil
 	}
-	return fmt.Errorf("%w (it expired at %s)", ErrTrustChainExpired, c.trustChainExpiresAt.UTC().Format(time.RFC3339))
+	return newError(ErrorTrustChainExpired, "the authorization server's Trust Chain has expired",
+		fmt.Errorf("%w (it expired at %s)", ErrTrustChainExpired, c.trustChainExpiresAt.UTC().Format(time.RFC3339)))
 }

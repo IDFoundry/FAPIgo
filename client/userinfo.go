@@ -67,6 +67,9 @@ func (u UserInfo) AsMap() map[string]any {
 // ID Token's sub Claim, to guard against a token-substitution attack —
 // there is nothing to check it against otherwise.
 func (c *Client) FetchUserInfo(ctx context.Context, tokens TokenSet) (UserInfo, error) {
+	if err := c.checkTrustChain(); err != nil {
+		return UserInfo{}, err
+	}
 	if c.cfg.Endpoints.UserInfo.IsZero() {
 		return UserInfo{}, newError(ErrorInvalidRequest, "userinfo endpoint is not configured", nil)
 	}

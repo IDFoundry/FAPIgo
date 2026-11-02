@@ -36,6 +36,9 @@ import (
 // "aud" naming this client, say, which an access token for a resource
 // server doesn't.
 func (c *Client) VerifyIssuerJWS(ctx context.Context, compactJWS string) ([]byte, error) {
+	if err := c.checkTrustChain(); err != nil {
+		return nil, err
+	}
 	parsed, err := c.verifyIssuerJWS(ctx, compactJWS)
 	if err != nil {
 		return nil, err

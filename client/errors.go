@@ -33,6 +33,13 @@ const (
 	// no Config.Endpoints.Revocation: the server offers no revocation
 	// endpoint, so the token can only be forgotten locally.
 	ErrorRevocationNotSupported ErrorCode = "revocation_not_supported"
+
+	// ErrorTrustChainExpired indicates the call was refused before
+	// anything was sent because the authorization server's Trust Chain
+	// has expired, for a Client NewFromDiscovery built from
+	// DiscoverViaFederation's metadata. The Error wraps
+	// ErrTrustChainExpired, which lists the methods it applies to.
+	ErrorTrustChainExpired ErrorCode = "trust_chain_expired"
 )
 
 // Error is the error type every public Client method returns. Code is

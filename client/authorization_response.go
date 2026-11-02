@@ -117,6 +117,9 @@ func (CallbackDenied) callbackResult() {}
 // consistency with what this session requested, and authorization-code
 // or error-response presence.
 func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb AuthorizationCallback) (CallbackResult, error) {
+	if err := c.checkTrustChain(); err != nil {
+		return nil, err
+	}
 	params, respMode, err := c.parseCallbackParams(ctx, cb)
 	if err != nil {
 		return nil, err

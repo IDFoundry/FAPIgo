@@ -515,6 +515,9 @@ func (BackchannelAuthenticationApproved) backchannelAuthenticationResult() {}
 // auth_req_id and this client's authentication never reach another
 // issuer's token endpoint.
 func (c *Client) PollBackchannelAuthentication(ctx context.Context, session BackchannelAuthenticationSession) (BackchannelAuthenticationResult, error) {
+	if err := c.checkTrustChain(); err != nil {
+		return nil, err
+	}
 	if !c.ownsBackchannelSession(session) {
 		return nil, newError(ErrorInvalidRequest, "the backchannel authentication session was begun by a client for a different issuer or client ID", nil)
 	}

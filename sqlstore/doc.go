@@ -376,6 +376,23 @@
 // authenticating with a TLS client certificate). These members are
 // new in sqlstore v0.4: an earlier release refuses a row that has them.
 //
+// Put checks a client only as storage.NewRegisteredClient does. What
+// only the server can check — Rich Authorization Request types its
+// Config.RAR doesn't register, AllowedResources while it accepts no
+// resource indicators, CIBA ping delivery without a notifier — is
+// server.Server.CheckClientRegistration's: run it on each client after
+// Put, and on every client at startup, since the operator's tooling
+// writing the table may hold no *server.Server. All lists them:
+//
+//	for client, err := range db.Clients().All(ctx) {
+//		if err == nil {
+//			err = srv.CheckClientRegistration(client)
+//		}
+//		if err != nil {
+//			return err
+//		}
+//	}
+//
 // # Sweeping
 //
 // The stores never delete an expired row themselves: the server refuses

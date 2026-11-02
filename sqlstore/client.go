@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"iter"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
@@ -71,11 +72,70 @@ func resolveRow(id fapi.ClientID, config []byte) (storage.RegisteredClient, erro
 	return client, nil
 }
 
+// All returns every registered client, in client_id order, as
+// ResolveClient builds each: a row that doesn't make a valid client
+// yields its error (wrapping ErrClientConfig) in place of the client,
+// and the iteration goes on. A failure to read the table is yielded
+// once, last. It reads the rows before yielding any, so the loop may
+// use the database. Run server.Server.CheckClientRegistration over it
+// at startup, to find a client the server can't honour before its
+// first request does:
+//
+//	for client, err := range db.Clients().All(ctx) {
+//		if err == nil {
+//			err = srv.CheckClientRegistration(client)
+//		}
+//		if err != nil {
+//			return err
+//		}
+//	}
+func (r *ClientRepository) All(ctx context.Context) iter.Seq2[storage.RegisteredClient, error] {
+	return func(yield func(storage.RegisteredClient, error) bool) {
+		ids, configs, err := r.rows(ctx)
+		for i, id := range ids {
+			if !yield(resolveRow(id, configs[i])) {
+				return
+			}
+		}
+		if err != nil {
+			yield(storage.RegisteredClient{}, unavailable("list clients", err))
+		}
+	}
+}
+
+// rows reads every row of the clients table, in client_id order, and
+// any error that stopped it.
+func (r *ClientRepository) rows(ctx context.Context) ([]fapi.ClientID, [][]byte, error) {
+	rows, err := r.d.db.QueryContext(ctx, r.d.q("SELECT client_id, config FROM {clients} ORDER BY client_id")) // NOSONAR: go:S2077 — a constant query of this package's; q substitutes only the validated TablePrefix.
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var (
+		ids     []fapi.ClientID
+		configs [][]byte
+	)
+	for rows.Next() {
+		var (
+			id     string
+			config []byte
+		)
+		if err := rows.Scan(&id, &config); err != nil {
+			return ids, configs, err
+		}
+		ids = append(ids, fapi.ClientID(id))
+		configs = append(configs, config)
+	}
+	return ids, configs, rows.Err()
+}
+
 // Put registers cfg's client with no keys in the clients table,
 // replacing any client registered under its ID, keys included: use
 // PutWithKeys for a client whose keys DB.ClientKeys serves. It refuses
 // a configuration storage.NewRegisteredClient refuses, or one
-// MarshalClientConfig can't write.
+// MarshalClientConfig can't write. Run
+// server.Server.CheckClientRegistration on the client too, for what
+// only the server can check.
 func (r *ClientRepository) Put(ctx context.Context, cfg storage.RegisteredClientConfig) error {
 	return r.PutWithKeys(ctx, cfg, ClientKeyRegistration{})
 }

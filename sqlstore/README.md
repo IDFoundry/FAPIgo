@@ -243,6 +243,12 @@ between instances: use SQLite there.
   deps.ClientKeys, err = db.ClientKeys(fetcher) // a hardened fapihttp.Client; nil if no client has a jwks_uri
   err = db.Clients().PutWithKeys(ctx, cfg, sqlstore.ClientKeyRegistration{JWKS: jwks})
   ```
+- **Check each client against the server**: `Put` checks only what
+  `storage.NewRegisteredClient` does. Run
+  `srv.CheckClientRegistration` on every client at startup and after
+  each `Put`, for what only the server knows (RAR types it doesn't
+  register, `AllowedResources` without resource indicators, CIBA ping
+  without a notifier); `Clients().All(ctx)` lists them.
 
 ## Tests
 

@@ -232,3 +232,35 @@ func TestDocumentedClientConfigParses(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// All yields every client in client_id order, a bad row's error in its
+// place, and stops when the loop does.
+func TestClientRepositoryAll(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		ctx := context.Background()
+		p := newPlace(t, dialect)
+		repo := p.migrated().Clients()
+		_, db := p.open()
+		for _, id := range []fapi.ClientID{"b", "a"} {
+			must(t, repo.Put(ctx, keyedClient(id)))
+		}
+		rawExec(t, p, db, "INSERT INTO "+p.prefix+"clients (client_id, config) VALUES (?, ?)", "c", `{"version":1,"redirect_uri":"https://rp.example/cb"}`)
+		var got []string
+		for client, err := range repo.All(ctx) {
+			switch {
+			case err == nil:
+				got = append(got, string(client.ID()))
+			case errors.Is(err, sqlstore.ErrClientConfig) && strings.Contains(err.Error(), `"c"`):
+				got = append(got, "error")
+			default:
+				t.Fatalf("All: %v", err)
+			}
+		}
+		if strings.Join(got, ",") != "a,b,error" {
+			t.Errorf("All = %v, want a, b and c's error", got)
+		}
+		for range repo.All(ctx) {
+			break // stopping early doesn't panic
+		}
+	})
+}

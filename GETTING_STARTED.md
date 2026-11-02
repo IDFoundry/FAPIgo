@@ -1220,12 +1220,9 @@ if err != nil {
 	return err
 }
 cfg := resource.Config{
-	Limits: resource.Limits{
-		MaxDPoPProofAge: time.Minute,      // how old a DPoP proof's iat may be
-		MaxClockSkew:    10 * time.Second, // tolerance either direction: 10 to 60 seconds in production
-		// With Dependencies.Nonces: at most 15 minutes in production.
-		DPoPNonceLifetime: 5 * time.Minute,
-	},
+	// 60s MaxDPoPProofAge, 10s MaxClockSkew and 5m DPoPNonceLifetime,
+	// the values server.RecommendedLimits uses; override any field.
+	Limits:       resource.RecommendedLimits(),
 	Assurance:    resource.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
 	ResourceURLs: []fapi.URL{apiURL},             // this API's own external URL(s), as clients call it
 	// Deployment: resource.DeploymentSingleInstance, // required under AssuranceProduction: or DeploymentHorizontallyScaled for a fleet
@@ -1235,6 +1232,9 @@ cfg := resource.Config{
 All four are required — `NewVerifier` rejects a zero `MaxDPoPProofAge`,
 a negative `MaxClockSkew`, a zero `Assurance` or no `ResourceURLs`, the
 same "no implicit default" discipline `server.Config` follows.
+`resource.RecommendedLimits()` is a starting point like the server's
+preset, documented with how each value is grounded, not a default
+`NewVerifier` applies; its values satisfy `AssuranceProduction`.
 
 `ResourceURLs` are this resource server's own external URLs: each an
 origin, optionally with a path prefix (`https://api.example.com/v1`),

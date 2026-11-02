@@ -789,7 +789,9 @@ case server.InteractionRequired:
 	// a.Handle must come back to CompleteAuthorization once the user
 	// is done.
 case server.RedirectResponse:
-	// no interaction needed — redirect the browser to a.Destination
+	// Reserved: BeginAuthorization doesn't return this yet. When it
+	// does, no interaction is needed — redirect the browser to
+	// a.Destination (a field, unlike AuthorizationRedirect's method).
 case server.LocalErrorResponse:
 	a.Error.WriteText(w) // render locally: code and public description only
 }
@@ -1065,7 +1067,7 @@ func routes(srv *server.Server, login func(http.ResponseWriter, *http.Request, s
 		switch a := action.(type) {
 		case server.InteractionRequired:
 			login(w, r, a) // step 5: authenticate, then CompleteAuthorization(a.Handle, ...)
-		case server.RedirectResponse:
+		case server.RedirectResponse: // reserved: not returned yet (see step 5)
 			http.Redirect(w, r, a.Destination.String(), http.StatusFound)
 		case server.LocalErrorResponse:
 			a.Error.WriteText(w) // render locally; nothing here is safe to redirect to. Never a.Error.Error(): it carries internal causes

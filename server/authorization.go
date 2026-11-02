@@ -44,11 +44,13 @@ func (InteractionRequired) authorizationAction() {}
 
 // RedirectResponse means the caller should redirect the browser to
 // Destination directly, with no further interaction — e.g. a
-// pre-existing session satisfies the request. No current code path
-// constructs this yet; it exists now because it is part of
+// pre-existing session satisfies the request. It is reserved: no
+// current code path constructs it, so a handler's case for it can't be
+// exercised yet. It exists now because it is part of
 // BeginAuthorization's documented outcome space, and adding it later
 // would be a breaking change to callers that type-switch on
-// AuthorizationAction.
+// AuthorizationAction. Handle it as a plain redirect to Destination (a
+// field here, unlike AuthorizationRedirect's Destination method).
 type RedirectResponse struct {
 	Destination fapi.URL
 }

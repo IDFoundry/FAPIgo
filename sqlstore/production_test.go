@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -31,8 +32,9 @@ func (discardAudit) Record(context.Context, server.AuditEvent) error { return ni
 // package provides taken from d: CIBA on, with d's
 // BackchannelAuthenticationStore; opaque access tokens in its
 // AccessTokenStore; and pairwise subjects by default, mapped in its
-// PairwiseSubjectStore. What it doesn't provide — signing keys and the
-// client key source — are the library's own production-ready ones.
+// PairwiseSubjectStore; and clients' keys from d's clients table
+// (ClientKeys, with no fetcher). What it doesn't provide — signing
+// keys — are the library's own production-ready ones.
 func productionServer(t *testing.T, d *sqlstore.DB, deployment server.Deployment) (server.Config, server.Dependencies) {
 	t.Helper()
 	url := func(raw string) fapi.URL { return mustURL(t, raw) }
@@ -52,7 +54,7 @@ func productionServer(t *testing.T, d *sqlstore.DB, deployment server.Deployment
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientKeys, err := keys.NewStaticClientKeys(nil)
+	clientKeys, err := d.ClientKeys(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +129,32 @@ func TestProductionServerAcceptsStores(t *testing.T) {
 			}
 		}
 		checkMemstoreRefused(t, d, deployment)
+		checkClientKeysFetcherHardened(t, d, cfg, deps)
 	})
+}
+
+// checkClientKeysFetcherHardened checks that AssuranceProduction's gate
+// accepts d's ClientKeys fetching jwks_uris through a hardened
+// fapihttp.Client, and refuses one fetching through any other.
+func checkClientKeysFetcherHardened(t *testing.T, d *sqlstore.DB, cfg server.Config, deps server.Dependencies) {
+	t.Helper()
+	cfg.Deployment = server.DeploymentSingleInstance
+	hardened, err := fapihttp.NewClient(fapihttp.RecommendedTransportConfig())
+	must(t, err)
+	fetcher, err := fapihttp.New(hardened, fapihttp.RecommendedConfig())
+	must(t, err)
+	deps.ClientKeys, err = d.ClientKeys(fetcher)
+	must(t, err)
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("server.New(production, ClientKeys with a hardened fetcher): %v", err)
+	}
+	plain, err := fapihttp.New(http.DefaultClient, fapihttp.RecommendedConfig())
+	must(t, err)
+	deps.ClientKeys, err = d.ClientKeys(plain)
+	must(t, err)
+	if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "LiveFetchHardened") {
+		t.Fatalf("server.New(production, ClientKeys with an unhardened fetcher) = %v, want it refused", err)
+	}
 }
 
 // checkMemstoreRefused checks that swapping any one of the stores for

@@ -232,6 +232,17 @@ between instances: use SQLite there.
   versioned JSON configuration, written with `Clients().Put` or
   `MarshalClientConfig`. See the package documentation's Clients
   section for the document's members.
+- **Client keys** live in the same document, as a `jwks_uri` or an
+  inline `jwks`, so the clients table is the one registry: write them
+  with `Clients().PutWithKeys` (or `MarshalClientConfigWithKeys`) and
+  serve them with `db.ClientKeys(fetcher)` as
+  `server.Dependencies.ClientKeys`. A client added or rekeyed at
+  runtime authenticates on its next request, without a restart.
+
+  ```go
+  deps.ClientKeys, err = db.ClientKeys(fetcher) // a hardened fapihttp.Client; nil if no client has a jwks_uri
+  err = db.Clients().PutWithKeys(ctx, cfg, sqlstore.ClientKeyRegistration{JWKS: jwks})
+  ```
 
 ## Tests
 

@@ -359,6 +359,23 @@
 // (ErrClientConfig, wrapping storage.ErrStoreUnavailable), not as an
 // unknown client.
 //
+// The document holds the client's keys too, so the clients table is the
+// one registry of clients and their keys: a jwks_uri member (an https
+// URL) or an inline jwks member (a JWK Set), never both (RFC 7591 §2),
+// which PutWithKeys and MarshalClientConfigWithKeys write
+// (ClientKeyRegistration) and DB.ClientKeys serves as
+// server.Dependencies.ClientKeys:
+//
+//	clientKeys, err := db.ClientKeys(fetcher) // fapihttp.Client, hardened for production; nil if no client has a jwks_uri
+//	deps.ClientKeys = clientKeys
+//	err = db.Clients().PutWithKeys(ctx, cfg, sqlstore.ClientKeyRegistration{JWKS: jwks})
+//
+// A client added or rekeyed at runtime authenticates with its new keys
+// on its next request, with no restart. Put registers a client with no
+// keys, replacing any (for a client that signs nothing, such as one
+// authenticating with a TLS client certificate). These members are
+// new in sqlstore v0.4: an earlier release refuses a row that has them.
+//
 // # Sweeping
 //
 // The stores never delete an expired row themselves: the server refuses

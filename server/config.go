@@ -503,7 +503,12 @@ type Config struct {
 	// RequireBindingMessage makes BeginBackchannelAuthentication refuse
 	// a CIBA request without a binding_message, with ErrorInvalidRequest
 	// (CIBA Core §13: a required parameter is missing), before anything
-	// is stored or shown to the user. FAPI-CIBA §5.2.2 requires that the
+	// is stored or shown to the user, and one whose binding_message has
+	// nothing visible in it (empty, only spaces) with
+	// ErrorInvalidBindingMessage (CIBA §13). A binding_message carrying
+	// a Unicode format character (bidi controls, zero-width characters)
+	// is refused with ErrorInvalidBindingMessage whether or not this is
+	// set. FAPI-CIBA §5.2.2 requires that the
 	// user can tell which request they're approving: either each request
 	// carries a unique authorization context you show them, or a binding
 	// message the consumption device shows too. Set this when your

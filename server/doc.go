@@ -57,9 +57,9 @@
 //     single-use — a second CompleteAuthorization with the same handle
 //     fails — and a request_uri is single-use at the point of
 //     authorization (FAPI 2.0 Security Profile §5.3.2.2 note 3):
-//     BeginAuthorization may be called with it again, for a reload,
-//     until one interaction begun from it completes, after which it
-//     fails. Until then it is a bearer value; see BeginAuthorization. An authorization
+//     BeginAuthorization may be called with it again, for a reload, up
+//     to eight times, until one interaction begun from it completes,
+//     after which it fails. Until then it is a bearer value; see BeginAuthorization. An authorization
 //     code is likewise single-use: a second ExchangeAuthorizationCode
 //     with the same code fails. A refresh token is deliberately not
 //     rotated — FAPI 2.0 Security Profile Final §5.3.2.1 says an

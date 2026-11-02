@@ -1267,7 +1267,7 @@ func TestBeginBackchannelAuthenticationAcceptsOrdinaryBindingMessage(t *testing.
 
 // TestBeginBackchannelAuthenticationAcceptsNonLatinAndEmojiBindingMessage
 // confirms the acceptability check is about length and
-// control/line-separator characters only — ordinary punctuation, emoji,
+// control/line-separator/format characters only — ordinary punctuation, emoji,
 // and non-Latin scripts are all legitimate human-readable content and
 // must not be rejected just because they aren't ASCII.
 func TestBeginBackchannelAuthenticationAcceptsNonLatinAndEmojiBindingMessage(t *testing.T) {

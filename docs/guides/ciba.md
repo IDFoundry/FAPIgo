@@ -177,8 +177,16 @@ message, which the consumption device shows too. This package can't
 tell whether a request's details are unique to it, so by default it
 accepts a request without `binding_message`. If yours can't be told
 apart otherwise, set `Config.RequireBindingMessage`: a request without
-one is then refused with `invalid_request` before it's stored or shown
-to anyone.
+one is then refused with `invalid_request`, and one whose
+`binding_message` shows nothing (empty or only spaces) with
+`invalid_binding_message`, before it's stored or shown to anyone.
+
+Whether or not it's required, a `binding_message` must be one the
+authentication device can show as sent: at most 100 characters, with
+no control or line-separator characters and no Unicode format
+characters (bidi controls such as U+202E, zero-width characters such
+as U+200B), which could reorder or hide part of it. Anything else is
+refused with `invalid_binding_message` (CIBA §13).
 
 ## Algorithms and TLS
 

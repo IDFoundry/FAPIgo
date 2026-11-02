@@ -574,14 +574,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	requestParam, hasRequestParam := params["request"]
 
 	if !hasRequestParam {
-		if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
-			return nil, nil, nil, newError(ErrorInvalidRequest, 400, "a signed request object is required", nil)
-		}
-		if err := checkPlainClaimsParameter(params); err != nil {
-			return nil, nil, nil, requestError(ErrorInvalidRequest, err)
-		}
-		plain := plainParamsToJSON(params)
-		tokenClaims, err := s.checkExtensions(ctx, client, plain, extension.SourcePlainParameter)
+		plain, tokenClaims, err := s.resolvePlainAuthorizationParameters(ctx, params, client)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -664,6 +657,25 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	return verified.Parameters, tokenClaims, resources, nil
 }
 
+// resolvePlainAuthorizationParameters is resolveAuthorizationParameters
+// for a request without a request object: refused under
+// ProfileFAPISecurityWithMessageSigning, otherwise the form parameters
+// as JSON, with their extension claims.
+func (s *Server) resolvePlainAuthorizationParameters(ctx context.Context, params map[string]string, client storage.RegisteredClient) (map[string]json.RawMessage, map[string]json.RawMessage, *Error) {
+	if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
+		return nil, nil, newError(ErrorInvalidRequest, 400, "a signed request object is required", nil)
+	}
+	if err := checkPlainClaimsParameter(params); err != nil {
+		return nil, nil, requestError(ErrorInvalidRequest, err)
+	}
+	plain := plainParamsToJSON(params)
+	tokenClaims, err := s.checkExtensions(ctx, client, plain, extension.SourcePlainParameter)
+	if err != nil {
+		return nil, nil, err
+	}
+	return plain, tokenClaims, nil
+}
+
 // checkExtensions validates every non-core parameter in params against
 // Config.Extensions (Config.Extensions is never nil once New has run —
 // see server.New), and returns the claims-eligible subset
@@ -722,8 +734,11 @@ func (s *Server) checkExtensions(ctx context.Context, client storage.RegisteredC
 
 // validateAuthorizationParameters checks the FAPI-mandated authorization
 // parameters (response_type, redirect_uri, PKCE, and scope if present)
-// against client. It returns params unmodified on success; every other
-// parameter is stored as-is for the authorization endpoint to interpret.
+// against client, and the core parameters' sizes
+// (authorizationParameterSizes). It returns params on success with only
+// an overlong ui_locales, claims_locales or display trimmed
+// (boundPresentationPreferences); every other parameter is stored as-is
+// for the authorization endpoint to interpret.
 func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessage, client storage.RegisteredClient) (map[string]json.RawMessage, *Error) {
 	// RFC 6749 §4.1.2.1's unauthorized_client: a client with no
 	// registered redirect URI (CIBA or client credentials only) can't
@@ -731,6 +746,10 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 	if !client.AllowsAuthorizationCodeGrant() {
 		return nil, newError(ErrorUnauthorizedClient, 400, "the client is not registered for the authorization code grant", nil)
 	}
+	if err := checkParameterSizes(params, authorizationParameterSizes); err != nil {
+		return nil, requestError(ErrorInvalidRequest, err)
+	}
+	boundPresentationPreferences(params)
 	if err := s.checkResponseMode(params); err != nil {
 		return nil, err
 	}

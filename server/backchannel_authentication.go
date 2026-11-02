@@ -482,7 +482,11 @@ func validateBackchannelHints(params map[string]json.RawMessage) *Error {
 
 // validateBindingMessage checks params' binding_message, if any, is a
 // string the authentication device can show (CIBA §7.1), and that there
-// is one when required (Config.RequireBindingMessage).
+// is one when required (Config.RequireBindingMessage). A required one
+// must also show something: an empty, whitespace-only or invisible
+// message gives the user nothing to compare with the consumption
+// device, so it's refused as invalid_binding_message (CIBA §13), like
+// any other message this server can't display faithfully.
 func validateBindingMessage(params map[string]json.RawMessage, required bool) *Error {
 	raw, ok := params["binding_message"]
 	if !ok {
@@ -497,6 +501,9 @@ func validateBindingMessage(params map[string]json.RawMessage, required bool) *E
 	}
 	if !isAcceptableBindingMessage(bindingMessage) {
 		return newError(ErrorInvalidBindingMessage, 400, "binding_message is not acceptable", nil)
+	}
+	if required && !hasVisibleContent(bindingMessage) {
+		return newError(ErrorInvalidBindingMessage, 400, "binding_message must have visible content", nil)
 	}
 	return nil
 }
@@ -574,21 +581,39 @@ const maxBindingMessageLength = 100
 // interlocking model depends on, not an arbitrary string. CIBA §13
 // explicitly gives an AS invalid_binding_message to reject one it
 // considers unacceptable, rather than accepting whatever a client sends
-// and hoping its own display surface can render it. Only length and
-// control/line-separator characters are checked — a display surface
-// can't safely render a value spanning multiple lines or embedding
-// control codes, but ordinary punctuation, emoji, and non-Latin scripts
-// are all fine and remain accepted.
+// and hoping its own display surface can render it. Only length,
+// control/line-separator characters and format characters are checked
+// — a display surface can't safely render a value spanning multiple
+// lines or embedding control codes, and Unicode format characters
+// (category Cf: the bidi controls U+202A-U+202E and U+2066-U+2069, and
+// zero-width characters such as U+200B-U+200F and U+2060) can reorder
+// or hide what the authentication device shows, so the user wouldn't
+// see the message the consumption device does. That also refuses an
+// emoji sequence joined with U+200D; ordinary punctuation, single emoji
+// with their modifiers, and non-Latin scripts are all fine and remain
+// accepted.
 func isAcceptableBindingMessage(msg string) bool {
 	if utf8.RuneCountInString(msg) > maxBindingMessageLength {
 		return false
 	}
 	for _, r := range msg {
-		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || unicode.Is(unicode.Cf, r) {
 			return false
 		}
 	}
 	return true
+}
+
+// hasVisibleContent reports whether msg has a character that shows up
+// on a display: a letter, digit, punctuation mark or symbol. Spaces and
+// combining marks on their own don't.
+func hasVisibleContent(msg string) bool {
+	for _, r := range msg {
+		if unicode.In(r, unicode.L, unicode.N, unicode.P, unicode.S) {
+			return true
+		}
+	}
+	return false
 }
 
 // reconcileBackchannelDPoPBinding is reconcileParDPoPBinding's CIBA

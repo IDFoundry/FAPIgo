@@ -294,6 +294,12 @@ func TestIssueAccessTokenRefusals(t *testing.T) {
 			r.Binding = server.TokenBinding{Thumbprint: r.Binding.Thumbprint, SenderConstrain: r.Binding.SenderConstrain}
 		}, server.ErrorServerError},
 		"binding verified for another client": {func(r *server.IssueAccessTokenRequest) { r.Binding = otherClientBinding }, server.ErrorServerError},
+		"binding thumbprint edited": {func(r *server.IssueAccessTokenRequest) {
+			r.Binding.Thumbprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" // a key nobody proved
+		}, server.ErrorServerError},
+		"attestation expiry edited": {func(r *server.IssueAccessTokenRequest) {
+			r.Client.AttestationExpiresAt = r.Client.AttestationExpiresAt.Add(time.Hour)
+		}, server.ErrorServerError},
 		"grant type not configured":           {func(r *server.IssueAccessTokenRequest) { r.GrantType = "authorization_code" }, server.ErrorServerError},
 		"client not authenticated":            {func(r *server.IssueAccessTokenRequest) { r.Client = server.AttestedClient{Client: r.Client.Client} }, server.ErrorServerError},
 		"client swapped after authentication": {func(r *server.IssueAccessTokenRequest) { r.Client.Client = otherClient }, server.ErrorServerError},
@@ -396,6 +402,12 @@ func TestEmbedderGrantRefusesExpiredAttestation(t *testing.T) {
 	}
 	if _, err := past.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest(req)); serverErrorCode(t, err) != server.ErrorServerError {
 		t.Errorf("IssueRefreshToken past the attestation's exp = %v, want server_error", err)
+	}
+	// Moving AttestationExpiresAt on doesn't make a kept Client current.
+	extended := req
+	extended.Client.AttestationExpiresAt = extended.Client.AttestationExpiresAt.Add(time.Hour)
+	if _, err := past.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest(extended)); serverErrorCode(t, err) != server.ErrorServerError {
+		t.Errorf("IssueRefreshToken with AttestationExpiresAt edited = %v, want server_error", err)
 	}
 }
 

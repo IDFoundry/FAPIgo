@@ -48,7 +48,9 @@ type AttestedClient struct {
 	Client storage.RegisteredClient
 
 	// AttestationExpiresAt is when the verified Client Attestation
-	// expires.
+	// expires. IssueRefreshToken and IssueAccessToken refuse a Client
+	// whose AttestationExpiresAt was changed since: they judge the
+	// attestation's expiry by their own copy of it.
 	AttestationExpiresAt time.Time
 
 	// instanceKey is the RFC 7638 thumbprint of the Client Instance Key
@@ -57,8 +59,11 @@ type AttestedClient struct {
 	// this server authenticated carries one. authenticatedID is the
 	// client it was verified for: IssueRefreshToken refuses a Client
 	// changed since, so the key can't be attached to another client.
-	instanceKey     string
-	authenticatedID fapi.ClientID
+	// verifiedExpiresAt is AttestationExpiresAt as verified, which they
+	// compare it with and judge expiry by.
+	instanceKey       string
+	authenticatedID   fapi.ClientID
+	verifiedExpiresAt time.Time
 }
 
 // AuthenticateAttestedClient authenticates a client with a Client
@@ -122,5 +127,5 @@ func (s *Server) AuthenticateAttestedClient(ctx context.Context, req AttestedCli
 		return AttestedClient{}, err
 	}
 	s.audit(ctx, AuditEventAuthenticateAttestedClient, client.ID(), AuditOutcomeSuccess, "")
-	return AttestedClient{Client: client, AttestationExpiresAt: verified.ExpiresAt, instanceKey: verified.InstanceKey, authenticatedID: client.ID()}, nil
+	return AttestedClient{Client: client, AttestationExpiresAt: verified.ExpiresAt, instanceKey: verified.InstanceKey, authenticatedID: client.ID(), verifiedExpiresAt: verified.ExpiresAt}, nil
 }

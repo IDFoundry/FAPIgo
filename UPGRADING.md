@@ -125,6 +125,44 @@ exponent 65537, or for EC keys:
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out attester-ca.pem
 ```
 
+### `IssueAccessToken` and `IssueRefreshToken` refuse an edited binding or attestation expiry (server)
+
+**Affects:** an embedder serving its own grant
+(`Config.AdditionalGrantTypes`) that changes, after the server returned
+them, the `Thumbprint` of a `server.TokenBinding` from
+`VerifyTokenRequestBinding` before passing it to `IssueAccessToken`, or
+the `AttestationExpiresAt` of a `server.AttestedClient` from
+`AuthenticateAttestedClient` before passing it to `IssueAccessToken` or
+`IssueRefreshToken`.
+
+**Why:** both documented that only what the server verified is
+accepted, but the check covered only the client the value was verified
+for. An edited `Thumbprint` bound the access token to a key that never
+proved possession, and an extended `AttestationExpiresAt` let a
+`Client` kept from an earlier request pass the attestation expiry
+check. Each now keeps its own copy of what was verified.
+
+**What fails:** nothing at startup. Such a call is refused with a
+`server_error` `*server.Error`.
+
+**What to change:** pass both exactly as the server returned them, for
+the current request:
+
+```go
+attested, err := srv.AuthenticateAttestedClient(ctx, req.AttestedClientAuthentication())
+if err != nil {
+	return err
+}
+binding, err := srv.VerifyTokenRequestBinding(ctx, attested.Client, req)
+if err != nil {
+	return err
+}
+result, err := srv.IssueAccessToken(ctx, server.IssueAccessTokenRequest{
+	GrantType: grantType, Client: attested, Binding: binding,
+	Subject: subject, Scope: scope,
+})
+```
+
 ## v0.68.0
 
 ### `DefaultAttesterLeafPolicy` refuses more signing roles (server)

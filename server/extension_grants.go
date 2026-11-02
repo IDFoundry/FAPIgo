@@ -76,7 +76,8 @@ func (t TokenEndpointRequest) AttestedClientAuthentication() AttestedClientAuthe
 // returned, for the same client: the access token is bound to its
 // Thumbprint, so a hand-built one, or one verified for another client,
 // would bind it to a key that never proved possession at the token
-// endpoint. IssueRefreshToken records Thumbprint for reference only, so
+// endpoint. It keeps its own copy of the thumbprint it verified, and
+// refuses a binding whose Thumbprint was changed since. IssueRefreshToken records Thumbprint for reference only, so
 // it accepts any binding of the client's registered kind.
 type TokenBinding struct {
 	// Thumbprint is the credential's thumbprint, as
@@ -95,9 +96,11 @@ type TokenBinding struct {
 	NextDPoPNonce string
 
 	// verifiedFor is the client VerifyTokenRequestBinding verified the
-	// credential for. Unexported, so only a binding it returned carries
-	// one: see IssueAccessToken.
-	verifiedFor fapi.ClientID
+	// credential for, and verifiedThumbprint the Thumbprint it verified.
+	// Unexported, so only a binding it returned carries them, and an
+	// edit to Thumbprint shows: see IssueAccessToken.
+	verifiedFor        fapi.ClientID
+	verifiedThumbprint string
 }
 
 // VerifyTokenRequestBinding verifies req's sender-constraining
@@ -145,7 +148,7 @@ func (s *Server) verifyExtensionGrantBinding(ctx context.Context, client storage
 	if err != nil {
 		return TokenBinding{}, err
 	}
-	return TokenBinding{Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), NextDPoPNonce: nextNonce, verifiedFor: client.ID()}, nil
+	return TokenBinding{Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), NextDPoPNonce: nextNonce, verifiedFor: client.ID(), verifiedThumbprint: thumbprint}, nil
 }
 
 // DPoPProofBinding is what VerifyTokenRequestDPoP verified: the DPoP key

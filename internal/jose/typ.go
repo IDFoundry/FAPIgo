@@ -4,6 +4,8 @@ import (
 	"errors"
 	"slices"
 	"strings"
+
+	"github.com/idfoundry/fapigo/internal/canonical"
 )
 
 // ErrOtherExplicitType reports a JWT whose "typ" names a different,
@@ -15,15 +17,17 @@ var ErrOtherExplicitType = errors.New("jose: header typ names another kind of JW
 var ErrUnexpectedType = errors.New(`jose: header typ is neither absent, "JWT", nor the expected media type`)
 
 // TypeIs reports whether typ names the media type want, comparing as
-// RFC 7515 §4.1.9 asks: case-insensitively (RFC 2045), and with
-// "application/" implied for a value containing no '/'. So
-// "application/at+jwt" and "AT+JWT" are both TypeIs(_, "at+jwt").
+// RFC 7515 §4.1.9 asks: case-insensitively (RFC 2045), in ASCII only,
+// and with "application/" implied for a value containing no '/'. So
+// "application/at+jwt" and "AT+JWT" are both TypeIs(_, "at+jwt"), but
+// a non-ASCII letter that Unicode folds onto an ASCII one (the Kelvin
+// sign U+212A onto "k") doesn't match it.
 func TypeIs(typ, want string) bool {
 	return mediaType(typ) == mediaType(want)
 }
 
 func mediaType(typ string) string {
-	typ = strings.ToLower(typ)
+	typ = canonical.LowerASCII(typ)
 	if !strings.Contains(typ, "/") {
 		typ = "application/" + typ
 	}

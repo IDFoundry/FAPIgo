@@ -20,6 +20,11 @@ func TestTypeIs(t *testing.T) {
 		{"text/at+jwt", "at+jwt", false},
 		{"at+jwt ", "at+jwt", false},
 		{"dpop+jwt", "at+jwt", false},
+		// Unicode folds the Kelvin sign U+212A onto "k"; the media type
+		// comparison is ASCII-only.
+		{"trust-mar\u212a+jwt", "trust-mark+jwt", false},
+		{"jw\u212a-set+jwt", "jwk-set+jwt", false},
+		{"TRUST-MARK+JWT", "trust-mark+jwt", true},
 	} {
 		if got := TypeIs(tc.typ, tc.want); got != tc.is {
 			t.Errorf("TypeIs(%q, %q) = %v, want %v", tc.typ, tc.want, got, tc.is)

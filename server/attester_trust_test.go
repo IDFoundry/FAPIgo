@@ -581,3 +581,118 @@ func TestRegisteredAttesterKeysNoKeyForAlgorithm(t *testing.T) {
 		t.Fatalf("error code = %q, want %q (err %v)", code, server.ErrorInvalidClient, err)
 	}
 }
+
+// TestX5CAttesterChainRefusesUnboundedRSAKeys covers an x5c whose
+// certificates carry RSA keys the caller chose to be costly: a modulus
+// over 4096 bits or an exponent other than 65537, on the signing
+// certificate or on an "intermediate" it names as its issuer. Nothing
+// chains to the anchor, and the moduli were never generated, so a
+// refusal from chain verification would be x509's unknown authority
+// after one costly RSA operation per candidate; the key limits must
+// refuse each first, without any signature check.
+func TestX5CAttesterChainRefusesUnboundedRSAKeys(t *testing.T) {
+	root := newTestCert(t, "trust list CA", certOptions{isCA: true})
+	trust := server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerInCertificate}
+	// An RSA signer, so the certificates' signature algorithm is one the
+	// costly RSA key would be used for.
+	signer, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		bits     int
+		exponent int
+		onLeaf   bool
+		want     error
+	}{
+		"31744-bit intermediate, exponent 2^31-1": {31744, 1<<31 - 1, false, jose.ErrRSAKeyTooLarge},
+		"4104-bit intermediate":                   {4104, 65537, false, jose.ErrRSAKeyTooLarge},
+		"intermediate with exponent 2^31-1":       {2048, 1<<31 - 1, false, jose.ErrUnsupportedRSAExponent},
+		"intermediate with exponent 3":            {2048, 3, false, jose.ErrUnsupportedRSAExponent},
+		"8192-bit signing certificate":            {8192, 65537, true, jose.ErrRSAKeyTooLarge},
+		"signing certificate with exponent 3":     {2048, 3, true, jose.ErrUnsupportedRSAExponent},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarnessWithAttesterTrust(t, nil, trust)
+			x5c, err := json.Marshal(costlyRSAX5C(t, signer, tc.bits, tc.exponent, tc.onLeaf)) // []byte marshals as standard base64
+			if err != nil {
+				t.Fatalf("marshal x5c: %v", err)
+			}
+			instanceKey := generateKey(t)
+			err = requestWithAttestation(t, h, createX5CAttestation(t, generateKey(t), x5c, "", &instanceKey.PublicKey, h.now), instanceKey)
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+				t.Fatalf("error code = %q, want %q (err %v)", code, server.ErrorInvalidClient, err)
+			}
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want it to wrap %v (refused by the key limits, before any signature check)", err, tc.want)
+			}
+		})
+	}
+}
+
+// costlyRSAX5C builds an attacker's x5c around an RSA public key with a
+// random (never generated) modulus of the given bits and exponent,
+// signed by signer:
+// either as the signing certificate's own key, or as the key of an
+// "intermediate" the signing certificate names as its issuer, whose
+// signature is then junk as long as that modulus.
+func costlyRSAX5C(t *testing.T, signer *rsa.PrivateKey, bits, exponent int, onLeaf bool) [][]byte {
+	t.Helper()
+	n, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), uint(bits)))
+	if err != nil {
+		t.Fatalf("rand.Int: %v", err)
+	}
+	n.SetBit(n, bits-1, 1)
+	n.SetBit(n, 0, 1)
+	costly := &rsa.PublicKey{N: n, E: exponent}
+	now := time.Now()
+	issuer := pkix.Name{CommonName: "attester CA"}
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "attester"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature,
+	}
+	if onLeaf {
+		der, err := x509.CreateCertificate(rand.Reader, leafTemplate, &x509.Certificate{Subject: issuer}, costly, signer)
+		if err != nil {
+			t.Fatalf("create leaf: %v", err)
+		}
+		return [][]byte{der}
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, &x509.Certificate{Subject: issuer}, signer.Public(), signer)
+	if err != nil {
+		t.Fatalf("create leaf: %v", err)
+	}
+	intermediateDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: issuer,
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}, &x509.Certificate{Subject: pkix.Name{CommonName: "root"}}, costly, signer)
+	if err != nil {
+		t.Fatalf("create intermediate: %v", err)
+	}
+	return [][]byte{withJunkSignature(t, leafDER, bits), intermediateDER}
+}
+
+// withJunkSignature replaces der's signature with bits/8 random bytes,
+// as long as an RSA signature by a key of that modulus would be.
+func withJunkSignature(t *testing.T, der []byte, bits int) []byte {
+	t.Helper()
+	var cert struct {
+		TBS    asn1.RawValue
+		SigAlg pkix.AlgorithmIdentifier
+		Sig    asn1.BitString
+	}
+	if _, err := asn1.Unmarshal(der, &cert); err != nil {
+		t.Fatalf("unmarshal certificate: %v", err)
+	}
+	sig := make([]byte, bits/8)
+	_, _ = rand.Read(sig)
+	sig[0] = 0x01
+	cert.Sig = asn1.BitString{Bytes: sig, BitLength: bits}
+	out, err := asn1.Marshal(cert)
+	if err != nil {
+		t.Fatalf("marshal certificate: %v", err)
+	}
+	return out
+}

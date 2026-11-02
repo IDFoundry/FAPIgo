@@ -17,6 +17,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientattestation"
 	"github.com/idfoundry/fapigo/internal/depcheck"
+	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -129,6 +130,12 @@ func (r RegisteredAttesterKeys) validate() error {
 // the client. An attestation without "x5c" is rejected — there is no
 // fallback to "kid", which would let an attestation skip the chain
 // check just by omitting it — and "kid" plays no part.
+//
+// Every "x5c" certificate holding an RSA key must hold one of at most
+// 4096 bits with exponent 65537, the limits on any RSA key a caller
+// supplies; this is checked before any signature, so a chain can't
+// choose how much work verifying it costs. Anchors TrustAnchors or
+// Anchors return are configured, not sent, and aren't limited.
 //
 // The signing certificate must:
 //
@@ -551,6 +558,12 @@ func verifyAttesterChain(ders [][]byte, roots *x509.CertPool, now time.Time) (*x
 		cert, err := x509.ParseCertificate(der)
 		if err != nil {
 			return nil, nil, fmt.Errorf("parse x5c certificate %d: %w", i, err)
+		}
+		// Before any of these keys checks a signature (isSelfSigned,
+		// path building): the caller chose them, and crypto/x509 bounds
+		// neither an RSA modulus nor its exponent.
+		if err := jose.ValidateCallerCertificateKey(cert.PublicKey); err != nil {
+			return nil, nil, fmt.Errorf("x5c certificate %d: %w", i, err)
 		}
 		certs[i] = cert
 	}

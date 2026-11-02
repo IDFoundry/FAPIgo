@@ -28,7 +28,8 @@ func (t TokenEndpointRequest) Parameters() (map[string]string, error) {
 }
 
 // Resources returns the request's RFC 8707 "resource" parameters, in
-// order: every one the client sent, which is what a check of the
+// order: every one the client sent with a value (an empty one is
+// omitted, RFC 6749 §3.2), which is what a check of the
 // resources an embedder's grant may be used for has to look at. Pass
 // them as IssueAccessTokenRequest.Resources and
 // IssueRefreshTokenRequest.Resources, which refuse any the client or

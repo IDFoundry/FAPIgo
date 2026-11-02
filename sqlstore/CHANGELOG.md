@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.3.0...sqlstore/v0.4.0) (2026-11-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sqlstore:** on SQLite, Migrate and CheckSchema return an error unless the database is in WAL mode, which v0.3 accepted. Open the file with both pragmas in its DSN, busy_timeout first, as in
+* **sqlstore:** AESGCMSealer returns an error for a key that is one byte repeated or made entirely of printable text, which v0.3 accepted. Generate the key with crypto/rand and decode an encoded key before passing it. The README's Upgrading from v0.3 section shows how to keep reading the records sealed under the old key.
+
+### Features
+
+* **sqlstore:** add ResourceServer for a standalone resource server's stores ([0989577](https://github.com/IDFoundry/FAPIgo/commit/09895771113c9a5db855c0883afad8065e95e627))
+* **sqlstore:** keep clients' keys in the clients table ([2cc26db](https://github.com/IDFoundry/FAPIgo/commit/2cc26dbb9725580c0577e0589ecc3f2f1fb8d417))
+* **sqlstore:** list clients, and document CheckClientRegistration ([d4665ca](https://github.com/IDFoundry/FAPIgo/commit/d4665ca622346811f1c81647747b7979024a1b0a))
+
+
+### Bug Fixes
+
+* **sqlstore:** refuse a sealing key that isn't random ([963cfdc](https://github.com/IDFoundry/FAPIgo/commit/963cfdc815f207a68dbb804c3b3757b68d404802))
+* **sqlstore:** refuse a SQLite database that isn't in WAL mode ([49c8d39](https://github.com/IDFoundry/FAPIgo/commit/49c8d3989573d1ad5206904dab5ef0b496080074))
+
 ## [0.3.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.2.0...sqlstore/v0.3.0) (2026-11-01)
 
 

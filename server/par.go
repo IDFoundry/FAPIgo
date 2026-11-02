@@ -574,14 +574,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	requestParam, hasRequestParam := params["request"]
 
 	if !hasRequestParam {
-		if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
-			return nil, nil, nil, newError(ErrorInvalidRequest, 400, "a signed request object is required", nil)
-		}
-		if err := checkPlainClaimsParameter(params); err != nil {
-			return nil, nil, nil, requestError(ErrorInvalidRequest, err)
-		}
-		plain := plainParamsToJSON(params)
-		tokenClaims, err := s.checkExtensions(ctx, client, plain, extension.SourcePlainParameter)
+		plain, tokenClaims, err := s.resolvePlainAuthorizationParameters(ctx, params, client)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -662,6 +655,25 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		return nil, nil, nil, checkErr
 	}
 	return verified.Parameters, tokenClaims, resources, nil
+}
+
+// resolvePlainAuthorizationParameters is resolveAuthorizationParameters
+// for a request without a request object: refused under
+// ProfileFAPISecurityWithMessageSigning, otherwise the form parameters
+// as JSON, with their extension claims.
+func (s *Server) resolvePlainAuthorizationParameters(ctx context.Context, params map[string]string, client storage.RegisteredClient) (map[string]json.RawMessage, map[string]json.RawMessage, *Error) {
+	if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
+		return nil, nil, newError(ErrorInvalidRequest, 400, "a signed request object is required", nil)
+	}
+	if err := checkPlainClaimsParameter(params); err != nil {
+		return nil, nil, requestError(ErrorInvalidRequest, err)
+	}
+	plain := plainParamsToJSON(params)
+	tokenClaims, err := s.checkExtensions(ctx, client, plain, extension.SourcePlainParameter)
+	if err != nil {
+		return nil, nil, err
+	}
+	return plain, tokenClaims, nil
 }
 
 // checkExtensions validates every non-core parameter in params against

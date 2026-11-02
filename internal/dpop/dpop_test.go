@@ -175,8 +175,8 @@ func TestVerifyRejectsURIMismatch(t *testing.T) {
 	}
 }
 
-// RFC 9449 §4.3: "the query and fragment parts of the htu... are
-// ignored", and RFC 3986 makes scheme/host case-insensitive. A proof
+// RFC 9449 §4.3 matches htu "ignoring any query and fragment parts",
+// and RFC 3986 makes scheme/host case-insensitive. A proof
 // whose htu differs from the request URL only in those respects must
 // still verify.
 func TestVerifyToleratesHTUQueryFragmentAndCase(t *testing.T) {

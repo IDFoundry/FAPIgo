@@ -68,7 +68,7 @@ func TestDecodeResultRejectsNonPositiveExpiresIn(t *testing.T) {
 }
 
 // TestDecodeResultIgnoresUnknownField covers RFC 6749 §5.1's "MUST
-// ignore unrecognized value names and extra parameters" — a member
+// ignore unrecognized value names in the response" — a member
 // beyond request_uri/expires_in must not fail parsing.
 func TestDecodeResultIgnoresUnknownField(t *testing.T) {
 	body := []byte(`{"request_uri":"urn:x","expires_in":60,"unexpected":"value"}`)

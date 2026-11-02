@@ -428,7 +428,7 @@ could consult — now passes cleanly. `server.Dependencies.Revocation`/
 `resource/revocation.go`) let this AS revoke both the access token and
 any refresh token it issued when it detects the authorization code
 that produced them being reused, satisfying RFC 6749 §4.1.2's "SHOULD
-revoke (if possible) all tokens previously issued based on that
+revoke (when possible) all tokens previously issued based on that
 authorization code" — `cmd/conformance-as` wires this to
 `storage/memstore.RevocationStore` (see `wiring.go`).
 Both plans' `client2` block requests `offline_access` alongside

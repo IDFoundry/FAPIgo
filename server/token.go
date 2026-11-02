@@ -236,7 +236,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if err != nil {
 		// RFC 6749 §4.1.2: "If an authorization code is used more than
 		// once, the authorization server MUST deny the request and
-		// SHOULD revoke (if possible) all tokens previously issued
+		// SHOULD revoke (when possible) all tokens previously issued
 		// based on that authorization code." The deny-the-request half
 		// is unconditional (below, same as always); the revoke half
 		// only has something to act on if RecordIssuedAccessToken/
@@ -459,7 +459,7 @@ func (s *Server) codeExchangeParameters(params map[string]string) (code, redirec
 
 // revokeTokensForReusedCode best-effort revokes whatever was already
 // issued for a reused authorization code — RFC 6749 §4.1.2's "SHOULD
-// revoke (if possible) all tokens previously issued based on that
+// revoke (when possible) all tokens previously issued based on that
 // authorization code" — when err is a
 // storage.AuthorizationCodeAlreadyRedeemedError; a no-op for any other
 // error. Split out of ExchangeAuthorizationCode purely to keep that

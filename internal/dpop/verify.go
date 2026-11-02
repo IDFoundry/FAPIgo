@@ -210,8 +210,8 @@ func verifyProofClaims(c claims, req VerifyRequest, iat time.Time) error {
 	if c.HTM != req.Method {
 		return ErrMethodMismatch
 	}
-	// htu is compared canonicalized on both sides (RFC 9449 §4.3: "the
-	// query and fragment parts of the htu... are ignored"), not as a raw
+	// htu is compared canonicalized on both sides (RFC 9449 §4.3 matches
+	// it "ignoring any query and fragment parts"), not as a raw
 	// string — a proof's own htu claim may legitimately differ from
 	// req.URL in case or in carrying a query/fragment the sender didn't
 	// bother to strip.

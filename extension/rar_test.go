@@ -142,7 +142,7 @@ func TestNewRARRegistryRejectsInvalidBounds(t *testing.T) {
 	}
 }
 
-// RFC 9396 §7's "authorization_details_types_supported" metadata field
+// RFC 9396 §10's "authorization_details_types_supported" metadata field
 // just needs the registered type strings, sorted for a deterministic
 // wire value.
 func TestRARRegistryTypesReturnsSortedRegisteredTypes(t *testing.T) {

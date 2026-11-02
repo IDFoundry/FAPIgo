@@ -675,10 +675,9 @@ type rawTokenResponse struct {
 
 // decodeTokenResponse parses body, tolerating any member beyond
 // rawTokenResponse's own fields: RFC 6749 §5.1 requires it — "The
-// client MUST ignore unrecognized value names and extra parameters
-// received in the response" — since a real authorization server
-// routinely adds parameters this module has no reason to model (e.g.
-// refresh_token_expires_in).
+// client MUST ignore unrecognized value names in the response" — since
+// a real authorization server routinely adds parameters this module has
+// no reason to model (e.g. refresh_token_expires_in).
 func decodeTokenResponse(body []byte) (rawTokenResponse, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	var raw rawTokenResponse

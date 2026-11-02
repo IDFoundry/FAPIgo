@@ -699,6 +699,14 @@ type AutomaticRegistrationConfig struct {
 	// federation.DefaultFailureCacheAge.
 	FailureCacheAge time.Duration
 
+	// MaxConcurrentResolutions bounds how many Trust Chain resolutions
+	// for distinct client_ids run at once; past it a request needing a new
+	// one is answered with 500 server_error — see
+	// federation.AutomaticRegistrationConfig.MaxConcurrentResolutions.
+	// Zero means federation.DefaultMaxConcurrentResolutions; negative is
+	// invalid.
+	MaxConcurrentResolutions int
+
 	// AllowsClientCredentialsGrant permits every automatically-registered
 	// client to use the client_credentials grant — see
 	// federation.AutomaticRegistrationConfig.AllowsClientCredentialsGrant

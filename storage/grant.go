@@ -13,7 +13,7 @@ import (
 // consumed — as opposed to any other failure (e.g. an unknown code),
 // which returns a plain error. RFC 6749 §4.1.2: "If an authorization
 // code is used more than once, the authorization server MUST deny the
-// request and SHOULD revoke (if possible) all tokens previously issued
+// request and SHOULD revoke (when possible) all tokens previously issued
 // based on that authorization code" — "all tokens," so this carries
 // both halves back to the caller, whichever were actually issued and
 // recorded.

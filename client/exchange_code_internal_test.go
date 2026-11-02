@@ -3,10 +3,10 @@ package client
 import "testing"
 
 // TestDecodeTokenResponseIgnoresUnknownField covers RFC 6749 §5.1's
-// "MUST ignore unrecognized value names and extra parameters received
-// in the response" — a real authorization server routinely adds
-// parameters this module has no reason to model (e.g.
-// refresh_token_expires_in, authorization_details), and rejecting the
+// "MUST ignore unrecognized value names in the response" — a real
+// authorization server routinely adds parameters this module has no
+// reason to model (e.g. refresh_token_expires_in,
+// authorization_details), and rejecting the
 // whole response over one would break token exchange against any such
 // server.
 func TestDecodeTokenResponseIgnoresUnknownField(t *testing.T) {

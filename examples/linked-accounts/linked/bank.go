@@ -137,9 +137,6 @@ func (w *World) newBank(ctx context.Context, apps apps) (*bank, error) {
 	// that long, and isn't rotated (FAPI 2.0), so the consent ends when it
 	// does.
 	limits.RefreshTokenLifetime = consentLifetime
-	// RecommendedLimits leaves the nonce lifetime to whoever enables
-	// nonces (Dependencies.Nonces below).
-	limits.DPoPNonceLifetime = 5 * time.Minute
 
 	b := &bank{w: w, interaction: interaction, connections: map[string]*connection{}}
 	b.cfg = server.Config{

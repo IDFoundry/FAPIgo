@@ -19,8 +19,10 @@ what a production deployment must do on one page, linking back here.
 transaction/grant/replay stores, a key manager, a client key source, an
 access-token issuer, a revocation sink, a client-certificate trust
 choice, a clock, a randomness source — with no implicit defaults for
-any of them (plus an audit sink, required
-only under `AssuranceProduction` — see step 2's `Assurance` field).
+any of them (plus, required only under `AssuranceProduction`, an audit
+sink and a DPoP nonce choice: a nonce store as `Dependencies.Nonces`,
+or `server.NoDPoPNonces{}` to decline nonces — see step 2's `Assurance`
+field).
 Writing real, production-shaped persistence and key management for all
 of that is real work, and not the place to start. Two packages exist
 specifically so you don't have to do it before you can run anything:
@@ -787,7 +789,9 @@ case server.InteractionRequired:
 	// a.Handle must come back to CompleteAuthorization once the user
 	// is done.
 case server.RedirectResponse:
-	// no interaction needed — redirect the browser to a.Destination
+	// Reserved: BeginAuthorization doesn't return this yet. When it
+	// does, no interaction is needed — redirect the browser to
+	// a.Destination (a field, unlike AuthorizationRedirect's method).
 case server.LocalErrorResponse:
 	a.Error.WriteText(w) // render locally: code and public description only
 }
@@ -1063,7 +1067,7 @@ func routes(srv *server.Server, login func(http.ResponseWriter, *http.Request, s
 		switch a := action.(type) {
 		case server.InteractionRequired:
 			login(w, r, a) // step 5: authenticate, then CompleteAuthorization(a.Handle, ...)
-		case server.RedirectResponse:
+		case server.RedirectResponse: // reserved: not returned yet (see step 5)
 			http.Redirect(w, r, a.Destination.String(), http.StatusFound)
 		case server.LocalErrorResponse:
 			a.Error.WriteText(w) // render locally; nothing here is safe to redirect to. Never a.Error.Error(): it carries internal causes
@@ -1220,12 +1224,9 @@ if err != nil {
 	return err
 }
 cfg := resource.Config{
-	Limits: resource.Limits{
-		MaxDPoPProofAge: time.Minute,      // how old a DPoP proof's iat may be
-		MaxClockSkew:    10 * time.Second, // tolerance either direction: 10 to 60 seconds in production
-		// With Dependencies.Nonces: at most 15 minutes in production.
-		DPoPNonceLifetime: 5 * time.Minute,
-	},
+	// 60s MaxDPoPProofAge, 10s MaxClockSkew and 5m DPoPNonceLifetime,
+	// the values server.RecommendedLimits uses; override any field.
+	Limits:       resource.RecommendedLimits(),
 	Assurance:    resource.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
 	ResourceURLs: []fapi.URL{apiURL},             // this API's own external URL(s), as clients call it
 	// Deployment: resource.DeploymentSingleInstance, // required under AssuranceProduction: or DeploymentHorizontallyScaled for a fleet
@@ -1235,6 +1236,9 @@ cfg := resource.Config{
 All four are required — `NewVerifier` rejects a zero `MaxDPoPProofAge`,
 a negative `MaxClockSkew`, a zero `Assurance` or no `ResourceURLs`, the
 same "no implicit default" discipline `server.Config` follows.
+`resource.RecommendedLimits()` is a starting point like the server's
+preset, documented with how each value is grounded, not a default
+`NewVerifier` applies; its values satisfy `AssuranceProduction`.
 
 `ResourceURLs` are this resource server's own external URLs: each an
 origin, optionally with a path prefix (`https://api.example.com/v1`),

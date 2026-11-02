@@ -29,8 +29,8 @@ const cibaGrantType = "urn:openid:params:grant-type:ciba"
 // defaultBackchannelAuthenticationPollInterval is the minimum poll
 // interval BackchannelAuthenticationSession.Interval assumes when a
 // server's response omits "interval" — OpenID Connect CIBA Core 1.0
-// §11's own fallback ("If the Client is not informed of the Interval
-// it should assume a default of 5 seconds").
+// §7.3's own fallback ("If no value is provided, clients MUST use 5 as
+// the default value.").
 const defaultBackchannelAuthenticationPollInterval = 5 * time.Second
 
 // errBackchannelAuthenticationRequestFailed is the shared newError

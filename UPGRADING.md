@@ -320,6 +320,9 @@ func (s *Store) BeginAuthorization(ctx context.Context, txn storage.BeginAuthori
 		return storage.PushedAuthorizationRequest{}, errors.New("request_uri has expired")
 	}
 	// ... then insert the interaction under txn.Handle.
+}
+```
+
 ### A token request's `authorization_details` is checked against the grant (server)
 
 **Affects:** a client that sends an `authorization_details` parameter
@@ -468,6 +471,8 @@ sent as `expires_in: 0`.
 
 ```go
 cfg.Limits.PushedRequestLifetime = 90 * time.Second
+```
+
 ### CIBA's poll interval and request lifetime must be whole seconds (server)
 
 **Affects:** a server with `Endpoints.BackchannelAuthentication` set whose
@@ -938,6 +943,9 @@ federation.AutomaticRegistrationConfig{
 	// ...
 	IDTokenSigningAlgorithm:  srvCfg.Algorithms.IDToken,
 	UserInfoSigningAlgorithm: srvCfg.Algorithms.UserInfo,
+}
+```
+
 ### DPoP nonces are valid for a time window, and `NonceStore.Consume` is now `Lookup` (storage, server, resource)
 
 **Affects:** a `storage.NonceStore` of your own, used as
@@ -983,6 +991,8 @@ func (s *SQLNonceStore) Lookup(ctx context.Context, lookup storage.NonceLookup) 
 	}
 	return storage.NonceRecord{ExpiresAt: expiresAt}, nil
 }
+```
+
 ### An issuer URL with a query is refused (all packages)
 
 **Affects:** anything that parses an issuer with `fapi.ParseIssuerURL`:

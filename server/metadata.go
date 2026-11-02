@@ -188,7 +188,7 @@ type Metadata struct {
 	// values every server using this package would report.
 	DPoPSigningAlgValuesSupported []string `json:"dpop_signing_alg_values_supported,omitempty"`
 
-	// AuthorizationDetailsTypesSupported (RFC 9396 §7) is set only when
+	// AuthorizationDetailsTypesSupported (RFC 9396 §10) is set only when
 	// Config.RAR is configured — RAR is an entirely optional capability,
 	// the same gating Config.Endpoints.BackchannelAuthentication gets
 	// for CIBA's own metadata fields above.

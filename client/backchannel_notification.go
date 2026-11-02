@@ -31,13 +31,16 @@ func (n BackchannelNotification) AuthReqID() string { return n.authReqID }
 // session's auth_req_id, and carries, as its bearer token, the
 // client_notification_token this client sent with that request
 // (compared in constant time). CIBA §10.2 requires this check before a
-// notification is trusted; when it fails, respond 401 Unauthorized.
+// notification is trusted; when it fails, respond 401 Unauthorized, as
+// §10.2 has a client do when the bearer token is not valid. A
+// notification carrying no bearer token, or not exactly one, never
+// authenticates.
 // When it passes, respond 204 No Content, then collect the decision with
 // PollBackchannelAuthentication — after responding, so the server isn't
 // kept waiting. It is always false for a session begun under poll
 // delivery, which has no notification token.
 func (n BackchannelNotification) Authenticates(session BackchannelAuthenticationSession) bool {
-	if session.notificationToken == "" || n.authReqID != session.authReqID {
+	if n.token == "" || session.notificationToken == "" || n.authReqID != session.authReqID {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(n.token), []byte(session.notificationToken)) == 1
@@ -51,7 +54,9 @@ func (n BackchannelNotification) Authenticates(session BackchannelAuthentication
 //
 // A request that isn't a well-formed ping returns an ErrorInvalidRequest
 // *Error; respond 400 Bad Request. A well-formed one isn't yet trusted:
-// see BackchannelNotification.Authenticates.
+// see BackchannelNotification.Authenticates, which refuses one without
+// exactly one bearer token, so that it is answered 401 Unauthorized as
+// CIBA §10.2 asks.
 func ParseBackchannelNotification(r *http.Request) (BackchannelNotification, error) {
 	if r.Method != http.MethodPost {
 		return BackchannelNotification{}, newError(ErrorInvalidRequest, "a backchannel notification must be a POST", nil)
@@ -59,10 +64,6 @@ func ParseBackchannelNotification(r *http.Request) (BackchannelNotification, err
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || !strings.EqualFold(mediaType, "application/json") {
 		return BackchannelNotification{}, newError(ErrorInvalidRequest, "a backchannel notification must be application/json", err)
-	}
-	scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
-	if !ok || !strings.EqualFold(scheme, "Bearer") || token == "" || len(r.Header.Values("Authorization")) != 1 {
-		return BackchannelNotification{}, newError(ErrorInvalidRequest, "a backchannel notification must carry exactly one bearer token", nil)
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBackchannelNotificationBytes+1))
 	if err != nil {
@@ -79,5 +80,19 @@ func ParseBackchannelNotification(r *http.Request) (BackchannelNotification, err
 	if raw, ok := members["auth_req_id"]; !ok || json.Unmarshal(raw, &authReqID) != nil || authReqID == "" {
 		return BackchannelNotification{}, newError(ErrorInvalidRequest, "the backchannel notification has no auth_req_id", errors.New("auth_req_id missing, empty or not a string"))
 	}
-	return BackchannelNotification{authReqID: authReqID, token: token}, nil
+	return BackchannelNotification{authReqID: authReqID, token: bearerToken(r.Header)}, nil
+}
+
+// bearerToken returns the request's bearer token, or "" (which never
+// authenticates) unless it has exactly one Authorization header with
+// the Bearer scheme and a non-empty token.
+func bearerToken(h http.Header) string {
+	if len(h.Values("Authorization")) != 1 {
+		return ""
+	}
+	scheme, token, ok := strings.Cut(h.Get("Authorization"), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return ""
+	}
+	return token
 }

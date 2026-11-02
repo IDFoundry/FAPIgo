@@ -93,7 +93,7 @@ func TestMetadataSecurityProfile(t *testing.T) {
 	}
 }
 
-// RFC 9396 §7: omitted when Config.RAR isn't configured — RAR is an
+// RFC 9396 §10: omitted when Config.RAR isn't configured — RAR is an
 // entirely optional capability, the same gating CIBA's own metadata
 // fields get from Config.Endpoints.BackchannelAuthentication.
 func TestMetadataOmitsAuthorizationDetailsTypesWhenRARNotConfigured(t *testing.T) {

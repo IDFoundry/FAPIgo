@@ -481,7 +481,7 @@ func TestExchangeAuthorizationCodeIsSingleUse(t *testing.T) {
 }
 
 // TestExchangeAuthorizationCodeReuseRevokesAccessToken exercises RFC
-// 6749 §4.1.2's "SHOULD revoke (if possible) all tokens previously
+// 6749 §4.1.2's "SHOULD revoke (when possible) all tokens previously
 // issued based on that authorization code": a detected code-reuse
 // attempt must call Dependencies.Revocation.Revoke with the jti of the
 // access token the first, legitimate exchange issued.

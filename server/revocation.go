@@ -7,7 +7,7 @@ import (
 
 // RevocationSink lets this server revoke an access token it already
 // issued — used when a reused authorization code is detected (RFC 6749
-// §4.1.2: "the authorization server SHOULD revoke (if possible) all
+// §4.1.2: "the authorization server SHOULD revoke (when possible) all
 // tokens previously issued based on that authorization code").
 // Dependencies.Revocation has no default: pass a real implementation,
 // or NoRevocation{} to explicitly decline — see NoRevocation's own doc

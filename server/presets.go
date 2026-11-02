@@ -124,9 +124,9 @@ func RecommendedLimits() Limits {
 		// guidance, not a value RFC 9449 itself specifies.
 		MaxDPoPProofAge: 60 * time.Second,
 
-		// RFC 9449 §8 sets no number either: a server "will need to
-		// keep a window of recent nonces" and decides when to supply a
-		// new one. A nonce here is valid until it expires and is
+		// RFC 9449 §8 sets no number either: "servers need to keep a
+		// window of recent nonces", and a server decides when to supply
+		// a new one. A nonce here is valid until it expires and is
 		// replaced once half its lifetime has passed, so 5 minutes
 		// keeps a client reusing one nonce for minutes at a time (one
 		// use_dpop_nonce round trip per client per endpoint at most

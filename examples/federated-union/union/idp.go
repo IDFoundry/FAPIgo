@@ -113,10 +113,6 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 		return nil, err
 	}
 
-	// RecommendedLimits leaves the nonce lifetime to whoever enables
-	// nonces (Dependencies.Nonces below).
-	limits := server.RecommendedLimits()
-	limits.DPoPNonceLifetime = 5 * time.Minute
 	cfg := server.Config{
 		// Pairwise by default, which also offers federation services
 		// pairwise subs alone: one asking for public is refused
@@ -126,7 +122,7 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 		Endpoints:  endpoints,
 		Profile:    server.ProfileFAPISecurity,
 		Algorithms: server.RecommendedAlgorithms(),
-		Limits:     limits,
+		Limits:     server.RecommendedLimits(),
 		Assurance:  server.AssuranceDevelopment,
 		Federation: server.FederationConfig{
 			EntityID: id, AuthorityHints: []string{ta.id}, Lifetime: statementLifetime, Algorithm: fapi.ES256,

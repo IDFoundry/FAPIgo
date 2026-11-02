@@ -322,10 +322,10 @@ func NewRARRegistry(maxTotalBytes, maxDepth int, defs ...registeredRAR) (*RARReg
 }
 
 // Types returns every "type" discriminator value r was built with, in
-// sorted order — for a caller advertising RFC 9396 §7's
+// sorted order — for a caller advertising RFC 9396 §10's
 // "authorization_details_types_supported" metadata field. Unlike plain
 // Registry (see Definitions), this returns names rather than full
-// registered values: RFC 9396 §7 only asks for the type strings, and
+// registered values: RFC 9396 §10 only asks for the type strings, and
 // registeredRAR is this package's own unexported interface, not
 // something a caller outside extension could use anyway.
 func (r *RARRegistry) Types() []string {

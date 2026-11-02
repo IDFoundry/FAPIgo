@@ -206,11 +206,28 @@ between instances: use SQLite there.
   whose digests each role namespaces), through a DB with the same
   `TablePrefix` and `Sealer`. Their DPoP nonce store is the exception:
   `Nonces()` from a DB with a `TablePrefix` of its own, never the
-  server's, whose nonces it would then accept. Give a resource server a
-  database role of its own: `SELECT` on the server's `access_tokens`,
-  `revocations` and `schema_migrations`, `SELECT`/`INSERT` on `replay`,
-  and its own prefix's tables; and let only the server `Sweep` the
-  tables they share.
+  server's, whose nonces it would then accept. A resource server in a
+  process of its own takes all four from
+  `sqlstore.ResourceServer(serverDB, rsDB)`, which reads each from the
+  right DB: one whose `Revocation()` came from its own prefix, as its
+  `Nonces()` must, never sees the server's revocations, and nothing
+  fails.
+
+  ```go
+  stores, err := sqlstore.ResourceServer(serverDB, rsDB) // rsDB: TablePrefix "fapigo_rs_", say
+  deps := resource.Dependencies{
+  	AccessTokens: resource.OpaqueAccessTokens{Store: stores.AccessTokens, Issuer: issuer, Audience: audience}, // or JWTs
+  	Replay:       stores.Replay,
+  	Revocation:   stores.Revocation,
+  	Nonces:       stores.Nonces,
+  	// …
+  }
+  ```
+
+  Give a resource server a database role of its own: `SELECT` on the
+  server's `access_tokens`, `revocations` and `schema_migrations`,
+  `SELECT`/`INSERT` on `replay`, and its own prefix's tables; and let
+  only the server `Sweep` the tables they share.
 - **Clients** are rows the operator manages: a `client_id` and a
   versioned JSON configuration, written with `Clients().Put` or
   `MarshalClientConfig`. See the package documentation's Clients

@@ -63,6 +63,26 @@
 // (serverresource.NewVerifier refuses the server's own db.Nonces(), but
 // can't tell two DBs with one TablePrefix apart.)
 //
+// A resource server in a process of its own, which builds
+// resource.Dependencies itself, needs both DBs, and the shortest path
+// is the wrong one: the same rsDB for everything, whose Revocation reads
+// a table the server never writes, so a grant the server revokes is
+// never revoked there, with nothing failing. Take its stores from
+// ResourceServer instead, which takes each from the right DB and
+// refuses two on one TablePrefix:
+//
+//	serverDB, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: sealer}) // the server's tables
+//	rsDB, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{TablePrefix: "fapigo_rs_"})
+//	err = rsDB.Migrate(ctx)
+//	stores, err := sqlstore.ResourceServer(serverDB, rsDB)
+//	deps := resource.Dependencies{
+//		AccessTokens: resource.OpaqueAccessTokens{Store: stores.AccessTokens, Issuer: issuer, Audience: audience}, // or JWTAccessTokens
+//		Replay:       stores.Replay,
+//		Revocation:   stores.Revocation,
+//		Nonces:       stores.Nonces,
+//		// ...
+//	}
+//
 // A resource server needs far less of the database than the server
 // does, and is often run in more places, so give it a database role of
 // its own with just that, rather than the server's: SELECT on the

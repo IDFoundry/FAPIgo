@@ -29,6 +29,9 @@ import (
 // that kept only the refresh token builds a TokenSet with it,
 // HasRefreshToken and the Issuer it came from.
 func (c *Client) RevokeToken(ctx context.Context, tokens TokenSet) error {
+	if err := c.checkTrustChain(); err != nil {
+		return err
+	}
 	if c.cfg.Endpoints.Revocation.IsZero() {
 		return newError(ErrorRevocationNotSupported, "the authorization server has no revocation endpoint", nil)
 	}

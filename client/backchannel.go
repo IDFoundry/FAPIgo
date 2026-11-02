@@ -75,7 +75,9 @@ type BeginBackchannelAuthenticationRequest struct {
 	// RequestedExpiry optionally bounds how long the returned
 	// auth_req_id remains pollable (CIBA §7.1's "requested_expiry").
 	// Zero means "don't send requested_expiry" — the server applies
-	// its own default.
+	// its own default. It is sent in whole seconds, rounded up, since
+	// §7.1 makes it "A positive integer": 500ms is sent as 1, and 1.5s
+	// as 2.
 	RequestedExpiry time.Duration
 
 	// AuthorizationDetails carries Rich Authorization Requests (RFC 9396)
@@ -336,7 +338,7 @@ func backchannelRequestParameters(req BeginBackchannelAuthenticationRequest) (ma
 		objectParams["binding_message"] = encoded
 	}
 	if req.RequestedExpiry > 0 {
-		encoded, _ := json.Marshal(int64(req.RequestedExpiry / time.Second))
+		encoded, _ := json.Marshal(requestedExpirySeconds(req.RequestedExpiry))
 		objectParams["requested_expiry"] = encoded
 	}
 	if len(req.AuthorizationDetails) > 0 {
@@ -515,6 +517,9 @@ func (BackchannelAuthenticationApproved) backchannelAuthenticationResult() {}
 // auth_req_id and this client's authentication never reach another
 // issuer's token endpoint.
 func (c *Client) PollBackchannelAuthentication(ctx context.Context, session BackchannelAuthenticationSession) (BackchannelAuthenticationResult, error) {
+	if err := c.checkTrustChain(); err != nil {
+		return nil, err
+	}
 	if !c.ownsBackchannelSession(session) {
 		return nil, newError(ErrorInvalidRequest, "the backchannel authentication session was begun by a client for a different issuer or client ID", nil)
 	}
@@ -694,4 +699,15 @@ func (c *Client) resolveClientAuthAndDPoPSigners(ctx context.Context) (assertion
 		}
 	}
 	return assertionSigner, assertionKID, dpopSigner, nil
+}
+
+// requestedExpirySeconds is d, a positive RequestedExpiry, in whole
+// seconds rounded up: at least 1, as CIBA §7.1's "A positive integer"
+// requires.
+func requestedExpirySeconds(d time.Duration) int64 {
+	seconds := int64(d / time.Second)
+	if d%time.Second != 0 {
+		seconds++
+	}
+	return seconds
 }

@@ -337,6 +337,36 @@ func assertStringClaims(t *testing.T, obj requestobject.Object, want map[string]
 	}
 }
 
+// TestBeginBackchannelAuthenticationRequestedExpiryRoundsUp: CIBA §7.1
+// makes requested_expiry "A positive integer", so a RequestedExpiry that
+// isn't whole seconds is rounded up — never sent as 0.
+func TestBeginBackchannelAuthenticationRequestedExpiryRoundsUp(t *testing.T) {
+	for _, tc := range []struct {
+		expiry      time.Duration
+		wantSeconds int64
+	}{
+		{time.Nanosecond, 1},
+		{500 * time.Millisecond, 1},
+		{time.Second, 1},
+		{1900 * time.Millisecond, 2},
+		{90 * time.Second, 90},
+	} {
+		t.Run(tc.expiry.String(), func(t *testing.T) {
+			c, as, _ := newTestClientWithCIBA(t)
+			if _, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
+				Scope: []string{"openid"}, LoginHint: "user@example.com", RequestedExpiry: tc.expiry,
+			}); err != nil {
+				t.Fatalf("BeginBackchannelAuthentication: %v", err)
+			}
+			obj, err := requestobject.Parse(as.lastBCForm.Get("request"))
+			if err != nil {
+				t.Fatalf("parse request object: %v", err)
+			}
+			assertRequestedExpiryClaim(t, obj, tc.wantSeconds)
+		})
+	}
+}
+
 // assertRequestedExpiryClaim checks the request object's
 // requested_expiry claim is a number equal to wantSeconds.
 func assertRequestedExpiryClaim(t *testing.T, obj requestobject.Object, wantSeconds int64) {

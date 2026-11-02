@@ -151,6 +151,8 @@ jobs:
             name: FuzzDecodeTokenResponse
           - pkg: ./client
             name: FuzzDecodeBackchannelAuthenticationResponse
+          - pkg: ./client
+            name: FuzzHandleAuthorizationResponsePlain
           - pkg: .
             name: FuzzParseEndpointURL
           - pkg: .

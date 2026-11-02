@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"time"
+	"unicode/utf8"
 
 	"github.com/idfoundry/fapigo/internal/jarm"
 	"github.com/idfoundry/fapigo/internal/par"
@@ -117,6 +118,9 @@ func (CallbackDenied) callbackResult() {}
 // consistency with what this session requested, and authorization-code
 // or error-response presence.
 func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb AuthorizationCallback) (CallbackResult, error) {
+	if err := c.checkTrustChain(); err != nil {
+		return nil, err
+	}
 	params, respMode, err := c.parseCallbackParams(ctx, cb)
 	if err != nil {
 		return nil, err
@@ -285,6 +289,13 @@ func (c *Client) parseCallbackParams(ctx context.Context, cb AuthorizationCallba
 	if c.cfg.Profile != ProfileFAPISecurityWithMessageSigning {
 		params := make(map[string]json.RawMessage, len(form))
 		for k, v := range form {
+			// json.Marshal would replace invalid UTF-8 with U+FFFD, so two
+			// different values (two codes, say) would read back as one.
+			// Refused instead, as this client's JOSE and UserInfo decoding
+			// refuses what it can't represent losslessly.
+			if !utf8.ValidString(k) || !utf8.ValidString(v) {
+				return nil, "", newError(ErrorInvalidRequest, "callback query contains a parameter that isn't valid UTF-8", nil)
+			}
 			encoded, _ := json.Marshal(v)
 			params[k] = encoded
 		}

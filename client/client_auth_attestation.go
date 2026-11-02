@@ -266,6 +266,9 @@ func (c *Client) currentAttestationChallenge(ctx context.Context) (string, error
 // It requires Config.ClientAuthMethod to be
 // storage.ClientAuthMethodAttestation.
 func (c *Client) ClientAttestationHeaders(ctx context.Context) (attestation, pop string, err error) {
+	if err := c.checkTrustChain(); err != nil {
+		return "", "", err
+	}
 	if c.cfg.ClientAuthMethod != storage.ClientAuthMethodAttestation {
 		return "", "", newError(ErrorInvalidRequest, "this client doesn't use attestation-based client authentication", nil)
 	}

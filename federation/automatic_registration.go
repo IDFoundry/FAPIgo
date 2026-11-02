@@ -42,8 +42,11 @@ type AutomaticRegistrationConfig struct {
 	// metadata: an RP's openid_relying_party metadata is
 	// attacker-controlled (any federation member publishes its own), so
 	// trusting a self-asserted "these are the scopes I'm allowed" claim
-	// would let any RP grant itself unlimited scope. Required — at
-	// least one.
+	// would let any RP grant itself unlimited scope. The federation can
+	// still narrow it: when the RP's resolved metadata (its own, after
+	// every superior's metadata policy) has a scope parameter, the
+	// client gets only the AllowedScopes that also lists, and fails to
+	// register if that leaves none. Required — at least one.
 	AllowedScopes []string
 
 	// AuthorizationDetailsTypes are the Rich Authorization Request types
@@ -103,7 +106,10 @@ type AutomaticRegistrationConfig struct {
 	// capability grant, not a mechanism detail an RP can safely
 	// self-assert. False (the zero value/default) means no
 	// automatically-registered client may use client_credentials,
-	// regardless of what it publishes. Also still requires
+	// regardless of what it publishes. True grants it to every client
+	// except one whose resolved metadata has a grant_types parameter
+	// without client_credentials: the federation (through a superior's
+	// metadata policy) can withhold a grant, never add one. Also still requires
 	// server.Config.ClientCredentialsGrant to be enabled server-wide,
 	// exactly as storage.RegisteredClientConfig's own field of the same
 	// name does for a statically registered client.
@@ -126,6 +132,9 @@ type AutomaticRegistrationConfig struct {
 	// RequestObjectSigningAlg already is, once the capability itself has
 	// been granted here. When false, that metadata is ignored entirely
 	// and CIBA stays disabled for every automatically-registered client.
+	// When true, a client whose resolved metadata has a grant_types
+	// parameter without urn:openid:params:grant-type:ciba doesn't get
+	// CIBA either, as for AllowsClientCredentialsGrant.
 	AllowsCIBA bool
 
 	// AllowedClientAuthMethods restricts which client authentication
@@ -213,9 +222,40 @@ type AutomaticRegistrationConfig struct {
 	// block. A failure is remembered for FailureCacheAge, so an RP that
 	// keeps retrying is reported once per resolution attempted, not once
 	// per request; the requests answered from that memory get the
-	// failure's message only, cut to its first KiB. Optional.
+	// failure's message only, cut to its first KiB. Optional. A
+	// resolution abandoned because every request waiting on it went away
+	// (see MaxConcurrentResolutions) isn't reported: it says nothing
+	// about the client_id.
 	OnResolutionFailure func(ctx context.Context, clientID fapi.ClientID, err error)
+
+	// MaxConcurrentResolutions bounds how many Trust Chain resolutions
+	// for distinct client_ids run at once. A client_id is resolved before
+	// its client is authenticated, so any caller can start one by naming
+	// an Entity Identifier, each costing outbound fetches; past this
+	// bound a request needing a new resolution fails at once with an
+	// error wrapping ErrTooManyResolutions (and so
+	// storage.ErrStoreUnavailable, which the server answers with 500
+	// server_error rather than invalid_client), and that failure isn't
+	// remembered against the client_id. Cached registrations and requests
+	// joining a resolution already running for their client_id don't
+	// count. A resolution also stops once every request waiting on it
+	// has gone. Zero means DefaultMaxConcurrentResolutions; negative is
+	// invalid.
+	MaxConcurrentResolutions int
 }
+
+// DefaultMaxConcurrentResolutions is
+// AutomaticRegistrationConfig.MaxConcurrentResolutions when it is zero.
+const DefaultMaxConcurrentResolutions = 128
+
+// ErrTooManyResolutions is wrapped by the error an automatic
+// registration returns when AutomaticRegistrationConfig.MaxConcurrentResolutions
+// Trust Chain resolutions are already running: the server is
+// temporarily too busy to resolve another client_id, which says nothing
+// about that client_id. It wraps storage.ErrStoreUnavailable, so a
+// caller treating the client repository as unavailable (as the server
+// does) does so here too.
+var ErrTooManyResolutions = fmt.Errorf("federation: too many Trust Chain resolutions in progress: %w", storage.ErrStoreUnavailable)
 
 // cachedClient is one Relying Party's resolved registration, cached
 // until whichever of AutomaticRegistrationConfig.MaxCacheAge or the
@@ -356,15 +396,23 @@ type AutomaticClientRepository struct {
 	// client_id share one Trust Chain resolution rather than each
 	// starting their own.
 	inflight map[fapi.ClientID]*inflightResolution
+	// running counts resolutions whose goroutine hasn't finished, those
+	// abandoned by every waiter but still winding down included, at most
+	// AutomaticRegistrationConfig.MaxConcurrentResolutions.
+	running int
 }
 
 // inflightResolution is one in-progress resolution that concurrent
 // callers for the same client_id wait on; done is closed once entry and
-// err are set.
+// err are set. waiters counts the callers waiting on it, and cancel
+// stops it once the last of them has gone. Both are guarded by
+// AutomaticClientRepository.mu.
 type inflightResolution struct {
-	done  chan struct{}
-	entry cachedClient
-	err   error
+	done    chan struct{}
+	entry   cachedClient
+	err     error
+	waiters int
+	cancel  context.CancelFunc
 }
 
 // NewAutomaticClientRepository validates cfg and returns an
@@ -401,6 +449,12 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	}
 	if cfg.FailureCacheAge == 0 {
 		cfg.FailureCacheAge = DefaultFailureCacheAge
+	}
+	if cfg.MaxConcurrentResolutions < 0 {
+		return nil, fmt.Errorf("federation: config: max_concurrent_resolutions must not be negative")
+	}
+	if cfg.MaxConcurrentResolutions == 0 {
+		cfg.MaxConcurrentResolutions = DefaultMaxConcurrentResolutions
 	}
 	if err := validateAllowedClientAuthMethods(cfg.AllowedClientAuthMethods); err != nil {
 		return nil, err
@@ -519,28 +573,75 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 	}
 	call, ok := a.inflight[id]
 	if !ok {
-		call = &inflightResolution{done: make(chan struct{})}
-		a.inflight[id] = call
-		// The resolution is shared by every caller for id, so it runs
-		// detached from this one's cancellation: one caller giving up
-		// (or an attacker cancelling its own request on purpose) must
-		// not fail the others. It keeps ctx's values, and the fetcher's
-		// own limits bound how long it can take.
-		go func() {
-			call.entry, call.err = a.resolveUncached(context.WithoutCancel(ctx), id)
-			a.mu.Lock()
-			delete(a.inflight, id)
+		if a.running >= a.maxConcurrentResolutions() {
 			a.mu.Unlock()
-			close(call.done)
-		}()
+			return cachedClient{}, fmt.Errorf("federation: resolve client %q: %w", id, ErrTooManyResolutions)
+		}
+		call = a.startResolution(ctx, id)
 	}
+	call.waiters++
 	a.mu.Unlock()
 	select {
 	case <-call.done:
 		return call.entry, call.err
 	case <-ctx.Done():
+		a.leaveResolution(id, call)
 		return cachedClient{}, ctx.Err()
 	}
+}
+
+// maxConcurrentResolutions is AutomaticRegistrationConfig.MaxConcurrentResolutions,
+// or its default for a repository not built by NewAutomaticClientRepository.
+func (a *AutomaticClientRepository) maxConcurrentResolutions() int {
+	if a.cfg.MaxConcurrentResolutions > 0 {
+		return a.cfg.MaxConcurrentResolutions
+	}
+	return DefaultMaxConcurrentResolutions
+}
+
+// startResolution starts id's resolution and records it as in flight.
+// a.mu must be held.
+//
+// The resolution is shared by every caller for id, so it runs detached
+// from this one's cancellation: one caller giving up (or an attacker
+// cancelling its own request on purpose) must not fail the others. It
+// keeps ctx's values, and the fetcher's own limits bound how long it can
+// take. It is cancelled only once every caller waiting on it has gone
+// (leaveResolution), so a caller hanging up doesn't leave outbound
+// fetches running on its behalf.
+func (a *AutomaticClientRepository) startResolution(ctx context.Context, id fapi.ClientID) *inflightResolution {
+	resolveCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	call := &inflightResolution{done: make(chan struct{}), cancel: cancel}
+	a.inflight[id] = call
+	a.running++
+	go func() {
+		defer cancel()
+		entry, err := a.resolveUncached(resolveCtx, id)
+		a.mu.Lock()
+		call.entry, call.err = entry, err
+		if a.inflight[id] == call {
+			delete(a.inflight, id)
+		}
+		a.running--
+		a.mu.Unlock()
+		close(call.done)
+	}()
+	return call
+}
+
+// leaveResolution records that a caller waiting on call (id's
+// resolution) has gone. When it was the last, the resolution is
+// cancelled and forgotten, so the next request for id starts afresh;
+// one that has already finished is left as it is.
+func (a *AutomaticClientRepository) leaveResolution(id fapi.ClientID, call *inflightResolution) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	call.waiters--
+	if call.waiters > 0 || a.inflight[id] != call {
+		return
+	}
+	delete(a.inflight, id)
+	call.cancel()
 }
 
 // resolveUncached resolves id's Trust Chain and builds its registration,
@@ -555,17 +656,19 @@ func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi
 	}
 	entry, err := a.register(ctx, id)
 	if err != nil {
+		// A resolution abandoned by every caller waiting on it says
+		// nothing about the client_id, so only one that ran its course
+		// is reported and remembered — from when it failed, not when it
+		// started, so a resolution slower than FailureCacheAge (an RP or
+		// superior answering slowly is the RP's own choice) is still
+		// remembered.
+		if ctx.Err() != nil {
+			return cachedClient{}, err
+		}
 		if a.cfg.OnResolutionFailure != nil {
 			a.cfg.OnResolutionFailure(ctx, id, err)
 		}
-		// A request cancelled or timed out by its own caller says nothing
-		// about the client_id, so only a resolution that ran its course
-		// is remembered — from when it failed, not when it started, so
-		// a resolution slower than FailureCacheAge (an RP or superior
-		// answering slowly is the RP's own choice) is still remembered.
-		if ctx.Err() == nil {
-			a.rememberFailure(id, err, a.clock.Now())
-		}
+		a.rememberFailure(id, err, a.clock.Now())
 		return cachedClient{}, err
 	}
 	a.mu.Lock()
@@ -794,6 +897,50 @@ type relyingPartyMetadata struct {
 	LogoURI    string `json:"logo_uri"`
 	PolicyURI  string `json:"policy_uri"`
 	TOSURI     string `json:"tos_uri"`
+
+	// Scope and GrantTypes are RFC 7591 §2's scope and grant_types, as
+	// the Trust Chain's metadata policy left them. They never widen what
+	// AutomaticRegistrationConfig grants, only narrow it (see
+	// narrowedScopes and grantTypePermitted); nil means left out.
+	Scope      *string  `json:"scope"`
+	GrantTypes []string `json:"grant_types"`
+}
+
+// cibaGrantType is the grant_types value for CIBA (OpenID Connect
+// Client-Initiated Backchannel Authentication Flow - Core 1.0 §4).
+const cibaGrantType = "urn:openid:params:grant-type:ciba"
+
+// clientCredentialsGrantType is RFC 6749 §4.4's grant_types value.
+const clientCredentialsGrantType = "client_credentials"
+
+// narrowedScopes returns the operator's allowed scopes that the RP's
+// resolved scope metadata also lists, or all of them when it has none.
+// The resolved scope is the RP's own value after every superior's
+// metadata policy (OpenID Federation 1.0 §6.1), so it is where the
+// federation narrows what a member may ask for; it can never add a scope
+// the operator didn't grant.
+func narrowedScopes(allowed []string, resolved *string) ([]string, error) {
+	if resolved == nil {
+		return allowed, nil
+	}
+	listed := strings.Fields(*resolved)
+	var scopes []string
+	for _, s := range allowed {
+		if slices.Contains(listed, s) {
+			scopes = append(scopes, s)
+		}
+	}
+	if len(scopes) == 0 {
+		return nil, fmt.Errorf("scope %q permits none of the allowed scopes", *resolved)
+	}
+	return scopes, nil
+}
+
+// grantTypePermitted reports whether the RP's resolved grant_types
+// metadata permits grant: when it is left out (nil), or lists grant. Like
+// narrowedScopes, it only ever narrows an operator's grant.
+func grantTypePermitted(grantTypes []string, grant string) bool {
+	return grantTypes == nil || slices.Contains(grantTypes, grant)
 }
 
 // registeredClientConfigFromMetadata parses raw (an openid_relying_party
@@ -868,15 +1015,20 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		redirectURIs[i] = fapi.RegisteredRedirectURI(u)
 	}
 
+	scopes, err := narrowedScopes(a.cfg.AllowedScopes, m.Scope)
+	if err != nil {
+		return storage.RegisteredClientConfig{}, nil, err
+	}
+
 	cfg := storage.RegisteredClientConfig{
 		ID: id, RedirectURIs: redirectURIs,
 		RequestObjectAlgorithm:          requestObjectAlg,
 		SenderConstrain:                 senderConstrain,
-		AllowedScopes:                   a.cfg.AllowedScopes,
+		AllowedScopes:                   scopes,
 		AuthorizationDetailsTypes:       a.cfg.AuthorizationDetailsTypes,
 		AllowedResources:                a.cfg.AllowedResources,
 		AutomaticFederationRegistration: true,
-		AllowsClientCredentialsGrant:    a.cfg.AllowsClientCredentialsGrant,
+		AllowsClientCredentialsGrant:    a.cfg.AllowsClientCredentialsGrant && grantTypePermitted(m.GrantTypes, clientCredentialsGrantType),
 	}
 	if err := a.applyDisplayAndSubjectType(&cfg, id, m); err != nil {
 		return storage.RegisteredClientConfig{}, nil, err
@@ -1322,11 +1474,11 @@ func (a *AutomaticClientRepository) allowsClientAuthMethod(method storage.Client
 }
 
 // applyBackchannelAuthenticationFields sets cfg's CIBA fields from m
-// when this repository allows CIBA and m actually advertises it — a
-// no-op otherwise. Split out of registeredClientConfigFromMetadata for
+// when this repository allows CIBA and m actually advertises it, with
+// grant_types (when present) listing the CIBA grant — a no-op otherwise. Split out of registeredClientConfigFromMetadata for
 // the same reason applyClientAuthMethodFields is.
 func (a *AutomaticClientRepository) applyBackchannelAuthenticationFields(cfg *storage.RegisteredClientConfig, m relyingPartyMetadata) error {
-	if !a.cfg.AllowsCIBA || m.BackchannelAuthenticationRequestSigningAlg == "" {
+	if !a.cfg.AllowsCIBA || m.BackchannelAuthenticationRequestSigningAlg == "" || !grantTypePermitted(m.GrantTypes, cibaGrantType) {
 		return nil
 	}
 	alg, err := fapi.ParseSignatureAlgorithm(m.BackchannelAuthenticationRequestSigningAlg)

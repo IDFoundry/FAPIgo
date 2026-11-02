@@ -77,6 +77,10 @@ sealer, err := sqlstore.AESGCMSealer(key) // 32 random bytes, from a secrets man
 db, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: sealer})
 ```
 
+`AESGCMSealer` refuses a key that's certainly not random: one byte
+repeated (an all-zero placeholder), or all printable text (a
+passphrase, or a hex or base64 key not yet decoded: decode it first).
+
 A sealed blob moved to another row, client, table or table prefix,
 altered, or opened under another key is refused (`ErrRecordFormat`, as
 an outage), as is one whose row's expiry (or an interaction's pushed
@@ -106,6 +110,48 @@ upgrading every instance to re-seal them in the current format (byte 3)
 and bind them too. Upgrade every instance sharing a database at once: a
 v0.2 instance can't open what an upgraded one seals, and rolling back
 to v0.2 leaves the records sealed since unreadable.
+
+## Upgrading from v0.3
+
+v0.4 refuses configurations v0.3 accepted:
+
+- **A sealing key that isn't random.** `AESGCMSealer` returns an error
+  for a key that's one byte repeated (all zeros, say) or all printable
+  text: a passphrase, or a hex or base64 key passed without decoding
+  it. Such a key gave no confidentiality, and let anyone who could
+  guess it and write to the database forge sealed records. Generate 32
+  bytes with `crypto/rand`, and decode an encoded key before passing
+  it:
+
+  ```go
+  key, err := hex.DecodeString(os.Getenv("FAPIGO_SEAL_KEY")) // `openssl rand -hex 32`
+  sealer, err := sqlstore.AESGCMSealer(key)
+  ```
+
+  The records sealed under the old key open only under it, and
+  `AESGCMSealer` no longer takes it. Either let them go (as with a lost
+  key, clients authorize again), or open them with a `Sealer` of your
+  own over the old key, in `RotatingSealer(newSealer, oldKeySealer)`,
+  until the longest-lived of them (a refresh token) expires. It reads
+  `AESGCMSealer`'s format, a 12-byte nonce then the ciphertext:
+
+  ```go
+  type oldKeySealer struct{ aead cipher.AEAD } // cipher.NewGCM(aes.NewCipher(oldKey))
+
+  func (s oldKeySealer) Seal(plaintext, additionalData []byte) ([]byte, error) {
+  	return nil, errors.New("the old key only opens")
+  }
+
+  func (s oldKeySealer) Open(sealed, additionalData []byte) ([]byte, error) {
+  	if len(sealed) < s.aead.NonceSize() {
+  		return nil, errors.New("sealed data is too short")
+  	}
+  	n := s.aead.NonceSize()
+  	return s.aead.Open(nil, sealed[:n], sealed[n:], additionalData)
+  }
+  ```
+
+  `RotatingSealer` also refuses two `AESGCMSealer`s over the same key.
 
 ## What each database declares
 

@@ -1,10 +1,12 @@
 package sqlstore
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
@@ -30,6 +32,10 @@ type Sealer interface {
 // AESGCMSealer is a Sealer that seals with AES-256-GCM under key (32
 // bytes, from a cryptographically secure source, kept outside the
 // database), with a random 96-bit nonce from crypto/rand for each seal.
+// It refuses a key that's certainly not random, as FAPIgo's other
+// sealers do: one byte repeated (all zeros, say: a placeholder), or all
+// printable text (a passphrase, or a hex or base64 key not yet decoded:
+// decode it first).
 //
 // Random nonces bound how much one key may seal: NIST SP 800-38D
 // (§8.3) allows at most 2^32 seals with random 96-bit nonces under one
@@ -46,8 +52,8 @@ type Sealer interface {
 // unreadable; to rotate it, seal with the new key and open with both,
 // until the records sealed under the old one expire: RotatingSealer.
 func AESGCMSealer(key []byte) (Sealer, error) {
-	if len(key) != 32 {
-		return nil, fmt.Errorf("sqlstore: record sealer: key is %d bytes, want 32 (AES-256)", len(key))
+	if err := checkSealKey(key); err != nil {
+		return nil, fmt.Errorf("sqlstore: record sealer: %w", err)
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -57,7 +63,31 @@ func AESGCMSealer(key []byte) (Sealer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sqlstore: record sealer: %w", err)
 	}
-	return gcmSealer{aead}, nil
+	return gcmSealer{aead, sha256.Sum256(key)}, nil
+}
+
+// sealKeySize is AESGCMSealer's key length: AES-256.
+const sealKeySize = 32
+
+// checkSealKey refuses key unless it's sealKeySize bytes, not one byte
+// repeated (all zeros, say: a placeholder, not a random key) and not
+// made entirely of printable text (a passphrase, or a hex or base64 key
+// not yet decoded). It's the check FAPIgo's own sealers make
+// (internal/sealkeys), copied: sqlstore uses FAPIgo's public API only,
+// so a release of it builds against any later FAPIgo. It only catches
+// keys that are certainly not random: 32 random bytes are all printable
+// with probability (98/256)^32, about 4e-14.
+func checkSealKey(key []byte) error {
+	if len(key) != sealKeySize {
+		return fmt.Errorf("key is %d bytes, want %d (AES-256)", len(key), sealKeySize)
+	}
+	if bytes.Count(key, key[:1]) == sealKeySize {
+		return errors.New("key is one byte repeated, not a random key")
+	}
+	if !slices.ContainsFunc(key, func(c byte) bool { return (c < 0x20 || c > 0x7e) && c != '\t' && c != '\n' && c != '\r' }) {
+		return fmt.Errorf("key is all printable text (a passphrase, or a hex or base64 key not yet decoded), not %d random bytes: generate it with crypto/rand, and decode an encoded key before passing it", sealKeySize)
+	}
+	return nil
 }
 
 // RotatingSealer is a Sealer for rotating keys: it seals with current,
@@ -69,12 +99,25 @@ func AESGCMSealer(key []byte) (Sealer, error) {
 // blobs' format is current's, unchanged, so the database needs nothing
 // to switch to it, and a blob sealed under no key it holds is refused
 // as before. Every open of an old record tries current first; with an
-// AEAD such as AESGCMSealer, that failure is cheap.
+// AEAD such as AESGCMSealer, that failure is cheap. It refuses two
+// AESGCMSealers under the same key: a rotation that changes nothing.
 func RotatingSealer(current Sealer, previous ...Sealer) (Sealer, error) {
 	if current == nil || slices.Contains(previous, nil) {
 		return nil, errors.New("sqlstore: rotating sealer: nil Sealer")
 	}
-	return rotatingSealer{append([]Sealer{current}, previous...)}, nil
+	sealers := append([]Sealer{current}, previous...)
+	seen := map[[sha256.Size]byte]int{}
+	for i, s := range sealers {
+		g, ok := s.(gcmSealer)
+		if !ok {
+			continue
+		}
+		if j, ok := seen[g.keyID]; ok {
+			return nil, fmt.Errorf("sqlstore: rotating sealer: sealer %d has the same key as sealer %d", i, j)
+		}
+		seen[g.keyID] = i
+	}
+	return rotatingSealer{sealers}, nil
 }
 
 type rotatingSealer struct{ sealers []Sealer }
@@ -95,7 +138,12 @@ func (s rotatingSealer) Open(sealed, additionalData []byte) ([]byte, error) {
 	return nil, errors.Join(errs...)
 }
 
-type gcmSealer struct{ aead cipher.AEAD }
+// gcmSealer is AESGCMSealer's Sealer. keyID, its key's SHA-256 digest,
+// lets RotatingSealer refuse one key twice.
+type gcmSealer struct {
+	aead  cipher.AEAD
+	keyID [sha256.Size]byte
+}
 
 func (s gcmSealer) Seal(plaintext, additionalData []byte) ([]byte, error) {
 	nonce := make([]byte, s.aead.NonceSize())

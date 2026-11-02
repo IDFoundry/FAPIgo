@@ -314,6 +314,44 @@ func TestAESGCMSealer(t *testing.T) {
 	}
 }
 
+// AESGCMSealer refuses a key that's certainly not random — a placeholder,
+// a passphrase, or an encoded key not yet decoded — as FAPIgo's other
+// sealers do, and RotatingSealer one key twice.
+func TestAESGCMSealerRefusesWeakKeys(t *testing.T) {
+	printable := bytes.Repeat([]byte("ab"), 16)
+	printable[31] = '\n' // whitespace is text too
+	for name, c := range map[string]struct {
+		key  []byte
+		want string
+	}{
+		"all zero":   {make([]byte, 32), "one byte repeated"},
+		"all 0xff":   {bytes.Repeat([]byte{0xff}, 32), "one byte repeated"},
+		"passphrase": {[]byte("correct horse battery staple!!!!"), "printable text"},
+		"hex":        {[]byte("00112233445566778899aabbccddeeff"), "printable text"},
+		"base64":     {[]byte("q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQ")[:32], "printable text"},
+		"text":       {printable, "printable text"},
+	} {
+		_, err := sqlstore.AESGCMSealer(c.key)
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), "sqlstore: record sealer: ") {
+			t.Errorf("AESGCMSealer(%s key) = %v, want an error saying %q", name, err, c.want)
+		}
+	}
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	must(t, err)
+	key[0] = 0x80 // never all printable
+	a, err := sqlstore.AESGCMSealer(key)
+	must(t, err)
+	b, err := sqlstore.AESGCMSealer(bytes.Clone(key))
+	must(t, err)
+	if _, err := sqlstore.RotatingSealer(a, testSealer(t), b); err == nil || !strings.Contains(err.Error(), "same key") {
+		t.Errorf("RotatingSealer(one key twice) = %v, want an error", err)
+	}
+	if _, err := sqlstore.RotatingSealer(a, testSealer(t)); err != nil {
+		t.Errorf("RotatingSealer(two keys) = %v", err)
+	}
+}
+
 // A record that opens but isn't one of this package's — not JSON,
 // another version, an unknown value — is unreadable, as an outage.
 func TestMalformedRecordsAreUnreadable(t *testing.T) {

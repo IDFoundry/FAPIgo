@@ -168,6 +168,11 @@
 //	sealer, err := sqlstore.AESGCMSealer(key) // 32 bytes from crypto/rand, kept outside the database
 //	db, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: sealer})
 //
+// AESGCMSealer refuses a key that's certainly not random, as FAPIgo's
+// other sealers do: one byte repeated (an all-zero placeholder), or all
+// printable text (a passphrase, or a hex or base64 key not yet decoded:
+// decode it first).
+//
 // Sealed are the blobs that hold what a copy of the database mustn't
 // reveal: pushed requests and interactions' copies of them (the
 // authorization request, its claims and PKCE challenge), authorization

@@ -194,32 +194,62 @@ func TestClientJWKSSourceCachesPerClient(t *testing.T) {
 }
 
 // TestClientJWKSSourceRefetchesOnRotation: a kid the cached set lacks
-// (the client rotated keys) forces a refetch, once the minimum refresh
-// interval has passed, and the new key then resolves.
+// (the client rotated keys) forces a refetch at once, however long the
+// cache TTL; a second rotation within the minimum refresh interval of
+// that forced refetch waits for the interval, then resolves.
 func TestClientJWKSSourceRefetchesOnRotation(t *testing.T) {
 	doc, _ := es256JWKS(t, "old")
 	src, srv, _ := newURISource(t, map[fapi.ClientID][]byte{"a": doc}, WithClientJWKSCacheTTL(time.Hour), WithClientJWKSMinRefreshInterval(time.Minute))
 	clock := newManualClock()
 	src.now = clock.Now
+	assertClientRotations(t, src, srv, clock, time.Minute)
+}
 
+// TestClientJWKSSourceDefaultRefetchesOnRotation: the same with the
+// default options, whose 5-minute cache TTL used to rate-limit forced
+// refetches out of existence (every TTL refresh reset the limit).
+func TestClientJWKSSourceDefaultRefetchesOnRotation(t *testing.T) {
+	doc, _ := es256JWKS(t, "old")
+	src, srv, _ := newURISource(t, map[fapi.ClientID][]byte{"a": doc})
+	clock := newManualClock()
+	src.now = clock.Now
+	assertClientRotations(t, src, srv, clock, defaultMinRefreshInterval)
+}
+
+// assertClientRotations drives two key rotations of client "a" against
+// src, whose minimum refresh interval is interval.
+func assertClientRotations(t *testing.T, src *ClientJWKSSource, srv *jwksServer, clock *manualClock, interval time.Duration) {
+	t.Helper()
 	if got, err := resolveES256(t, src, "a", "old"); err != nil || len(got) != 1 {
 		t.Fatalf("old kid: got %d keys, err %v", len(got), err)
 	}
 	rotated, pubs := es256JWKS(t, "new")
 	srv.set("/a", rotated)
-
-	// Within the minimum refresh interval of the first fetch, the miss
-	// doesn't refetch.
-	if got, err := resolveES256(t, src, "a", "new"); err != nil || len(got) != 0 {
-		t.Fatalf("new kid within the interval: got %d keys, err %v; want none", len(got), err)
-	}
-	clock.Advance(2 * time.Minute)
-	got, err := resolveES256(t, src, "a", "new")
-	if err != nil || len(got) != 1 || !got[0].PublicKey.(*ecdsa.PublicKey).Equal(pubs["new"]) {
-		t.Fatalf("new kid after the interval: got %+v, err %v; want the rotated key", got, err)
-	}
+	clock.Advance(time.Second)
+	assertClientKey(t, src, "new", pubs["new"])
 	if n := srv.fetchCount("/a"); n != 2 {
-		t.Fatalf("fetches = %d, want 2", n)
+		t.Fatalf("fetches after the first rotation = %d, want 2", n)
+	}
+
+	rotatedAgain, pubsAgain := es256JWKS(t, "newer")
+	srv.set("/a", rotatedAgain)
+	clock.Advance(interval / 2)
+	if got, err := resolveES256(t, src, "a", "newer"); err != nil || len(got) != 0 {
+		t.Fatalf("newer kid within the interval: got %d keys, err %v; want none", len(got), err)
+	}
+	clock.Advance(interval / 2)
+	assertClientKey(t, src, "newer", pubsAgain["newer"])
+	if n := srv.fetchCount("/a"); n != 3 {
+		t.Fatalf("fetches after the second rotation = %d, want 3", n)
+	}
+}
+
+// assertClientKey asserts that kid resolves for client "a" to want.
+func assertClientKey(t *testing.T, src *ClientJWKSSource, kid string, want *ecdsa.PublicKey) {
+	t.Helper()
+	got, err := resolveES256(t, src, "a", kid)
+	if err != nil || len(got) != 1 || !got[0].PublicKey.(*ecdsa.PublicKey).Equal(want) {
+		t.Fatalf("kid %q: got %+v, err %v; want the rotated key", kid, got, err)
 	}
 }
 

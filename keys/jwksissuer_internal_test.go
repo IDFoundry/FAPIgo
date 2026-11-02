@@ -87,16 +87,17 @@ func TestUnknownKIDBurstCoalescesToSingleFetch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJWKSIssuerKeySource: %v", err)
 	}
+	// A stopped clock: every call arrives no later than the fetch.
+	src.now = newManualClock().Now
 
 	// No priming: the cache starts empty, so every one of these
 	// concurrent, distinct-unknown-kid calls independently discovers a
-	// cache miss and races to populate it via currentKeys' own
+	// cache miss and races to populate it via current's own
 	// refreshSingleflight call — this is the single-flight coalescing
-	// this test exercises. Once that first fetch completes, each call's
-	// own forced-refresh attempt (the kid still won't match) is in turn
-	// suppressed by minRefreshInterval, since it was just satisfied by
-	// the same fetch a moment ago — so the total across all 50 must
-	// still be exactly one fetch.
+	// this test exercises. Once that first fetch completes, no call
+	// forces another: the set each one misses in was fetched since it
+	// arrived — so the total across all 50 must still be exactly one
+	// fetch.
 	const burst = 50
 	var wg sync.WaitGroup
 	wg.Add(burst)
@@ -139,39 +140,37 @@ func TestUnknownKIDRateLimited(t *testing.T) {
 	src.now = clock.Now
 
 	// No priming: the cache starts empty, so this first unknown-kid
-	// lookup does the initial population fetch itself (via
-	// currentKeys), which also stamps lastAttempt.
-	if _, err := src.ResolveIssuerKeys(context.Background(), IssuerKeyRequest{
-		Algorithm: fapi.ES256, KeyID: "unknown-1",
-	}); err != nil {
-		t.Fatalf("ResolveIssuerKeys(unknown-1): %v", err)
-	}
-	if got := atomic.LoadInt32(&fetches); got != 1 {
-		t.Fatalf("fetches after first miss = %d, want 1", got)
-	}
+	// lookup does the initial population fetch itself (via current);
+	// the set it misses in was fetched for it, so no forced refresh.
+	assertFetchesAfterMiss(t, src, "unknown-1", &fetches, 1)
 
-	// A second, different unknown kid within minRefreshInterval must not
-	// force another fetch.
+	// Another unknown kid, on a set fetched before it arrived, forces
+	// one refetch: a plain fetch doesn't count against the limit.
 	clock.Advance(30 * time.Second)
-	if _, err := src.ResolveIssuerKeys(context.Background(), IssuerKeyRequest{
-		Algorithm: fapi.ES256, KeyID: "unknown-2",
-	}); err != nil {
-		t.Fatalf("ResolveIssuerKeys(unknown-2): %v", err)
-	}
-	if got := atomic.LoadInt32(&fetches); got != 1 {
-		t.Fatalf("fetches after second miss within interval = %d, want 1 (rate limit not enforced)", got)
-	}
+	assertFetchesAfterMiss(t, src, "unknown-2", &fetches, 2)
+
+	// A third, different unknown kid within minRefreshInterval of that
+	// forced refetch must not force another.
+	clock.Advance(59 * time.Second)
+	assertFetchesAfterMiss(t, src, "unknown-3", &fetches, 2)
 
 	// Once minRefreshInterval has elapsed, a further unknown kid is
 	// allowed to force a new fetch.
-	clock.Advance(31 * time.Second)
+	clock.Advance(time.Second)
+	assertFetchesAfterMiss(t, src, "unknown-4", &fetches, 3)
+}
+
+// assertFetchesAfterMiss resolves the unknown kid against src and
+// asserts that the upstream has then been fetched want times.
+func assertFetchesAfterMiss(t *testing.T, src *JWKSIssuerKeySource, kid string, fetches *int32, want int32) {
+	t.Helper()
 	if _, err := src.ResolveIssuerKeys(context.Background(), IssuerKeyRequest{
-		Algorithm: fapi.ES256, KeyID: "unknown-3",
+		Algorithm: fapi.ES256, KeyID: kid,
 	}); err != nil {
-		t.Fatalf("ResolveIssuerKeys(unknown-3): %v", err)
+		t.Fatalf("ResolveIssuerKeys(%s): %v", kid, err)
 	}
-	if got := atomic.LoadInt32(&fetches); got != 2 {
-		t.Fatalf("fetches after interval elapsed = %d, want 2", got)
+	if got := atomic.LoadInt32(fetches); got != want {
+		t.Fatalf("fetches after a miss on %s = %d, want %d", kid, got, want)
 	}
 }
 
@@ -207,15 +206,34 @@ func TestNegativeCacheSuppressesRefetch(t *testing.T) {
 	}
 }
 
+// TestRotationStillResolvesAfterInterval: a rotated-in kid forces a
+// refetch at once, however long the cache TTL; a second rotation within
+// the minimum refresh interval of that forced refetch waits for the
+// interval, then resolves.
 func TestRotationStillResolvesAfterInterval(t *testing.T) {
-	var newKID atomic.Bool
+	assertIssuerRotations(t, time.Hour, time.Minute, WithMinRefreshInterval(time.Minute))
+}
+
+// TestRotationResolvesWithDefaultOptions: the same with no options,
+// where the minimum refresh interval used to default to the cache TTL
+// and every TTL refresh reset it, so an unknown kid never forced a
+// refetch (OIDC Core §10.1.1).
+func TestRotationResolvesWithDefaultOptions(t *testing.T) {
+	assertIssuerRotations(t, 15*time.Minute, defaultMinRefreshInterval)
+}
+
+// assertIssuerRotations drives two key rotations against a
+// JWKSIssuerKeySource built with cacheTTL and opts, whose minimum
+// refresh interval is interval.
+func assertIssuerRotations(t *testing.T, cacheTTL, interval time.Duration, opts ...JWKSOption) {
+	t.Helper()
+	var kid atomic.Value
+	kid.Store("kid-original")
+	var fetches atomic.Int32
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetches.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		if newKID.Load() {
-			fmt.Fprint(w, testP256JWK(t, "kid-rotated"))
-		} else {
-			fmt.Fprint(w, testP256JWK(t, "kid-original"))
-		}
+		fmt.Fprint(w, testP256JWK(t, kid.Load().(string)))
 	}))
 	defer ts.Close()
 
@@ -224,42 +242,39 @@ func TestRotationStillResolvesAfterInterval(t *testing.T) {
 		t.Fatalf("ParseEndpointURL: %v", err)
 	}
 	clock := newManualClock()
-	src, err := NewJWKSIssuerKeySource(testFetcher(t, ts), jwksURI, time.Hour, WithMinRefreshInterval(time.Minute))
+	src, err := NewJWKSIssuerKeySource(testFetcher(t, ts), jwksURI, cacheTTL, opts...)
 	if err != nil {
 		t.Fatalf("NewJWKSIssuerKeySource: %v", err)
 	}
 	src.now = clock.Now
 
-	if _, err := src.ResolveIssuerKeys(context.Background(), IssuerKeyRequest{
-		Algorithm: fapi.ES256, KeyID: "kid-original",
-	}); err != nil {
-		t.Fatalf("prime: %v", err)
+	assertIssuerKeyCount(t, src, "kid-original", 1)
+	kid.Store("kid-rotated")
+	clock.Advance(time.Second)
+	assertIssuerKeyCount(t, src, "kid-rotated", 1)
+	if n := fetches.Load(); n != 2 {
+		t.Fatalf("fetches after the first rotation = %d, want 2", n)
 	}
 
-	// The priming resolve above already stamped lastAttempt at clock's
-	// current value, so this immediate query for the (now rotated) kid
-	// is still within minRefreshInterval and must not force a refresh.
-	newKID.Store(true)
-	set, err := src.ResolveIssuerKeys(context.Background(), IssuerKeyRequest{
-		Algorithm: fapi.ES256, KeyID: "kid-rotated",
-	})
-	if err != nil {
-		t.Fatalf("ResolveIssuerKeys(kid-rotated, within interval): %v", err)
+	kid.Store("kid-rotated-again")
+	clock.Advance(interval / 2)
+	assertIssuerKeyCount(t, src, "kid-rotated-again", 0)
+	clock.Advance(interval / 2)
+	assertIssuerKeyCount(t, src, "kid-rotated-again", 1)
+	if n := fetches.Load(); n != 3 {
+		t.Fatalf("fetches after the second rotation = %d, want 3", n)
 	}
-	if len(set.Keys) != 0 {
-		t.Fatalf("Keys = %+v, want none yet (forced refresh should still be rate-limited)", set.Keys)
-	}
+}
 
-	// After minRefreshInterval elapses, the same kid resolves.
-	clock.Advance(2 * time.Minute)
-	set, err = src.ResolveIssuerKeys(context.Background(), IssuerKeyRequest{
-		Algorithm: fapi.ES256, KeyID: "kid-rotated",
-	})
+// assertIssuerKeyCount asserts that src resolves want ES256 keys for kid.
+func assertIssuerKeyCount(t *testing.T, src *JWKSIssuerKeySource, kid string, want int) {
+	t.Helper()
+	set, err := src.ResolveIssuerKeys(context.Background(), IssuerKeyRequest{Algorithm: fapi.ES256, KeyID: kid})
 	if err != nil {
-		t.Fatalf("ResolveIssuerKeys(kid-rotated, after interval): %v", err)
+		t.Fatalf("ResolveIssuerKeys(%s): %v", kid, err)
 	}
-	if len(set.Keys) != 1 || set.Keys[0].KeyID != "kid-rotated" {
-		t.Fatalf("Keys = %+v, want one key with kid-rotated", set.Keys)
+	if len(set.Keys) != want {
+		t.Fatalf("ResolveIssuerKeys(%s) = %+v, want %d keys", kid, set.Keys, want)
 	}
 }
 

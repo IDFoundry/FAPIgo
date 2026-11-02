@@ -47,12 +47,13 @@ type JWKSIssuerKeySource struct {
 type JWKSOption func(*JWKSIssuerKeySource)
 
 // WithMinRefreshInterval bounds how often an unknown-kid miss may force
-// a live refetch, independent of CacheTTL. Defaults to CacheTTL, which
-// means an unknown kid can force at most one extra fetch per TTL
-// window — a real key rotation is still picked up within one TTL, the
-// same worst case as plain TTL expiry, while an attacker sending
-// requests with distinct unknown kids cannot force more than one
-// upstream fetch per interval.
+// a live refetch, independent of CacheTTL: at most one forced refetch
+// per interval, counted from the last forced refetch (the plain TTL
+// refreshes don't count). Defaults to min(CacheTTL, 1 minute), so a
+// real key rotation is picked up within a minute of the new kid's first
+// use (OIDC Core §10.1.1), while an attacker sending requests with
+// distinct unknown kids cannot force more than one upstream fetch per
+// interval. A zero or negative duration means that default.
 func WithMinRefreshInterval(d time.Duration) JWKSOption {
 	return func(s *JWKSIssuerKeySource) { s.timing.minRefreshInterval = d }
 }

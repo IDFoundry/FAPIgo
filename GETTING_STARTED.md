@@ -1747,8 +1747,9 @@ in the right order:
    for your JWKS — this module's own `keys.NewJWKSIssuerKeySource` (a
    client resolving your keys) refetches on an unrecognized kid at most
    once per its minimum refresh interval (`keys.WithMinRefreshInterval`,
-   by default its cache TTL), so it picks up a new key within one TTL,
-   and you may have consumers you don't control caching longer.
+   by default a minute, or the cache TTL if shorter), but you may have
+   consumers you don't control that only refetch once their cache
+   expires.
    When in doubt, wait longer than you think you need to; this step
    costs nothing but time.
 4. Cut `Sign`/`PublicKey` over to the new key. New ID tokens, JWT

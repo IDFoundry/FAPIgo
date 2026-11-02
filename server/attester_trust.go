@@ -17,6 +17,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientattestation"
 	"github.com/idfoundry/fapigo/internal/depcheck"
+	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -130,6 +131,12 @@ func (r RegisteredAttesterKeys) validate() error {
 // fallback to "kid", which would let an attestation skip the chain
 // check just by omitting it — and "kid" plays no part.
 //
+// Every "x5c" certificate holding an RSA key must hold one of at most
+// 4096 bits with exponent 65537, the limits on any RSA key a caller
+// supplies; this is checked before any signature, so a chain can't
+// choose how much work verifying it costs. Anchors TrustAnchors or
+// Anchors return are configured, not sent, and aren't limited.
+//
 // The signing certificate must:
 //
 //   - chain to one of the anchors through the other "x5c" certificates,
@@ -138,12 +145,16 @@ func (r RegisteredAttesterKeys) validate() error {
 //     the trust anchor out of "x5c" and rejects self-signed signing
 //     certificates wherever else it uses x5c, so the signing key can be
 //     rotated or revoked without redistributing anchors;
-//   - come with intermediates only: "x5c" must not include the trust
-//     anchor (HAIP 1.0), so an attestation is refused when any other
-//     "x5c" certificate is self-signed, or has the subject and public
-//     key of the anchor a verified chain ends at — even an anchor that
-//     is not self-signed, such as an intermediate configured as an
-//     anchor, and even a re-issued or cross-signed copy of it;
+//   - come with intermediates: HAIP 1.0 §4.4.1 has the wallet leave
+//     the trust anchor out of "x5c", so an attestation is refused when
+//     any other "x5c" certificate is self-signed, or when every
+//     verified chain ends at an anchor the wallet sent — one with the
+//     subject and public key of an "x5c" certificate, such as an
+//     intermediate configured as an anchor, or a re-issued or
+//     cross-signed copy of it. One chain ending at an anchor not in
+//     "x5c" is enough: with anchors {root, intermediate}, x5c [leaf,
+//     intermediate] is accepted, since it verifies on to root and the
+//     wallet can't know which of its CAs the server lists;
 //   - permit digital signatures, if it restricts key usage at all;
 //   - hold a key of the type the client's registered attestation
 //     algorithm needs.
@@ -552,6 +563,12 @@ func verifyAttesterChain(ders [][]byte, roots *x509.CertPool, now time.Time) (*x
 		if err != nil {
 			return nil, nil, fmt.Errorf("parse x5c certificate %d: %w", i, err)
 		}
+		// Before any of these keys checks a signature (isSelfSigned,
+		// path building): the caller chose them, and crypto/x509 bounds
+		// neither an RSA modulus nor its exponent.
+		if err := jose.ValidateCallerCertificateKey(cert.PublicKey); err != nil {
+			return nil, nil, fmt.Errorf("x5c certificate %d: %w", i, err)
+		}
 		certs[i] = cert
 	}
 	leaf := certs[0]
@@ -569,10 +586,11 @@ func verifyAttesterChain(ders [][]byte, roots *x509.CertPool, now time.Time) (*x
 	}
 	intermediates := x509.NewCertPool()
 	for i, c := range certs[1:] {
-		// HAIP 1.0 keeps the trust anchor out of x5c; a self-signed
-		// certificate there can only be an anchor, configured or not.
+		// HAIP 1.0 has the wallet keep the trust anchor out of x5c; a
+		// self-signed certificate there can only be an anchor,
+		// configured or not.
 		if isSelfSigned(c) {
-			return nil, nil, fmt.Errorf("attester x5c must not include the trust anchor (HAIP 1.0): x5c certificate %d is self-signed", i+1)
+			return nil, nil, fmt.Errorf("attester x5c must not include a self-signed certificate (HAIP 1.0 keeps the trust anchor out): x5c certificate %d is self-signed", i+1)
 		}
 		intermediates.AddCert(c)
 	}
@@ -587,34 +605,34 @@ func verifyAttesterChain(ders [][]byte, roots *x509.CertPool, now time.Time) (*x
 	if err != nil {
 		return nil, nil, fmt.Errorf("attester certificate chain does not verify: %w", err)
 	}
-	if err := checkX5CExcludesAnchors(certs[1:], chains); err != nil {
+	if err := checkX5CReachesUnsentAnchor(certs[1:], chains); err != nil {
 		return nil, nil, err
 	}
 	return leaf, chains, nil
 }
 
-// checkX5CExcludesAnchors refuses x5c certificates (below the leaf)
-// for the anchor any verified chain ends at — an anchor that is not
-// self-signed, such as an intermediate configured as an anchor. A
-// certificate with the anchor's subject and public key is the anchor
-// for path building, whatever else differs, so a copy re-issued by the
-// anchor's own issuer or cross-signed by another CA is refused just as
-// the configured certificate is. It looks at every verified chain, not
-// only those LeafPolicy or the issuer binding later keep, so an x5c
-// that carries an anchor is refused whichever chain would otherwise be
-// used. A pool's anchors can't be listed, so only those a chain reached
-// are compared.
-func checkX5CExcludesAnchors(extra []*x509.Certificate, chains [][]*x509.Certificate) error {
+// checkX5CReachesUnsentAnchor refuses an x5c (extra, the certificates
+// below the leaf) when every verified chain ends at an anchor the
+// wallet sent itself. A certificate with the anchor's subject and
+// public key is the anchor for path building, whatever else differs,
+// so a copy re-issued by the anchor's own issuer or cross-signed by
+// another CA counts as sending it just as the configured certificate
+// does. One chain ending at an anchor not in x5c is enough, as when the
+// x5c intermediate is also configured as an anchor but verifies on to
+// a root: the wallet can't know which of its CAs the server lists, and
+// every chain ends at a configured anchor anyway. A pool's anchors
+// can't be listed, so only those a chain reached are compared.
+func checkX5CReachesUnsentAnchor(extra []*x509.Certificate, chains [][]*x509.Certificate) error {
 	for _, chain := range chains {
 		// x509.Certificate.Verify never returns an empty chain.
 		anchor := chain[len(chain)-1]
-		for i, c := range extra {
-			if bytes.Equal(c.RawSubject, anchor.RawSubject) && bytes.Equal(c.RawSubjectPublicKeyInfo, anchor.RawSubjectPublicKeyInfo) {
-				return fmt.Errorf("attester x5c must not include the trust anchor (HAIP 1.0): x5c certificate %d is an anchor", i+1)
-			}
+		if !slices.ContainsFunc(extra, func(c *x509.Certificate) bool {
+			return bytes.Equal(c.RawSubject, anchor.RawSubject) && bytes.Equal(c.RawSubjectPublicKeyInfo, anchor.RawSubjectPublicKeyInfo)
+		}) {
+			return nil
 		}
 	}
-	return nil
+	return errors.New("attester x5c includes the trust anchor every verified chain ends at (HAIP 1.0 has the wallet leave it out)")
 }
 
 // isSelfSigned reports whether cert is signed by its own key —

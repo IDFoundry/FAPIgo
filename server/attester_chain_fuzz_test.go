@@ -105,7 +105,7 @@ func attesterChainRefusedOracle(chain []*x509.Certificate) bool {
 }
 
 // FuzzAttesterLeafPolicy checks DefaultAttesterLeafPolicy and
-// checkX5CExcludesAnchors on chains of certificates whose extended key
+// checkX5CReachesUnsentAnchor on chains of certificates whose extended key
 // usages, and shapes, come from the fuzzer. Beyond never panicking on
 // an empty or odd chain:
 //
@@ -113,9 +113,9 @@ func attesterChainRefusedOracle(chain []*x509.Certificate) bool {
 //     documented rule (attesterChainRefusedOracle) refuses;
 //   - approvedAttesterChains keeps exactly the chains the policy
 //     accepts, in order, and fails closed when it keeps none;
-//   - checkX5CExcludesAnchors refuses exactly when an x5c certificate
-//     below the leaf has the subject and public key of the last
-//     certificate of some chain.
+//   - checkX5CReachesUnsentAnchor refuses exactly when every chain's
+//     last certificate has the subject and public key of an x5c
+//     certificate below the leaf.
 func FuzzAttesterLeafPolicy(f *testing.F) {
 	f.Add([]byte{})
 	f.Add([]byte{1, 0, 0, 0})
@@ -179,16 +179,16 @@ func checkX5CAnchorRule(t *testing.T, extra []*x509.Certificate, chains [][]*x50
 	// A certificate is identified, for path building, by its subject
 	// and public key together.
 	type identity struct{ subject, key string }
-	anchors := map[identity]bool{}
-	for _, c := range nonEmpty {
-		a := c[len(c)-1]
-		anchors[identity{string(a.RawSubject), string(a.RawSubjectPublicKeyInfo)}] = true
+	sent := map[identity]bool{}
+	for _, e := range extra {
+		sent[identity{string(e.RawSubject), string(e.RawSubjectPublicKeyInfo)}] = true
 	}
-	want := slices.ContainsFunc(extra, func(e *x509.Certificate) bool {
-		return anchors[identity{string(e.RawSubject), string(e.RawSubjectPublicKeyInfo)}]
+	want := !slices.ContainsFunc(nonEmpty, func(c []*x509.Certificate) bool {
+		a := c[len(c)-1]
+		return !sent[identity{string(a.RawSubject), string(a.RawSubjectPublicKeyInfo)}]
 	})
-	if err := checkX5CExcludesAnchors(extra, nonEmpty); (err != nil) != want {
-		t.Fatalf("checkX5CExcludesAnchors = %v, want refusal %v", err, want)
+	if err := checkX5CReachesUnsentAnchor(extra, nonEmpty); (err != nil) != want {
+		t.Fatalf("checkX5CReachesUnsentAnchor = %v, want refusal %v", err, want)
 	}
 }
 
@@ -288,7 +288,8 @@ func newAttesterPool(f *testing.F) attesterPool {
 //   - no self-signed certificate, and nothing that isn't a certificate,
 //     anywhere in x5c;
 //   - chains that each start at that certificate and end at one of the
-//     configured anchors, none of which x5c carries below the leaf.
+//     configured anchors, at least one of which x5c doesn't carry
+//     below the leaf.
 func FuzzVerifyAttesterChain(f *testing.F) {
 	pool := newAttesterPool(f)
 	f.Add([]byte{poolLeaf, poolIntermediate}, uint8(1<<poolRoot))
@@ -341,22 +342,26 @@ func checkVerifiedAttesterChain(t *testing.T, pool attesterPool, shape []byte, a
 	if len(chains) == 0 {
 		t.Fatalf("accepted x5c %v with no verified chain", shape)
 	}
+	reachesUnsent := false
 	for _, chain := range chains {
-		checkVerifiedChainAnchor(t, pool, shape, anchors, leaf, chain)
+		if !checkVerifiedChainAnchor(t, pool, shape, anchors, leaf, chain) {
+			reachesUnsent = true
+		}
+	}
+	if !reachesUnsent {
+		t.Fatalf("accepted x5c %v, which carries the anchor of every verified chain", shape)
 	}
 }
 
 // checkVerifiedChainAnchor checks chain runs from leaf to one of
-// anchors, which x5c (shape) doesn't carry.
-func checkVerifiedChainAnchor(t *testing.T, pool attesterPool, shape []byte, anchors []*x509.Certificate, leaf *x509.Certificate, chain []*x509.Certificate) {
+// anchors, and reports whether x5c (shape) carries that anchor.
+func checkVerifiedChainAnchor(t *testing.T, pool attesterPool, shape []byte, anchors []*x509.Certificate, leaf *x509.Certificate, chain []*x509.Certificate) (sent bool) {
 	t.Helper()
 	anchor := chain[len(chain)-1]
 	if !chain[0].Equal(leaf) || !slices.ContainsFunc(anchors, anchor.Equal) {
 		t.Fatalf("x5c %v: a chain doesn't run from the signing certificate to a configured anchor", shape)
 	}
-	for _, s := range shape[1:] {
-		if pool.certs[int(s)%poolSize].Equal(anchor) {
-			t.Fatalf("accepted x5c %v, which carries anchor %q", shape, anchor.Subject)
-		}
-	}
+	return slices.ContainsFunc(shape[1:], func(s byte) bool {
+		return pool.certs[int(s)%poolSize].Equal(anchor)
+	})
 }

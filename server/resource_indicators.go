@@ -77,17 +77,22 @@ func (s *Server) resourceIndicatorsEnabled() bool {
 // takeResourceParameters splits a form request's "resource" parameters
 // (RFC 8707 §2: repeatable) from the rest, which then go through the
 // usual duplicate-refusing parsing. With resource indicators disabled
-// it returns params unchanged, so "resource" stays an ordinary,
-// ignored parameter.
+// it drops them, however many there are: "resource" is then a
+// parameter this server doesn't recognize, which RFC 6749 §3.1 and
+// §3.2 have it ignore, and a client following RFC 8707 may repeat it.
 func (s *Server) takeResourceParameters(params []FormParameter) ([]FormParameter, []string) {
+	rest, resources := splitResourceParameters(params)
 	if !s.resourceIndicatorsEnabled() {
-		return params, nil
+		return rest, nil
 	}
-	return splitResourceParameters(params)
+	return rest, resources
 }
 
 // splitResourceParameters separates params' "resource" parameters from
-// the rest. Too many parameters are returned unsplit, for
+// the rest, dropping any without a value: RFC 6749 §3.1 and §3.2,
+// "Parameters sent without a value MUST be treated as if they were
+// omitted from the request", so "resource=" is no resource, even beside
+// others. Too many parameters are returned unsplit, for
 // formParametersToMap to refuse, so the resources don't escape its
 // bound.
 func splitResourceParameters(params []FormParameter) ([]FormParameter, []string) {
@@ -97,11 +102,11 @@ func splitResourceParameters(params []FormParameter) ([]FormParameter, []string)
 	rest := make([]FormParameter, 0, len(params))
 	var resources []string
 	for _, p := range params {
-		if p.Name == resourceParameter {
+		if p.Name != resourceParameter {
+			rest = append(rest, p)
+		} else if p.Value != "" {
 			resources = append(resources, p.Value)
-			continue
 		}
-		rest = append(rest, p)
 	}
 	return rest, resources
 }

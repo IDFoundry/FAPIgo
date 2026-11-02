@@ -57,3 +57,16 @@ func checkCallerKeyMaterial(pub crypto.PublicKey) error {
 	}
 	return nil
 }
+
+// ValidateCallerCertificateKey checks pub, the public key of a
+// certificate a caller supplied — one in an attestation's "x5c" chain,
+// say — against the key-material rules ParseJWK applies to a caller's
+// key, whatever algorithm the certificate is used with: an RSA modulus
+// of at most 4096 bits (maxCallerRSAModulusBits) and exponent 65537.
+// Run it before the certificate's key verifies anything, path building
+// included: crypto/x509 accepts any modulus size and exponents up to
+// 2^31-1, so an unchecked certificate lets the caller choose how much
+// CPU each signature check costs.
+func ValidateCallerCertificateKey(pub crypto.PublicKey) error {
+	return checkCallerKeyMaterial(pub)
+}

@@ -128,9 +128,9 @@ func (s *Server) embedderGrant(ctx context.Context, req embedderGrantRequest) (g
 	switch {
 	case !slices.Contains(s.cfg.AdditionalGrantTypes, req.GrantType):
 		return grantRecord{}, newError(ErrorServerError, 500, "GrantType is not one of Config.AdditionalGrantTypes", nil)
-	case req.Client.instanceKey == "" || req.Client.authenticatedID != client.ID():
+	case req.Client.instanceKey == "" || req.Client.authenticatedID != client.ID() || !req.Client.AttestationExpiresAt.Equal(req.Client.verifiedExpiresAt):
 		return grantRecord{}, newError(ErrorServerError, 500, "Client must be as AuthenticateAttestedClient returned it", nil)
-	case s.deps.Clock.Now().After(req.Client.AttestationExpiresAt.Add(s.cfg.Limits.MaxClockSkew)):
+	case s.deps.Clock.Now().After(req.Client.verifiedExpiresAt.Add(s.cfg.Limits.MaxClockSkew)):
 		// AuthenticateAttestedClient accepted the attestation up to
 		// MaxClockSkew past its exp; past that, Client was kept from an
 		// earlier request rather than authenticated for this one.

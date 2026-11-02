@@ -27,7 +27,8 @@ type IssueAccessTokenRequest struct {
 	// Binding is the token request's sender-constraining credential,
 	// exactly as VerifyTokenRequestBinding returned it for Client: the
 	// access token is bound to it (its "cnf" claim), so one built by
-	// hand, or verified for another client, is refused.
+	// hand, verified for another client, or whose Thumbprint was
+	// changed since, is refused.
 	Binding TokenBinding
 
 	// Subject is the access token's sub.
@@ -82,7 +83,7 @@ type IssueAccessTokenRequest struct {
 func (s *Server) IssueAccessToken(ctx context.Context, req IssueAccessTokenRequest) (TokenResult, error) {
 	client := req.Client.Client
 	grant, err := s.embedderGrant(ctx, embedderGrantRequest(req))
-	if err == nil && req.Binding.verifiedFor != client.ID() {
+	if err == nil && (req.Binding.verifiedFor != client.ID() || req.Binding.Thumbprint != req.Binding.verifiedThumbprint) {
 		err = newError(ErrorServerError, 500, "Binding must be as VerifyTokenRequestBinding returned it for Client", nil)
 	}
 	if err != nil {

@@ -85,8 +85,9 @@ func checkAcceptedResources(t *testing.T, raw []byte, accepted []string) {
 // FuzzSplitResourceParameters runs an arbitrary form body through
 // FormRequestFromHTTP and takeResourceParameters, with resource
 // indicators enabled, as every endpoint taking "resource" does. RFC 8707
-// lets "resource" repeat, and nothing else: every resource value must
-// come out, in order and unchanged, while a repeat of any other
+// lets "resource" repeat, and nothing else: every resource value but
+// an empty one (RFC 6749 §3.2: omitted) must come out, in order and
+// unchanged, while a repeat of any other
 // parameter is still refused by formParametersToMap, which also still
 // bounds the request.
 func FuzzSplitResourceParameters(f *testing.F) {
@@ -115,8 +116,8 @@ func FuzzSplitResourceParameters(f *testing.F) {
 
 // checkResourceSplit fails t unless takeResourceParameters splits params
 // as RFC 8707 allows: over maxFormParameters, not at all (and
-// formParametersToMap refuses them); otherwise every resource value out,
-// in order, and the rest unchanged, with a repeat of any of those still
+// formParametersToMap refuses them); otherwise every non-empty resource
+// value out, in order, and the rest unchanged, with a repeat of any of those still
 // refused by formParametersToMap.
 func checkResourceSplit(t *testing.T, s *Server, params []FormParameter) {
 	t.Helper()
@@ -132,6 +133,8 @@ func checkResourceSplit(t *testing.T, s *Server, params []FormParameter) {
 	}
 
 	wantRest, wantResources := splitByName(params, resourceParameter)
+	// An empty value is no resource at all (RFC 6749 §3.1, §3.2).
+	wantResources = slices.DeleteFunc(wantResources, func(v string) bool { return v == "" })
 	if !slices.Equal(resources, wantResources) {
 		t.Fatalf("resources = %q, want %q", resources, wantResources)
 	}

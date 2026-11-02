@@ -97,6 +97,73 @@ example letters and digits:
 req.BindingMessage = "W4SCT"
 ```
 
+### `X5CAttesterChain` limits the RSA keys of `x5c` certificates (server)
+
+**Affects:** a server whose `Dependencies.AttesterTrust` is
+`server.X5CAttesterChain`, when a wallet's attestation `x5c` carries a
+certificate — the signing certificate or an intermediate — whose
+public key is RSA with a modulus over 4096 bits or a public exponent
+other than 65537. Anchors you configure (`TrustAnchors`, `Anchors`)
+aren't limited.
+
+**Why:** the `x5c` certificates are the caller's, and `crypto/x509`
+bounds neither an RSA modulus nor its exponent. Path building spent an
+RSA operation on whatever key an unauthenticated request carried, so a
+31,744-bit modulus with exponent 2^31-1 cost the server about 60 ms of
+CPU per request. v0.63.0 already limited every other RSA key a caller
+supplies (a DPoP `jwk`, an attestation's `cnf.jwk`, a client's JWK Set)
+to 4096 bits and exponent 65537; `x5c` now follows the same rule,
+checked before any signature.
+
+**What fails:** nothing at startup. Such an attestation is refused
+with `invalid_client`. There is no option to keep the old behaviour.
+
+**What to change:** have the attester's CA issue its signing and
+intermediate certificates for 2048-, 3072- or 4096-bit RSA keys with
+exponent 65537, or for EC keys:
+
+```sh
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out attester-ca.pem
+```
+
+### `IssueAccessToken` and `IssueRefreshToken` refuse an edited binding or attestation expiry (server)
+
+**Affects:** an embedder serving its own grant
+(`Config.AdditionalGrantTypes`) that changes, after the server returned
+them, the `Thumbprint` of a `server.TokenBinding` from
+`VerifyTokenRequestBinding` before passing it to `IssueAccessToken`, or
+the `AttestationExpiresAt` of a `server.AttestedClient` from
+`AuthenticateAttestedClient` before passing it to `IssueAccessToken` or
+`IssueRefreshToken`.
+
+**Why:** both documented that only what the server verified is
+accepted, but the check covered only the client the value was verified
+for. An edited `Thumbprint` bound the access token to a key that never
+proved possession, and an extended `AttestationExpiresAt` let a
+`Client` kept from an earlier request pass the attestation expiry
+check. Each now keeps its own copy of what was verified.
+
+**What fails:** nothing at startup. Such a call is refused with a
+`server_error` `*server.Error`.
+
+**What to change:** pass both exactly as the server returned them, for
+the current request:
+
+```go
+attested, err := srv.AuthenticateAttestedClient(ctx, req.AttestedClientAuthentication())
+if err != nil {
+	return err
+}
+binding, err := srv.VerifyTokenRequestBinding(ctx, attested.Client, req)
+if err != nil {
+	return err
+}
+result, err := srv.IssueAccessToken(ctx, server.IssueAccessTokenRequest{
+	GrantType: grantType, Client: attested, Binding: binding,
+	Subject: subject, Scope: scope,
+})
+```
+
 ## v0.68.0
 
 ### `DefaultAttesterLeafPolicy` refuses more signing roles (server)
@@ -170,6 +237,12 @@ anchor, including cross-signed copies:
 // x5c: signing certificate, then intermediates, never the anchor.
 x5c := [][]byte{leaf.Raw, intermediate.Raw}
 ```
+
+*Relaxed in v0.69.0:* a configured anchor in `x5c` that isn't
+self-signed is accepted when a verified chain also ends at an anchor
+`x5c` doesn't carry, as `[leaf, intermediate]` does with both the root
+and the intermediate configured as anchors. It's refused only when
+every verified chain ends at an anchor the wallet sent.
 
 ## v0.66.0
 
@@ -273,6 +346,12 @@ anchor:
 // x5c: signing certificate, then intermediates, never the anchor.
 x5c := [][]byte{leaf.Raw, intermediate.Raw}
 ```
+
+*Relaxed in v0.69.0:* a configured anchor in `x5c` that isn't
+self-signed is accepted when a verified chain also ends at an anchor
+`x5c` doesn't carry, as `[leaf, intermediate]` does with both the root
+and the intermediate configured as anchors. It's refused only when
+every verified chain ends at an anchor the wallet sent.
 
 ## v0.65.0
 

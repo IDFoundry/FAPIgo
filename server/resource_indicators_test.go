@@ -216,9 +216,34 @@ func TestResourceIndicatorsIgnoredWhenNothingConfigured(t *testing.T) {
 	}
 	wantAudience(t, result, testIssuer)
 
-	// "resource" stays an ordinary parameter: not repeatable.
-	_, err = pushWithResources(t, h, resourceA, resourceB)
-	wantErrorCode(t, err, server.ErrorInvalidRequest)
+	// Ignored however many times it's sent (RFC 6749 §3.1: an
+	// unrecognized parameter is ignored; RFC 8707 §2: it's repeatable).
+	code = grantForResources(t, h, resourceA, resourceB)
+	result, err = exchangeWithResources(t, h, code, resourceA, resourceB, "")
+	if err != nil {
+		t.Fatalf("ExchangeAuthorizationCode with repeated resources: %v", err)
+	}
+	wantAudience(t, result, testIssuer)
+}
+
+// TestResourceIndicatorsEmptyTreatedAsOmitted covers RFC 6749 §3.1 and
+// §3.2, "Parameters sent without a value MUST be treated as if they
+// were omitted from the request": an empty "resource" at PAR or the
+// token endpoint, alone or beside others, names no resource.
+func TestResourceIndicatorsEmptyTreatedAsOmitted(t *testing.T) {
+	h := withResources(t, newHarness(t, server.ProfileFAPISecurity, true), []string{resourceA, resourceB}, nil)
+
+	result, err := exchangeWithResources(t, h, grantForResources(t, h, ""), "")
+	if err != nil {
+		t.Fatalf("empty resource at PAR and the token endpoint: %v", err)
+	}
+	wantAudience(t, result, testIssuer)
+
+	result, err = exchangeWithResources(t, h, grantForResources(t, h, "", resourceA, ""), resourceA, "")
+	if err != nil {
+		t.Fatalf("empty resources beside one: %v", err)
+	}
+	wantAudience(t, result, resourceA)
 }
 
 func TestResourceIndicatorsPARValidation(t *testing.T) {
@@ -226,15 +251,16 @@ func TestResourceIndicatorsPARValidation(t *testing.T) {
 		resources []string
 		want      server.ErrorCode
 	}{
-		"one listed":         {resources: []string{resourceA}},
-		"two listed":         {resources: []string{resourceA, resourceB}},
-		"repeated":           {resources: []string{resourceA, resourceA}},
-		"unlisted":           {resources: []string{resourceA, resourceC}, want: server.ErrorInvalidTarget},
-		"relative":           {resources: []string{"/api"}, want: server.ErrorInvalidTarget},
-		"fragment":           {resources: []string{resourceA + "#x"}, want: server.ErrorInvalidTarget},
-		"empty":              {resources: []string{""}, want: server.ErrorInvalidTarget},
-		"too many":           {resources: manyResources(17), want: server.ErrorInvalidTarget},
-		"listed with prefix": {resources: []string{resourceA + "/"}, want: server.ErrorInvalidTarget},
+		"one listed":          {resources: []string{resourceA}},
+		"two listed":          {resources: []string{resourceA, resourceB}},
+		"repeated":            {resources: []string{resourceA, resourceA}},
+		"unlisted":            {resources: []string{resourceA, resourceC}, want: server.ErrorInvalidTarget},
+		"relative":            {resources: []string{"/api"}, want: server.ErrorInvalidTarget},
+		"fragment":            {resources: []string{resourceA + "#x"}, want: server.ErrorInvalidTarget},
+		"empty":               {resources: []string{""}},
+		"empty beside listed": {resources: []string{"", resourceA, ""}},
+		"too many":            {resources: manyResources(17), want: server.ErrorInvalidTarget},
+		"listed with prefix":  {resources: []string{resourceA + "/"}, want: server.ErrorInvalidTarget},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := withResources(t, newHarness(t, server.ProfileFAPISecurity, true), []string{resourceA, resourceB}, nil)

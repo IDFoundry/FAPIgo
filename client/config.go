@@ -447,7 +447,9 @@ type Config struct {
 	// Issuer is the authorization server this client talks to — the
 	// audience client assertions and request objects are addressed to,
 	// and the issuer authorization responses and ID tokens must come
-	// from.
+	// from. Parse it with fapi.ParseIssuerURL: New refuses one with a
+	// query, even an empty one, which RFC 8414 §2 and OpenID Connect
+	// Core §2 rule out.
 	Issuer fapi.URL
 
 	// ClientID is this client's identifier at the authorization server:

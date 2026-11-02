@@ -215,6 +215,9 @@ func validateRequiredConfig(cfg Config) error {
 	if cfg.Issuer.IsZero() {
 		return fmt.Errorf("client: config: issuer is required")
 	}
+	if u := cfg.Issuer.URL(); u.RawQuery != "" || u.ForceQuery {
+		return fmt.Errorf("client: config: issuer must not contain a query (RFC 8414 §2): parse it with fapi.ParseIssuerURL")
+	}
 	if cfg.ClientID == "" {
 		return fmt.Errorf("client: config: client ID is required")
 	}

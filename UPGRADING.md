@@ -164,6 +164,35 @@ result, err := srv.IssueAccessToken(ctx, server.IssueAccessTokenRequest{
 })
 ```
 
+### `server.New` and `client.New` refuse an issuer with a query (server, client)
+
+**Affects:** a server's or a client's `Config.Issuer` with a query,
+even an empty `?`. `fapi.ParseIssuerURL` has refused one since v0.65.0,
+so this only reaches an issuer built another way, such as with
+`fapi.ParseEndpointURL`, which allows a query.
+
+**Why:** RFC 8414 §2 and OpenID Connect Core §2 define an issuer as a
+URL with no query or fragment. v0.65.0 made `fapi.ParseIssuerURL`
+refuse a query, but `New` accepted any `fapi.URL` as the issuer, so a
+server could still publish and sign (`iss` in ID tokens, authorization
+responses and JARM) an issuer conformant clients refuse.
+
+**What fails:** `New` returns an error ending "issuer must not contain
+a query (RFC 8414 §2): parse it with fapi.ParseIssuerURL", at either
+assurance level.
+
+**What to change:** parse the issuer with `fapi.ParseIssuerURL` and
+give it without a query. An issuer that needs to tell tenants apart
+puts the tenant in the path:
+
+```go
+issuer, err := fapi.ParseIssuerURL("https://as.example/tenants/a") // not ParseEndpointURL("https://as.example/?tenant=a")
+if err != nil {
+	return err
+}
+cfg.Issuer = issuer
+```
+
 ## v0.68.0
 
 ### `DefaultAttesterLeafPolicy` refuses more signing roles (server)

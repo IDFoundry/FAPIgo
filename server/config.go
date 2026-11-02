@@ -452,11 +452,13 @@ type Config struct {
 	// server accepts, beyond the standard OAuth/OIDC/PKCE parameters it
 	// already understands (response_type, client_id, redirect_uri,
 	// scope, state, nonce, code_challenge, code_challenge_method). A
-	// parameter with no registered Definition is rejected — there is no
-	// permissive fallback — so nil is equivalent to an empty Registry
-	// (no custom parameters accepted at all), not to "extensions
-	// disabled, accept anything." See ARCHITECTURE.md design rules
-	// 10-11 and extension.Registry.Parse.
+	// parameter with no registered Definition is ignored and stripped
+	// from the request (RFC 6749 §3.1: an authorization server "MUST
+	// ignore unrecognized request parameters"), so it never reaches
+	// storage, an InteractionRequest or a token; only a registered one
+	// is parsed, validated and kept. nil is equivalent to an empty
+	// Registry: no custom parameter is kept. See ARCHITECTURE.md design
+	// rules 10-11 and extension.Registry.Parse.
 	//
 	// A Definition whose AllowedSources permits SourcePlainParameter
 	// must use a string-shaped T: this server's plain-parameter path
@@ -471,10 +473,10 @@ type Config struct {
 	// on PAR, CIBA backchannel authentication requests, and
 	// client_credentials token requests (RFC 9396 §6). Unlike
 	// Extensions, nil is not equivalent to an empty registry accepting
-	// nothing extra — it means "authorization_details" itself is
-	// rejected outright as an unregistered parameter, the same
-	// default-reject stance Extensions takes for any parameter without a
-	// matching Definition. A registered RARRegistry's own bounds (total
+	// nothing extra: it means a request carrying "authorization_details"
+	// at all is refused with invalid_authorization_details (RFC 9396
+	// §5), rather than the parameter being ignored as an unregistered
+	// Extensions parameter is. A registered RARRegistry's own bounds (total
 	// size, nesting depth, per-type object count and size) apply
 	// identically to both flows. Each client requests only the types its
 	// registration lists (storage.RegisteredClientConfig.

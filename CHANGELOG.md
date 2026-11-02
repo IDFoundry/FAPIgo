@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.69.0](https://github.com/IDFoundry/FAPIgo/compare/v0.68.0...v0.69.0) (2026-11-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* fapi.ParseIssuerURL, ParseEndpointURL and ParseRedirectURL refuse a URL ending in a bare "#", and storage.NewRegisteredClient (and so sqlstore) refuses a registered redirect URI containing "#". Drop the "#" from configuration and from each client's registered redirect URIs.
+* **server,client:** server.New and client.New refuse a Config.Issuer with a query, including an empty "?". Parse the issuer with fapi.ParseIssuerURL and move any tenant selector into the path.
+* **server:** IssueAccessToken refuses with server_error a TokenBinding whose Thumbprint was changed after VerifyTokenRequestBinding returned it, and IssueAccessToken and IssueRefreshToken refuse an AttestedClient whose AttestationExpiresAt was changed after AuthenticateAttestedClient returned it.
+* **server:** X5CAttesterChain refuses with invalid_client an attestation whose x5c carries an RSA key over 4096 bits or with an exponent other than 65537, on the signing certificate or an intermediate.
+* **server:** a pushed authorization request whose core parameters exceed the new size bounds is refused with invalid_request, and a request_uri begins at most eight interactions before BeginAuthorization refuses it with invalid_request_uri. See UPGRADING.md for the bounds.
+
+### Features
+
+* **resource:** add RecommendedLimits ([be3823c](https://github.com/IDFoundry/FAPIgo/commit/be3823c0b5ebd717b291e6a575b92c6cc508b15f))
+
+
+### Bug Fixes
+
+* **client:** let a ping without a valid bearer token be answered 401 ([216b5b7](https://github.com/IDFoundry/FAPIgo/commit/216b5b70534e6b9fb27c0a2832b0d4c008aa25b0))
+* **client:** refuse every request to a federated OP once its Trust Chain expires ([b1a51f9](https://github.com/IDFoundry/FAPIgo/commit/b1a51f97274c757a30eba827aee4a358b20451ae))
+* **client:** refuse plain-mode callback parameters that aren't valid UTF-8 ([571f0c4](https://github.com/IDFoundry/FAPIgo/commit/571f0c427dc33ec85f9035ace46f1071345cb765))
+* **client:** send CIBA requested_expiry rounded up to whole seconds ([179bb20](https://github.com/IDFoundry/FAPIgo/commit/179bb201e3c8d23e79014810dff1ee8180eb836f))
+* **fapihttp:** accept Structured Field parameters on a forwarded Client-Cert ([4555c67](https://github.com/IDFoundry/FAPIgo/commit/4555c67116bb03e6ee519b33234b5aa2ced0cc9a))
+* **federation:** bound and cancel detached automatic-registration resolutions ([063f147](https://github.com/IDFoundry/FAPIgo/commit/063f1474a722c475cdbe8fe983654567b1219eb0))
+* **federation:** narrow automatic registration grants by resolved scope and grant_types ([f5584fa](https://github.com/IDFoundry/FAPIgo/commit/f5584faf7744bda8d0c9d8d39202be00375ecd11))
+* **federation:** refuse a null value combined with add in metadata policy ([a188676](https://github.com/IDFoundry/FAPIgo/commit/a1886763aea2978d2e01ccfc9652d9250ab63eaa))
+* **federation:** refuse an empty fragment in Entity Identifiers and source_endpoint ([f618d18](https://github.com/IDFoundry/FAPIgo/commit/f618d18104d257d627db1b30371f3b906b800bec))
+* **jose:** compare a JWT typ case-insensitively in ASCII only ([191824d](https://github.com/IDFoundry/FAPIgo/commit/191824d5cab80d66aa926feb06d9c38c195a994a))
+* **keys:** let an unknown kid force a JWKS refetch with the default options ([99aff1d](https://github.com/IDFoundry/FAPIgo/commit/99aff1dcccc20094db36e8057cc23b1852a45e98))
+* **keys:** match a kid-less client key by its RFC 7638 thumbprint ([da49bdf](https://github.com/IDFoundry/FAPIgo/commit/da49bdf661085507ce2f8af3a9a5b09ef5d3d41f))
+* refuse an empty fragment in issuer, endpoint and redirect URIs ([f3a006b](https://github.com/IDFoundry/FAPIgo/commit/f3a006baefb11ff712f8e7242ec59caff645e63e))
+* **server,client:** refuse a configured issuer with a query ([de97ac3](https://github.com/IDFoundry/FAPIgo/commit/de97ac30f887ec2e57487e137d690968f089f607))
+* **server:** accept an x5c intermediate that is also a configured anchor ([f223e2b](https://github.com/IDFoundry/FAPIgo/commit/f223e2b96a903c0462ef0e281ba4f6d470aaa7b3))
+* **server:** bound pushed request parameters and interactions per request_uri ([610dcd5](https://github.com/IDFoundry/FAPIgo/commit/610dcd51a49f90814976c68ce7890463a21fd3dc))
+* **server:** compare requested claim values' numbers exactly ([f979047](https://github.com/IDFoundry/FAPIgo/commit/f97904718acf88a866921ae1ae1b2a24f8ddbadc))
+* **server:** limit the RSA keys of attestation x5c certificates ([45189bc](https://github.com/IDFoundry/FAPIgo/commit/45189bcfba23f75142a55920d1ce042184c9d368))
+* **server:** refuse an edited TokenBinding thumbprint or attestation expiry ([6adb4ed](https://github.com/IDFoundry/FAPIgo/commit/6adb4ed0027fe515639864cf5c1255d1cca295b5))
+* **server:** refuse invisible and format-character CIBA binding messages ([f518b8e](https://github.com/IDFoundry/FAPIgo/commit/f518b8e617ce74c53a10dcce6d3fccd1a9ec2d9f))
+* **server:** say an attestation can't be combined with another client auth method ([5bf9195](https://github.com/IDFoundry/FAPIgo/commit/5bf91958b02b98493578e5dff20426ee5f06ec7f))
+* **server:** treat an empty resource as omitted and ignore resource when unsupported ([0faec6a](https://github.com/IDFoundry/FAPIgo/commit/0faec6ae9f0b0f9519053538b89c2ad93460a16e))
+
 ## [0.68.0](https://github.com/IDFoundry/FAPIgo/compare/v0.67.2...v0.68.0) (2026-11-01)
 
 

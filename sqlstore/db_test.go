@@ -3,7 +3,10 @@ package sqlstore_test
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"errors"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -143,6 +146,51 @@ func TestCheckSchemaRefusals(t *testing.T) {
 			t.Error("CheckSchema with no migration recorded = nil error, want an error")
 		}
 	})
+}
+
+// withSQLite runs fn on a DB over the SQLite file at path opened with
+// DSN query query (with its "?", or empty), closing it after.
+func withSQLite(t *testing.T, path, query string, fn func(d *sqlstore.DB) error) error {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+path+query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	d, err := sqlstore.New(db, sqlstore.SQLite, sqlstore.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fn(d)
+}
+
+// Migrate and CheckSchema refuse a SQLite database that isn't in WAL
+// mode, whose reads fail with SQLITE_BUSY while a write commits, with
+// an error naming the DSN that fixes it; a file once switched to WAL
+// mode stays in it, whatever DSN opens it next.
+func TestSQLiteRequiresWAL(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "store.db")
+	migrate := func(d *sqlstore.DB) error { return d.Migrate(ctx) }
+	checkSchema := func(d *sqlstore.DB) error { return d.CheckSchema(ctx) }
+	for _, query := range []string{"", "?_pragma=busy_timeout(10000)", "?_pragma=journal_mode(DELETE)", "?_pragma=journal_mode(TRUNCATE)"} {
+		wantNotWAL(t, "Migrate("+query+")", withSQLite(t, path, query, migrate))
+	}
+	if err := withSQLite(t, path, "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)", migrate); err != nil {
+		t.Fatalf("Migrate in WAL mode: %v", err)
+	}
+	if err := withSQLite(t, path, "", checkSchema); err != nil {
+		t.Fatalf("CheckSchema of a WAL file opened without the pragma: %v", err)
+	}
+	wantNotWAL(t, "CheckSchema(after switching back to a rollback journal)", withSQLite(t, path, "?_pragma=journal_mode(DELETE)", checkSchema))
+}
+
+// wantNotWAL fails t unless err is checkJournalMode's refusal.
+func wantNotWAL(t *testing.T, what string, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "not WAL") || !strings.Contains(err.Error(), "_pragma=journal_mode(WAL)") {
+		t.Errorf("%s = %v, want a refusal naming journal_mode(WAL)", what, err)
+	}
 }
 
 // Two prefixes in one database are two separate sets of stores.

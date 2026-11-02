@@ -59,6 +59,12 @@ pure Go, no cgo) needs WAL mode and a busy timeout:
 sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
 ```
 
+`Migrate` and `CheckSchema` refuse a SQLite database that isn't in WAL
+mode: without it, a read made while a write commits fails with
+`SQLITE_BUSY`, and under concurrent requests most fail as outages.
+`Options.SQLiteBusyTimeout` covers sqlstore's writes; reads get the
+DSN's `busy_timeout`, so give the DSN both.
+
 On a new file, the first connection switches it to WAL mode as it
 opens, and a connection another process opens at that moment fails with
 `SQLITE_BUSY`. `Migrate` waits that out, so run it first in each
@@ -152,6 +158,18 @@ v0.4 refuses configurations v0.3 accepted:
   ```
 
   `RotatingSealer` also refuses two `AESGCMSealer`s over the same key.
+- **A SQLite database not in WAL mode.** `Migrate` and `CheckSchema`
+  return an error unless `PRAGMA journal_mode` is `wal`. Without it, a
+  read made while a write commits failed with `SQLITE_BUSY`, answered
+  as an outage: under concurrent requests, most of them. Open the file
+  with both pragmas, `busy_timeout` first:
+
+  ```go
+  sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
+  ```
+
+  The first connection opened that way switches the file to WAL mode,
+  which lasts.
 
 ## What each database declares
 

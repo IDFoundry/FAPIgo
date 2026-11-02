@@ -83,6 +83,12 @@
 //
 //	sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
 //
+// Migrate and CheckSchema refuse a database that isn't in WAL mode:
+// without it, a read made while a write commits fails with SQLITE_BUSY
+// unless its connection has a busy timeout, and under concurrent
+// requests most of them would fail as outages. Options.SQLiteBusyTimeout
+// covers this package's writes, which set it on their connection;
+// reads get the DSN's busy_timeout, so give the DSN both.
 // List busy_timeout first, so it applies to the pragmas after it. On a
 // new file, the first connection switches the file to WAL mode (which
 // lasts) as it opens, holding the write lock without waiting the busy

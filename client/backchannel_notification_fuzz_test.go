@@ -16,13 +16,15 @@ import (
 // notification endpoint chooses. Beyond never panicking:
 //
 //   - a refusal is always an ErrorInvalidRequest *Error;
-//   - an accepted one is a POST of application/json, with exactly one
-//     Authorization header carrying a non-empty bearer token, and a body
-//     of at most a few kilobytes that is a JSON object whose auth_req_id
+//   - an accepted one is a POST of application/json, with a body of at
+//     most a few kilobytes that is a JSON object whose auth_req_id
 //     member, read independently, is the non-empty string AuthReqID
 //     returns;
-//   - it authenticates for the session with that auth_req_id and that
-//     token, and not for one with another token or under poll delivery.
+//   - with exactly one Authorization header carrying a non-empty bearer
+//     token, it authenticates for the session with that auth_req_id and
+//     that token, and not for one with another token or under poll
+//     delivery; without one, it authenticates for no session (CIBA
+//     §10.2's 401 case, not a parse error).
 func FuzzParseBackchannelNotification(f *testing.F) {
 	f.Add(uint8(0), "application/json", "Bearer notify-token", false, []byte(`{"auth_req_id":"req-1"}`))
 	f.Add(uint8(0), "Application/JSON; charset=utf-8", "bearer t", false, []byte(`{"auth_req_id":"a","auth_req_id":"b","x":[1,{}]}`))
@@ -50,7 +52,7 @@ func FuzzParseBackchannelNotification(f *testing.F) {
 			return
 		}
 		checkAcceptedNotificationRequest(t, r, len(body))
-		checkAcceptedNotification(t, n, authorization, body)
+		checkAcceptedNotification(t, n, authorization, twice, body)
 	})
 }
 
@@ -68,24 +70,28 @@ func checkAcceptedNotificationRequest(t *testing.T, r *http.Request, bodyLen int
 		t.Fatalf("accepted a %q request", r.Method)
 	case err != nil || !strings.EqualFold(mediaType, "application/json"):
 		t.Fatalf("accepted Content-Type %q", r.Header.Get("Content-Type"))
-	case len(r.Header.Values("Authorization")) != 1:
-		t.Fatalf("accepted %d Authorization headers", len(r.Header.Values("Authorization")))
 	case bodyLen > maxBackchannelNotificationBytes:
 		t.Fatalf("accepted a %d-byte body", bodyLen)
 	}
 }
 
 // checkAcceptedNotification checks an accepted notification carries
-// authorization's bearer token and body's auth_req_id.
-func checkAcceptedNotification(t *testing.T, n BackchannelNotification, authorization string, body []byte) {
+// body's auth_req_id, and authenticates with authorization's bearer
+// token only when that was the request's one Authorization header.
+func checkAcceptedNotification(t *testing.T, n BackchannelNotification, authorization string, twice bool, body []byte) {
 	t.Helper()
-	scheme, token, _ := strings.Cut(authorization, " ")
-	if !strings.EqualFold(scheme, "Bearer") || token == "" {
-		t.Fatalf("accepted Authorization %q, which isn't a bearer token", authorization)
-	}
 	want, ok := lastAuthReqID(body)
 	if !ok || want == "" || n.AuthReqID() != want {
 		t.Fatalf("AuthReqID() = %q, but body %q names %q (%v)", n.AuthReqID(), body, want, ok)
+	}
+	scheme, token, _ := strings.Cut(authorization, " ")
+	if twice || !strings.EqualFold(scheme, "Bearer") || token == "" {
+		for _, candidate := range []string{token, authorization} {
+			if candidate != "" && n.Authenticates(BackchannelAuthenticationSession{authReqID: want, notificationToken: candidate}) {
+				t.Fatalf("Authorization %q (twice: %v) authenticates for token %q", authorization, twice, candidate)
+			}
+		}
+		return
 	}
 	if !n.Authenticates(BackchannelAuthenticationSession{authReqID: want, notificationToken: token}) {
 		t.Fatalf("notification doesn't authenticate for its own auth_req_id %q and token %q", want, token)

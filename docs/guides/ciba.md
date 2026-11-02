@@ -80,7 +80,9 @@ func notify(w http.ResponseWriter, r *http.Request) {
 
 `Authenticates` checks the notification's bearer token against the
 `client_notification_token` the client sent, in constant time; CIBA
-requires that before a ping is trusted.
+requires that before a ping is trusted. A notification without exactly
+one bearer token parses but never authenticates, so it too is answered
+401, as CIBA §10.2 asks of a client whose bearer token is not valid.
 
 ## Authorization server: three calls around your user's decision
 

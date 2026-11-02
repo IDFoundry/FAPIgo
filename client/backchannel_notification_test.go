@@ -60,9 +60,6 @@ func TestParseBackchannelNotificationRejectsMalformed(t *testing.T) {
 		"GET":                 httptest.NewRequest(http.MethodGet, "https://client.example/ciba-notify", nil),
 		"form body":           pingRequest(`auth_req_id=req-1`, map[string]string{"Content-Type": "application/x-www-form-urlencoded"}),
 		"no content type":     pingRequest(`{"auth_req_id":"req-1"}`, map[string]string{"Content-Type": ""}),
-		"no token":            pingRequest(`{"auth_req_id":"req-1"}`, map[string]string{"Authorization": ""}),
-		"empty token":         pingRequest(`{"auth_req_id":"req-1"}`, map[string]string{"Authorization": "Bearer "}),
-		"basic auth":          pingRequest(`{"auth_req_id":"req-1"}`, map[string]string{"Authorization": "Basic bm90aWZ5"}),
 		"not JSON":            pingRequest(`req-1`, nil),
 		"array":               pingRequest(`["req-1"]`, nil),
 		"no auth_req_id":      pingRequest(`{}`, nil),
@@ -79,11 +76,30 @@ func TestParseBackchannelNotificationRejectsMalformed(t *testing.T) {
 	}
 }
 
-func TestParseBackchannelNotificationRejectsTwoAuthorizationHeaders(t *testing.T) {
-	r := pingRequest(`{"auth_req_id":"req-1"}`, nil)
-	r.Header.Add("Authorization", "Bearer other-token")
-	if _, err := ParseBackchannelNotification(r); err == nil {
-		t.Error("two Authorization headers = nil error, want error")
+// TestParseBackchannelNotificationWithoutOneBearerTokenFailsAuthentication:
+// CIBA §10.2 has a client answer a notification whose bearer token is
+// not valid with 401 Unauthorized, so a missing or malformed token is
+// not a parse error (answered 400) but a notification that never
+// authenticates (answered 401).
+func TestParseBackchannelNotificationWithoutOneBearerTokenFailsAuthentication(t *testing.T) {
+	twoHeaders := pingRequest(`{"auth_req_id":"req-1"}`, nil)
+	twoHeaders.Header.Add("Authorization", "Bearer notify-token")
+	session := BackchannelAuthenticationSession{authReqID: "req-1", notificationToken: "notify-token"}
+	for name, r := range map[string]*http.Request{
+		"no token":        pingRequest(`{"auth_req_id":"req-1"}`, map[string]string{"Authorization": ""}),
+		"empty token":     pingRequest(`{"auth_req_id":"req-1"}`, map[string]string{"Authorization": "Bearer "}),
+		"no scheme":       pingRequest(`{"auth_req_id":"req-1"}`, map[string]string{"Authorization": "notify-token"}),
+		"basic auth":      pingRequest(`{"auth_req_id":"req-1"}`, map[string]string{"Authorization": "Basic notify-token"}),
+		"two Bearer ones": twoHeaders,
+	} {
+		n, err := ParseBackchannelNotification(r)
+		if err != nil {
+			t.Errorf("ParseBackchannelNotification(%s) = %v, want a notification that fails Authenticates", name, err)
+			continue
+		}
+		if n.Authenticates(session) {
+			t.Errorf("Authenticates(%s) = true, want false", name)
+		}
 	}
 }
 

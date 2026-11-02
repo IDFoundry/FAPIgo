@@ -13,8 +13,8 @@ import (
 // on a client-supplied redirect_uri, which a pushed authorization
 // request now runs through it. Beyond "does not panic":
 //
-//   - an accepted URL is absolute, has no credentials or fragment, and
-//     has a lowercase scheme and host;
+//   - an accepted URL is absolute, has no credentials or fragment (not
+//     even an empty "#"), and has a lowercase scheme and host;
 //   - it is https, or http only with AllowLoopbackHTTP and a host that
 //     is genuinely loopback — judged by an oracle independent of
 //     isLoopbackHost (url.Hostname, which strips the port and IPv6
@@ -85,8 +85,8 @@ func checkAcceptedURL(t *testing.T, raw string, u URL, allowLoopback bool) {
 	if parsed.User != nil {
 		t.Fatalf("accepted URL with credentials %q", raw)
 	}
-	if parsed.Fragment != "" {
-		t.Fatalf("accepted URL with fragment %q", raw)
+	if parsed.Fragment != "" || strings.Contains(raw, "#") {
+		t.Fatalf("accepted URL with a fragment, or an empty one, %q", raw)
 	}
 	if parsed.Scheme != strings.ToLower(parsed.Scheme) || parsed.Host != strings.ToLower(parsed.Host) {
 		t.Fatalf("accepted %q without lowercasing scheme/host: %q", raw, u.String())
@@ -115,7 +115,7 @@ func checkLoopbackHTTPNotWronglyRejected(t *testing.T, raw string, allowLoopback
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil || !strings.EqualFold(parsed.Scheme, "http") || !parsed.IsAbs() || parsed.Host == "" ||
-		parsed.User != nil || parsed.Fragment != "" {
+		parsed.User != nil || strings.Contains(raw, "#") {
 		return
 	}
 	if loopbackOracle(parsed.Hostname()) {

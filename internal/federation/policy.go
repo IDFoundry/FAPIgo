@@ -211,8 +211,12 @@ func mergeOperatorValue(name string, current, next json.RawMessage) (json.RawMes
 // crit is a policy error too, since this package implements none.
 //
 // "The values of value" for a null value (which removes the parameter)
-// are taken to be none, so a null value is compatible with an empty add,
-// with subset_of, and with an empty superset_of, and with nothing else.
+// are taken to be none, so a null value is compatible with subset_of and
+// with an empty superset_of, and with nothing else. Not even with an
+// empty add: add initializes an absent parameter with its value
+// (§6.1.3.1.2), so a subordinate's add: [] would bring back a parameter
+// a superior's value: null removed, which §6.1.1 (Hierarchy: a policy
+// "cannot be repealed") rules out.
 func validateCombination(ops PolicyOperators, crit critSet) error {
 	if err := validateOperandTypes(ops); err != nil {
 		return err
@@ -273,15 +277,8 @@ func validateOperandTypes(ops PolicyOperators) error {
 // combined with (§6.1.3.1.1).
 func validateValueCombinations(valueRaw json.RawMessage, ops PolicyOperators) error {
 	if isJSONNull(valueRaw) {
-		if _, ok := ops[opDefault]; ok {
-			return policyError("value is null and cannot be combined with default")
-		}
-		if raw, ok := ops[opEssential]; ok {
-			var essential bool
-			_ = json.Unmarshal(raw, &essential) // type already checked
-			if essential {
-				return policyError("value operator is null and essential operator is true")
-			}
+		if err := validateNullValueCombinations(ops); err != nil {
+			return err
 		}
 	}
 	if raw, ok := ops[opOneOf]; ok {
@@ -303,6 +300,26 @@ func validateValueCombinations(valueRaw json.RawMessage, ops PolicyOperators) er
 	} {
 		if err := requireSubset(ops, check.op, check.subsetOf, check.msg); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// validateNullValueCombinations checks the operators a null value (one
+// removing the parameter) is combined with: none that would set it again
+// (default, or add — see validateCombination) and no essential true.
+func validateNullValueCombinations(ops PolicyOperators) error {
+	if _, ok := ops[opDefault]; ok {
+		return policyError("value is null and cannot be combined with default")
+	}
+	if _, ok := ops[opAdd]; ok {
+		return policyError("value is null and cannot be combined with add")
+	}
+	if raw, ok := ops[opEssential]; ok {
+		var essential bool
+		_ = json.Unmarshal(raw, &essential) // type already checked
+		if essential {
+			return policyError("value operator is null and essential operator is true")
 		}
 	}
 	return nil

@@ -26,7 +26,10 @@ func TestValidateCombination(t *testing.T) {
 		// value + add: add ⊆ value.
 		{"value+add subset", `{"value":["a","b"],"add":["a"]}`, true},
 		{"value+add not subset", `{"value":["a"],"add":["b"]}`, false},
-		{"null value+empty add", `{"value":null,"add":[]}`, true},
+		// A null value removes the parameter, and any add (even an empty
+		// one) would initialize it again (§6.1.3.1.2), repealing the
+		// removal (§6.1.1 Hierarchy).
+		{"null value+empty add", `{"value":null,"add":[]}`, false},
 		{"null value+add", `{"value":null,"add":["a"]}`, false},
 		// value + default: value not null.
 		{"value+default", `{"value":"a","default":"b"}`, true},
@@ -94,6 +97,7 @@ func TestSubordinateCannotLoosenSuperiorPolicy(t *testing.T) {
 	}{
 		{"add to a fixed value", `{"openid_relying_party":{"grant_types":{"value":["authorization_code"]}}}`, `{"openid_relying_party":{"grant_types":{"add":["client_credentials"]}}}`},
 		{"default for a removed parameter", `{"openid_relying_party":{"x":{"value":null}}}`, `{"openid_relying_party":{"x":{"default":"d"}}}`},
+		{"empty add for a removed parameter", `{"openid_relying_party":{"jwks_uri":{"value":null}}}`, `{"openid_relying_party":{"jwks_uri":{"add":[]}}}`},
 		{"add outside subset_of", `{"openid_relying_party":{"grant_types":{"subset_of":["authorization_code"]}}}`, `{"openid_relying_party":{"grant_types":{"add":["client_credentials"]}}}`},
 		{"value outside one_of", `{"openid_relying_party":{"x":{"one_of":["a","b"]}}}`, `{"openid_relying_party":{"x":{"value":"c"}}}`},
 	} {

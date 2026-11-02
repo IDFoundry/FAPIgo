@@ -19,8 +19,10 @@ what a production deployment must do on one page, linking back here.
 transaction/grant/replay stores, a key manager, a client key source, an
 access-token issuer, a revocation sink, a client-certificate trust
 choice, a clock, a randomness source — with no implicit defaults for
-any of them (plus an audit sink, required
-only under `AssuranceProduction` — see step 2's `Assurance` field).
+any of them (plus, required only under `AssuranceProduction`, an audit
+sink and a DPoP nonce choice: a nonce store as `Dependencies.Nonces`,
+or `server.NoDPoPNonces{}` to decline nonces — see step 2's `Assurance`
+field).
 Writing real, production-shaped persistence and key management for all
 of that is real work, and not the place to start. Two packages exist
 specifically so you don't have to do it before you can run anything:

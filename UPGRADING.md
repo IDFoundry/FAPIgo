@@ -164,6 +164,69 @@ result, err := srv.IssueAccessToken(ctx, server.IssueAccessTokenRequest{
 })
 ```
 
+### `server.New` and `client.New` refuse an issuer with a query (server, client)
+
+**Affects:** a server's or a client's `Config.Issuer` with a query,
+even an empty `?`. `fapi.ParseIssuerURL` has refused one since v0.65.0,
+so this only reaches an issuer built another way, such as with
+`fapi.ParseEndpointURL`, which allows a query.
+
+**Why:** RFC 8414 §2 and OpenID Connect Core §2 define an issuer as a
+URL with no query or fragment. v0.65.0 made `fapi.ParseIssuerURL`
+refuse a query, but `New` accepted any `fapi.URL` as the issuer, so a
+server could still publish and sign (`iss` in ID tokens, authorization
+responses and JARM) an issuer conformant clients refuse.
+
+**What fails:** `New` returns an error ending "issuer must not contain
+a query (RFC 8414 §2): parse it with fapi.ParseIssuerURL", at either
+assurance level.
+
+**What to change:** parse the issuer with `fapi.ParseIssuerURL` and
+give it without a query. An issuer that needs to tell tenants apart
+puts the tenant in the path:
+
+```go
+issuer, err := fapi.ParseIssuerURL("https://as.example/tenants/a") // not ParseEndpointURL("https://as.example/?tenant=a")
+if err != nil {
+	return err
+}
+cfg.Issuer = issuer
+```
+
+### An empty fragment (`#`) is refused in issuer, endpoint and redirect URIs (all packages, storage)
+
+**Affects:**
+
+- a URL ending in a bare `#` given to `fapi.ParseIssuerURL`,
+  `fapi.ParseEndpointURL` or `fapi.ParseRedirectURL`, including an
+  issuer a client discovers and a `redirect_uri` a client sends to a
+  server;
+- a client registered with `storage.NewRegisteredClient` (and so
+  `sqlstore`) whose `RedirectURIs` has a URI containing `#`, even a
+  web client's.
+
+**Why:** RFC 3986 §3.5 makes everything after the first `#` a fragment
+component, an empty one included. RFC 8414 §2 rules one out of an
+issuer and RFC 6749 §3.1.2 out of a redirect URI. The parsers refused
+a non-empty fragment but parsed a bare `#` away, silently rewriting the
+value. `NewRegisteredClient` checked a web client's redirect URIs for
+no fragment at all, and registered one that could only match a request
+spelled the same way, which the server's own parser then refused.
+
+**What fails:** the parsers return an error ending "URL must not
+contain a fragment". `NewRegisteredClient` returns an error saying the
+redirect URI "has a fragment, which a redirect URI must not (RFC 6749
+§3.1.2)". A client already stored in `sqlstore` with such a URI fails
+to resolve with `sqlstore.ErrClientConfig`, so requests naming it are
+refused until it is stored again without the `#`.
+
+**What to change:** drop the `#`, from the configuration and from each
+client's registered redirect URIs:
+
+```go
+cfg.RedirectURIs = []fapi.RegisteredRedirectURI{"https://rp.example/cb"} // not "https://rp.example/cb#"
+```
+
 ## v0.68.0
 
 ### `DefaultAttesterLeafPolicy` refuses more signing roles (server)

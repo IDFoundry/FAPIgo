@@ -404,7 +404,9 @@ type Config struct {
 	// Issuer is this server's issuer identifier — the audience client
 	// assertions and request objects must be addressed to, and every
 	// access token's audience unless the token is for resources (RFC
-	// 8707 resource indicators; see Resources).
+	// 8707 resource indicators; see Resources). Parse it with
+	// fapi.ParseIssuerURL: New refuses one with a query, even an empty
+	// one, which RFC 8414 §2 and OpenID Connect Core §2 rule out.
 	Issuer fapi.URL
 
 	Endpoints  Endpoints

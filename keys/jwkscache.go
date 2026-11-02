@@ -15,7 +15,12 @@ import (
 // refetch, at most once per minRefreshInterval, with a miss for that
 // kid negative-cached for as long, since the kid comes from an
 // unverified JWT header and so is attacker-controlled. Concurrent
-// fetches are single-flighted.
+// fetches are single-flighted. The forced-refetch rate limit counts
+// only forced refetches, never the plain TTL refreshes, so a rotated-in
+// kid is picked up within minRefreshInterval of its first use whatever
+// the TTL (OIDC Core §10.1.1: "The verifier knows to go back to the
+// jwks_uri location to re-retrieve the keys when it sees an unfamiliar
+// kid value").
 //
 // It is shared by JWKSIssuerKeySource (one cache per source) and
 // ClientJWKSSource (one per client), and stays unexported: each source
@@ -32,7 +37,7 @@ type jwksCache[V any] struct {
 	cached           V
 	haveCached       bool
 	cachedAt         time.Time
-	lastAttempt      time.Time
+	lastForced       time.Time
 	lastRefreshErr   error
 	lastRefreshErrAt time.Time
 	inflight         *refreshCall[V]
@@ -55,6 +60,13 @@ type refreshCall[V any] struct {
 // occasional extra refresh, which minRefreshInterval already bounds.
 const maxNegativeKIDs = 1024
 
+// defaultMinRefreshInterval is how often, by default, an unknown kid
+// may force a refetch of a JWK Set: short enough that a signer's key
+// rotation is picked up within a minute of the new kid's first use,
+// long enough that a flood of random kids costs the JWKS endpoint at
+// most one extra fetch a minute per set.
+const defaultMinRefreshInterval = time.Minute
+
 // jwksCacheTiming is a jwksCache's three intervals.
 type jwksCacheTiming struct {
 	cacheTTL           time.Duration
@@ -63,10 +75,11 @@ type jwksCacheTiming struct {
 }
 
 // withDefaults fills t's unset intervals: minRefreshInterval defaults to
-// cacheTTL, refreshBackoff to min(cacheTTL, 5s).
+// min(cacheTTL, defaultMinRefreshInterval), refreshBackoff to
+// min(cacheTTL, 5s).
 func (t jwksCacheTiming) withDefaults() jwksCacheTiming {
 	if t.minRefreshInterval <= 0 {
-		t.minRefreshInterval = t.cacheTTL
+		t.minRefreshInterval = min(t.cacheTTL, defaultMinRefreshInterval)
 	}
 	if t.refreshBackoff <= 0 {
 		t.refreshBackoff = min(t.cacheTTL, 5*time.Second)
@@ -89,6 +102,7 @@ func newJWKSCache[V any](timing jwksCacheTiming, now func() time.Time, fetch fun
 // is set and matches nothing, it forces one refresh (rate-limited and
 // single-flighted, see jwksCache) before giving up with an empty result.
 func resolveFromJWKSCache[V, K any](ctx context.Context, c *jwksCache[V], kid string, match func(V) []K) ([]K, error) {
+	arrived := c.now()
 	current, err := c.current(ctx)
 	if err != nil {
 		return nil, err
@@ -97,7 +111,7 @@ func resolveFromJWKSCache[V, K any](ctx context.Context, c *jwksCache[V], kid st
 	if len(matched) > 0 || kid == "" {
 		return matched, nil
 	}
-	if !c.shouldForceRefresh(kid) {
+	if !c.reserveForcedRefresh(kid, arrived) {
 		return nil, nil
 	}
 	fresh, err := c.refreshSingleflight(ctx)
@@ -135,20 +149,30 @@ func (c *jwksCache[V]) current(ctx context.Context) (V, error) {
 	return c.refreshSingleflight(ctx)
 }
 
-// shouldForceRefresh reports whether an unknown-kid miss on kid may
-// force a live refresh right now: it may not if kid is still
-// negative-cached, or if the last refresh attempt was within
-// minRefreshInterval.
-func (c *jwksCache[V]) shouldForceRefresh(kid string) bool {
+// reserveForcedRefresh reports whether an unknown-kid miss on kid, in
+// a request that arrived at arrived, may force a live refresh right
+// now, and if so records it as the last forced refresh. It may not if
+// kid is still negative-cached, or if the last forced refresh was
+// within minRefreshInterval. A plain TTL refresh doesn't count against
+// that limit (if it did, a minRefreshInterval as long as cacheTTL would
+// let a kid miss force nothing at all), but a set fetched since the
+// request arrived is already as fresh as a forced refresh would make
+// it, so a miss on it is negative-cached instead of refetched.
+func (c *jwksCache[V]) reserveForcedRefresh(kid string, arrived time.Time) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
 	if retryAt, ok := c.negativeKIDs[kid]; ok && now.Before(retryAt) {
 		return false
 	}
-	if !c.lastAttempt.IsZero() && now.Sub(c.lastAttempt) < c.minRefreshInterval {
+	if c.haveCached && !c.cachedAt.Before(arrived) {
+		c.rememberMissLocked(kid, now)
 		return false
 	}
+	if !c.lastForced.IsZero() && now.Sub(c.lastForced) < c.minRefreshInterval {
+		return false
+	}
+	c.lastForced = now
 	return true
 }
 
@@ -159,7 +183,11 @@ func (c *jwksCache[V]) shouldForceRefresh(kid string) bool {
 func (c *jwksCache[V]) rememberMiss(kid string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	now := c.now()
+	c.rememberMissLocked(kid, c.now())
+}
+
+// rememberMissLocked is rememberMiss with c.mu held.
+func (c *jwksCache[V]) rememberMissLocked(kid string, now time.Time) {
 	if len(c.negativeKIDs) >= maxNegativeKIDs {
 		for k, retryAt := range c.negativeKIDs {
 			if !now.Before(retryAt) {
@@ -185,7 +213,6 @@ func (c *jwksCache[V]) refreshSingleflight(ctx context.Context) (V, error) {
 	}
 	call := &refreshCall[V]{done: make(chan struct{})}
 	c.inflight = call
-	c.lastAttempt = c.now()
 	c.mu.Unlock()
 
 	go func() {

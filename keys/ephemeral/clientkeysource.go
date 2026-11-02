@@ -19,6 +19,10 @@ import (
 // WithCacheTTL.
 const defaultClientJWKSCacheTTL = 5 * time.Minute
 
+// defaultMinRefreshInterval caps how often, by default, a request naming
+// a kid a client's cached JWKS lacks may force a refetch of it.
+const defaultMinRefreshInterval = time.Minute
+
 // ClientKeySpec is one registered client's key material —
 // either an inline static JWKS or a JWKS URI to fetch live. Deliberately
 // carries only what ClientKeySource needs (not a storage.RegisteredClient
@@ -47,11 +51,13 @@ func WithCacheTTL(d time.Duration) Option {
 
 // WithMinRefreshInterval bounds how often a request naming a kid the
 // cached JWKS doesn't have may force a live refetch of that client's
-// JWKS. Defaults to the cache TTL, as keys.JWKSIssuerKeySource's own
-// option does: a rotated key is still picked up within one TTL, while a
-// caller sending distinct unknown kids (taken from an unverified JWT
-// header, so attacker-controlled) forces at most one fetch per client
-// per interval. A zero or negative duration means that default.
+// JWKS. Defaults to min(cache TTL, 1 minute), as
+// keys.JWKSIssuerKeySource's own option does: a rotated key is picked up
+// within one interval of its first use, while a caller sending distinct
+// unknown kids (taken from an unverified JWT header, so
+// attacker-controlled) forces at most one fetch per client per
+// interval. Only forced refetches count against it, not the TTL ones. A
+// zero or negative duration means that default.
 func WithMinRefreshInterval(d time.Duration) Option {
 	return func(s *ClientKeySource) { s.minRefreshInterval = d }
 }
@@ -82,6 +88,7 @@ type clientKeyEntry struct {
 	cached      *clientKeys
 	cachedAt    time.Time
 	lastAttempt time.Time // the last fetch, successful or not
+	lastForced  time.Time // the last fetch made while the cached set was fresh
 	lastErr     error     // the last fetch's error, nil if it succeeded
 
 	// fetchMu serializes fetches, so concurrent callers that all need
@@ -133,7 +140,7 @@ func NewClientKeySource(fetcher *fapihttp.Client, specs []ClientKeySpec, opts ..
 		return nil, fmt.Errorf("ephemeral: cache TTL must be positive")
 	}
 	if s.minRefreshInterval <= 0 {
-		s.minRefreshInterval = s.cacheTTL
+		s.minRefreshInterval = min(s.cacheTTL, defaultMinRefreshInterval)
 	}
 	for _, spec := range specs {
 		if spec.ClientID == "" {
@@ -235,21 +242,23 @@ func (s *ClientKeySource) ResolveEncryptionKeys(ctx context.Context, req keys.Cl
 // while fresh, refetched once stale, with the same stale-key handling
 // keys.JWKSIssuerKeySource applies: a fresh set without wantKeyID (a
 // client that may have rotated keys since the last fetch) is refetched
-// too, but at most once per minRefreshInterval, since wantKeyID comes
-// from an unverified JWT header. Fetches are serialized per client, and
+// too, but at most once per minRefreshInterval of the last such forced
+// refetch, since wantKeyID comes from an unverified JWT header, and not
+// if the set was fetched since the request arrived. Fetches are serialized per client, and
 // a failed one isn't retried for refreshBackoff — its error is
 // returned instead, or the cached set while it is still fresh.
 func (s *ClientKeySource) current(ctx context.Context, entry *clientKeyEntry, wantKeyID string, kids func(clientKeys) []string) (clientKeys, error) {
 	if entry.jwksURL == nil {
 		return entry.static, nil
 	}
-	if keys, done, err := s.cachedOrRateLimited(entry, wantKeyID, kids); done {
+	arrived := s.now()
+	if keys, done, err := s.cachedOrRateLimited(entry, wantKeyID, kids, arrived); done {
 		return keys, err
 	}
 	entry.fetchMu.Lock()
 	defer entry.fetchMu.Unlock()
 	// Another caller may have fetched while this one waited.
-	if keys, done, err := s.cachedOrRateLimited(entry, wantKeyID, kids); done {
+	if keys, done, err := s.cachedOrRateLimited(entry, wantKeyID, kids, arrived); done {
 		return keys, err
 	}
 	return s.refetch(ctx, entry)
@@ -258,9 +267,11 @@ func (s *ClientKeySource) current(ctx context.Context, entry *clientKeyEntry, wa
 // cachedOrRateLimited reports (done=true) the answer current gives
 // without fetching: the cached set when it is fresh and has wantKeyID
 // (or none was asked for), or when a fetch for a missing kid isn't
-// allowed yet; the last fetch's error while it is within
+// allowed yet (the set was fetched since the request arrived at
+// arrived, or the last forced refetch was within minRefreshInterval);
+// the last fetch's error while it is within
 // refreshBackoff. done=false means current should fetch now.
-func (s *ClientKeySource) cachedOrRateLimited(entry *clientKeyEntry, wantKeyID string, kids func(clientKeys) []string) (clientKeys, bool, error) {
+func (s *ClientKeySource) cachedOrRateLimited(entry *clientKeyEntry, wantKeyID string, kids func(clientKeys) []string, arrived time.Time) (clientKeys, bool, error) {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	now := s.now()
@@ -275,7 +286,7 @@ func (s *ClientKeySource) cachedOrRateLimited(entry *clientKeyEntry, wantKeyID s
 		}
 		return clientKeys{}, true, entry.lastErr
 	}
-	if fresh && sinceAttempt < s.minRefreshInterval {
+	if fresh && (!entry.cachedAt.Before(arrived) || now.Sub(entry.lastForced) < s.minRefreshInterval) {
 		return *entry.cached, true, nil
 	}
 	return clientKeys{}, false, nil
@@ -293,6 +304,9 @@ func (s *ClientKeySource) refetch(ctx context.Context, entry *clientKeyEntry) (c
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	entry.lastAttempt = s.now()
+	if entry.cached != nil && entry.lastAttempt.Sub(entry.cachedAt) < s.cacheTTL {
+		entry.lastForced = entry.lastAttempt
+	}
 	entry.lastErr = err
 	if err != nil {
 		return clientKeys{}, err

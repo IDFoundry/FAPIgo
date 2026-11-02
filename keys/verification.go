@@ -48,6 +48,12 @@ type ClientKeyRequest struct {
 // type, so an external implementation of ClientKeySource never needs to
 // depend on this module's internal JWK representation.
 type VerificationKey struct {
+	// KeyID is the key's "kid". A request naming no kid matches any
+	// key of its algorithm; one naming a kid matches a key whose KeyID
+	// is that kid. A key given without one (to NewStaticClientKeys, or
+	// in a client's JWK Set) matches a request naming its RFC 7638 JWK
+	// thumbprint, the kid NewKeyManagerFromSigners and SignerSpec derive
+	// for a key given without one, and no other kid.
 	KeyID     string
 	Algorithm fapi.SignatureAlgorithm
 	PublicKey crypto.PublicKey

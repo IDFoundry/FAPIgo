@@ -16,7 +16,7 @@ import (
 // ParseIssuerURL, ParseEndpointURL or ParseRedirectURL, which enforce:
 // absolute, HTTPS (except an explicitly enabled loopback exception, or a
 // native app's private-use scheme for a redirect), no embedded
-// credentials, no fragment, a host in ASCII (an internationalized
+// credentials, no fragment (not even an empty "#"), a host in ASCII (an internationalized
 // domain name given as its xn-- A-label), and a normalized scheme and
 // host (their ASCII letters lowercased).
 type URL struct {
@@ -65,7 +65,7 @@ func ParseRedirectURL(raw string, opts ...URLOption) (URL, error) {
 	}
 	if o.allowPrivateUseScheme {
 		if parsed, err := url.Parse(raw); err == nil && parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "" {
-			u, err := parsePrivateUseURL(parsed)
+			u, err := parsePrivateUseURL(raw, parsed)
 			if err != nil {
 				return URL{}, fmt.Errorf("fapi: parse redirect URL: %w", err)
 			}
@@ -79,9 +79,9 @@ func ParseRedirectURL(raw string, opts ...URLOption) (URL, error) {
 	return u, nil
 }
 
-// parsePrivateUseURL validates parsed as a private-use URI scheme
-// redirect (RFC 8252 §7.1, §8.4).
-func parsePrivateUseURL(parsed *url.URL) (URL, error) {
+// parsePrivateUseURL validates parsed, raw's parse, as a private-use
+// URI scheme redirect (RFC 8252 §7.1, §8.4).
+func parsePrivateUseURL(raw string, parsed *url.URL) (URL, error) {
 	if !isReverseDomainScheme(parsed.Scheme) {
 		return URL{}, fmt.Errorf("private-use scheme %q must be a reverse-order domain name, such as com.example.app", parsed.Scheme)
 	}
@@ -91,10 +91,19 @@ func parsePrivateUseURL(parsed *url.URL) (URL, error) {
 	if parsed.Opaque != "" || parsed.Host != "" || parsed.User != nil || !strings.HasPrefix(parsed.Path, "/") || strings.HasPrefix(parsed.Path, "//") || strings.HasPrefix(parsed.String(), parsed.Scheme+"://") {
 		return URL{}, fmt.Errorf("private-use redirect URI must be %s:/path, with a single slash after the scheme (RFC 8252 §7.1), not %s://…", parsed.Scheme, parsed.Scheme)
 	}
-	if parsed.Fragment != "" {
+	if hasFragment(raw) {
 		return URL{}, fmt.Errorf("URL must not contain a fragment")
 	}
 	return URL{value: *parsed}, nil
+}
+
+// hasFragment reports whether raw has a fragment component, even an
+// empty one: RFC 3986 §3.5's fragment is everything after the first
+// "#", so "https://rp.example/cb#" has one. net/url parses that "#"
+// away, leaving url.URL.Fragment empty, and a URL that kept it would
+// drop it from its string form, silently rewriting the value.
+func hasFragment(raw string) bool {
+	return strings.Contains(raw, "#")
 }
 
 // isReverseDomainScheme reports whether scheme has the form RFC 8252
@@ -184,7 +193,7 @@ func parseSecureURL(raw string, opts []URLOption) (URL, error) {
 	if parsed.User != nil {
 		return URL{}, fmt.Errorf("URL must not contain embedded credentials")
 	}
-	if parsed.Fragment != "" {
+	if hasFragment(raw) {
 		return URL{}, fmt.Errorf("URL must not contain a fragment")
 	}
 

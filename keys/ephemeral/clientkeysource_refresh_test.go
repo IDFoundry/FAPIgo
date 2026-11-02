@@ -73,7 +73,7 @@ func (h refreshHarness) resolve(kid string) (keys.VerificationKeySet, error) {
 
 // TestClientKeySourceBoundsUnknownKeyIDRefetches: a kid is taken from an
 // unverified JWT header, so a stream of distinct unknown kids within
-// the minimum refresh interval forces no fetch beyond the first.
+// the minimum refresh interval forces one refetch, and no more.
 func TestClientKeySourceBoundsUnknownKeyIDRefetches(t *testing.T) {
 	h := newRefreshHarness(t)
 	if _, err := h.resolve("kid-1"); err != nil {
@@ -86,8 +86,8 @@ func TestClientKeySourceBoundsUnknownKeyIDRefetches(t *testing.T) {
 			t.Fatalf("resolve(unknown kid) = %+v, %v; want no keys, no error", set.Keys, err)
 		}
 	}
-	if got := h.fetches.Load(); got != 1 {
-		t.Fatalf("fetches = %d after 50 unknown kids within the interval, want 1", got)
+	if got := h.fetches.Load(); got != 2 {
+		t.Fatalf("fetches = %d after 50 unknown kids within the interval, want 2 (the first lookup plus one forced refetch)", got)
 	}
 }
 
@@ -169,27 +169,30 @@ func TestNewClientKeySourceRejectsNonPositiveCacheTTL(t *testing.T) {
 	}
 }
 
-// TestClientKeySourceMinRefreshIntervalDefaultsToCacheTTL: without
-// WithMinRefreshInterval, an unknown kid forces at most one refetch per
-// cache TTL, as keys.JWKSIssuerKeySource's own default does.
-func TestClientKeySourceMinRefreshIntervalDefaultsToCacheTTL(t *testing.T) {
-	h := newRefreshHarness(t, WithCacheTTL(time.Minute))
-	if _, err := h.resolve("kid-1"); err != nil {
-		t.Fatalf("resolve(kid-1): %v", err)
+// TestClientKeySourceMinRefreshIntervalDefault: without
+// WithMinRefreshInterval, an unknown kid forces a refetch at once, then
+// at most one more per minute however long the cache TTL, as
+// keys.JWKSIssuerKeySource's own default does.
+func TestClientKeySourceMinRefreshIntervalDefault(t *testing.T) {
+	h := newRefreshHarness(t, WithCacheTTL(time.Hour))
+	steps := []struct {
+		advance time.Duration
+		kid     string
+		fetches int32
+	}{
+		{0, "kid-1", 1},
+		{time.Second, "unknown-1", 2},
+		{59 * time.Second, "unknown-2", 2},
+		{time.Second, "unknown-3", 3},
 	}
-	*h.now = h.now.Add(59 * time.Second)
-	if _, err := h.resolve("unknown"); err != nil {
-		t.Fatalf("resolve(unknown): %v", err)
-	}
-	if got := h.fetches.Load(); got != 1 {
-		t.Fatalf("fetches = %d for an unknown kid within the cache TTL, want 1", got)
-	}
-	*h.now = h.now.Add(2 * time.Second)
-	if _, err := h.resolve("unknown"); err != nil {
-		t.Fatalf("resolve(unknown): %v", err)
-	}
-	if got := h.fetches.Load(); got != 2 {
-		t.Fatalf("fetches = %d once the cache TTL has passed, want 2", got)
+	for _, step := range steps {
+		*h.now = h.now.Add(step.advance)
+		if _, err := h.resolve(step.kid); err != nil {
+			t.Fatalf("resolve(%s): %v", step.kid, err)
+		}
+		if got := h.fetches.Load(); got != step.fetches {
+			t.Fatalf("fetches = %d after resolve(%s), want %d", got, step.kid, step.fetches)
+		}
 	}
 }
 

@@ -173,6 +173,9 @@ func validateRequiredEndpoints(cfg Config) error {
 	if cfg.Issuer.IsZero() {
 		return fmt.Errorf("server: config: issuer is required")
 	}
+	if u := cfg.Issuer.URL(); u.RawQuery != "" || u.ForceQuery {
+		return fmt.Errorf("server: config: issuer must not contain a query (RFC 8414 §2): parse it with fapi.ParseIssuerURL")
+	}
 	if cfg.Endpoints.Token.IsZero() {
 		return fmt.Errorf("server: config: endpoints.token is required")
 	}

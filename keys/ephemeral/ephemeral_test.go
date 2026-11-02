@@ -264,8 +264,9 @@ func TestClientKeySourceCachesWithinTTL(t *testing.T) {
 // TestClientKeySourceRefetchesOnUnknownKeyIDEvenWhenCacheFresh covers
 // current's stale-key handling: a client that has rotated keys since the
 // last fetch isn't stuck with a cached set that lacks the newly
-// requested kid until the TTL expires — it is refetched once the minimum
-// refresh interval has passed, and not before.
+// requested kid until the TTL expires — it is refetched at once, and a
+// further unknown kid forces another refetch only once the minimum
+// refresh interval has passed.
 func TestClientKeySourceRefetchesOnUnknownKeyIDEvenWhenCacheFresh(t *testing.T) {
 	priv1, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -321,28 +322,33 @@ func TestClientKeySourceRefetchesOnUnknownKeyIDEvenWhenCacheFresh(t *testing.T) 
 	mu.Lock()
 	rotated = true
 	mu.Unlock()
-	resolveKid2 := func() keys.VerificationKeySet {
+	resolve := func(kid string) keys.VerificationKeySet {
 		t.Helper()
 		set, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
-			ClientID: "client-1", Algorithm: fapi.ES256, KeyID: "kid-2",
+			ClientID: "client-1", Algorithm: fapi.ES256, KeyID: kid,
 		})
 		if err != nil {
-			t.Fatalf("ResolveVerificationKeys(kid-2): %v", err)
+			t.Fatalf("ResolveVerificationKeys(%s): %v", kid, err)
 		}
 		return set
 	}
 
+	// The rotated-in kid forces a refetch at once, well within the TTL.
+	now = now.Add(time.Second)
+	if set := resolve("kid-2"); len(set.Keys) != 1 || set.Keys[0].KeyID != "kid-2" || fetches != 2 {
+		t.Fatalf("rotated kid: keys = %+v, fetches = %d; want kid-2 and 2 (rotation should force a refetch)", set.Keys, fetches)
+	}
+
+	// Another unknown kid within the minimum refresh interval of that
+	// forced refetch doesn't force another.
 	now = now.Add(5 * time.Second)
-	if set := resolveKid2(); len(set.Keys) != 0 || fetches != 1 {
-		t.Fatalf("within the minimum refresh interval: keys = %+v, fetches = %d; want none and 1", set.Keys, fetches)
+	if set := resolve("kid-3"); len(set.Keys) != 0 || fetches != 2 {
+		t.Fatalf("within the minimum refresh interval: keys = %+v, fetches = %d; want none and 2", set.Keys, fetches)
 	}
 
 	now = now.Add(6 * time.Second)
-	if set := resolveKid2(); len(set.Keys) != 1 || set.Keys[0].KeyID != "kid-2" {
-		t.Fatalf("Keys = %+v, want one key with kid-2 (rotation should force a refetch)", set.Keys)
-	}
-	if fetches != 2 {
-		t.Fatalf("fetches = %d, want 2 (an unknown kid forces a refetch within TTL once the interval has passed)", fetches)
+	if set := resolve("kid-3"); len(set.Keys) != 0 || fetches != 3 {
+		t.Fatalf("after the interval: keys = %+v, fetches = %d; want none and 3 (an unknown kid forces a refetch once the interval has passed)", set.Keys, fetches)
 	}
 }
 

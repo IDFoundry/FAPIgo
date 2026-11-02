@@ -36,10 +36,28 @@ type ClientKeyMaterial struct {
 }
 
 // clientKeySet is one client's validated keys: those that verify its
-// signatures and those to encrypt to it.
+// signatures and those to encrypt to it. thumbprints[i] is the RFC 7638
+// JWK thumbprint of verification[i] when that key has no KeyID, the kid
+// it also answers to (see VerificationKey.KeyID), and "" otherwise.
 type clientKeySet struct {
 	verification []VerificationKey
+	thumbprints  []string
 	encryption   []ClientEncryptionKey
+}
+
+// addVerificationKey appends k, an already validated key, to set,
+// with its thumbprint if it has no KeyID.
+func (set *clientKeySet) addVerificationKey(k VerificationKey) error {
+	thumbprint := ""
+	if k.KeyID == "" {
+		var err error
+		if thumbprint, err = keyIDFor("", k.PublicKey, k.Algorithm); err != nil {
+			return err
+		}
+	}
+	set.verification = append(set.verification, k)
+	set.thumbprints = append(set.thumbprints, thumbprint)
+	return nil
 }
 
 // StaticClientKeys is a ClientKeySource and ClientEncryptionKeySource
@@ -99,7 +117,9 @@ func validateClientKeyMaterial(material ClientKeyMaterial) (clientKeySet, error)
 		if err := jose.ValidateCallerVerificationKey(k.PublicKey, k.Algorithm); err != nil {
 			return clientKeySet{}, fmt.Errorf("verification key %d (kid %q): %w", i, k.KeyID, err)
 		}
-		set.verification = append(set.verification, k)
+		if err := set.addVerificationKey(k); err != nil {
+			return clientKeySet{}, fmt.Errorf("verification key %d: %w", i, err)
+		}
 	}
 	for i, k := range material.EncryptionKeys {
 		if err := jose.ValidateCallerEncryptionKey(k.PublicKey, k.Algorithm); err != nil {
@@ -143,11 +163,12 @@ func (s *StaticClientKeys) Capabilities() KeySourceCapabilities {
 }
 
 // matchVerificationKeys is set's verification keys for alg (and kid, if
-// set), in a new slice.
+// set), in a new slice. A key registered without a KeyID matches a kid
+// that is its RFC 7638 thumbprint, and no other.
 func matchVerificationKeys(set clientKeySet, alg fapi.SignatureAlgorithm, kid string) []VerificationKey {
 	var matched []VerificationKey
-	for _, k := range set.verification {
-		if k.Algorithm == alg && (kid == "" || k.KeyID == kid) {
+	for i, k := range set.verification {
+		if k.Algorithm == alg && (kid == "" || k.KeyID == kid || k.KeyID == "" && set.thumbprints[i] == kid) {
 			matched = append(matched, k)
 		}
 	}
@@ -185,7 +206,9 @@ func parseClientJWKS(body []byte) (clientKeySet, error) {
 	}
 	var out clientKeySet
 	for _, k := range verification {
-		out.verification = append(out.verification, VerificationKey{KeyID: k.KeyID, Algorithm: k.Algorithm, PublicKey: k.PublicKey})
+		if err := out.addVerificationKey(VerificationKey{KeyID: k.KeyID, Algorithm: k.Algorithm, PublicKey: k.PublicKey}); err != nil {
+			return clientKeySet{}, err
+		}
 	}
 	for _, k := range encryption {
 		out.encryption = append(out.encryption, ClientEncryptionKey{KeyID: k.KeyID, Algorithm: k.Algorithm, PublicKey: k.PublicKey})

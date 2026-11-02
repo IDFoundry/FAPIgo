@@ -21,7 +21,7 @@ func TestJWKSCacheBoundsNegativeKeyIDs(t *testing.T) {
 	if n := len(c.negativeKIDs); n != maxNegativeKIDs {
 		t.Fatalf("negative cache holds %d kids, want %d", n, maxNegativeKIDs)
 	}
-	if c.shouldForceRefresh("kid-0") {
+	if c.reserveForcedRefresh("kid-0", clock.Now()) {
 		t.Fatalf("a negative-cached kid may force a refresh")
 	}
 	clock.Advance(2 * time.Hour)

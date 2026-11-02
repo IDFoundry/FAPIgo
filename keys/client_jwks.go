@@ -91,8 +91,10 @@ func WithClientJWKSCacheTTL(d time.Duration) ClientJWKSOption {
 
 // WithClientJWKSMinRefreshInterval bounds how often a request naming a
 // kid a client's cached set lacks may force a refetch of that client's
-// set, as WithMinRefreshInterval does for JWKSIssuerKeySource. Defaults
-// to the cache TTL; a zero or negative duration means that default.
+// set, as WithMinRefreshInterval does for JWKSIssuerKeySource: at most
+// one forced refetch per interval, counted from the last forced
+// refetch. Defaults to min(cache TTL, 1 minute); a zero or negative
+// duration means that default.
 func WithClientJWKSMinRefreshInterval(d time.Duration) ClientJWKSOption {
 	return func(s *ClientJWKSSource) { s.timing.minRefreshInterval = d }
 }

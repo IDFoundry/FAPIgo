@@ -58,13 +58,15 @@ var (
 // certificate, authenticating as that client and presenting its
 // certificate-bound tokens.
 //
-// The value is RFC 8941 §3.3.5's Byte Sequence: the DER certificate in
-// base64 between colons. A header occurring more than once (RFC 9440
-// §2.2 makes it a singleton), a value longer than
-// MaxForwardedCertificateBytes, anything but one Byte Sequence
-// (parameters included: RFC 9440 defines none), or bytes that aren't
-// exactly one X.509 certificate is ErrMalformedForwardedCertificate.
-// Missing "=" padding is accepted, as RFC 8941 §4.2.7 asks. A forwarded
+// The value is RFC 9651 §3.3.5's Byte Sequence: the DER certificate in
+// base64 between colons. RFC 9440 defines no parameters, but RFC 9651
+// §2.3 lets every Item carry some, so any that follow the Byte Sequence
+// (":…:;a=1") are accepted and ignored. A header occurring more than
+// once (RFC 9440 §2.2 makes it a singleton), a value longer than
+// MaxForwardedCertificateBytes, anything but one Byte Sequence and its
+// parameters, or bytes that aren't exactly one X.509 certificate is
+// ErrMalformedForwardedCertificate. Missing "=" padding is accepted, as
+// RFC 9651 §4.2.7 asks. A forwarded
 // PEM or URL-encoded certificate, which some proxies send in their own
 // headers, isn't RFC 9440's encoding and is refused: configure the proxy
 // to send Client-Cert instead.
@@ -97,21 +99,29 @@ func ForwardedClientCertificate(r *http.Request, header string, trusted func(*ht
 	return cert, nil
 }
 
-// parseByteSequence decodes a header field value that is one RFC 8941
-// Byte Sequence (§3.3.5, parsed per §4.2 and §4.2.7): optional spaces,
-// ":", base64, ":", optional spaces, and nothing else.
+// parseByteSequence decodes a header field value that is one RFC 9651
+// Item whose bare item is a Byte Sequence (§3.3.5, parsed per §4.2,
+// §4.2.3 and §4.2.7): optional spaces, ":", base64, ":", any
+// parameters (ignored), optional spaces, and nothing else.
 func parseByteSequence(value string) ([]byte, error) {
 	if len(value) > MaxForwardedCertificateBytes {
 		return nil, fmt.Errorf("the value is longer than %d bytes", MaxForwardedCertificateBytes)
 	}
-	// RFC 8941 §4.2: leading and trailing SP are discarded (net/http has
+	// RFC 9651 §4.2: leading and trailing SP are discarded (net/http has
 	// already removed any other optional whitespace).
 	value = strings.Trim(value, " ")
-	if len(value) < 2 || value[0] != ':' || value[len(value)-1] != ':' {
+	end := -1
+	if value != "" && value[0] == ':' {
+		end = strings.IndexByte(value[1:], ':')
+	}
+	if end < 0 {
 		return nil, errors.New("the value isn't a byte sequence (:base64:)")
 	}
-	body := value[1 : len(value)-1]
-	// Up to two "=" of padding, only at the end; RFC 8941 §4.2.7 asks a
+	body := value[1 : 1+end]
+	if err := skipParameters(value[2+end:]); err != nil {
+		return nil, err
+	}
+	// Up to two "=" of padding, only at the end; RFC 9651 §4.2.7 asks a
 	// parser not to fail when it is missing.
 	unpadded := strings.TrimRight(body, "=")
 	if unpadded == "" {
@@ -121,9 +131,9 @@ func parseByteSequence(value string) ([]byte, error) {
 	if len(body)-len(unpadded) > 2 || strings.ContainsRune(unpadded, '=') {
 		return nil, errors.New("the byte sequence's padding is malformed")
 	}
-	// encoding/base64 skips line breaks, which RFC 8941's base64 doesn't
+	// encoding/base64 skips line breaks, which RFC 9651's base64 doesn't
 	// allow, so the alphabet is checked first. Non-zero pad bits are
-	// accepted, as RFC 8941 §4.2.7 asks.
+	// accepted, as RFC 9651 §4.2.7 asks.
 	if strings.IndexFunc(unpadded, notBase64) >= 0 {
 		return nil, errors.New("the byte sequence isn't base64")
 	}

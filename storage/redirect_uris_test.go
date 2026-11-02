@@ -97,3 +97,33 @@ func TestNewRegisteredClientRefusesRedirectQueryNamingResponseParameter(t *testi
 		})
 	}
 }
+
+// RFC 6749 §3.1.2: a redirect URI "MUST NOT include a fragment
+// component", and "#" alone is one (RFC 3986 §3.5). NewRegisteredClient
+// refuses it for a web or a native client, rather than registering a
+// URI that matches only a request spelled with the same bare "#".
+func TestNewRegisteredClientRefusesRedirectFragment(t *testing.T) {
+	for _, tc := range []struct {
+		uri    string
+		native bool
+	}{
+		{"https://rp.example/cb#", false},
+		{"https://rp.example/cb#frag", false},
+		{"https://rp.example/cb?a=1#", false},
+		{"http://127.0.0.1/cb#", true},
+		{"com.example.app:/cb#", true},
+	} {
+		t.Run(tc.uri, func(t *testing.T) {
+			cfg := RegisteredClientConfig{
+				ID: "c", RedirectURIs: []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(tc.uri)},
+				ClientAssertionAlgorithm: fapi.ES256, AllowedScopes: []string{"openid"},
+			}
+			if tc.native {
+				cfg.ApplicationType = ApplicationTypeNative
+			}
+			if c, err := NewRegisteredClient(cfg); err == nil {
+				t.Fatalf("NewRegisteredClient(%q) accepted it; HasRedirectURI = %v", tc.uri, c.HasRedirectURI(tc.uri))
+			}
+		})
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"math/big"
 	"strings"
 	"testing"
@@ -74,6 +75,55 @@ func TestStaticClientKeysServesKeysGivenDirectly(t *testing.T) {
 	}
 	if !src.Capabilities().LiveFetchHardened {
 		t.Fatalf("StaticClientKeys fetches nothing, so should declare LiveFetchHardened")
+	}
+}
+
+// TestStaticClientKeysMatchesThumbprintOfKeyWithoutKeyID: a key
+// registered without a KeyID matches a request naming its RFC 7638
+// thumbprint, the kid NewKeyManagerFromSigners derives for the same key
+// given without one, so the two sides interoperate. It matches no other
+// kid, and a key with a KeyID still matches only that kid.
+func TestStaticClientKeysMatchesThumbprintOfKeyWithoutKeyID(t *testing.T) {
+	rp, other := newP256(t), newP256(t)
+	km, err := keys.NewKeyManagerFromSigners([]keys.SignerSpec{{Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256, Signer: rp}})
+	if err != nil {
+		t.Fatalf("NewKeyManagerFromSigners: %v", err)
+	}
+	signing, err := km.PublicKey(context.Background(), keys.ClientAuthentication, fapi.ES256)
+	if err != nil || signing.KeyID == "" {
+		t.Fatalf("PublicKey: %+v, %v; want a derived kid", signing, err)
+	}
+	point, err := rp.PublicKey.Bytes() // 0x04 || X || Y
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+	src, err := keys.NewStaticClientKeys(map[fapi.ClientID]keys.ClientKeyMaterial{
+		"rp":    {VerificationKeys: []keys.VerificationKey{{Algorithm: fapi.ES256, PublicKey: &rp.PublicKey}}},
+		"named": {VerificationKeys: []keys.VerificationKey{{KeyID: "named", Algorithm: fapi.ES256, PublicKey: &rp.PublicKey}}},
+		"other": {VerificationKeys: []keys.VerificationKey{{Algorithm: fapi.ES256, PublicKey: &other.PublicKey}}},
+		"jwks":  {JWKS: []byte(`{"keys":[{"kty":"EC","crv":"P-256","alg":"ES256","use":"sig","x":"` + base64.RawURLEncoding.EncodeToString(point[1:33]) + `","y":"` + base64.RawURLEncoding.EncodeToString(point[33:]) + `"}]}`)},
+	})
+	if err != nil {
+		t.Fatalf("NewStaticClientKeys: %v", err)
+	}
+	for _, tc := range []struct {
+		client fapi.ClientID
+		kid    string
+		want   int
+	}{
+		{"rp", signing.KeyID, 1},
+		{"rp", "", 1},
+		{"rp", "some-other-kid", 0},
+		{"named", signing.KeyID, 0},
+		{"named", "named", 1},
+		{"other", signing.KeyID, 0},
+		{"jwks", signing.KeyID, 1},
+		{"jwks", "some-other-kid", 0},
+	} {
+		set, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{ClientID: tc.client, Purpose: keys.ClientAssertionVerification, Algorithm: fapi.ES256, KeyID: tc.kid})
+		if err != nil || len(set.Keys) != tc.want {
+			t.Errorf("client %q, kid %q: got %d keys, err %v; want %d", tc.client, tc.kid, len(set.Keys), err, tc.want)
+		}
 	}
 }
 

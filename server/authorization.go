@@ -100,7 +100,10 @@ type BeginAuthorizationRequest struct {
 // themselves (FAPI 2.0 Security Profile §6.4). BeginAuthorization
 // accepts a request_uri more than once — a browser reloading or
 // prefetching the page must not use it up (§5.3.2.2 Note 3) — but only
-// one interaction for it can ever complete. Keep it out of anything a
+// one interaction for it can ever complete, and at most
+// maxInteractionsPerRequestURI can begin: each stores its own copy of
+// the pushed request until it expires, so beyond that the request_uri
+// is refused with ErrorInvalidRequestURI. Keep it out of anything a
 // third party can read: serve the login page with
 // "Referrer-Policy: no-referrer" and no third-party resources, and don't
 // log full authorization request URLs.
@@ -129,12 +132,16 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 
 	now := s.deps.Clock.Now()
 	handleExpiresAt := now.Add(s.cfg.Limits.InteractionLifetime)
+	referenceKey := parReferenceKey(req.ClientID, reference)
+	if slotErr := s.claimInteractionSlot(ctx, referenceKey, now); slotErr != nil {
+		return s.beginFail(ctx, "", slotErr), nil
+	}
 	// Keyed by the client_id presented with it (parReferenceKey), a
 	// request_uri presented with another is unknown to the store, and
 	// one the store finds expired at now is refused there: neither
 	// mints an interaction record.
 	pushed, err := s.deps.Transactions.BeginAuthorization(ctx, storage.BeginAuthorizationTransaction{
-		Reference:       parReferenceKey(req.ClientID, reference),
+		Reference:       referenceKey,
 		Handle:          interactionHandleKey(handle),
 		HandleExpiresAt: handleExpiresAt,
 		Now:             now,

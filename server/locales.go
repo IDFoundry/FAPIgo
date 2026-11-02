@@ -132,3 +132,37 @@ func containsFold(tags []string, tag string) bool {
 	}
 	return false
 }
+
+// maxLocalesBytes and maxDisplayBytes bound how much of ui_locales,
+// claims_locales and display a pushed request stores as sent: a list of
+// maxLocaleTags tags of maxLocaleTagLength each, and the longest display
+// value OIDC Core defines with room for JSON escaping.
+const (
+	maxLocalesBytes = maxLocaleTags * (maxLocaleTagLength + 1)
+	maxDisplayBytes = 64
+)
+
+// boundPresentationPreferences keeps ui_locales, claims_locales and
+// display from carrying more into the stored request than they can
+// mean. They are preferences OIDC Core §15.1 has never fail a request,
+// so one longer than its bound (or of the wrong JSON type, at that
+// length) isn't refused: a locale list is replaced by the tags
+// requestedLocales would read from it, or removed when there are none,
+// and a display that long can't be one OIDC Core defines, so it's
+// removed. Either way the interaction sees what it would have.
+func boundPresentationPreferences(params map[string]json.RawMessage) {
+	for _, name := range []string{"ui_locales", "claims_locales"} {
+		if raw, ok := params[name]; ok && len(raw) > maxLocalesBytes {
+			tags := requestedLocales(params, name)
+			if len(tags) == 0 {
+				delete(params, name)
+				continue
+			}
+			encoded, _ := json.Marshal(strings.Join(tags, " "))
+			params[name] = encoded
+		}
+	}
+	if raw, ok := params["display"]; ok && len(raw) > maxDisplayBytes {
+		delete(params, "display")
+	}
+}

@@ -56,13 +56,24 @@ Authorization Request types, PKCE), and stores them for
 `BeginAuthorizationRequestFromHTTP` and `BeginAuthorization` accept only
 a `request_uri` this server issued, to the client it was issued to,
 before it expires. A plain authorization request without one is
-refused. A reload can begin the same `request_uri` again, but only one
-interaction for it can complete, so treat it as a bearer value until
-then: serve the login page with `Referrer-Policy: no-referrer`, so it
-can't leak into the CSRF FAPI 2.0 Security Profile §6.4 describes.
+refused. A reload can begin the same `request_uri` again, up to eight
+times, but only one interaction for it can complete, so treat it as a
+bearer value until then: serve the login page with
+`Referrer-Policy: no-referrer`, so it can't leak into the CSRF FAPI 2.0
+Security Profile §6.4 describes. Each interaction stores its own copy
+of the pushed request, so a ninth is refused with `invalid_request_uri`
+rather than stored; the count is kept in `Dependencies.Replay`, so it
+holds across instances.
 
 Unregistered parameters are ignored rather than echoed into the grant,
-and a PAR request that itself carries a `request_uri` is refused.
+and a PAR request that itself carries a `request_uri` is refused. The
+core parameters stored with the request are bounded: `state`, `nonce`,
+`scope`, `login_hint` and `acr_values` at 4 KiB each, `id_token_hint`
+at 16 KiB, `code_challenge` and `dpop_jkt` at 128 bytes, and `max_age`
+at 32; a longer one is refused with `invalid_request`. An overlong
+`ui_locales`, `claims_locales` or `display` is trimmed to what the
+interaction would read from it instead, since those never fail a
+request (OIDC Core §15.1).
 
 The key that verifies a client assertion or request object comes from
 `Dependencies.ClientKeys`, for the client the token names, and the

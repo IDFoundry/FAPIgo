@@ -15,6 +15,61 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.69.0
+
+### Pushed requests: core parameter size bounds, and at most eight interactions per `request_uri` (server)
+
+**Affects:** a server whose clients push an authorization request with
+a core parameter longer than its new bound, or whose users' browsers
+open the authorization endpoint more than eight times with one
+`request_uri` before it expires.
+
+**Why:** the 1 MiB form limit was the only bound on `state`, `nonce`
+and the other free-form core parameters, and every call to
+`BeginAuthorization` stored a new interaction record holding a full
+copy of the pushed request. One pushed request with a 900 KB `state`
+and 200 GETs of the authorization endpoint added about 175 MB to the
+store. The parameters now have bounds of their own, and one
+`request_uri` begins at most eight interactions, counted in
+`Dependencies.Replay` so the bound holds across instances. No storage
+interface changes.
+
+**What fails:** nothing at startup. `PushAuthorizationRequest` refuses
+with `invalid_request` a request whose:
+
+- `state`, `nonce`, `scope`, `login_hint` or `acr_values` is longer
+  than 4 KiB;
+- `id_token_hint` is longer than 16 KiB;
+- `code_challenge` or `dpop_jkt` is longer than 128 bytes;
+- `max_age` is longer than 32 bytes.
+
+A string's length is that of its value, after JSON unescaping. An
+overlong `ui_locales`, `claims_locales` or `display` isn't refused: it
+is trimmed to what `InteractionRequest` would read from it, as before.
+The ninth `BeginAuthorization` for one `request_uri` returns a
+`LocalErrorResponse` with `invalid_request_uri`, and a replay store
+that can't answer (`storage.ErrStoreUnavailable`) one with
+`server_error`. A `request_uri` that doesn't exist or has expired now
+leaves a 32-byte record in the replay store until
+`Limits.PushedRequestLifetime` plus twice `Limits.MaxClockSkew` has
+passed.
+
+**What to change:** keep core parameters within the bounds. A client
+that carries application data in `state` should store it on its side
+and send a short reference instead:
+
+```go
+// Keep the data in the client's session, send only a key for it.
+key := rand.Text()
+session.Put(key, returnTo)
+params.Set("state", key)
+```
+
+If your authorization endpoint redirects to itself, or a page reloads
+it in a loop, make it call `BeginAuthorization` once per visit and
+keep the `InteractionHandle` (for example in an
+`interactioncookie`) for later steps.
+
 ## v0.68.0
 
 ### `DefaultAttesterLeafPolicy` refuses more signing roles (server)

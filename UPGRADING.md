@@ -70,6 +70,33 @@ it in a loop, make it call `BeginAuthorization` once per visit and
 keep the `InteractionHandle` (for example in an
 `interactioncookie`) for later steps.
 
+### CIBA `binding_message` refuses format characters and blank text (server)
+
+**Affects:** a server with `Endpoints.BackchannelAuthentication` set
+whose clients send a `binding_message` containing a Unicode format
+character (category Cf: bidi controls, zero-width characters, the
+byte order mark, the soft hyphen, the zero-width joiner in emoji
+sequences), or, with `Config.RequireBindingMessage`, one with no
+visible character.
+
+**Why:** the binding message is what the user compares on two
+devices. Invisible and bidi characters can hide or reorder what the
+authentication device shows, and an empty or blank message satisfied
+`RequireBindingMessage` without binding anything. CIBA Core §7.1 asks
+for "a limited set of plain text characters".
+
+**What fails:** nothing at startup. Such a backchannel authentication
+request is refused with `invalid_binding_message`. A missing
+`binding_message` under `RequireBindingMessage` is still
+`invalid_request`, as before.
+
+**What to change:** send a short code or sentence in plain text, for
+example letters and digits:
+
+```go
+req.BindingMessage = "W4SCT"
+```
+
 ## v0.68.0
 
 ### `DefaultAttesterLeafPolicy` refuses more signing roles (server)

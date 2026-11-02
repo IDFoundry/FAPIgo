@@ -199,6 +199,12 @@ anchor, including cross-signed copies:
 x5c := [][]byte{leaf.Raw, intermediate.Raw}
 ```
 
+*Relaxed in v0.69.0:* a configured anchor in `x5c` that isn't
+self-signed is accepted when a verified chain also ends at an anchor
+`x5c` doesn't carry, as `[leaf, intermediate]` does with both the root
+and the intermediate configured as anchors. It's refused only when
+every verified chain ends at an anchor the wallet sent.
+
 ## v0.66.0
 
 ### `X5CAttesterChain` refuses other roles' signing certificates (server)
@@ -301,6 +307,12 @@ anchor:
 // x5c: signing certificate, then intermediates, never the anchor.
 x5c := [][]byte{leaf.Raw, intermediate.Raw}
 ```
+
+*Relaxed in v0.69.0:* a configured anchor in `x5c` that isn't
+self-signed is accepted when a verified chain also ends at an anchor
+`x5c` doesn't carry, as `[leaf, intermediate]` does with both the root
+and the intermediate configured as anchors. It's refused only when
+every verified chain ends at an anchor the wallet sent.
 
 ## v0.65.0
 

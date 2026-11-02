@@ -239,12 +239,15 @@ func TestX5CAttesterChainRejectsUntrustedAttestation(t *testing.T) {
 	}
 }
 
-// TestX5CAttesterChainRefusesAnchorInX5C covers HAIP 1.0 keeping the
-// trust anchor out of x5c: a self-signed certificate below the leaf,
-// configured as an anchor or not, and a configured anchor that is not
-// self-signed (an intermediate trusted directly), under both a
-// TrustAnchors pool and AttesterIssuerBoundToAnchor, are refused, while
-// the leaf alone or with its intermediates is accepted.
+// TestX5CAttesterChainRefusesAnchorInX5C covers HAIP 1.0 having the
+// wallet keep the trust anchor out of x5c: a self-signed certificate
+// below the leaf, configured as an anchor or not, is refused, and so is
+// a configured anchor that is not self-signed (an intermediate trusted
+// directly) when every verified chain ends at it, under both a
+// TrustAnchors pool and AttesterIssuerBoundToAnchor. The leaf alone or
+// with its intermediates is accepted, including an intermediate that
+// is also an anchor when the chain verifies on to another anchor the
+// wallet didn't send: the wallet can't know which CAs the server lists.
 func TestX5CAttesterChainRefusesAnchorInX5C(t *testing.T) {
 	root := newTestCert(t, "root", certOptions{isCA: true})
 	intermediate := newTestCert(t, "intermediate", certOptions{parent: &root, isCA: true})
@@ -273,7 +276,9 @@ func TestX5CAttesterChainRefusesAnchorInX5C(t *testing.T) {
 		"leaf, root, bound":                             {bound(root), attesterLeaf{leafFromRoot, x5cOf(leafFromRoot, root)}, false},
 		"intermediate anchor in x5c, pool":              {pool(intermediate), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, false},
 		"intermediate anchor in x5c, bound":             {bound(intermediate), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, false},
-		"intermediate anchor in x5c, root also anchor":  {pool(root, intermediate), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, false},
+		"intermediate anchor in x5c, root also anchor":  {pool(root, intermediate), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, true},
+		"intermediate anchor in x5c, root also bound":   {bound(root, intermediate), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, true},
+		"leaf, intermediate, root, both anchors":        {pool(root, intermediate), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate, root)}, false},
 		"self-signed certificate that is not an anchor": {pool(root), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate, stray)}, false},
 		"leaf, intermediate":                            {pool(root), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, true},
 		"leaf, intermediate, bound":                     {bound(root), attesterLeaf{leafFromIntermediate, x5cOf(leafFromIntermediate, intermediate)}, true},

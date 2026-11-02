@@ -41,12 +41,17 @@ needs `Config.AttestationBasedClientAuthentication` and an
 `AttesterTrust`: `server.RegisteredAttesterKeys` with the attesters'
 own keys, by issuer (a `keys.AttesterKeySource` such as
 `keys.StaticAttesterKeys` — never the clients' keys), or
-`server.X5CAttesterChain` to verify the attestation's `x5c` chain. That
-`x5c` carries the signing certificate and its intermediates only, as
-HAIP 1.0 requires: an attestation whose `x5c` also includes a trust
-anchor (any self-signed certificate, or a certificate with a
-configured anchor's subject and public key, such as a cross-signed
-copy of it) is `invalid_client`. With
+`server.X5CAttesterChain` to verify the attestation's `x5c` chain.
+HAIP 1.0 §4.4.1 has the wallet send the signing certificate and its
+intermediates only, leaving out the trust anchor. The server refuses
+an `x5c` that includes any self-signed certificate, or whose every
+verified chain ends at an anchor `x5c` carries itself (a certificate
+with a configured anchor's subject and public key, such as a
+cross-signed copy of it), with `invalid_client`. An intermediate the
+server also lists as an anchor is accepted when the chain verifies on
+to another anchor, since the wallet can't know which of its CAs the
+server lists. Each RSA key in `x5c` must be at most 4096 bits, with
+exponent 65537. With
 a trust list shared by several attesters, use its
 `AttesterIssuerBoundToAnchor` binding, so each anchor vouches only for
 the attesters it's bound to. Its `LeafPolicy`, by default

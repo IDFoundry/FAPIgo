@@ -60,7 +60,12 @@ that isn't `HardenedForProduction`. Statically registered clients
 always take priority. What a client may do
 beyond the authorization code flow is your grant, never its own metadata's:
 `AllowedScopes`, `AuthorizationDetailsTypes`, `AllowsClientCredentialsGrant`,
-`AllowsCIBA` and `AllowedClientAuthMethods`. Its `subject_type` is
+`AllowsCIBA` and `AllowedClientAuthMethods`. The federation can narrow
+those grants but never widen them: when the Relying Party's resolved
+metadata (after every superior's metadata policy) has `scope`, it gets
+only the `AllowedScopes` that also lists, and when it has `grant_types`
+without `client_credentials` or `urn:openid:params:grant-type:ciba`, it
+doesn't get that grant. Its `subject_type` is
 honoured within `AutomaticRegistration.SubjectTypes` (pairwise alone by
 default when `Config.Subjects.Default` is pairwise), and
 `EntityConfiguration` advertises that list as the `openid_provider`

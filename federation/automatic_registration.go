@@ -42,8 +42,11 @@ type AutomaticRegistrationConfig struct {
 	// metadata: an RP's openid_relying_party metadata is
 	// attacker-controlled (any federation member publishes its own), so
 	// trusting a self-asserted "these are the scopes I'm allowed" claim
-	// would let any RP grant itself unlimited scope. Required — at
-	// least one.
+	// would let any RP grant itself unlimited scope. The federation can
+	// still narrow it: when the RP's resolved metadata (its own, after
+	// every superior's metadata policy) has a scope parameter, the
+	// client gets only the AllowedScopes that also lists, and fails to
+	// register if that leaves none. Required — at least one.
 	AllowedScopes []string
 
 	// AuthorizationDetailsTypes are the Rich Authorization Request types
@@ -103,7 +106,10 @@ type AutomaticRegistrationConfig struct {
 	// capability grant, not a mechanism detail an RP can safely
 	// self-assert. False (the zero value/default) means no
 	// automatically-registered client may use client_credentials,
-	// regardless of what it publishes. Also still requires
+	// regardless of what it publishes. True grants it to every client
+	// except one whose resolved metadata has a grant_types parameter
+	// without client_credentials: the federation (through a superior's
+	// metadata policy) can withhold a grant, never add one. Also still requires
 	// server.Config.ClientCredentialsGrant to be enabled server-wide,
 	// exactly as storage.RegisteredClientConfig's own field of the same
 	// name does for a statically registered client.
@@ -126,6 +132,9 @@ type AutomaticRegistrationConfig struct {
 	// RequestObjectSigningAlg already is, once the capability itself has
 	// been granted here. When false, that metadata is ignored entirely
 	// and CIBA stays disabled for every automatically-registered client.
+	// When true, a client whose resolved metadata has a grant_types
+	// parameter without urn:openid:params:grant-type:ciba doesn't get
+	// CIBA either, as for AllowsClientCredentialsGrant.
 	AllowsCIBA bool
 
 	// AllowedClientAuthMethods restricts which client authentication
@@ -794,6 +803,50 @@ type relyingPartyMetadata struct {
 	LogoURI    string `json:"logo_uri"`
 	PolicyURI  string `json:"policy_uri"`
 	TOSURI     string `json:"tos_uri"`
+
+	// Scope and GrantTypes are RFC 7591 §2's scope and grant_types, as
+	// the Trust Chain's metadata policy left them. They never widen what
+	// AutomaticRegistrationConfig grants, only narrow it (see
+	// narrowedScopes and grantTypePermitted); nil means left out.
+	Scope      *string  `json:"scope"`
+	GrantTypes []string `json:"grant_types"`
+}
+
+// cibaGrantType is the grant_types value for CIBA (OpenID Connect
+// Client-Initiated Backchannel Authentication Flow - Core 1.0 §4).
+const cibaGrantType = "urn:openid:params:grant-type:ciba"
+
+// clientCredentialsGrantType is RFC 6749 §4.4's grant_types value.
+const clientCredentialsGrantType = "client_credentials"
+
+// narrowedScopes returns the operator's allowed scopes that the RP's
+// resolved scope metadata also lists, or all of them when it has none.
+// The resolved scope is the RP's own value after every superior's
+// metadata policy (OpenID Federation 1.0 §6.1), so it is where the
+// federation narrows what a member may ask for; it can never add a scope
+// the operator didn't grant.
+func narrowedScopes(allowed []string, resolved *string) ([]string, error) {
+	if resolved == nil {
+		return allowed, nil
+	}
+	listed := strings.Fields(*resolved)
+	var scopes []string
+	for _, s := range allowed {
+		if slices.Contains(listed, s) {
+			scopes = append(scopes, s)
+		}
+	}
+	if len(scopes) == 0 {
+		return nil, fmt.Errorf("scope %q permits none of the allowed scopes", *resolved)
+	}
+	return scopes, nil
+}
+
+// grantTypePermitted reports whether the RP's resolved grant_types
+// metadata permits grant: when it is left out (nil), or lists grant. Like
+// narrowedScopes, it only ever narrows an operator's grant.
+func grantTypePermitted(grantTypes []string, grant string) bool {
+	return grantTypes == nil || slices.Contains(grantTypes, grant)
 }
 
 // registeredClientConfigFromMetadata parses raw (an openid_relying_party
@@ -868,15 +921,20 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		redirectURIs[i] = fapi.RegisteredRedirectURI(u)
 	}
 
+	scopes, err := narrowedScopes(a.cfg.AllowedScopes, m.Scope)
+	if err != nil {
+		return storage.RegisteredClientConfig{}, nil, err
+	}
+
 	cfg := storage.RegisteredClientConfig{
 		ID: id, RedirectURIs: redirectURIs,
 		RequestObjectAlgorithm:          requestObjectAlg,
 		SenderConstrain:                 senderConstrain,
-		AllowedScopes:                   a.cfg.AllowedScopes,
+		AllowedScopes:                   scopes,
 		AuthorizationDetailsTypes:       a.cfg.AuthorizationDetailsTypes,
 		AllowedResources:                a.cfg.AllowedResources,
 		AutomaticFederationRegistration: true,
-		AllowsClientCredentialsGrant:    a.cfg.AllowsClientCredentialsGrant,
+		AllowsClientCredentialsGrant:    a.cfg.AllowsClientCredentialsGrant && grantTypePermitted(m.GrantTypes, clientCredentialsGrantType),
 	}
 	if err := a.applyDisplayAndSubjectType(&cfg, id, m); err != nil {
 		return storage.RegisteredClientConfig{}, nil, err
@@ -1322,11 +1380,11 @@ func (a *AutomaticClientRepository) allowsClientAuthMethod(method storage.Client
 }
 
 // applyBackchannelAuthenticationFields sets cfg's CIBA fields from m
-// when this repository allows CIBA and m actually advertises it — a
-// no-op otherwise. Split out of registeredClientConfigFromMetadata for
+// when this repository allows CIBA and m actually advertises it, with
+// grant_types (when present) listing the CIBA grant — a no-op otherwise. Split out of registeredClientConfigFromMetadata for
 // the same reason applyClientAuthMethodFields is.
 func (a *AutomaticClientRepository) applyBackchannelAuthenticationFields(cfg *storage.RegisteredClientConfig, m relyingPartyMetadata) error {
-	if !a.cfg.AllowsCIBA || m.BackchannelAuthenticationRequestSigningAlg == "" {
+	if !a.cfg.AllowsCIBA || m.BackchannelAuthenticationRequestSigningAlg == "" || !grantTypePermitted(m.GrantTypes, cibaGrantType) {
 		return nil
 	}
 	alg, err := fapi.ParseSignatureAlgorithm(m.BackchannelAuthenticationRequestSigningAlg)

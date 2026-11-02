@@ -249,7 +249,8 @@ type RegisteredClientConfig struct {
 	// kept byte for byte and the authorization response's parameters
 	// added after it (RFC 6749 §3.1.2), so a query naming one of them —
 	// code, state, iss, error, error_description, error_uri or
-	// response — is refused.
+	// response — is refused, as is a URI with a fragment, even an empty
+	// "#" (RFC 6749 §3.1.2).
 	RedirectURIs []fapi.RegisteredRedirectURI
 
 	// ApplicationType is ApplicationTypeWeb (the zero value) or
@@ -944,6 +945,19 @@ func (c RegisteredClient) ApplicationType() ApplicationType { return c.applicati
 // iss, and JARM's response.
 var authorizationResponseParameters = []string{"code", "state", "iss", "error", "error_description", "error_uri", "response"}
 
+// checkRedirectURIFragments refuses a redirect URI with a fragment
+// component, even an empty one ("https://rp.example/cb#"): RFC 6749
+// §3.1.2 says "The endpoint URI MUST NOT include a fragment component",
+// and RFC 3986 §3.5 makes everything after the first "#" one.
+func checkRedirectURIFragments(cfg RegisteredClientConfig) error {
+	for _, uri := range cfg.RedirectURIs {
+		if strings.Contains(string(uri), "#") {
+			return fmt.Errorf("storage: client %q: redirect URI %q has a fragment, which a redirect URI must not (RFC 6749 §3.1.2)", cfg.ID, uri)
+		}
+	}
+	return nil
+}
+
 // checkRedirectURIQueries refuses a redirect URI whose query names an
 // authorization response parameter (authorizationResponseParameters).
 // RFC 6749 §3.1.2 has the server retain the registered query and add
@@ -1033,7 +1047,7 @@ func withoutLoopbackPort(uri string) (string, bool) {
 		return "", false
 	}
 	u, err := url.Parse(uri)
-	if err != nil || u.User != nil || u.Fragment != "" || !strings.HasPrefix(uri[len(prefix):], u.Host) {
+	if err != nil || u.User != nil || strings.Contains(uri, "#") || !strings.HasPrefix(uri[len(prefix):], u.Host) {
 		return "", false
 	}
 	if ip := net.ParseIP(u.Hostname()); ip == nil || !ip.IsLoopback() {

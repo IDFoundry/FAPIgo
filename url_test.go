@@ -258,6 +258,25 @@ func TestParseURLRefusesNonASCIIHost(t *testing.T) {
 	}
 }
 
+// TestParseURLRefusesEmptyFragment: "#" alone is a fragment component
+// (RFC 3986 §3.5), which an issuer (RFC 8414 §2) and a redirect URI (RFC
+// 6749 §3.1.2) must not have, so every parser refuses it rather than
+// parsing it away; a private-use redirect too.
+func TestParseURLRefusesEmptyFragment(t *testing.T) {
+	for name, parse := range parsers {
+		for _, raw := range []string{
+			"https://as.example.com/#",
+			"https://as.example.com#",
+			"https://client.example.com/cb?a=1#",
+			"com.example.app:/cb#",
+		} {
+			if u, err := parse(raw); err == nil {
+				t.Errorf("%s(%q) = %q, want an error", name, raw, u.String())
+			}
+		}
+	}
+}
+
 // TestParseURLLowercasesASCIIHost: a mixed-case ASCII host or scheme is
 // lowercased, and an internationalized name in its A-label form is
 // accepted.

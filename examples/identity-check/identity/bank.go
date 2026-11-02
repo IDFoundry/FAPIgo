@@ -196,11 +196,6 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	algs.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.ECDHESA256KW}
 	algs.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
 
-	// RecommendedLimits leaves the nonce lifetime to whoever enables
-	// nonces (Dependencies.Nonces below).
-	limits := server.RecommendedLimits()
-	limits.DPoPNonceLifetime = 5 * time.Minute
-
 	b := &bank{w: w, clients: memstore.NewClientRepository(registered), interaction: interaction}
 	cfg := server.Config{
 		// Every client gets its own sub for each customer (OIDC Core §8):
@@ -210,7 +205,7 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 		// none here is.
 		Subjects: server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Prefix: prefix},
 		Issuer:   issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
-		Algorithms: algs, Limits: limits, Assurance: server.AssuranceDevelopment,
+		Algorithms: algs, Limits: server.RecommendedLimits(), Assurance: server.AssuranceDevelopment,
 	}
 	deps := server.Dependencies{
 		Clients:      b.clients,

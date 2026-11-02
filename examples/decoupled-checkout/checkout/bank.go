@@ -119,9 +119,6 @@ func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
 	limits.BackchannelAuthenticationRequestLifetime = requestLifetime
 	limits.MaxBackchannelAuthenticationRequestLifetime = 10 * time.Minute
 	limits.BackchannelAuthenticationPollInterval = pollInterval
-	// RecommendedLimits leaves the nonce lifetime to whoever enables
-	// nonces (Dependencies.Nonces below).
-	limits.DPoPNonceLifetime = 5 * time.Minute
 	algorithms := server.RecommendedAlgorithms()
 	algorithms.BackchannelAuthenticationRequest = server.RecommendedAlgorithmSet()
 

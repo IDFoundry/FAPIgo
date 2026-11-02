@@ -110,11 +110,6 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 		return nil, err
 	}
 
-	// RecommendedLimits leaves the nonce lifetime to whoever enables
-	// nonces: a few minutes, so a captured nonce is soon useless.
-	limits := server.RecommendedLimits()
-	limits.DPoPNonceLifetime = 5 * time.Minute
-
 	b := &bank{w: w, interaction: interaction}
 	b.cfg = server.Config{
 		Subjects: server.PublicSubjects(),
@@ -122,7 +117,7 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 		// Message Signing: the shop's request must be a signed request
 		// object, and the bank's response is signed too (JARM).
 		Profile:    server.ProfileFAPISecurityWithMessageSigning,
-		Algorithms: server.RecommendedAlgorithms(), Limits: limits,
+		Algorithms: server.RecommendedAlgorithms(), Limits: server.RecommendedLimits(),
 		Assurance: server.AssuranceDevelopment, RAR: registry,
 	}
 	b.deps = server.Dependencies{

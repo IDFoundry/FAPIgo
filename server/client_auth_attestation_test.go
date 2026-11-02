@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -899,7 +900,23 @@ func TestAttestationWithClientAssertionRefused(t *testing.T) {
 			if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
 				t.Fatalf("RequestClientCredentialsToken code %q, want invalid_request", code)
 			}
+			checkAttestationCombinedDescription(t, err)
 		})
+	}
+}
+
+// checkAttestationCombinedDescription checks err's error_description
+// says why: an attestation as an additional signal beside another
+// client authentication method (draft-12 §7.6) isn't supported.
+func checkAttestationCombinedDescription(t *testing.T, err error) {
+	t.Helper()
+	var srvErr *server.Error
+	if !errors.As(err, &srvErr) {
+		t.Fatalf("error %v is not a *server.Error", err)
+	}
+	const want = "a client attestation cannot be combined with another client authentication method"
+	if got := srvErr.PublicDescription(); got != want {
+		t.Fatalf("error_description = %q, want %q", got, want)
 	}
 }
 
@@ -921,4 +938,5 @@ func TestAuthenticateAttestedClientWithClientAssertionRefused(t *testing.T) {
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
 		t.Fatalf("AuthenticateAttestedClient code %q, want invalid_request", code)
 	}
+	checkAttestationCombinedDescription(t, err)
 }

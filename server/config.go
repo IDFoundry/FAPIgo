@@ -589,6 +589,14 @@ type Config struct {
 	// only private_key_jwt and mTLS. It's here for HAIP and OpenID4VCI
 	// wallets; don't register a client that must be FAPI 2.0 compliant
 	// for it.
+	//
+	// The attestation is supported only as the client authentication
+	// method, not as the additional security signal beside another
+	// method that draft-12 §7.6 allows: a request carrying attestation
+	// headers together with a client_assertion or client_assertion_type
+	// is refused with invalid_request (RFC 6749 §2.3: one method per
+	// request), so an assertion naming another client can't be ignored
+	// in favour of the attestation.
 	AttestationBasedClientAuthentication bool
 
 	// OAuthOnly, if set, makes this server a pure OAuth 2.0 + FAPI 2.0

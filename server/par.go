@@ -348,7 +348,8 @@ func (s *Server) validateAuthorizationRequest(ctx context.Context, params map[st
 // method in each request", so a request carrying both attestation
 // headers and a client_assertion/client_assertion_type is refused with
 // invalid_request rather than authenticated by whichever one is checked
-// first. A peer certificate alone is not a second method: an mTLS
+// first. Draft-12 §7.6's use of an attestation as an additional signal
+// beside another method is not supported. A peer certificate alone is not a second method: an mTLS
 // connection presents one on every request, including a
 // private_key_jwt or attestation client's in an mTLS-sender-constrained
 // deployment, and it authenticates the client only when neither of the
@@ -359,7 +360,7 @@ func (s *Server) authenticateClient(ctx context.Context, params map[string]strin
 	switch {
 	case carriesAttestation && carriesAssertion:
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidRequest, 400, "the request uses more than one client authentication method", nil)
+			newError(ErrorInvalidRequest, 400, "a client attestation cannot be combined with another client authentication method", nil)
 	case carriesAttestation:
 		return s.authenticateClientViaAttestation(ctx, params["client_id"], attestation, attestationPoP)
 	case params["client_assertion"] != "":

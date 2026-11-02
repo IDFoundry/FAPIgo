@@ -108,7 +108,7 @@ func (s *Server) AuthenticateAttestedClient(ctx context.Context, req AttestedCli
 	if req.malformed {
 		err = newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", nil)
 	} else if req.otherClientAuth {
-		err = newError(ErrorInvalidRequest, 400, "the request uses more than one client authentication method", nil)
+		err = newError(ErrorInvalidRequest, 400, "a client attestation cannot be combined with another client authentication method", nil)
 	} else if err == nil && attestation == "" {
 		err = newError(ErrorInvalidClient, 401, "client authentication is required", nil)
 	}

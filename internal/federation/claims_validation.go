@@ -132,10 +132,11 @@ func parseSourceEndpoint(raw json.RawMessage) (string, error) {
 }
 
 // isHTTPSURL reports whether s is an absolute https URL with a host and
-// no fragment.
+// no fragment, not even an empty one: url.Parse drops a bare "#", so
+// it's looked for in s itself.
 func isHTTPSURL(s string) bool {
 	u, err := url.Parse(s)
-	return err == nil && u.Scheme == "https" && u.Host != "" && u.Fragment == "" && !strings.ContainsAny(s, " \t\r\n")
+	return err == nil && u.Scheme == "https" && u.Host != "" && !strings.ContainsAny(s, "# \t\r\n")
 }
 
 // maxJSONDepth bounds how deeply refuseDuplicateMembers descends; the

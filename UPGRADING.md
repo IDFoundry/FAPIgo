@@ -1034,6 +1034,13 @@ have dropped since, until the process restarted.
 wrapping `client.ErrTrustChainExpired`. A flow already begun completes
 as before.
 
+From v0.69.0 every method that contacts or trusts the OP refuses once
+the chain has expired, including those that complete a flow already
+begun (`HandleAuthorizationResponse`, `ExchangeCode`,
+`PollBackchannelAuthentication`), and the error is a `*client.Error`
+with code `client.ErrorTrustChainExpired`, still wrapping
+`client.ErrTrustChainExpired`.
+
 **What to change:** resolve the chain again and build a new Client
 before it expires, for example on a timer from the new
 `Client.TrustChainExpiresAt`:

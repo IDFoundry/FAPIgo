@@ -430,6 +430,35 @@ func TestRotatingSealer(t *testing.T) {
 	}
 }
 
+// SealRecords seals tables of more rows than one of its batches, every
+// row once.
+func TestSealRecordsPagesThroughTables(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		ctx := context.Background()
+		p := newPlace(t, dialect)
+		plain := p.migrated()
+		const rows = 250
+		for i := range rows {
+			createRefreshToken(t, plain, strconv.Itoa(i))
+			must(t, plain.Transactions().CreatePAR(ctx, storage.NewPARRecord{Reference: "ref-" + strconv.Itoa(i), ClientID: "c", Request: secretGrant, ExpiresAt: time.Now().Add(time.Hour)}))
+		}
+		sealer := testSealer(t)
+		d := p.migratedWith(sqlstore.Options{Sealer: sealer, ReadUnsealed: true})
+		if n, err := d.SealRecords(ctx); err != nil || n != 2*rows {
+			t.Fatalf("SealRecords = %d, %v, want %d, nil", n, err, 2*rows)
+		}
+		if n, err := d.SealRecords(ctx); err != nil || n != 0 {
+			t.Fatalf("SealRecords again = %d, %v, want 0, nil", n, err)
+		}
+		sealed := p.migratedWith(sqlstore.Options{Sealer: sealer})
+		for _, i := range []int{0, rows / 2, rows - 1} {
+			if _, err := sealed.Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: sha256.Sum256([]byte("rt-" + strconv.Itoa(i)))}); err != nil {
+				t.Fatalf("RedeemRefreshToken %d after SealRecords, without ReadUnsealed = %v", i, err)
+			}
+		}
+	})
+}
+
 // blockingSealer is a Sealer whose Seal waits for release, after
 // saying so on sealing.
 type blockingSealer struct {

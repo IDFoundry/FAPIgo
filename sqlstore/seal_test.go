@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -491,4 +492,56 @@ func TestCreateSealsOutsideTheWriteLock(t *testing.T) {
 		t.Fatalf("UseOnce while a Create is sealing = %v, want nil", err)
 	}
 	must(t, <-created)
+}
+
+// failingAfterSealer is a Sealer that seals n records, then fails.
+type failingAfterSealer struct {
+	sqlstore.Sealer
+	n *int
+}
+
+func (s failingAfterSealer) Seal(plaintext, additionalData []byte) ([]byte, error) {
+	if *s.n == 0 {
+		return nil, errors.New("kms down")
+	}
+	*s.n--
+	return s.Sealer.Seal(plaintext, additionalData)
+}
+
+// Every Create whose Sealer fails — for a CIBA request, at either of
+// its two blobs — is an outage.
+func TestCreateSealerFailures(t *testing.T) {
+	ctx := context.Background()
+	later := time.Now().Add(time.Hour)
+	creates := map[string]func(d *sqlstore.DB) error{
+		"CreatePAR": func(d *sqlstore.DB) error {
+			return d.Transactions().CreatePAR(ctx, storage.NewPARRecord{Reference: "r", ClientID: "c", Request: secretGrant, ExpiresAt: later})
+		},
+		"CreateAuthorizationCode": func(d *sqlstore.DB) error {
+			return d.Grants().CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{ClientID: "c", Grant: secretGrant, ExpiresAt: later})
+		},
+		"CreateAccessToken": func(d *sqlstore.DB) error {
+			return d.AccessTokens().CreateAccessToken(ctx, storage.NewAccessToken{ClientID: "c", ExpiresAt: later})
+		},
+		"CreateBackchannelAuthentication": func(d *sqlstore.DB) error {
+			return d.Backchannel().CreateBackchannelAuthentication(ctx, cibaRequest("sealing", "poll"))
+		},
+		"Sessions.Create": func(d *sqlstore.DB) error {
+			return d.Sessions().Create(ctx, storage.NewSession{State: "s", Record: secretGrant, ExpiresAt: later})
+		},
+	}
+	for name, create := range creates {
+		for _, sealed := range []int{0, 1} {
+			if sealed == 1 && name != "CreateBackchannelAuthentication" {
+				continue
+			}
+			t.Run(fmt.Sprintf("%s/after %d", name, sealed), func(t *testing.T) {
+				n := sealed
+				d := newPlace(t, sqlstore.SQLite).migratedWith(sqlstore.Options{Sealer: failingAfterSealer{testSealer(t), &n}})
+				if err := create(d); !errors.Is(err, storage.ErrStoreUnavailable) {
+					t.Fatalf("%s with a failing Sealer = %v, want storage.ErrStoreUnavailable", name, err)
+				}
+			})
+		}
+	}
 }

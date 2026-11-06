@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	github.com/idfoundry/fapigo v0.67.2
 	github.com/jackc/pgx/v5 v5.12.0
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 )
 
 require (

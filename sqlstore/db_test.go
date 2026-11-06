@@ -549,3 +549,53 @@ func TestInvalidRecordsRefused(t *testing.T) {
 		}
 	}
 }
+
+// A SQLite write waiting for another of its DB's writes stops waiting
+// once its context ends, as an outage wrapping the context's error,
+// rather than waiting its turn.
+func TestSQLiteWriteWaitEndsWithItsContext(t *testing.T) {
+	d := freshDB(t, sqlstore.SQLite)
+	use := storage.ReplayUse{Namespace: "n", Digest: sha256.Sum256([]byte("waiting")), ExpiresAt: time.Now().Add(time.Minute)}
+	release := sqlstore.HoldSQLiteWrites(d)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := d.Replay().UseOnce(ctx, use)
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, storage.ErrStoreUnavailable) {
+		t.Fatalf("UseOnce waiting past its deadline = %v, want context.DeadlineExceeded as an outage", err)
+	}
+	if waited := time.Since(start); waited > 5*time.Second {
+		t.Fatalf("UseOnce waited %v past its deadline", waited)
+	}
+	release()
+	must(t, d.Replay().UseOnce(context.Background(), use))
+}
+
+// A SQLite write sets Options.SQLiteBusyTimeout on its connection once,
+// not before every write.
+func TestSQLiteBusyTimeoutIsSetOncePerConnection(t *testing.T) {
+	ctx := context.Background()
+	p := newPlace(t, sqlstore.SQLite)
+	_, db := p.openPool()
+	db.SetMaxOpenConns(1)
+	d := p.handleWith(db, sqlstore.Options{SQLiteBusyTimeout: 1234 * time.Millisecond})
+	must(t, d.Migrate(ctx))
+	busyTimeout := func() int {
+		t.Helper()
+		var ms int
+		if err := db.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&ms); err != nil {
+			t.Fatal(err)
+		}
+		return ms
+	}
+	if ms := busyTimeout(); ms != 1234 {
+		t.Fatalf("busy_timeout after a write = %d, want 1234", ms)
+	}
+	if _, err := db.ExecContext(ctx, "PRAGMA busy_timeout = 777"); err != nil {
+		t.Fatal(err)
+	}
+	must(t, d.Replay().UseOnce(ctx, storage.ReplayUse{Namespace: "n", Digest: sha256.Sum256([]byte("once")), ExpiresAt: time.Now().Add(time.Minute)}))
+	if ms := busyTimeout(); ms != 777 {
+		t.Fatalf("busy_timeout after another write on the same connection = %d, want 777: set again", ms)
+	}
+}

@@ -39,3 +39,10 @@ func LookupClientKeys(ctx context.Context, d *DB, id fapi.ClientID) (fapi.URL, [
 // PinsIsolation reports whether d runs every Postgres write, single
 // statements included, in a READ COMMITTED transaction.
 func PinsIsolation(d *DB) bool { return d.pinIsolation.Load() }
+
+// HoldSQLiteWrites takes d's SQLite write slot, as a write of d's own
+// would, returning the function that releases it.
+func HoldSQLiteWrites(d *DB) (release func()) {
+	d.sqliteWrites <- struct{}{}
+	return func() { <-d.sqliteWrites }
+}

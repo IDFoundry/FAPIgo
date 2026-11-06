@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -61,8 +62,9 @@ type Options struct {
 	// SQLiteBusyTimeout is how long a SQLite write waits for another
 	// connection's write lock before failing. Zero means 10 seconds.
 	// Ignored for Postgres. It applies to this package's writes only,
-	// which set it on their connection: a read waits as long as the
-	// busy_timeout in the DSN says, which is why the DSN needs one too.
+	// which set it on their connection, the first time they use it: a
+	// read waits as long as the busy_timeout in the DSN says, which is
+	// why the DSN needs one too.
 	// In WAL mode, which Migrate and CheckSchema require, a read doesn't
 	// wait for a write at all; it waits only on the rare moments WAL
 	// mode can't serve it, such as a new file's switch to WAL.
@@ -126,7 +128,14 @@ type DB struct {
 	// sqliteWrites serializes this DB's own SQLite write transactions,
 	// which would otherwise only wait on SQLite's busy handler for each
 	// other. Other processes, and other DBs on the same file, still do.
-	sqliteWrites sync.Mutex
+	// It's a semaphore of one slot, rather than a mutex, so a write
+	// whose context ends while it waits stops waiting; and a slot freed
+	// goes to the longest waiter, so a Sweep's batches queue behind the
+	// writes waiting when each one ends.
+	sqliteWrites chan struct{}
+
+	// busyConns are the SQLite connections whose busy timeout is set.
+	busyConns busyConns
 
 	// pinIsolation is whether every Postgres write, single statements
 	// included, runs in a READ COMMITTED transaction: Migrate or
@@ -178,7 +187,7 @@ func New(db *sql.DB, dialect Dialect, opts Options) (*DB, error) {
 	if opts.ClientCacheTTL < 0 {
 		return nil, errors.New("sqlstore: negative ClientCacheTTL")
 	}
-	d := &DB{db: db, dialect: dialect, prefix: prefix, busy: busy, sealer: opts.Sealer, readUnsealed: opts.ReadUnsealed}
+	d := &DB{db: db, dialect: dialect, prefix: prefix, busy: busy, sealer: opts.Sealer, readUnsealed: opts.ReadUnsealed, sqliteWrites: make(chan struct{}, 1)}
 	d.clients.ttl = opts.ClientCacheTTL
 	d.nonces = &NonceStore{d}
 	return d, nil
@@ -334,34 +343,108 @@ func (d *DB) checkIsolation(ctx context.Context) error {
 
 // sqliteWrite is write for SQLite. database/sql's BeginTx can't ask for
 // BEGIN IMMEDIATE, so this takes a connection and issues the
-// transaction's statements itself.
-func (d *DB) sqliteWrite(ctx context.Context, fn func(q querier) error) (err error) {
-	d.sqliteWrites.Lock()
-	defer d.sqliteWrites.Unlock()
+// transaction's statements itself, under sqliteExclusive.
+func (d *DB) sqliteWrite(ctx context.Context, fn func(q querier) error) error {
+	return d.sqliteExclusive(ctx, func(conn *sql.Conn) (err error) {
+		defer func() {
+			if err != nil {
+				// Never hand the pool a connection still in a transaction.
+				if _, rbErr := conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK"); rbErr != nil && !noTransaction(rbErr) {
+					_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+				}
+			}
+		}()
+		if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+			return err
+		}
+		if err := fn(conn); err != nil {
+			return err
+		}
+		_, err = conn.ExecContext(ctx, "COMMIT")
+		return err
+	})
+}
+
+// sqliteExclusive runs fn on a connection of d's whose busy timeout is
+// d's, holding sqliteWrites. Waiting for it, it stops once ctx ends,
+// returning ctx's error.
+func (d *DB) sqliteExclusive(ctx context.Context, fn func(conn *sql.Conn) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case d.sqliteWrites <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-d.sqliteWrites }()
 	conn, err := d.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			// Never hand the pool a connection still in a transaction.
-			if _, rbErr := conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK"); rbErr != nil && !noTransaction(rbErr) {
-				_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-			}
-		}
-		_ = conn.Close()
-	}()
-	if _, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = "+strconv.FormatInt(d.busy.Milliseconds(), 10)); err != nil { // NOSONAR: go:S2077 — the only value is an integer New validated; PRAGMA takes no bound arguments.
+	defer func() { _ = conn.Close() }()
+	if err := d.setBusyTimeout(ctx, conn); err != nil {
 		return err
 	}
-	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+	return fn(conn)
+}
+
+// busyConns is the set of SQLite driver connections whose busy timeout
+// a DB has set. An entry keeps its connection from being collected, so
+// a connection the pool has closed can't be mistaken for a new one at
+// its address; it is only forgotten, at worst, setting the timeout
+// again: when the set grows past maxBusyConns, it starts over.
+type busyConns struct {
+	mu    sync.Mutex
+	conns map[any]struct{}
+}
+
+// maxBusyConns is how many connections busyConns remembers before it
+// starts over: well past any pool's open connections, so it starts over
+// only after the pool has replaced that many.
+const maxBusyConns = 1024
+
+// setBusyTimeout sets conn's busy timeout to d's, unless d has set it on
+// conn's driver connection already: a busy timeout lasts as long as
+// its connection, so this costs one statement per connection rather
+// than one per write.
+func (d *DB) setBusyTimeout(ctx context.Context, conn *sql.Conn) error {
+	var dc any
+	if err := conn.Raw(func(c any) error { dc = c; return nil }); err != nil {
 		return err
 	}
-	if err := fn(conn); err != nil {
+	if !comparableConn(dc) {
+		return d.execBusyTimeout(ctx, conn)
+	}
+	b := &d.busyConns
+	b.mu.Lock()
+	_, done := b.conns[dc]
+	b.mu.Unlock()
+	if done {
+		return nil
+	}
+	if err := d.execBusyTimeout(ctx, conn); err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, "COMMIT")
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conns == nil || len(b.conns) >= maxBusyConns {
+		b.conns = map[any]struct{}{}
+	}
+	b.conns[dc] = struct{}{}
+	return nil
+}
+
+// execBusyTimeout sets conn's busy timeout to d's.
+func (d *DB) execBusyTimeout(ctx context.Context, conn *sql.Conn) error {
+	_, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = "+strconv.FormatInt(d.busy.Milliseconds(), 10)) // NOSONAR: go:S2077 — the only value is an integer New validated; PRAGMA takes no bound arguments.
 	return err
+}
+
+// comparableConn reports whether dc, a driver connection, is a pointer
+// and so can key busyConns by identity: every SQLite driver's is.
+func comparableConn(dc any) bool {
+	return dc != nil && reflect.TypeOf(dc).Kind() == reflect.Pointer
 }
 
 // noTransaction reports whether err is SQLite's answer to a ROLLBACK

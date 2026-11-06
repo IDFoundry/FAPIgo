@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -126,6 +127,12 @@ type DB struct {
 	// which would otherwise only wait on SQLite's busy handler for each
 	// other. Other processes, and other DBs on the same file, still do.
 	sqliteWrites sync.Mutex
+
+	// pinIsolation is whether every Postgres write, single statements
+	// included, runs in a READ COMMITTED transaction: Migrate or
+	// CheckSchema found the database's default isolation level isn't
+	// READ COMMITTED (see writeOne).
+	pinIsolation atomic.Bool
 
 	queries sync.Map // query template → the dialect's query
 
@@ -250,8 +257,9 @@ func (d *DB) queryRow(ctx context.Context, template string, args ...any) *sql.Ro
 // default_transaction_isolation, which a transaction otherwise
 // inherits — they would fail with a serialization error (SQLSTATE
 // 40001) instead, an outage, and a reused code's tokens wouldn't be
-// revoked. Pinning the level, rather than retrying on 40001, keeps each
-// consume one attempt, as on READ COMMITTED databases.
+// revoked. Pinning the level keeps each multi-statement consume one
+// attempt, as on READ COMMITTED databases; writeOne reruns a single
+// statement under it.
 var readCommitted = &sql.TxOptions{Isolation: sql.LevelReadCommitted}
 
 // write runs fn in a transaction, committing it if fn returns nil and
@@ -274,12 +282,54 @@ func (d *DB) write(ctx context.Context, fn func(q querier) error) error {
 	return tx.Commit()
 }
 
-// writeOne runs fn, which makes one change in one statement, as write
-// does: in a READ COMMITTED transaction on Postgres, since a statement
-// run on its own would take the database's default isolation level,
-// and with the write lock on SQLite, waiting its busy timeout for it.
+// writeOne runs fn, which makes one change in one statement — run
+// last, after anything of fn's that may fail — with write's guarantees.
+// On SQLite it is write. On Postgres the statement runs on its own, in
+// the implicit transaction PostgreSQL gives it, which saves BEGIN and
+// COMMIT's round trips: one statement is atomic at every isolation
+// level, and at READ COMMITTED it re-checks its WHERE against a row a
+// concurrent transaction changed, as in write's transaction. At
+// REPEATABLE READ or SERIALIZABLE it fails instead with a serialization
+// error (SQLSTATE 40001), having changed nothing, and fn is run again in
+// write's READ COMMITTED transaction, where it gets the outcome it
+// would have had there all along: so each change is made at most once,
+// and a lost race is still its typed outcome, never an outage. Where
+// Migrate or CheckSchema found the database's default isolation isn't
+// READ COMMITTED, every statement runs in write's transaction from the
+// start (pinIsolation): that needs no rerun, so it holds too with a
+// driver whose errors don't report their SQLSTATE.
 func (d *DB) writeOne(ctx context.Context, fn func(q querier) error) error {
-	return d.write(ctx, fn)
+	if d.dialect == SQLite || d.pinIsolation.Load() {
+		return d.write(ctx, fn)
+	}
+	err := fn(d.db)
+	if serializationFailure(err) {
+		return d.write(ctx, fn)
+	}
+	return err
+}
+
+// serializationFailure reports whether err is PostgreSQL's
+// serialization failure, SQLSTATE 40001, as a driver reports it: pgx's
+// *pgconn.PgError and lib/pq's *pq.Error each have a SQLState method.
+func serializationFailure(err error) bool {
+	var coded interface{ SQLState() string }
+	return errors.As(err, &coded) && coded.SQLState() == "40001"
+}
+
+// checkIsolation sets pinIsolation unless the database's default
+// isolation level, as a connection of d's pool reports it, is READ
+// COMMITTED. Postgres only.
+func (d *DB) checkIsolation(ctx context.Context) error {
+	if d.dialect != Postgres {
+		return nil
+	}
+	var level string
+	if err := d.db.QueryRowContext(ctx, "SHOW default_transaction_isolation").Scan(&level); err != nil {
+		return fmt.Errorf("read the default transaction isolation: %w", err)
+	}
+	d.pinIsolation.Store(!strings.EqualFold(level, "read committed"))
+	return nil
 }
 
 // sqliteWrite is write for SQLite. database/sql's BeginTx can't ask for

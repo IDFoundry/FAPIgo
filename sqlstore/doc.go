@@ -299,11 +299,16 @@
 //     the database sees the same rows. Not SerializableRedemption: the
 //     stores write at READ COMMITTED isolation, relying on row locks for
 //     each key rather than on SERIALIZABLE isolation between keys. Each
-//     write is a transaction that asks for READ COMMITTED explicitly, so
-//     a database, role or DSN whose default_transaction_isolation is
-//     REPEATABLE READ or SERIALIZABLE doesn't turn a lost race (a reused
-//     code, a consumed session) into a serialization failure, answered
-//     as an outage.
+//     write of several statements is a transaction that asks for READ
+//     COMMITTED explicitly, so a database, role or DSN whose
+//     default_transaction_isolation is REPEATABLE READ or SERIALIZABLE
+//     doesn't turn a lost race (a reused code, a consumed session) into
+//     a serialization failure, answered as an outage. A write of one
+//     statement runs on its own, without BEGIN and COMMIT; one that
+//     fails with a serialization failure has changed nothing, and is run
+//     again in such a transaction. Where Migrate or CheckSchema finds a
+//     default other than READ COMMITTED, every write runs in one from
+//     the start.
 //   - SQLite: Durable, AtomicConsume and SerializableRedemption, since
 //     SQLite's transactions are serializable. Not
 //     CrossInstanceConsistent: a database file on one host can't back a

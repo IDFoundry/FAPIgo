@@ -103,7 +103,8 @@ func (d *DB) statements(m migration) []string {
 // to run from several processes at once: they apply each migration
 // once between them (a Postgres advisory lock; SQLite's write lock).
 // It refuses a database a newer release of this package has migrated
-// further, as CheckSchema does.
+// further, and reads a Postgres database's default isolation level, as
+// CheckSchema does.
 //
 // Nothing migrates implicitly — New doesn't: run it from a deployment
 // step, or at startup before serving, as a role that may create tables.
@@ -181,6 +182,9 @@ func (d *DB) migrate(ctx context.Context) error {
 		}
 	}
 	if err := d.refuseNewer(ctx, d.db); err != nil {
+		return fmt.Errorf("sqlstore: migrate: %w", err)
+	}
+	if err := d.checkIsolation(ctx); err != nil {
 		return fmt.Errorf("sqlstore: migrate: %w", err)
 	}
 	return nil
@@ -277,7 +281,11 @@ func checkApplied(applied map[int]bool, requireAll bool) error {
 // none newer than SchemaVersion (a newer release's, whose changes this
 // one doesn't know). On SQLite it also requires WAL mode, as Migrate
 // does. Call it at startup, where Migrate is run separately, to fail
-// fast rather than on the first request.
+// fast rather than on the first request. On Postgres it also reads the
+// database's default isolation level, as Migrate does: under one other
+// than READ COMMITTED, every write the stores make then runs in a READ
+// COMMITTED transaction, single statements included (see the package
+// documentation's Capabilities section).
 func (d *DB) CheckSchema(ctx context.Context) error {
 	if err := d.checkJournalMode(ctx); err != nil {
 		return fmt.Errorf("sqlstore: check schema: %w", err)
@@ -287,6 +295,9 @@ func (d *DB) CheckSchema(ctx context.Context) error {
 		return fmt.Errorf("sqlstore: check schema (has Migrate run?): %w", err)
 	}
 	if err := checkApplied(applied, true); err != nil {
+		return fmt.Errorf("sqlstore: check schema: %w", err)
+	}
+	if err := d.checkIsolation(ctx); err != nil {
 		return fmt.Errorf("sqlstore: check schema: %w", err)
 	}
 	return nil

@@ -35,3 +35,7 @@ func ResolveClientCounting(ctx context.Context, d *DB, id fapi.ClientID, parses 
 func LookupClientKeys(ctx context.Context, d *DB, id fapi.ClientID) (fapi.URL, []byte, error) {
 	return d.Clients().lookupKeys(ctx, id)
 }
+
+// PinsIsolation reports whether d runs every Postgres write, single
+// statements included, in a READ COMMITTED transaction.
+func PinsIsolation(d *DB) bool { return d.pinIsolation.Load() }

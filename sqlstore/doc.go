@@ -420,4 +420,10 @@
 // it's consumed or expires. Pairwise subjects are never swept: a user's
 // identifier for a sector must stay the same for as long as relying
 // parties may hold it.
+//
+// Sweep deletes in batches, each a short transaction of its own, so a
+// large backlog doesn't hold up the stores' writes; on PostgreSQL,
+// instances sweeping the same tables at once leave each other's batches
+// alone (an advisory lock), and on SQLite a Sweep that deleted rows
+// truncates the write-ahead log after.
 package sqlstore

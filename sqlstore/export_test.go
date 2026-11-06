@@ -46,3 +46,10 @@ func HoldSQLiteWrites(d *DB) (release func()) {
 	d.sqliteWrites <- struct{}{}
 	return func() { <-d.sqliteWrites }
 }
+
+// SweepLockKey is the Postgres advisory lock d's Sweep batches take.
+func SweepLockKey(d *DB) int64 { return d.sweepLockKey() }
+
+// SweepBatchSize is how many rows each of d's Sweep transactions
+// deletes at most.
+func SweepBatchSize(d *DB) int64 { return d.sweepBatchSize() }

@@ -3,7 +3,9 @@ package sqlstore_test
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -207,4 +209,108 @@ func TestRedeemedCodeRetentionAtTheEndOfTime(t *testing.T) {
 			t.Fatalf("Sweep = %d, %v, want 0, nil", n, err)
 		}
 	})
+}
+
+// insertExpiredReplay inserts n replay digests, past their sweep_after
+// at sweepAfter, straight into p's table on db.
+func insertExpiredReplay(t *testing.T, p *place, db *sql.DB, n int, sweepAfter int64) {
+	t.Helper()
+	query := "WITH RECURSIVE g(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM g WHERE x < ?) INSERT INTO " + p.prefix + "replay (namespace, digest, sweep_after) SELECT 'backlog', randomblob(32), ? FROM g"
+	if p.dialect == sqlstore.Postgres {
+		query = "INSERT INTO " + p.prefix + "replay (namespace, digest, sweep_after) SELECT 'backlog', sha256(int8send(g) || int8send($2)), $2 FROM generate_series(1, $1) g"
+	}
+	if _, err := db.ExecContext(context.Background(), query, n, sweepAfter); err != nil {
+		t.Fatalf("insert %d expired replay rows: %v", n, err)
+	}
+}
+
+// countRows is how many rows p's table holds, on db.
+func countRows(t *testing.T, p *place, db *sql.DB, table string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+p.prefix+table).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// Sweep deletes a backlog larger than its batches, all of it, and
+// keeps what hasn't expired; on SQLite it leaves the write-ahead log
+// truncated.
+func TestSweepDeletesBacklogInBatches(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		ctx := context.Background()
+		p := newPlace(t, dialect)
+		d := p.migrated()
+		_, db := p.open()
+		backlog := 2*int(sqlstore.SweepBatchSize(d)) + 7
+		now := time.Now()
+		insertExpiredReplay(t, p, db, backlog, now.Add(-time.Minute).UnixNano())
+		insertExpiredReplay(t, p, db, 3, now.Add(time.Minute).UnixNano())
+		if n, err := d.Sweep(ctx, now); err != nil || n != int64(backlog) {
+			t.Fatalf("Sweep = %d, %v, want %d, nil", n, err, backlog)
+		}
+		if n := countRows(t, p, db, "replay"); n != 3 {
+			t.Fatalf("rows left after Sweep = %d, want the 3 live ones", n)
+		}
+		if dialect != sqlstore.SQLite {
+			return
+		}
+		if info, err := os.Stat(p.path + "-wal"); err != nil || info.Size() != 0 {
+			t.Fatalf("write-ahead log after Sweep: %v, %v, want it truncated", info, err)
+		}
+	})
+}
+
+// A Sweep whose context has ended deletes nothing more, and says so as
+// an outage that still wraps the context's error.
+func TestSweepStopsWithItsContext(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		p := newPlace(t, dialect)
+		d := p.migrated()
+		_, db := p.open()
+		insertExpiredReplay(t, p, db, 10, 0)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		n, err := d.Sweep(ctx, time.Now())
+		if n != 0 || !errors.Is(err, context.Canceled) || !errors.Is(err, storage.ErrStoreUnavailable) {
+			t.Fatalf("Sweep with an ended context = %d, %v, want 0 and context.Canceled as an outage", n, err)
+		}
+		if left := countRows(t, p, db, "replay"); left != 10 {
+			t.Fatalf("rows left = %d, want 10", left)
+		}
+	})
+}
+
+// On PostgreSQL, a Sweep that finds another instance's batch running —
+// here, its lock held — stops without an error, deleting nothing, and
+// sweeps once the lock is free.
+func TestPostgresSweepSkipsWhileAnotherSweeps(t *testing.T) {
+	if postgresDSN == "" {
+		t.Skip("PostgreSQL only: " + postgresDSNEnv + " is unset")
+	}
+	ctx := context.Background()
+	p := newPlace(t, sqlstore.Postgres)
+	d := p.migrated()
+	insertExpiredReplay(t, p, postgresPool, 10, 0)
+	conn, err := postgresPool.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", sqlstore.SweepLockKey(d)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := d.Sweep(ctx, time.Now()); n != 0 || err != nil {
+		t.Fatalf("Sweep while another holds the lock = %d, %v, want 0, nil", n, err)
+	}
+	if left := countRows(t, p, postgresPool, "replay"); left != 10 {
+		t.Fatalf("rows left = %d, want 10", left)
+	}
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", sqlstore.SweepLockKey(d)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := d.Sweep(ctx, time.Now()); n != 10 || err != nil {
+		t.Fatalf("Sweep once the lock is free = %d, %v, want 10, nil", n, err)
+	}
 }

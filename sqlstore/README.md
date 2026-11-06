@@ -237,7 +237,11 @@ between instances: use SQLite there.
   with `Clients().PutWithKeys` (or `MarshalClientConfigWithKeys`) and
   serve them with `db.ClientKeys(fetcher)` as
   `server.Dependencies.ClientKeys`. A client added or rekeyed at
-  runtime authenticates on its next request, without a restart.
+  runtime authenticates on its next request, without a restart. Each
+  lookup reads the row but parses it again only when it has changed;
+  `Options.ClientCacheTTL` skips the read too, at the cost of a
+  removed or rekeyed client working on each other instance for up to
+  the TTL.
 
   ```go
   deps.ClientKeys, err = db.ClientKeys(fetcher) // a hardened fapihttp.Client; nil if no client has a jwks_uri

@@ -56,7 +56,7 @@ func newSweepFixture(t *testing.T, dialect sqlstore.Dialect) sweepFixture {
 	return f
 }
 
-func must(t *testing.T, err error) {
+func must(t testing.TB, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)

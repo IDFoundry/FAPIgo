@@ -24,7 +24,7 @@ import (
 )
 
 // clientJWKS is a JWK Set of one fresh P-256 public key, kid kid.
-func clientJWKS(t *testing.T, kid string) json.RawMessage {
+func clientJWKS(t testing.TB, kid string) json.RawMessage {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

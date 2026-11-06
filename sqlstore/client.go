@@ -1,6 +1,7 @@
 package sqlstore
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -26,19 +27,23 @@ func (d *DB) Clients() *ClientRepository { return &ClientRepository{d} }
 
 // ResolveClient implements storage.ClientRepository: the client in the
 // row whose client_id is exactly id (compared byte for byte), built
-// with storage.NewRegisteredClient from its configuration on every
-// call, so a change to the table takes effect on the next request. An
-// unknown id is an error wrapping ErrNotFound; a row whose
-// configuration doesn't parse, or that NewRegisteredClient refuses, is
-// the operator's mistake rather than the client's, so its error wraps
-// ErrClientConfig and storage.ErrStoreUnavailable, and the server
-// answers it with 500 server_error rather than invalid_client.
+// with storage.NewRegisteredClient from its configuration. It reads
+// the row on every call, so a change to the table takes effect on the
+// next request — unless Options.ClientCacheTTL is set, when a client
+// read less than that long ago isn't read again (see there). The
+// client built from a configuration is kept, and reused while the row
+// reads back the same, byte for byte; a storage.RegisteredClient is
+// immutable, so no caller can change another's. An unknown id is an
+// error wrapping ErrNotFound; a row whose configuration doesn't parse,
+// or that NewRegisteredClient refuses, is the operator's mistake rather
+// than the client's, so its error wraps ErrClientConfig and
+// storage.ErrStoreUnavailable, and the server answers it with 500
+// server_error rather than invalid_client. Neither is kept: the next
+// call reads the row again.
 func (r *ClientRepository) ResolveClient(ctx context.Context, id fapi.ClientID) (storage.RegisteredClient, error) {
-	config, err := r.config(ctx, "resolve client", id)
-	if err != nil {
-		return storage.RegisteredClient{}, err
-	}
-	return resolveRow(id, config)
+	return cachedRow(ctx, r, "resolve client", id, parsedClient, func(config []byte) (storage.RegisteredClient, error) {
+		return resolveRow(id, config)
+	})
 }
 
 // config is the configuration document of the client registered as
@@ -143,7 +148,10 @@ func (r *ClientRepository) Put(ctx context.Context, cfg storage.RegisteredClient
 // PutWithKeys is Put for a client whose keys the clients table holds
 // too, for DB.ClientKeys: its jwks_uri, or its inline JWK Set. It
 // refuses what MarshalClientConfigWithKeys refuses. The keys take
-// effect on the next request, as the configuration does.
+// effect on the next request, as the configuration does — with
+// Options.ClientCacheTTL set, on this DB's next request (Put and
+// Delete drop the client from its cache), and on another DB's, in this
+// process or another, once its TTL has passed.
 func (r *ClientRepository) PutWithKeys(ctx context.Context, cfg storage.RegisteredClientConfig, reg ClientKeyRegistration) error {
 	if _, err := storage.NewRegisteredClient(cfg); err != nil {
 		return fmt.Errorf("sqlstore: put client: %w", err)
@@ -155,6 +163,9 @@ func (r *ClientRepository) PutWithKeys(ctx context.Context, cfg storage.Register
 	if err != nil {
 		return fmt.Errorf("sqlstore: put client: %w", err)
 	}
+	// Whether or not the write committed, which a failed COMMIT leaves
+	// unknown.
+	defer r.d.clients.invalidate(cfg.ID)
 	err = r.d.writeOne(ctx, func(q querier) error {
 		_, err := q.ExecContext(ctx, r.d.q("INSERT INTO {clients} (client_id, config) VALUES (?, ?) ON CONFLICT (client_id) DO UPDATE SET config = excluded.config"),
 			string(cfg.ID), string(config))
@@ -167,11 +178,13 @@ func (r *ClientRepository) PutWithKeys(ctx context.Context, cfg storage.Register
 }
 
 // Delete removes the client registered as id, reporting whether there
-// was one.
+// was one. With Options.ClientCacheTTL set, another DB may resolve the
+// client until its TTL has passed (see there).
 func (r *ClientRepository) Delete(ctx context.Context, id fapi.ClientID) (bool, error) {
 	if !validTextKey(string(id)) {
 		return false, nil
 	}
+	defer r.d.clients.invalidate(id)
 	var n int64
 	err := r.d.writeOne(ctx, func(q querier) error {
 		res, err := q.ExecContext(ctx, r.d.q("DELETE FROM {clients} WHERE client_id = ?"), string(id))
@@ -197,7 +210,9 @@ func (r *ClientRepository) Capabilities() storage.Capabilities { return r.d.capa
 // ClientEncryptionKeys), so the clients table is the one registry of
 // clients and their keys: a client PutWithKeys registers, or whose keys
 // it changes, is served its keys on the next request, with no restart.
-// The source reads the row on every resolution; it parses an inline
+// The source reads the row on every resolution but within
+// Options.ClientCacheTTL (which ResolveClient shares), reusing the
+// row's parsed keys while it reads back the same; it parses an inline
 // JWK Set once per distinct set, and fetches a jwks_uri through
 // fetcher, caching it as keys.ClientJWKSSource describes (opts tune
 // that). fetcher may be nil when no client registers a jwks_uri; under
@@ -211,15 +226,18 @@ func (d *DB) ClientKeys(fetcher *fapihttp.Client, opts ...keys.ClientJWKSOption)
 	return keys.NewClientJWKSSource(fetcher, r.lookupKeys, opts...)
 }
 
-// lookupKeys is ClientKeys' keys.ClientJWKSLookup.
+// lookupKeys is ClientKeys' keys.ClientJWKSLookup. The inline JWK Set
+// it returns is a copy: the cached registration's stays as parsed.
 func (r *ClientRepository) lookupKeys(ctx context.Context, id fapi.ClientID) (fapi.URL, []byte, error) {
-	config, err := r.config(ctx, "client keys", id)
+	reg, err := cachedRow(ctx, r, "client keys", id, parsedKeys, func(config []byte) (ClientKeyRegistration, error) {
+		reg, err := ParseClientKeys(config)
+		if err != nil {
+			return ClientKeyRegistration{}, fmt.Errorf("sqlstore: client keys %q: %w: %w", id, storage.ErrStoreUnavailable, err)
+		}
+		return reg, nil
+	})
 	if err != nil {
 		return fapi.URL{}, nil, err
 	}
-	reg, err := ParseClientKeys(config)
-	if err != nil {
-		return fapi.URL{}, nil, fmt.Errorf("sqlstore: client keys %q: %w: %w", id, storage.ErrStoreUnavailable, err)
-	}
-	return reg.JWKSURI, reg.JWKS, nil
+	return reg.JWKSURI, bytes.Clone(reg.JWKS), nil
 }

@@ -89,6 +89,26 @@ type Options struct {
 	// to the database can plant a blob the Sealer never sealed. It
 	// requires Sealer.
 	ReadUnsealed bool
+
+	// ClientCacheTTL, if set, is how long ClientRepository.ResolveClient
+	// and ClientKeys go on using a client's row, once read, without
+	// reading it again: a request within it costs no query for its
+	// client. Zero, the default, reads the row on every call, so a
+	// change to the clients table takes effect on the next request. Its
+	// cost is staleness: a client deleted, reconfigured or rekeyed by
+	// anything but this DB's own Put, PutWithKeys or Delete — another
+	// DB, another instance of the server, SQL run on the table — goes on
+	// being served as it was, by this DB, for up to the TTL after its
+	// last read: a removed client still authenticates, and a rekeyed
+	// one's old keys are still accepted (a client added is seen at once,
+	// as an unknown client is never kept). This DB's own writes drop
+	// their client at once; nothing reaches another DB. Set it only as
+	// short as an emergency revocation can wait — seconds, not minutes.
+	//
+	// With or without it, a client's parsed configuration and keys are
+	// kept, for a few thousand clients, and reused while its row reads
+	// back the same, so the TTL saves the query alone.
+	ClientCacheTTL time.Duration
 }
 
 // DB holds FAPIgo's stores' tables in one SQL database: an
@@ -113,6 +133,8 @@ type DB struct {
 	readUnsealed bool
 
 	nonces *NonceStore // Nonces' one value
+
+	clients clientCache // ClientRepository's and ClientKeys' parsed rows
 }
 
 const defaultTablePrefix = "fapigo_"
@@ -146,7 +168,11 @@ func New(db *sql.DB, dialect Dialect, opts Options) (*DB, error) {
 	if opts.ReadUnsealed && opts.Sealer == nil {
 		return nil, errors.New("sqlstore: ReadUnsealed without a Sealer")
 	}
+	if opts.ClientCacheTTL < 0 {
+		return nil, errors.New("sqlstore: negative ClientCacheTTL")
+	}
 	d := &DB{db: db, dialect: dialect, prefix: prefix, busy: busy, sealer: opts.Sealer, readUnsealed: opts.ReadUnsealed}
+	d.clients.ttl = opts.ClientCacheTTL
 	d.nonces = &NonceStore{d}
 	return d, nil
 }

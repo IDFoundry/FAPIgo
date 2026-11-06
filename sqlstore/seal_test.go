@@ -429,3 +429,37 @@ func TestRotatingSealer(t *testing.T) {
 		t.Error("RotatingSealer(current, nil) = nil error, want an error")
 	}
 }
+
+// blockingSealer is a Sealer whose Seal waits for release, after
+// saying so on sealing.
+type blockingSealer struct {
+	sqlstore.Sealer
+	sealing, release chan struct{}
+}
+
+func (s blockingSealer) Seal(plaintext, additionalData []byte) ([]byte, error) {
+	s.sealing <- struct{}{}
+	<-s.release
+	return s.Sealer.Seal(plaintext, additionalData)
+}
+
+// A Create seals its record before it takes SQLite's write lock: a
+// slow Sealer holds up no other write.
+func TestCreateSealsOutsideTheWriteLock(t *testing.T) {
+	sealer := blockingSealer{testSealer(t), make(chan struct{}), make(chan struct{})}
+	d := newPlace(t, sqlstore.SQLite).migratedWith(sqlstore.Options{Sealer: sealer})
+	ctx := context.Background()
+	created := make(chan error, 1)
+	go func() {
+		created <- d.Grants().CreateRefreshToken(ctx, storage.NewRefreshToken{TokenHash: sha256.Sum256([]byte("slow")), ClientID: "c", Grant: secretGrant, ExpiresAt: time.Now().Add(time.Hour)})
+	}()
+	<-sealer.sealing
+	wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	err := d.Replay().UseOnce(wctx, storage.ReplayUse{Namespace: "n", Digest: sha256.Sum256([]byte("meanwhile")), ExpiresAt: time.Now().Add(time.Minute)})
+	close(sealer.release)
+	if err != nil {
+		t.Fatalf("UseOnce while a Create is sealing = %v, want nil", err)
+	}
+	must(t, <-created)
+}

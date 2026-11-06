@@ -33,12 +33,12 @@ func (s *SessionStore) Create(ctx context.Context, session storage.NewSession) e
 		return errors.New("sqlstore: create session: state isn't valid UTF-8 without NUL")
 	}
 	expires := nanos(session.ExpiresAt)
-	err := s.d.writeOne(ctx, func(q querier) error {
-		record, err := s.d.seal(blobRef{sessionsTable, recordColumn, session.State, "", expires, nil}, session.Record)
-		if err != nil {
-			return err
-		}
-		_, err = q.ExecContext(ctx, s.d.q("INSERT INTO {client_sessions} (state, record, expires_at, sweep_after) VALUES (?, ?, ?, ?)"),
+	record, err := s.d.seal(blobRef{sessionsTable, recordColumn, session.State, "", expires, nil}, session.Record)
+	if err != nil {
+		return unavailable("create session", err)
+	}
+	err = s.d.writeOne(ctx, func(q querier) error {
+		_, err := q.ExecContext(ctx, s.d.q("INSERT INTO {client_sessions} (state, record, expires_at, sweep_after) VALUES (?, ?, ?, ?)"),
 			session.State, record, expires, expires)
 		return err
 	})

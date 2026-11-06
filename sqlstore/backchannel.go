@@ -70,6 +70,10 @@ var (
 	errRefused = errors.New("sqlstore: refused")
 )
 
+// opCreateBackchannel names CreateBackchannelAuthentication in its
+// errors.
+const opCreateBackchannel = "create backchannel authentication"
+
 // CreateBackchannelAuthentication implements
 // storage.BackchannelAuthenticationStore, storing the request pending,
 // for Sweep to delete BackchannelExpiredRetention after it expires.
@@ -94,22 +98,22 @@ func (s *BackchannelAuthenticationStore) CreateBackchannelAuthentication(ctx con
 	expires, sweepAfter := nanos(record.ExpiresAt), nanos(record.ExpiresAt.Add(BackchannelExpiredRetention))
 	key, clientID := string(record.AuthReqIDHash[:]), string(record.ClientID)
 	bound := backchannelBound{record.HandleHash[:], record.DeliveryMode, int64(record.PollInterval), expires}
+	sealedRecord, err := s.d.seal(bound.ref(recordColumn, key, clientID), plainRecord)
+	if err != nil {
+		return unavailable(opCreateBackchannel, err)
+	}
+	sealedDecision, err := s.d.seal(bound.ref(decisionColumn, key, clientID), plainDecision)
+	if err != nil {
+		return unavailable(opCreateBackchannel, err)
+	}
 	err = s.d.writeOne(ctx, func(q querier) error {
-		sealedRecord, err := s.d.seal(bound.ref(recordColumn, key, clientID), plainRecord)
-		if err != nil {
-			return err
-		}
-		sealedDecision, err := s.d.seal(bound.ref(decisionColumn, key, clientID), plainDecision)
-		if err != nil {
-			return err
-		}
-		_, err = q.ExecContext(ctx, s.d.q("INSERT INTO {backchannel_authentications} (auth_req_id_hash, handle_hash, client_id, delivery_mode, record, decision, status, poll_interval, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+		_, err := q.ExecContext(ctx, s.d.q("INSERT INTO {backchannel_authentications} (auth_req_id_hash, handle_hash, client_id, delivery_mode, record, decision, status, poll_interval, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
 			record.AuthReqIDHash[:], record.HandleHash[:], clientID, record.DeliveryMode, sealedRecord, sealedDecision,
 			int(storage.BackchannelAuthenticationPending), int64(record.PollInterval), expires, sweepAfter)
 		return err
 	})
 	if err != nil {
-		return unavailable("create backchannel authentication", err)
+		return unavailable(opCreateBackchannel, err)
 	}
 	return nil
 }

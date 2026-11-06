@@ -187,9 +187,9 @@
 // # Sealing
 //
 // Options.Sealer seals every record blob the stores write with an AEAD
-// — AESGCMSealer (AES-256-GCM), or a Sealer of your own calling a key
-// management service; OID4VCgo's verifier.TransactionSealer is the same
-// interface, so one sealer value serves both:
+// — AESGCMSealer (AES-256-GCM), or a Sealer of your own, local and fast
+// (see Performance and scaling); OID4VCgo's verifier.TransactionSealer
+// is the same interface, so one sealer value serves both:
 //
 //	sealer, err := sqlstore.AESGCMSealer(key) // 32 bytes from crypto/rand, kept outside the database
 //	db, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{Sealer: sealer})
@@ -273,8 +273,9 @@
 // key and opens with either, until the longest-lived record (a refresh
 // token) sealed under the old one expires. AESGCMSealer's random nonces
 // allow 2^32 seals per key (NIST SP 800-38D), which a busy server can
-// reach in weeks: rotate before then — see AESGCMSealer. A resource
-// server reading opaque access tokens needs the same Sealer.
+// reach in weeks, or days: rotate before then — see AESGCMSealer, and
+// Performance and scaling for the cadence. A resource server reading
+// opaque access tokens needs the same Sealer.
 //
 // # Errors
 //
@@ -412,4 +413,202 @@
 // it's consumed or expires. Pairwise subjects are never swept: a user's
 // identifier for a sector must stay the same for as long as relying
 // parties may hold it.
+//
+// # Performance and scaling
+//
+// The figures here are indicative, not a benchmark: measured on
+// sqlstore v0.4 (a later release may issue fewer statements) on one
+// 8-core Xeon host shared with other load (so ±30%), with PostgreSQL 17
+// limited to 4 vCPUs and 2 GB in a Docker VM, SQLite through
+// modernc.org/sqlite, Go 1.26 and pgx through database/sql, and a
+// FAPI 2.0 login with private_key_jwt, DPoP with
+// server nonces, opaque access tokens and a refresh token. Measure your
+// own deployment; pg_stat_statements counts what each request runs.
+//
+// On PostgreSQL the database is the limit, not the server instances,
+// which keep nothing between requests: under load the database's CPU
+// saturated first in every scenario, and adding instances added nothing
+// (244, 246 and 224 logins a second with 1, 2 and 4 of them). Its cost
+// is statements and commits, not query plans: every hot statement is
+// an index lookup by key, touching a few pages. What a request costs:
+//
+//   - a pushed authorization request: 12 statements, 3 of them write
+//     transactions;
+//   - an authorization (BeginAuthorization and CompleteAuthorization):
+//     about 19 statements, 4 write transactions;
+//   - an authorization code exchange: about 24 statements, 7 write
+//     transactions;
+//   - so a whole login: 55 statements and 14 write transactions, 28 of
+//     the statements BEGIN or COMMIT, 7 reads of the client's row and 5
+//     replay digests;
+//   - a refresh: 15 statements, 3 write transactions (refresh tokens
+//     aren't rotated, as FAPI 2.0 requires);
+//   - a resource server's check of an opaque access token: about 4
+//     reads (the token and its grant's revocations), and one write for a
+//     DPoP proof's replay digest;
+//   - a CIBA poll of a pending request: 4 statements, 1 write
+//     transaction.
+//
+// The 4-vCPU database saturated at about 380 logins, 1,600 pushed
+// requests, 1,300 refreshes or 9,000 opaque access-token lookups (with
+// their revocation checks) a second, at about 19 ms of its CPU per
+// login and 5 per refresh, inflated by the VM's costly system calls:
+// dedicated hardware should need less per statement. Size the
+// database's CPU from your request rates and those costs; it scales
+// with cores, not with server instances.
+//
+// Size the connection pool explicitly, on every instance: database/sql's
+// defaults are wrong for this load. Its MaxIdleConns of 2 keeps at most
+// two connections idle, closing any other a request gives back, so most
+// requests open a new one (a new backend process, and pgx preparing its
+// statements again): at 32 concurrent logins that cut throughput from 214 to 47 a
+// second and raised the database's CPU per login from 19 to 85 ms. Its
+// unlimited MaxOpenConns let 128 concurrent callers exceed
+// max_connections (100), and about one call in ten failed as an outage.
+// So:
+//
+//	sqlDB.SetMaxOpenConns(n)
+//	sqlDB.SetMaxIdleConns(n)                   // the same n: never fewer idle than open
+//	sqlDB.SetConnMaxLifetime(30 * time.Minute) // so connections move after a failover
+//	sqlDB.SetConnMaxIdleTime(5 * time.Minute)  // so a quiet instance gives them back
+//
+// with n times the instances, plus every other client of the database
+// and headroom for maintenance, below max_connections. n needn't be
+// large: the connections busy at once are about the requests a second
+// times the round trips each makes times the round-trip time (plus the
+// database's own time), so 2,000 code exchanges a second at 26 round
+// trips of 0.4 ms keep about 21 busy. Once the database's CPU
+// saturates, a larger pool only moves the queue into the database: 50
+// and 200 connections per instance did the same, while 10 capped logins
+// at about 110 a second. (A pool of one never deadlocks; it serializes.)
+//
+// Many instances, or many processes with a pool each (resource servers
+// too), can exceed max_connections however each is sized: put PgBouncer
+// in front in transaction mode. Every operation here that runs more
+// than one statement is one transaction (Migrate's advisory lock is a
+// transaction's too), so transaction pooling keeps their guarantees.
+// pgx's default prepares and caches named statements per connection,
+// which transaction pooling breaks; set default_query_exec_mode in the
+// DSN to exec, or cache_describe, neither of which names statements:
+//
+//	postgres://fapigo@pgbouncer:6432/fapigo?default_query_exec_mode=exec
+//
+// The package's tests pass that way through PgBouncer 1.26 in
+// transaction mode, but not with pgx's default and PgBouncer's own
+// prepared-statement support (max_prepared_statements), where a
+// statement that once failed to prepare (CheckSchema before Migrate)
+// kept its name taken. (statement_cache_capacity sizes only the default
+// mode's cache.) PgBouncer refuses startup parameters it doesn't track,
+// so set default_transaction_isolation and the like on the role or
+// database, not in the DSN, and add search_path, if the DSN sets it, to
+// track_extra_parameters.
+//
+// A login writes roughly 70 KB of WAL (45 KB for its pushed request and
+// authorization, 27 KB for the code exchange, measured with the stores'
+// SQL replayed by pgbench), mostly full-page images: digests as primary
+// keys scatter writes across each index. wal_compression (lz4 or zstd)
+// shrinks those images, and a longer checkpoint_timeout writes fewer of
+// them. Keep the hot tables (replay, access_tokens, refresh_tokens and
+// their indexes) in memory if you can: with 5 GB of rows against 512 MB
+// of shared_buffers, throughput fell by 6–25%, with no change of plan.
+// The tables are delete-heavy, so a lower autovacuum_vacuum_scale_factor
+// on replay, access_tokens and interactions keeps them vacuumed.
+//
+// Sweep's cost grows with the rows it deletes, so run it often enough
+// that each run deletes a modest number, thousands or tens of thousands
+// per table rather than millions: a login leaves four or five replay
+// digests, so at 300 logins a second a five-minute interval leaves
+// about 400,000 replay rows for each run. The costly case is a backlog,
+// the first Sweep after sweeping was off or failing. Measured on v0.4,
+// which deletes each table in one statement: on PostgreSQL, 6.9 million
+// expired rows took 135 s, stalling every other writer on the WAL for 2
+// to 4 s at a time, and 10.3 million in one table took one 59 s
+// transaction and 1.6 GB of WAL; on SQLite, 500,000 rows in one table
+// held the write lock for 9 s. One instance, or one scheduled job, is
+// enough to sweep: a run deletes what every instance wrote, and runs
+// from several instances at once are safe but repeat the work and
+// contend with each other.
+//
+// SQLite has one writer, and with the DSN in Setup each write
+// transaction waits for an fsync: synchronous is FULL, SQLite's default
+// (and modernc.org/sqlite's), and SQLite has no group commit. A login
+// is 13 write transactions, a refresh 3, a resource server's check of a
+// DPoP-bound token 1, so the ceiling is roughly one write transaction
+// per fsync latency (plus about 0.1 ms), from every process and DB on
+// the file together: on a Linux VM's disk, about 760 a second, which
+// made 13 logins a second one at a time and 17 at 32 concurrent (p99
+// 2.2 s). Faster
+// storage raises that in proportion; a larger pool doesn't (DB
+// serializes its writes; reads scale with cores, so keep MaxOpenConns
+// at GOMAXPROCS or more). Don't size it on macOS: fsync there doesn't
+// flush the drive's cache, so the same test ran thousands of writes a
+// second, and 33 a second with fullfsync, which does.
+//
+// synchronous(NORMAL) in the DSN takes the fsync off each commit (in
+// WAL mode, SQLite syncs at checkpoints instead): measured, 286 logins
+// a second where FULL made 17. A process crash then loses nothing and
+// the database is never corrupted, but an operating-system crash or a
+// power loss loses the last commits before it, and here a lost commit
+// can be a security event, not just lost data: a replay digest (a DPoP
+// proof or client assertion accepted again while it's fresh), a code's
+// redemption (the code redeemed again), a consumed pushed request or
+// session, or a revocation the server reported done (a revoked grant's
+// tokens accepted again). Whether that window is acceptable is the
+// operator's call; the stores declare Durable whatever the DSN says.
+//
+// Keep to one writing process per file. Writes from another — a
+// resource server in a process of its own, say, recording DPoP proofs'
+// replay digests in the server's file — wait on SQLite's busy handler,
+// which polls rather than queues: two and four processes added no
+// throughput (3,235, 3,188 and 2,851 writes a second in all), took p99
+// latency from 22 ms to as much as 1.2 s and starved one process to
+// half its share, and a long Sweep can outlast another process's busy
+// timeout, failing its requests with server_error. Several DBs writing
+// to one file in one process behave the same way, since each queues
+// only its own writes (one that writes rarely, such as a resource
+// server's DB for its DPoP nonces, costs little). Run a resource server
+// in the server's process (serverresource.NewVerifier), or use
+// PostgreSQL.
+//
+// Under continuous reads the WAL file grows past the database (58 MB
+// for a 15.5 MB database in 20 s), and a large Sweep left one of
+// 157 MB; SQLite reuses the file but never shrinks it, unless the DSN
+// sets journal_size_limit, to which it truncates the file after a
+// checkpoint:
+//
+//	sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=journal_size_limit(67108864)")
+//
+// Move to PostgreSQL for more than one server instance (server.New
+// refuses SQLite with server.DeploymentHorizontallyScaled), for a
+// writer in another process, or for more write transactions than the
+// disk's fsync allows.
+//
+// The Sealer runs on the request path for every sealed record: Seal for
+// each one written, Open for each one read, some of them inside a write
+// transaction (the Open in a consume, while it holds the row's lock,
+// and on SQLite the one write lock). It must be local and fast:
+// AESGCMSealer seals and opens a 600-byte record in about 1.2 µs, and
+// turning sealing on made no measurable difference. Don't call a key
+// management service per record, which would hold a pooled connection
+// and its locks for the call, and on SQLite every other write too (2 ms
+// a call inside the write lock is at most 500 writes a second): take
+// the key from the KMS, or unwrap it with one, once at startup, and
+// pass it to AESGCMSealer.
+//
+// AESGCMSealer's random nonces allow 2^32 seals per key (about 4.3
+// billion; see AESGCMSealer), so rotate with RotatingSealer at a
+// cadence set by your seal rate. A login seals five records (its pushed
+// request, the interaction's copy, the code's grant, an opaque access
+// token and a refresh token; fewer with JWT access tokens or no refresh
+// token), a refresh one (its opaque access token), a CIBA request two
+// and its decision one, and a relying party's session one, if it shares
+// the key. So 2,000 logins a second are 10,000 seals a second, which
+// reach 2^32 in five days, and 1,000 seals a second in seven weeks;
+// rotating at a quarter of the budget, as AESGCMSealer suggests, is
+// every 30 hours or so at 10,000 seals a second, and every 12 days at
+// 1,000. Each previous key stays in the RotatingSealer until the
+// refresh tokens it sealed expire, and an old record's Open tries the
+// current key and then each previous one in turn: cheap with AES-GCM,
+// but daily rotation under a 90-day refresh token lifetime keeps 90
+// keys.
 package sqlstore

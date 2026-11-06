@@ -43,8 +43,9 @@ type Sealer interface {
 // read and write the database forge sealed records — becomes too
 // likely. A server seals a few records per authorization (the pushed
 // request, the interaction's copy, the code, an opaque access token, a
-// refresh token) and two per refresh, so a busy one can reach 2^32 in
-// weeks: at 1,000 seals a second, in about seven weeks. Rotate the key
+// refresh token) and one per refresh (an opaque access token: refresh
+// tokens aren't rotated), so a busy one can reach 2^32 in weeks: at
+// 1,000 seals a second, in about seven weeks. Rotate the key
 // well before then (say, at a quarter of the budget, or monthly at that
 // rate), with RotatingSealer.
 //

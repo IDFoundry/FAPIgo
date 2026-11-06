@@ -353,8 +353,10 @@
 // (which would read back as U+FFFD). MarshalClientConfig writes the document from a
 // RegisteredClientConfig, ParseClientConfig reads it, and Put and
 // Delete manage rows, Put refusing a configuration
-// storage.NewRegisteredClient refuses. ResolveClient builds the client
-// on every call, so a change takes effect on the next request; a row
+// storage.NewRegisteredClient refuses. ResolveClient reads the row on
+// every call, so a change takes effect on the next request (unless
+// Options.ClientCacheTTL is set: see there), and builds the client
+// again only when the row has changed; a row
 // that doesn't make a valid client is answered as an outage
 // (ErrClientConfig, wrapping storage.ErrStoreUnavailable), not as an
 // unknown client.
@@ -371,7 +373,8 @@
 //	err = db.Clients().PutWithKeys(ctx, cfg, sqlstore.ClientKeyRegistration{JWKS: jwks})
 //
 // A client added or rekeyed at runtime authenticates with its new keys
-// on its next request, with no restart. Put registers a client with no
+// on its next request, with no restart (with Options.ClientCacheTTL
+// set, a rekey through another DB takes up to the TTL). Put registers a client with no
 // keys, replacing any (for a client that signs nothing, such as one
 // authenticating with a TLS client certificate). These members are
 // new in sqlstore v0.4: an earlier release refuses a row that has them.

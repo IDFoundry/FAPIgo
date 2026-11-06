@@ -8,10 +8,10 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// SetClientCache bounds d's client cache to max clients and sets its
+// SetClientCache bounds d's client cache to bound clients and sets its
 // clock, before d is used.
-func SetClientCache(d *DB, max int, now func() time.Time) {
-	d.clients.max = max
+func SetClientCache(d *DB, bound int, now func() time.Time) {
+	d.clients.max = bound
 	d.clients.now = now
 }
 

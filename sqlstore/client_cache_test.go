@@ -210,29 +210,33 @@ func TestClientCacheTTLKeys(t *testing.T) {
 // resolves as its row says.
 func TestClientCacheEvictionBound(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
-		ctx := context.Background()
 		for _, ttl := range []time.Duration{0, time.Hour} {
-			c := newCachePlace(t, dialect, sqlstore.Options{ClientCacheTTL: ttl})
-			const bound = 3
-			sqlstore.SetClientCache(c.d, bound, c.clock.Now)
-			source, err := c.d.ClientKeys(nil)
-			must(t, err)
-			for i := range 10 {
-				id := fapi.ClientID(fmt.Sprintf("c%d", i))
-				must(t, c.d.Clients().PutWithKeys(ctx, scoped(id, string(id)), sqlstore.ClientKeyRegistration{JWKS: clientJWKS(t, string(id))}))
-			}
-			for range 3 {
-				for i := range 10 {
-					id := fapi.ClientID(fmt.Sprintf("c%d", i))
-					wantScope(t, c.d, id, string(id))
-					wantKIDs(t, source, id, string(id))
-					if n := sqlstore.ClientCacheLen(c.d); n > bound {
-						t.Fatalf("TTL %v: cache holds %d clients, want at most %d", ttl, n, bound)
-					}
-				}
-			}
+			t.Run(ttl.String(), func(t *testing.T) { testClientCacheEvictionBound(t, dialect, ttl) })
 		}
 	})
+}
+
+func testClientCacheEvictionBound(t *testing.T, dialect sqlstore.Dialect, ttl time.Duration) {
+	ctx := context.Background()
+	c := newCachePlace(t, dialect, sqlstore.Options{ClientCacheTTL: ttl})
+	const bound = 3
+	sqlstore.SetClientCache(c.d, bound, c.clock.Now)
+	source, err := c.d.ClientKeys(nil)
+	must(t, err)
+	for i := range 10 {
+		id := fapi.ClientID(fmt.Sprintf("c%d", i))
+		must(t, c.d.Clients().PutWithKeys(ctx, scoped(id, string(id)), sqlstore.ClientKeyRegistration{JWKS: clientJWKS(t, string(id))}))
+	}
+	for range 3 {
+		for i := range 10 {
+			id := fapi.ClientID(fmt.Sprintf("c%d", i))
+			wantScope(t, c.d, id, string(id))
+			wantKIDs(t, source, id, string(id))
+			if n := sqlstore.ClientCacheLen(c.d); n > bound {
+				t.Fatalf("cache holds %d clients, want at most %d", n, bound)
+			}
+		}
+	}
 }
 
 // A row that doesn't make a valid client fails as it does uncached,

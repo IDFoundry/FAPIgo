@@ -153,11 +153,10 @@
 //     per pushed request ever completes;
 //   - a CIBA decision is an UPDATE … RETURNING that matches only a
 //     pending request, so exactly one is recorded; a poll locks the
-//     request's row (an UPDATE … RETURNING that changes nothing), then
-//     checks it, records the poll and, for an approval, marks it
-//     redeemed, in one transaction, so exactly one poll observes an
-//     approval, and the poll interval (slow_down) is checked and
-//     recorded atomically;
+//     request's row (SELECT … FOR UPDATE on PostgreSQL), then checks
+//     it, records the poll and, for an approval, marks it redeemed, in
+//     one transaction, so exactly one poll observes an approval, and
+//     the poll interval (slow_down) is checked and recorded atomically;
 //   - a relying party's session is consumed by one DELETE … RETURNING,
 //     in a transaction that also opens its record, so exactly one
 //     Consume of a state returns it;
@@ -165,7 +164,9 @@
 //     against the table's primary key (issuer, sector, subject) and its
 //     unique (issuer, sector, body), then read back: of concurrent
 //     calls for one user and sector exactly one stores its body, and a
-//     body is never another user's in the same issuer and sector.
+//     body is never another user's in the same issuer and sector (a
+//     returning user's body, which never changes, is read without the
+//     INSERT).
 //
 // On SQLite every write runs in a transaction started with BEGIN
 // IMMEDIATE. Expiry is compared against the time the server passes
@@ -462,6 +463,15 @@
 //     DPoP proof's replay digest;
 //   - a CIBA poll of a pending request: 4 statements, 1 write
 //     transaction.
+//
+// Two methods beyond the storage interfaces take a little more off,
+// with a fapigo that looks for them (storage.RevocationBatchChecker and
+// storage.IssuedTokensRecorder) and makes the separate calls otherwise:
+// RevocationStore.IsAnyRevoked checks all of a token's or grant's
+// revocation keys, current and legacy forms, in one statement rather
+// than one each, on every token request and resource-server check; and
+// GrantStore.RecordIssuedTokens records a code exchange's access and
+// refresh tokens in one UPDATE of the code's row rather than two.
 //
 // Options.ClientCacheTTL takes the client's row out of most of those:
 // with 5 seconds, a login was 24 statements, a pushed request 4 and a

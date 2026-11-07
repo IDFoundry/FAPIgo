@@ -240,8 +240,8 @@ func (r polledRow) tooSoon(now time.Time) bool {
 }
 
 // PollBackchannelAuthentication implements
-// storage.BackchannelAuthenticationStore. In one transaction, an UPDATE
-// … RETURNING that changes nothing locks the row and reads it; then the
+// storage.BackchannelAuthenticationStore. In one transaction, a SELECT
+// … FOR UPDATE (pollLockQuery) locks the row and reads it; then the
 // poll is checked (another client's, already redeemed and expired
 // requests are refused, the row left as it was), recorded — a poll
 // before the interval has elapsed is too, and gets slow_down — and, if
@@ -266,13 +266,31 @@ func (s *BackchannelAuthenticationStore) PollBackchannelAuthentication(ctx conte
 	return out, nil
 }
 
+// pollRead is the SELECT of a polled request's row, which
+// pollLockQuery locks.
+const pollRead = "SELECT client_id, handle_hash, delivery_mode, record, decision, status, redeemed, poll_interval, last_polled_at, expires_at FROM {backchannel_authentications} WHERE auth_req_id_hash = ?"
+
+// pollLockQuery is the statement that reads a polled request's row and
+// locks it until the poll's transaction ends: on PostgreSQL a SELECT …
+// FOR UPDATE, which, like an UPDATE, waits for a concurrent poll's
+// transaction and then reads the row as that one committed it (write's
+// transactions are READ COMMITTED), but writes no new row version; on
+// SQLite the plain SELECT, write's BEGIN IMMEDIATE already holding the
+// database's write lock.
+func (s *BackchannelAuthenticationStore) pollLockQuery() string {
+	if s.d.dialect == Postgres {
+		return pollRead + " FOR UPDATE"
+	}
+	return pollRead
+}
+
 // pollLocked is PollBackchannelAuthentication's transaction on q,
 // setting *refusal to the poll's refusal, if any. A refusal that leaves
 // the row as it was comes with errRefused, which rolls the transaction
 // back; slow_down comes with a nil error, so its poll is recorded.
 func (s *BackchannelAuthenticationStore) pollLocked(ctx context.Context, q querier, poll storage.PollBackchannelAuthentication, refusal *error) (storage.PolledBackchannelAuthentication, error) {
 	var r polledRow
-	if err := q.QueryRowContext(ctx, s.d.q("UPDATE {backchannel_authentications} SET sweep_after = sweep_after WHERE auth_req_id_hash = ? RETURNING client_id, handle_hash, delivery_mode, record, decision, status, redeemed, poll_interval, last_polled_at, expires_at"),
+	if err := q.QueryRowContext(ctx, s.d.q(s.pollLockQuery()),
 		poll.AuthReqIDHash[:]).Scan(&r.clientID, &r.handleHash, &r.deliveryMode, &r.record, &r.decision, &r.status, &r.redeemed, &r.interval, &r.lastPolled, &r.expires); err != nil {
 		return storage.PolledBackchannelAuthentication{}, err
 	}

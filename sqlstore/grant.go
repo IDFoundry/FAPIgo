@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -126,23 +127,38 @@ func (s *GrantStore) RecordIssuedAccessToken(ctx context.Context, codeHash [32]b
 	if !validTextKey(key) {
 		return errors.New("sqlstore: record issued access token: key isn't valid UTF-8 without NUL")
 	}
-	return s.recordIssued(ctx, "access_token", "issued_access_token_key", codeHash, key, expiresAt)
+	return s.recordIssued(ctx, "access_token", "issued_access_token_key = ?", codeHash, nanos(expiresAt), key)
 }
 
 // RecordIssuedRefreshToken implements storage.GrantStore, keeping the
 // code's row at least until the refresh token expires.
 func (s *GrantStore) RecordIssuedRefreshToken(ctx context.Context, codeHash [32]byte, refreshTokenHash [32]byte, expiresAt time.Time) error {
-	return s.recordIssued(ctx, "refresh_token", "issued_refresh_token_hash", codeHash, refreshTokenHash[:], expiresAt)
+	return s.recordIssued(ctx, "refresh_token", "issued_refresh_token_hash = ?", codeHash, nanos(expiresAt), refreshTokenHash[:])
 }
 
-// recordIssued sets column, the record of a token issued as codeHash
-// was redeemed, to value.
-func (s *GrantStore) recordIssued(ctx context.Context, what, column string, codeHash [32]byte, value any, expiresAt time.Time) error {
-	until := nanos(expiresAt)
+// RecordIssuedTokens is RecordIssuedAccessToken and
+// RecordIssuedRefreshToken together, in one UPDATE of the code's row:
+// both recorded or neither, and the row kept at least until the later
+// of the two tokens expires, as the two calls in turn would keep it.
+// The server discovers it by type assertion (fapigo's
+// storage.IssuedTokensRecorder) and makes one call where it would
+// otherwise make those two.
+func (s *GrantStore) RecordIssuedTokens(ctx context.Context, codeHash [32]byte, accessTokenKey string, accessExpiresAt time.Time, refreshTokenHash [32]byte, refreshExpiresAt time.Time) error {
+	if !validTextKey(accessTokenKey) {
+		return errors.New("sqlstore: record issued tokens: access token key isn't valid UTF-8 without NUL")
+	}
+	until := max(nanos(accessExpiresAt), nanos(refreshExpiresAt))
+	return s.recordIssued(ctx, "tokens", "issued_access_token_key = ?, issued_refresh_token_hash = ?", codeHash, until, accessTokenKey, refreshTokenHash[:])
+}
+
+// recordIssued sets the columns of set (assignments of values), the
+// record of tokens issued as codeHash was redeemed, keeping the row's
+// sweep_after at least until (Unix nanoseconds).
+func (s *GrantStore) recordIssued(ctx context.Context, what, set string, codeHash [32]byte, until int64, values ...any) error {
+	args := slices.Concat(values, []any{until, until, codeHash[:]})
 	var n int64
 	err := s.d.writeOne(ctx, func(q querier) error {
-		res, err := q.ExecContext(ctx, s.d.q("UPDATE {authorization_codes} SET "+column+" = ?, sweep_after = "+laterSweep+" WHERE code_hash = ?"),
-			value, until, until, codeHash[:])
+		res, err := q.ExecContext(ctx, s.d.q("UPDATE {authorization_codes} SET "+set+", sweep_after = "+laterSweep+" WHERE code_hash = ?"), args...)
 		if err != nil {
 			return err
 		}

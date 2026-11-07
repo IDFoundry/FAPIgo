@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.4.0...sqlstore/v0.5.0) (2026-11-07)
+
+
+### Features
+
+* **sqlstore:** cache parsed client configuration, with optional ClientCacheTTL ([75e5b38](https://github.com/IDFoundry/FAPIgo/commit/75e5b38c244f81ad7f7148f12a39aa62b9e028a8))
+
+
+### Bug Fixes
+
+* **sqlstore:** let a waiting SQLite write give up with its context ([941eb08](https://github.com/IDFoundry/FAPIgo/commit/941eb08e48bb5fe933133d0df191524d423db442))
+* **sqlstore:** page SealRecords through each table by key ([dba8a12](https://github.com/IDFoundry/FAPIgo/commit/dba8a122b0a96a82e7dccde544efd6bd3e64e9f8))
+* **sqlstore:** run single-statement Postgres writes without BEGIN/COMMIT ([5b4308a](https://github.com/IDFoundry/FAPIgo/commit/5b4308a7948603ba5d335d4274d7a3e67dc33637))
+* **sqlstore:** seal new records before starting their write ([5d6a9b3](https://github.com/IDFoundry/FAPIgo/commit/5d6a9b3f60037b51efd55eb9962865ed8632a63d))
+* **sqlstore:** sweep expired rows in short batches ([6d4f28b](https://github.com/IDFoundry/FAPIgo/commit/6d4f28b711acecd208a38b68a20fa049336f3d46))
+
 ## [0.4.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.3.0...sqlstore/v0.4.0) (2026-11-02)
 
 

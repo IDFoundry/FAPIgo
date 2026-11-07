@@ -2,6 +2,7 @@ package federation_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -104,10 +105,19 @@ func resolveWithGrantsPolicy(t *testing.T, tc grantsPolicyCase) (storage.Registe
 
 func checkGrants(t *testing.T, client storage.RegisteredClient, tc grantsPolicyCase) {
 	t.Helper()
+	var allowed []string
 	for scope, want := range tc.wantScopes {
 		if got := client.AllowsScope(scope); got != want {
 			t.Errorf("AllowsScope(%q) = %v, want %v", scope, got, want)
 		}
+		if want {
+			allowed = append(allowed, scope)
+		}
+	}
+	// The scope bound a request from the client gets counts the scopes
+	// the operator's allowlist narrowed to, not the RP's own metadata.
+	if got, want := client.AllowedScopesLength(), len(strings.Join(allowed, " ")); got != want {
+		t.Errorf("AllowedScopesLength() = %d, want %d", got, want)
 	}
 	if got := client.AllowsClientCredentialsGrant(); got != tc.wantClientCreds {
 		t.Errorf("AllowsClientCredentialsGrant() = %v, want %v", got, tc.wantClientCreds)

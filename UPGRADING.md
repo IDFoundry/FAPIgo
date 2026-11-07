@@ -43,6 +43,15 @@ with `invalid_request` a request whose:
 - `code_challenge` or `dpop_jkt` is longer than 128 bytes;
 - `max_age` is longer than 32 bytes.
 
+From the next release, `scope`'s bound is the larger of 4 KiB and the
+client's registered `AllowedScopes` joined with single spaces
+(`storage.RegisteredClient.AllowedScopesLength`), so a client
+registered for many fine-grained scopes can request all of them at
+once; a client registered for under 4 KiB of scopes keeps the 4 KiB
+bound. The same bound now also applies to the `scope` of a CIBA
+backchannel authentication request, a `client_credentials` request and
+a refresh request.
+
 A string's length is that of its value, after JSON unescaping. An
 overlong `ui_locales`, `claims_locales` or `display` isn't refused: it
 is trimmed to what `InteractionRequest` would read from it, as before.

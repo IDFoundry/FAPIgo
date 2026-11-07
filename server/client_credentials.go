@@ -85,22 +85,9 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorUnauthorizedClient, 400, "this client is not registered for the client_credentials grant", nil))
 	}
 
-	scopeTokens := strings.Fields(params["scope"])
-	if len(scopeTokens) == 0 {
-		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidScope, 400, "scope is required", nil))
-	}
-	for _, tok := range scopeTokens {
-		// No end user takes part, so there is no identity to request
-		// (an access token scoped to openid would carry the client's
-		// own ID as its subject, which a UserInfo endpoint would serve
-		// as a user's) and no refresh token to ask for: refuse both
-		// rather than issue a token whose scope claims either.
-		if tok == "openid" || tok == "offline_access" {
-			return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidScope, 400, "the client_credentials grant has no end user: "+tok+" cannot be requested", nil))
-		}
-		if !s.clientAllowsScope(client, tok) {
-			return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidScope, 400, "scope is not valid for this client", nil))
-		}
+	scopeTokens, scopeErr := s.clientCredentialsScope(client, params["scope"])
+	if scopeErr != nil {
+		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), scopeErr)
 	}
 
 	authorizationDetails, audience, audiences, grantErr := s.clientCredentialsGrant(ctx, client, params, requestedResources)
@@ -192,4 +179,32 @@ func (s *Server) clientCredentialsGrant(ctx context.Context, client storage.Regi
 	}
 	audience, audiences := s.accessTokenAudience(resources)
 	return authorizationDetails, audience, audiences, nil
+}
+
+// clientCredentialsScope is the scope values a client_credentials
+// request from client asks for: at least one, each among its allowed
+// scopes, and in all no longer than scopeBound(client), since an opaque
+// access token's record keeps the scope as requested, repeats and all.
+func (s *Server) clientCredentialsScope(client storage.RegisteredClient, scope string) ([]string, *Error) {
+	if err := checkScopeLength(len(scope), client); err != nil {
+		return nil, requestError(ErrorInvalidRequest, err)
+	}
+	scopeTokens := strings.Fields(scope)
+	if len(scopeTokens) == 0 {
+		return nil, newError(ErrorInvalidScope, 400, "scope is required", nil)
+	}
+	for _, tok := range scopeTokens {
+		// No end user takes part, so there is no identity to request
+		// (an access token scoped to openid would carry the client's
+		// own ID as its subject, which a UserInfo endpoint would serve
+		// as a user's) and no refresh token to ask for: refuse both
+		// rather than issue a token whose scope claims either.
+		if tok == "openid" || tok == "offline_access" {
+			return nil, newError(ErrorInvalidScope, 400, "the client_credentials grant has no end user: "+tok+" cannot be requested", nil)
+		}
+		if !s.clientAllowsScope(client, tok) {
+			return nil, newError(ErrorInvalidScope, 400, "scope is not valid for this client", nil)
+		}
+	}
+	return scopeTokens, nil
 }

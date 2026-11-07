@@ -214,6 +214,7 @@ type RegisteredClient struct {
 	expectedAttesterIssuer           string
 	clientAttestationAlgorithm       fapi.SignatureAlgorithm
 	allowedScopes                    map[string]struct{}
+	allowedScopesLength              int
 	authorizationDetailsTypes        map[string]struct{}
 	allowedResources                 map[string]struct{}
 
@@ -697,6 +698,7 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		expectedAttesterIssuer:                    cfg.ExpectedAttesterIssuer,
 		clientAttestationAlgorithm:                cfg.ClientAttestationAlgorithm,
 		allowedScopes:                             scopes,
+		allowedScopesLength:                       joinedLength(scopes),
 		authorizationDetailsTypes:                 rarTypes,
 		allowedResources:                          resources,
 		idTokenEncryptionKeyManagement:            cfg.IDTokenEncryptionKeyManagement,
@@ -1249,6 +1251,14 @@ func (c RegisteredClient) AllowsScope(scope string) bool {
 	return ok
 }
 
+// AllowedScopesLength is the length in bytes of this client's allowed
+// scopes, each counted once, joined with single spaces: the longest
+// scope a request naming every one of them once can carry. It is 0 for
+// a client with no allowed scopes. The server bounds a requested scope
+// by the larger of this and 4 KiB, so a client registered for many
+// fine-grained scopes can request all of them at once.
+func (c RegisteredClient) AllowedScopesLength() int { return c.allowedScopesLength }
+
 // AllowsResource reports whether this client may name resource as an
 // RFC 8707 resource indicator: always when it registered no
 // AllowedResources (the server's own acceptance then decides), and
@@ -1307,6 +1317,16 @@ func stringSet(id fapi.ClientID, what string, values []string) (map[string]struc
 		set[v] = struct{}{}
 	}
 	return set, nil
+}
+
+// joinedLength is the length of set's members joined with single
+// spaces, in any order: 0 for an empty set.
+func joinedLength(set map[string]struct{}) int {
+	n := 0
+	for v := range set {
+		n += len(v) + 1
+	}
+	return max(n-1, 0)
 }
 
 // allowedSets validates and collects cfg's AllowedScopes,

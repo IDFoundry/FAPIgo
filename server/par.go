@@ -736,8 +736,8 @@ func (s *Server) checkExtensions(ctx context.Context, client storage.RegisteredC
 // validateAuthorizationParameters checks the FAPI-mandated authorization
 // parameters (response_type, redirect_uri, PKCE, and scope if present)
 // against client, and the core parameters' sizes
-// (authorizationParameterSizes). It returns params on success with only
-// an overlong ui_locales, claims_locales or display trimmed
+// (checkAuthorizationParameterSizes). It returns params on success with
+// only an overlong ui_locales, claims_locales or display trimmed
 // (boundPresentationPreferences); every other parameter is stored as-is
 // for the authorization endpoint to interpret.
 func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessage, client storage.RegisteredClient) (map[string]json.RawMessage, *Error) {
@@ -747,7 +747,7 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 	if !client.AllowsAuthorizationCodeGrant() {
 		return nil, newError(ErrorUnauthorizedClient, 400, "the client is not registered for the authorization code grant", nil)
 	}
-	if err := checkParameterSizes(params, authorizationParameterSizes); err != nil {
+	if err := checkAuthorizationParameterSizes(params, client); err != nil {
 		return nil, requestError(ErrorInvalidRequest, err)
 	}
 	boundPresentationPreferences(params)

@@ -68,9 +68,11 @@ holds across instances.
 Unregistered parameters are ignored rather than echoed into the grant,
 and a PAR request that itself carries a `request_uri` is refused. The
 core parameters stored with the request are bounded: `state`, `nonce`,
-`scope`, `login_hint` and `acr_values` at 4 KiB each, `id_token_hint`
-at 16 KiB, `code_challenge` and `dpop_jkt` at 128 bytes, and `max_age`
-at 32; a longer one is refused with `invalid_request`. An overlong
+`login_hint` and `acr_values` at 4 KiB each, `scope` at the larger of
+4 KiB and the client's registered `AllowedScopes` joined with single
+spaces, `id_token_hint` at 16 KiB, `code_challenge` and `dpop_jkt` at
+128 bytes, and `max_age` at 32; a longer one is refused with
+`invalid_request`. An overlong
 `ui_locales`, `claims_locales` or `display` is trimmed to what the
 interaction would read from it instead, since those never fail a
 request (OIDC Core §15.1).

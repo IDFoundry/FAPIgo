@@ -296,10 +296,10 @@ role is tested against the OpenID Foundation conformance suite.
 > sides: querying a trusted resolver's resolve-as-a-service endpoint instead of
 > walking its Trust Chain hop by hop, and signing a response for an
 > embedder's own already-resolved result — and the Federation Historical
-> Keys endpoint (§8.7, `Resolver.FetchHistoricalKeys`), querying side:
-> a peer's retired keys (with their own expiry and, if applicable,
-> revocation status), to keep an older Trust Chain verifiable after key
-> rotation. **Explicit
+> Keys endpoint (§8.7, `Resolver.FetchHistoricalKeys`/`HistoricalKeysIssuer`) —
+> both sides: reading a peer's retired keys (with their own expiry and,
+> if applicable, revocation status), and signing the list of an entity's
+> own, to keep an older Trust Chain verifiable after key rotation. **Explicit
 > Registration (§12.2) is not implemented**: an
 > OP can accept RPs via Automatic Registration, but provisioning a
 > distinct `client_id`/`client_secret` through a dedicated federation

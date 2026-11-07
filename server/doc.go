@@ -11,7 +11,7 @@
 // RequestClientCredentialsToken, RevokeToken (RFC 7009 token revocation),
 // RevokeGrant, BuildAuthorizationErrorRedirect,
 // SignUserInfoResponse, Metadata, PublicJWKS and (for OpenID Federation)
-// EntityConfiguration — that only ever consume client-generated
+// EntityConfiguration and HistoricalKeys — that only ever consume client-generated
 // artefacts and validate them against server-held state and policy.
 // AuthenticateAttestedClient and VerifyTokenRequestBinding serve an
 // embedder's own grant at the token endpoint (Config.AdditionalGrantTypes)

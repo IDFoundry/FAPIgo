@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
@@ -378,7 +379,11 @@ func TestCreateHistoricalKeysResponseRejectsMissingFields(t *testing.T) {
 		"no key id":   func(p *CreateHistoricalKeysResponseParams) { p.KeyID = "" },
 		"no issuer":   func(p *CreateHistoricalKeysResponseParams) { p.Issuer = "" },
 		"zero now":    func(p *CreateHistoricalKeysResponseParams) { p.Now = time.Time{} },
-		"no keys":     func(p *CreateHistoricalKeysResponseParams) { p.Keys = nil },
+		"key: revoked without revoked_at": func(p *CreateHistoricalKeysResponseParams) {
+			k := validKey()
+			k.Revoked = &KeyRevocation{Reason: KeyRevocationReasonCompromised}
+			p.Keys = []HistoricalKeyParams{k}
+		},
 		"key: no key id": func(p *CreateHistoricalKeysResponseParams) {
 			k := validKey()
 			k.KeyID = ""
@@ -408,5 +413,57 @@ func TestCreateHistoricalKeysResponseRejectsMissingFields(t *testing.T) {
 				t.Fatalf("CreateHistoricalKeysResponse(%s) = nil error, want error", name)
 			}
 		})
+	}
+}
+
+// TestCreateHistoricalKeysResponseEmptyKeysAndOmittedReason covers two
+// encoding details of §8.7.2/§8.7.3: no keys still encodes the REQUIRED
+// "keys" claim as an empty array, never null, and a revocation with no
+// reason omits "reason" rather than publishing an empty string.
+func TestCreateHistoricalKeysResponseEmptyKeysAndOmittedReason(t *testing.T) {
+	signingKey := generateKey(t)
+	historicalKey := generateKey(t)
+	now := time.Now()
+	base := CreateHistoricalKeysResponseParams{
+		Signer: signingKey, Algorithm: fapi.ES256, KeyID: "current-key",
+		Issuer: "https://entity.example.org", Now: now,
+	}
+
+	empty, err := CreateHistoricalKeysResponse(base)
+	if err != nil {
+		t.Fatalf("CreateHistoricalKeysResponse(no keys): %v", err)
+	}
+	compact, err := jose.ParseCompact(empty)
+	if err != nil {
+		t.Fatalf("ParseCompact: %v", err)
+	}
+	if !bytes.Contains(compact.Payload, []byte(`"keys":[]`)) {
+		t.Errorf("payload = %s, want an empty keys array", compact.Payload)
+	}
+
+	base.Keys = []HistoricalKeyParams{{
+		KeyID: "old-key", Algorithm: fapi.ES256, PublicKey: &historicalKey.PublicKey, ExpiresAt: now.Add(-time.Hour),
+		Revoked: &KeyRevocation{RevokedAt: now.Add(-2 * time.Hour)},
+	}}
+	token, err := CreateHistoricalKeysResponse(base)
+	if err != nil {
+		t.Fatalf("CreateHistoricalKeysResponse(no reason): %v", err)
+	}
+	if compact, err = jose.ParseCompact(token); err != nil {
+		t.Fatalf("ParseCompact: %v", err)
+	}
+	if bytes.Contains(compact.Payload, []byte(`"reason"`)) {
+		t.Errorf("payload = %s, want no reason member", compact.Payload)
+	}
+	r, err := ParseHistoricalKeysResponse(token)
+	if err != nil {
+		t.Fatalf("ParseHistoricalKeysResponse: %v", err)
+	}
+	claims, err := r.Verify(&signingKey.PublicKey, historicalKeysVerifyPolicy(now.Add(time.Second)))
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(claims.Keys) != 1 || claims.Keys[0].Revoked == nil || claims.Keys[0].Revoked.Reason != "" {
+		t.Errorf("Keys = %+v, want one revoked key with no reason", claims.Keys)
 	}
 }

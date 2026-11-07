@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.6.0...sqlstore/v0.7.0) (2026-11-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sqlstore:** RevocationStore.IsAnyRevoked and GrantStore.RecordIssuedTokens are removed. Wire db.Revocation().Batching() and db.Grants().Batching() to keep the batched calls; the plain stores still work, with one IsRevoked per key and two RecordIssued* calls.
+
+### Features
+
+* **sqlstore:** move the batch methods onto explicit Batching adapters ([47fb10a](https://github.com/IDFoundry/FAPIgo/commit/47fb10ae0777c2b5ee02b3cccef0700d7c548392))
+
+
+### Bug Fixes
+
+* **sqlstore:** keep a late client-cache read from replacing a newer one ([944f6c5](https://github.com/IDFoundry/FAPIgo/commit/944f6c503fcd8daa1f2c673bd42604365e3f02bf))
+* **sqlstore:** key the Postgres sweep lock by schema too ([3b173aa](https://github.com/IDFoundry/FAPIgo/commit/3b173aa3bd2a3fd11e46909bd7487bd8c2524660))
+* **sqlstore:** never wait in Sweep's SQLite checkpoint ([9e25fc1](https://github.com/IDFoundry/FAPIgo/commit/9e25fc113290031249ede87f70764ffa143d00e7))
+
 ## [0.6.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.5.0...sqlstore/v0.6.0) (2026-11-07)
 
 

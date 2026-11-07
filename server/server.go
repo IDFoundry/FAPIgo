@@ -847,38 +847,14 @@ type namedSource struct {
 	source any
 }
 
-// attesterTrustSources returns the sources trust, by value or pointer,
-// draws its trust from: RegisteredAttesterKeys' key source, or
-// X5CAttesterChain's trust-anchor source (TrustAnchors or Anchors,
-// whichever is set). Nil for a nil trust.
+// attesterTrustSources returns the sources trust draws its trust from
+// (see AttesterTrust's trustSources): nil for a nil trust. New has
+// already refused a nil pointer (validateAttesterTrust).
 func attesterTrustSources(trust AttesterTrust) []namedSource {
-	switch t := trust.(type) {
-	case RegisteredAttesterKeys:
-		return []namedSource{{"attester_trust keys", t.Keys}}
-	case *RegisteredAttesterKeys:
-		if t != nil {
-			return []namedSource{{"attester_trust keys", t.Keys}}
-		}
-	case X5CAttesterChain:
-		return x5cAttesterTrustSources(t)
-	case *X5CAttesterChain:
-		if t != nil {
-			return x5cAttesterTrustSources(*t)
-		}
+	if trust == nil {
+		return nil
 	}
-	return nil
-}
-
-// x5cAttesterTrustSources returns c's trust-anchor sources.
-func x5cAttesterTrustSources(c X5CAttesterChain) []namedSource {
-	var sources []namedSource
-	if c.TrustAnchors != nil {
-		sources = append(sources, namedSource{"attester_trust trust_anchors", c.TrustAnchors})
-	}
-	if c.Anchors != nil {
-		sources = append(sources, namedSource{"attester_trust anchors", c.Anchors})
-	}
-	return sources
+	return trust.trustSources()
 }
 
 // checkProductionStateStores checks the stores holding flow state:

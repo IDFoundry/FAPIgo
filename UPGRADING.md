@@ -55,6 +55,50 @@ wrapper wasn't being consulted: wire the wrapper itself, and implement
 `IsAnyRevoked` (or `RecordIssuedTokens`) on it, consistent with its
 overrides, if you want the batched call.
 
+
+## v0.72.0
+
+### An issuer embedding `JWTAccessTokens` declares its own keys (server)
+
+**Affects:** a deployment whose `Dependencies.AccessTokens` is a type of
+its own that embeds `server.JWTAccessTokens` (by value or pointer), for
+example a wrapper adding claims or metrics. `JWTAccessTokens`,
+`OpaqueAccessTokens` and issuers that don't embed `JWTAccessTokens` are
+unaffected.
+
+**Why:** the server used to treat such a wrapper as `JWTAccessTokens`
+through Go's method promotion: it published the embedded `Keys` at the
+JWKS endpoint and, under `AssuranceProduction`, checked only their
+custody. But those keys describe what `JWTAccessTokens.IssueAccessToken`
+signs with, and the wrapper overrides that method. A wrapper that signs
+with other keys, or issues opaque tokens kept in a store of its own,
+passed the production gate with nothing it actually relies on checked —
+an in-memory token store included — and had the wrong key published.
+
+**What fails:** `New` refuses the wrapper at every assurance level,
+naming `server.AccessTokenKeyPublisher`. Under `AssuranceProduction`,
+it is also refused until it implements
+`server.AccessTokenIssuerAssurance`.
+
+**What to change:** implement `server.AccessTokenKeyPublisher` on the
+wrapper, naming the keys its access tokens are signed with. `PublicJWKS`
+publishes them, and `RevokeToken` now recognises the wrapper's access
+tokens (answering `unsupported_token_type`, as for `JWTAccessTokens`').
+A wrapper that issues no JWTs returns a nil key manager. Under
+`AssuranceProduction`, also implement `AccessTokenIssuerAssurance`,
+naming the signing keys or token store it relies on. A wrapper that
+still signs with the embedded keys needs two methods:
+
+```go
+func (w Wrapper) AccessTokenSigningKeys() (keys.KeyManager, fapi.SignatureAlgorithm) {
+	return w.Keys, w.Algorithm
+}
+
+func (w Wrapper) AccessTokenAssurance() server.AccessTokenAssurance {
+	return server.AccessTokenAssurance{SigningKeys: w.Keys}
+}
+```
+
 ## v0.71.0
 
 ### `memstore` stores no longer implement the batch methods (storage)

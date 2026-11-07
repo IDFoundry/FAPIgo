@@ -32,7 +32,8 @@ type declaringIssuer struct{ fieldWrappedIssuer }
 func (d declaringIssuer) AccessTokenAssurance() server.AccessTokenAssurance { return *d.declared }
 
 // embeddingIssuer embeds JWTAccessTokens, as a wrapper adding claims or
-// metrics might.
+// metrics might, declaring nothing of its own: refused, since only the
+// wrapper can say what its IssueAccessToken relies on.
 type embeddingIssuer struct{ server.JWTAccessTokens }
 
 func productionNew(t *testing.T, mutate func(*server.Dependencies)) error {
@@ -84,7 +85,7 @@ func TestProductionChecksCustomAccessTokenIssuers(t *testing.T) {
 		"declares keys without custody":       {declaringIssuer{fieldWrappedIssuer{inner: undeclaredKeys, declared: &server.AccessTokenAssurance{SigningKeys: undeclaredKeys.Keys}}}, true},
 		"declares a store without assurance":  {declaringIssuer{fieldWrappedIssuer{inner: jwt, declared: &server.AccessTokenAssurance{Store: memstore.NewAccessTokenStore()}}}, true},
 		"declares nothing":                    {declaringIssuer{fieldWrappedIssuer{inner: jwt, declared: &server.AccessTokenAssurance{}}}, true},
-		"embeds JWTAccessTokens with custody": {embeddingIssuer{jwt}, false},
+		"embeds JWTAccessTokens with custody": {embeddingIssuer{jwt}, true},
 		"embeds JWTAccessTokens without":      {embeddingIssuer{undeclaredKeys}, true},
 		"pointer JWTAccessTokens without":     {&undeclaredKeys, true},
 		"nil *JWTAccessTokens":                {(*server.JWTAccessTokens)(nil), true},

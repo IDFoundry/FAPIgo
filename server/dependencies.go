@@ -57,7 +57,10 @@ type Dependencies struct {
 	// JWTAccessTokens{...} (the default), OpaqueAccessTokens{...}, or
 	// your own AccessTokenIssuer. Under AssuranceProduction, your own
 	// issuer must implement AccessTokenIssuerAssurance, so New can check
-	// its signing keys and store as it checks the built-in issuers'.
+	// its signing keys and store as it checks the built-in issuers'. An
+	// issuer of your own that signs JWT access tokens implements
+	// AccessTokenKeyPublisher, so PublicJWKS publishes its keys; one
+	// embedding JWTAccessTokens must.
 	AccessTokens AccessTokenIssuer
 
 	// Audit records security-significant events. Required when

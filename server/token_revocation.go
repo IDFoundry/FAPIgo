@@ -170,30 +170,23 @@ func (s *Server) isOwnAccessToken(ctx context.Context, clientID fapi.ClientID, r
 }
 
 // isOwnJWTAccessToken reports whether rawToken is a JWT access token
-// Dependencies.AccessTokens (a JWTAccessTokens) signed with one of its
-// current keys, for this server's issuer and clientID, and not expired
-// (allowing Limits.MaxClockSkew). Only the client's own tokens are
-// reported, as isOwnOpaqueAccessToken reports only the client's own; a
-// key that can't be read counts as no.
+// Dependencies.AccessTokens signed with one of its current keys — a
+// JWTAccessTokens', or those an AccessTokenKeyPublisher names — for this
+// server's issuer and clientID, and not expired (allowing
+// Limits.MaxClockSkew). Only the client's own tokens are reported, as
+// isOwnOpaqueAccessToken reports only the client's own; a key that
+// can't be read counts as no.
 func (s *Server) isOwnJWTAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) bool {
-	var issuer JWTAccessTokens
-	switch t := s.deps.AccessTokens.(type) {
-	case JWTAccessTokens:
-		issuer = t
-	case *JWTAccessTokens:
-		if t == nil {
-			return false
-		}
-		issuer = *t
-	default:
+	signing, ok := accessTokenSigningKeys(s.deps.AccessTokens)
+	if !ok {
 		return false
 	}
 	parsed, err := token.ParseAccessToken(rawToken)
-	if err != nil || parsed.Algorithm() != issuer.Algorithm {
+	if err != nil || parsed.Algorithm() != signing.Algorithm {
 		return false
 	}
-	for _, key := range accessTokenVerificationKeys(ctx, issuer) {
-		claims, err := parsed.SignedClaims(key.PublicKey, issuer.Algorithm)
+	for _, key := range accessTokenVerificationKeys(ctx, signing) {
+		claims, err := parsed.SignedClaims(key.PublicKey, signing.Algorithm)
 		if err != nil {
 			continue
 		}
@@ -203,18 +196,18 @@ func (s *Server) isOwnJWTAccessToken(ctx context.Context, clientID fapi.ClientID
 	return false
 }
 
-// accessTokenVerificationKeys is every key issuer currently publishes for
-// access token signing: all of a keys.RotatingKeyManager's, or the one
-// keys.KeyManager.PublicKey returns.
-func accessTokenVerificationKeys(ctx context.Context, issuer JWTAccessTokens) []keys.PublicKeyInfo {
-	if rotating, ok := issuer.Keys.(keys.RotatingKeyManager); ok {
-		set, err := rotating.PublicKeys(ctx, keys.AccessTokenSigning, issuer.Algorithm)
+// accessTokenVerificationKeys is every key signing currently publishes:
+// all of a keys.RotatingKeyManager's, or the one keys.KeyManager.PublicKey
+// returns.
+func accessTokenVerificationKeys(ctx context.Context, signing keys.SigningKeyUse) []keys.PublicKeyInfo {
+	if rotating, ok := signing.Manager.(keys.RotatingKeyManager); ok {
+		set, err := rotating.PublicKeys(ctx, signing.Purpose, signing.Algorithm)
 		if err != nil {
 			return nil
 		}
 		return set.Keys
 	}
-	info, err := issuer.Keys.PublicKey(ctx, keys.AccessTokenSigning, issuer.Algorithm)
+	info, err := signing.Manager.PublicKey(ctx, signing.Purpose, signing.Algorithm)
 	if err != nil {
 		return nil
 	}

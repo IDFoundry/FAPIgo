@@ -92,8 +92,9 @@ const (
 	// HSM or KMS is not required — durable keys a deployment loads from
 	// its own storage qualify too — only that the declaration is made.
 	// A custom AccessTokenIssuer (neither JWTAccessTokens nor
-	// OpaqueAccessTokens) must implement AccessTokenIssuerAssurance,
-	// naming the signing keys or store these checks then apply to.
+	// OpaqueAccessTokens, though it may embed one) must implement
+	// AccessTokenIssuerAssurance, naming the signing keys or store these
+	// checks then apply to.
 	// With CIBA configured, Dependencies.BackchannelNotifier must
 	// implement BackchannelNotifierAssurance and declare
 	// OutboundHardened (backchannelhttp.Notifier and
@@ -263,9 +264,16 @@ func checkNotifierAssurance(notifier BackchannelNotifier) error {
 // relies on, so New can check it the way it checks JWTAccessTokens and
 // OpaqueAccessTokens. New refuses any other AccessTokenIssuer under
 // AssuranceProduction: an issuer it can't see into would otherwise skip
-// the key custody and store checks entirely. A type embedding
-// JWTAccessTokens needn't implement it; its keys are checked as
-// JWTAccessTokens' are.
+// the key custody and store checks entirely.
+//
+// A type embedding JWTAccessTokens or OpaqueAccessTokens must implement
+// it too. The embedded Keys or Store describe what the embedded type's
+// own IssueAccessToken relies on; a wrapper overriding IssueAccessToken
+// may sign with other keys or keep tokens in another store, which only
+// the wrapper can declare, so New never checks an embedded type's
+// dependencies in its place. A wrapper that still relies on exactly what
+// it embeds declares that in one line, returning
+// AccessTokenAssurance{SigningKeys: w.Keys} (or Store: w.Store).
 type AccessTokenIssuerAssurance interface {
 	AccessTokenAssurance() AccessTokenAssurance
 }
@@ -288,9 +296,10 @@ type AccessTokenAssurance struct {
 
 // productionAccessTokenAssurance returns what issuer relies on, for the
 // AssuranceProduction checks: JWTAccessTokens' signing keys and
-// OpaqueAccessTokens' store, by value or pointer; the signing keys of a
-// type embedding JWTAccessTokens; or a custom issuer's own
-// AccessTokenIssuerAssurance declaration. Any other issuer is refused.
+// OpaqueAccessTokens' store, by value or pointer, or a custom issuer's
+// own AccessTokenIssuerAssurance declaration. Any other issuer is
+// refused, including one only embedding JWTAccessTokens or
+// OpaqueAccessTokens (see AccessTokenIssuerAssurance).
 func productionAccessTokenAssurance(issuer AccessTokenIssuer) (AccessTokenAssurance, error) {
 	switch t := issuer.(type) {
 	case JWTAccessTokens:
@@ -313,8 +322,6 @@ func productionAccessTokenAssurance(issuer AccessTokenIssuer) (AccessTokenAssura
 			return AccessTokenAssurance{}, fmt.Errorf("server: dependencies: access_tokens' AccessTokenAssurance must name its SigningKeys or Store under AssuranceProduction")
 		}
 		return declared, nil
-	case accessTokenKeyPublisher:
-		return AccessTokenAssurance{SigningKeys: t.accessTokenSigningKeyUse().Manager}, nil
 	}
 	return AccessTokenAssurance{}, fmt.Errorf("server: dependencies: access_tokens must be JWTAccessTokens, OpaqueAccessTokens, or implement server.AccessTokenIssuerAssurance under AssuranceProduction")
 }

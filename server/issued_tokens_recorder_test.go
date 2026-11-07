@@ -294,3 +294,50 @@ func TestExchangeAuthorizationCodeRecordsNothingWhenIssuanceFails(t *testing.T) 
 		})
 	}
 }
+
+// loggingWriteOnlySink is a Dependencies.Revocation the server can only
+// write to — it has Revoke and no IsRevoked, so no code grant ID is
+// issued — logging what it's told to revoke in sink.
+type loggingWriteOnlySink struct{ sink *fakeRevocationSink }
+
+func (w loggingWriteOnlySink) Revoke(ctx context.Context, key string, expiresAt time.Time) error {
+	return w.sink.Revoke(ctx, key, expiresAt)
+}
+
+// TestCodeReuseDuringRefreshTokenCreationRevokesTheAccessTokenWithAWriteOnlySink:
+// with a storage.IssuedTokensRecorder grant store but a write-only
+// revocation sink, the tokens carry no code grant ID, so the exchange
+// keeps the two-call form: the access token is issued and recorded
+// before the refresh token is created. A reuse landing during
+// CreateRefreshToken then still finds the access token's key, and
+// revokes it (RFC 6749 §4.1.2).
+func TestCodeReuseDuringRefreshTokenCreationRevokesTheAccessTokenWithAWriteOnlySink(t *testing.T) {
+	h, store := newRecordingHarness(t)
+	sink := loggingWriteOnlySink{sink: h.revocation}
+	deps := h.deps
+	deps.Revocation = sink
+	srv, err := server.New(h.cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	h.server = srv
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts", "offline_access"})
+	var reuseErr error
+	store.beforeCreateRefreshToken = func() {
+		_, reuseErr = exchangeCode(t, h, code, generateKey(t))
+	}
+	first, err := exchangeCode(t, h, code, generateKey(t))
+	if err != nil {
+		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	}
+	if reuseErr == nil {
+		t.Fatal("ExchangeAuthorizationCode reusing the code mid-exchange = nil error, want error")
+	}
+	want := []string{"RecordIssuedAccessToken", "CreateRefreshToken", "RecordIssuedRefreshToken"}
+	if got := store.loggedCalls(); !slices.Equal(got, want) {
+		t.Fatalf("grant store calls = %v, want %v", got, want)
+	}
+	if jti := accessTokenJTI(t, h, first.AccessToken.Reveal()); !slices.Contains(h.revocation.all(), jti) {
+		t.Fatalf("Revoke calls = %v, want the first access token's jti %q among them", h.revocation.all(), jti)
+	}
+}

@@ -10,12 +10,15 @@ import (
 
 // IssuedTokensRecorder is an optional interface a GrantStore may
 // implement to record both tokens a code exchange issues in one write.
-// When the authorization includes "offline_access", the server issues
-// the refresh token and then the access token, and calls
-// RecordIssuedTokens once with both, in place of RecordIssuedAccessToken
-// followed later by RecordIssuedRefreshToken; without "offline_access",
-// or for a store without it, it calls RecordIssuedAccessToken alone as
-// before.
+// When the authorization includes "offline_access" and the server's
+// Dependencies.Revocation can be read (it has IsRevoked, so each token
+// carries the code's grant ID), the server issues the refresh token and
+// then the access token, and calls RecordIssuedTokens once with both, in
+// place of RecordIssuedAccessToken followed later by
+// RecordIssuedRefreshToken. Otherwise — without "offline_access", with a
+// revocation store the server can only write to, or for a store without
+// it — it makes those two calls as before (the second only with a
+// refresh token).
 //
 // RecordIssuedTokens must have exactly the effect of
 // RecordIssuedAccessToken(ctx, codeHash, accessTokenKey,

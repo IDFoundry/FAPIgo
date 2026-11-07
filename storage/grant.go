@@ -27,6 +27,19 @@ import (
 // at the cost of a reused code's tokens staying usable.
 // TestGrantStoreContract checks a store that implements it against the
 // two-call form.
+//
+// The server finds RecordIssuedTokens by type assertion, and then
+// doesn't call RecordIssuedAccessToken or RecordIssuedRefreshToken for
+// that exchange. A wrapper that embeds a store implementing it inherits
+// RecordIssuedTokens through Go's method promotion, so a wrapper
+// overriding RecordIssuedAccessToken or RecordIssuedRefreshToken is
+// bypassed: the server records through the inner store, skipping the
+// wrapper's own recording, and a reuse of the code depends on what the
+// inner store kept. A wrapper that overrides either method must also
+// override RecordIssuedTokens, or hold the inner store in a field of
+// the plain GrantStore type, so nothing is promoted.
+// TestGrantStoreContract run against the wrapper catches the mismatch
+// whenever it changes what a reuse of the code reports.
 type IssuedTokensRecorder interface {
 	RecordIssuedTokens(ctx context.Context, codeHash [32]byte, accessTokenKey string, accessExpiresAt time.Time, refreshTokenHash [32]byte, refreshExpiresAt time.Time) error
 }

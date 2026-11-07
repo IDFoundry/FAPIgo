@@ -317,3 +317,19 @@ func checkOneWinner(t *testing.T, what string, errs []error, lost func(error) bo
 		t.Errorf("%s: %d of %d concurrent calls won, want exactly 1", what, winners, len(errs))
 	}
 }
+
+// TestPostgresIsolationCheckFailureKeepsPin checks that a failed read of
+// the default isolation level is an error, and leaves a handle that
+// pinned READ COMMITTED still pinning it.
+func TestPostgresIsolationCheckFailureKeepsPin(t *testing.T) {
+	_, d := isolationPlace(t, "serializable", true)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := sqlstore.CheckIsolation(ctx, d)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CheckIsolation with a cancelled context = %v, want context.Canceled", err)
+	}
+	if !sqlstore.PinsIsolation(d) {
+		t.Fatal("PinsIsolation after a failed check = false, want true")
+	}
+}

@@ -53,3 +53,6 @@ func SweepLockKey(d *DB) int64 { return d.sweepLockKey() }
 // SweepBatchSize is how many rows each of d's Sweep transactions
 // deletes at most.
 func SweepBatchSize(d *DB) int64 { return d.sweepBatchSize() }
+
+// CheckIsolation is d's check of the database's default isolation level.
+func CheckIsolation(ctx context.Context, d *DB) error { return d.checkIsolation(ctx) }

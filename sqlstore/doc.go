@@ -462,35 +462,38 @@
 // # Performance and scaling
 //
 // The figures here are indicative, not a benchmark: measured on
-// sqlstore v0.4, and for v0.5's changes on a prototype of them with the
-// same harness, on one 8-core Xeon host shared with other load (so ±30%), with PostgreSQL 17
-// limited to 4 vCPUs and 2 GB in a Docker VM, SQLite through
-// modernc.org/sqlite, Go 1.26 and pgx through database/sql, and a
-// FAPI 2.0 login with private_key_jwt, DPoP with
-// server nonces, opaque access tokens and a refresh token. Measure your
-// own deployment; pg_stat_statements counts what each request runs.
+// sqlstore v0.7 with fapigo v0.71 (and, where they're compared, on v0.4
+// with the same harness, in interleaved runs), on one 8-core Xeon host
+// whose CPU clock throttled under sustained load, so a rate can differ
+// by up to 2x between runs and the comparisons are the firmer figures,
+// with PostgreSQL 17 limited to 4 vCPUs and 2 GB in a Docker VM, SQLite
+// through modernc.org/sqlite, Go 1.26 and pgx through database/sql, and
+// a FAPI 2.0 login with private_key_jwt, DPoP with server nonces, opaque
+// access tokens and a refresh token. Measure your own deployment;
+// pg_stat_statements counts what each request runs.
 //
 // On PostgreSQL the database is the limit, not the server instances,
 // which keep nothing between requests: under load the database's CPU
 // saturated first in every scenario, and adding instances added nothing
-// (244, 246 and 224 logins a second with 1, 2 and 4 of them). Its cost
-// is statements and commits, not query plans: every hot statement is
-// an index lookup by key, touching a few pages. A write that is one
-// statement runs on its own, without BEGIN and COMMIT, on a database
-// whose default isolation is READ COMMITTED (see Capabilities), which v0.4
-// didn't. What a request costs:
+// (about 560, 520 and 450 logins a second at 128 concurrent with 1, 2
+// and 4 of them). Its cost is statements and commits, not query plans:
+// every hot statement is an index lookup by key, touching a few pages.
+// A write that is one statement runs on its own, without BEGIN and
+// COMMIT, on a database whose default isolation is READ COMMITTED (see
+// Capabilities), which v0.4 didn't. What a request costs:
 //
 //   - a pushed authorization request: 6 statements (12 on v0.4), 3 of
 //     them writes;
 //   - a whole login (pushed request, authorization and code exchange):
 //     31 statements (55 on v0.4) and 14 write transactions, 7 of the
 //     statements reads of the client's row and 5 writes of replay
-//     digests;
-//   - a refresh: 9 statements (15 on v0.4), 3 of them writes (refresh
-//     tokens aren't rotated, as FAPI 2.0 requires);
-//   - a resource server's check of an opaque access token: about 4
-//     reads (the token and its grant's revocations), and one write for a
-//     DPoP proof's replay digest;
+//     digests; 29 statements and 13 write transactions with the
+//     Batching stores below;
+//   - a refresh: 9 statements (15 on v0.4; 8 with Batching), 3 of them
+//     writes (refresh tokens aren't rotated, as FAPI 2.0 requires);
+//   - a resource server's check of an opaque access token: 5
+//     statements, 4 reads (the token and its three revocation keys) and
+//     one write for a DPoP proof's replay digest; 3 with Batching;
 //   - a CIBA poll of a pending request: 4 statements, 1 write
 //     transaction.
 //
@@ -507,33 +510,38 @@
 // check; and RecordIssuedTokens records a code exchange's access and
 // refresh tokens in one UPDATE of the code's row rather than two. A
 // wrapper of your own over a store gets neither unless it implements
-// them itself.
+// them itself. Measured, they matter most to resource servers: a check
+// went from 5 statements to 3, with about 30% less of the database's
+// CPU per check and about 40% more checks a second at saturation. A
+// login (31 statements to 29) and a refresh (9 to 8) got a few percent
+// faster.
 //
 // Options.ClientCacheTTL takes the client's row out of most of those:
 // with 5 seconds, a login was 24 statements, a pushed request 4 and a
-// refresh 7, at the cost of a client's change made through another
-// instance (or outside this package) taking up to that long to reach
-// this one. Without it, the row is still read on every lookup, but
-// parsed again only when it changed.
+// refresh 7 (22, 4 and 6 with Batching), at the cost of a client's
+// change made through another instance (or outside this package)
+// taking up to that long to reach this one. Without it, the row is
+// still read on every lookup, but parsed again only when it changed.
 //
-// On v0.4 the 4-vCPU database saturated at about 380 logins, 1,600
-// pushed requests, 1,300 refreshes or 9,000 opaque access-token lookups
-// (with their revocation checks) a second, at about 19 ms of its CPU
-// per login and 5 per refresh, inflated by the VM's costly system
-// calls: dedicated hardware should need less per statement. v0.5's
-// changes, on the same setup, took about a quarter off the database's
-// CPU per login, and raised logins a second by about a third and
-// pushed requests and refreshes by about half. Size the database's CPU
-// from your request rates and those costs; it scales with cores, not
-// with server instances.
+// The 4-vCPU database saturated at about 740 logins, 3,500 pushed
+// requests, 2,300 refreshes or 4,500 resource-server checks a second
+// (760, 3,500, 2,400 and 6,200 with Batching), at about 5.5 ms of its
+// CPU per login, 1.7 per refresh, 1 per pushed request and 0.9 per
+// check (0.6 with Batching), inflated by the VM's costly system calls:
+// dedicated hardware should need less per statement. Against v0.4 in
+// interleaved runs on the same setup, v0.5's changes took a fifth to a
+// quarter off the database's CPU per login, and raised logins a second
+// by a fifth to a third, pushed requests by up to a third and refreshes
+// by about 40%. Size the database's CPU from your request rates and
+// those costs; it scales with cores, not with server instances.
 //
 // Size the connection pool explicitly, on every instance: database/sql's
 // defaults are wrong for this load. Its MaxIdleConns of 2 keeps at most
 // two connections idle, closing any other a request gives back, so most
 // requests open a new one (a new backend process, and pgx preparing its
-// statements again): at 32 concurrent logins that cut throughput from 214 to 47 a
-// second and raised the database's CPU per login from 19 to 85 ms. Its
-// unlimited MaxOpenConns let 128 concurrent callers exceed
+// statements again): at 32 concurrent logins that cut throughput from
+// 417 to 70 a second and raised the database's CPU per login from 10 to
+// 57 ms. Its unlimited MaxOpenConns let 128 concurrent callers exceed
 // max_connections (100), and about one call in ten failed as an outage.
 // So:
 //
@@ -605,21 +613,22 @@
 // SQLite has one writer, and with the DSN in Setup each write
 // transaction waits for an fsync: synchronous is FULL, SQLite's default
 // (and modernc.org/sqlite's), and SQLite has no group commit. A login
-// is 13 write transactions, a refresh 3, a resource server's check of a
-// DPoP-bound token 1, so the ceiling is roughly one write transaction
-// per fsync latency (plus about 0.1 ms), from every process and DB on
-// the file together: on a Linux VM's disk, about 760 a second, which
-// made 13 logins a second one at a time and 17 at 32 concurrent (p99
-// 2.2 s). Faster
-// storage raises that in proportion; a larger pool doesn't (DB
-// serializes its writes; reads scale with cores, so keep MaxOpenConns
-// at GOMAXPROCS or more). Don't size it on macOS: fsync there doesn't
-// flush the drive's cache, so the same test ran thousands of writes a
-// second, and 33 a second with fullfsync, which does.
+// is 13 write transactions (12 with Batching), a refresh 3, a resource
+// server's check of a DPoP-bound token 1, so the ceiling is roughly one
+// write transaction per fsync latency (plus about 0.1 ms), from every
+// process and DB on the file together: on a Linux VM's disk, about 850
+// to 1,050 a second, which made about 55 logins a second, one at a time
+// or 32 concurrent (p99 0.63 s at 32), 220 refreshes or 590
+// resource-server checks. Faster storage raises that in proportion; a
+// larger pool doesn't (DB serializes its writes; reads scale with
+// cores, so keep MaxOpenConns at GOMAXPROCS or more). Don't size it on
+// macOS: fsync there doesn't flush the drive's cache, so the same test
+// ran thousands of writes a second, and 52 a second with fullfsync,
+// which does (4 logins a second).
 //
 // synchronous(NORMAL) in the DSN takes the fsync off each commit (in
-// WAL mode, SQLite syncs at checkpoints instead): measured, 286 logins
-// a second where FULL made 17. A process crash then loses nothing and
+// WAL mode, SQLite syncs at checkpoints instead): measured, 241 logins
+// a second where FULL made 56. A process crash then loses nothing and
 // the database is never corrupted, but an operating-system crash or a
 // power loss loses the last commits before it, and here a lost commit
 // can be a security event, not just lost data: a replay digest (a DPoP
@@ -632,16 +641,16 @@
 // Keep to one writing process per file. Writes from another — a
 // resource server in a process of its own, say, recording DPoP proofs'
 // replay digests in the server's file — wait on SQLite's busy handler,
-// which polls rather than queues: two and four processes added no
-// throughput (3,235, 3,188 and 2,851 writes a second in all), took p99
-// latency from 22 ms to as much as 1.2 s and starved one process to
-// half its share, and a long Sweep can outlast another process's busy
-// timeout, failing its requests with server_error. Several DBs writing
-// to one file in one process behave the same way, since each queues
-// only its own writes (one that writes rarely, such as a resource
-// server's DB for its DPoP nonces, costs little). Run a resource server
-// in the server's process (serverresource.NewVerifier), or use
-// PostgreSQL.
+// which polls rather than queues: on v0.4, two and four processes
+// added no throughput (3,235, 3,188 and 2,851 writes a second in all),
+// took p99 latency from 22 ms to as much as 1.2 s and starved one
+// process to half its share, and a long Sweep can outlast another
+// process's busy timeout, failing its requests with server_error.
+// Several DBs writing to one file in one process behave the same way,
+// since each queues only its own writes (one that writes rarely, such
+// as a resource server's DB for its DPoP nonces, costs little). Run a
+// resource server in the server's process (serverresource.NewVerifier),
+// or use PostgreSQL.
 //
 // Under continuous reads the WAL file grows past the database (58 MB
 // for a 15.5 MB database in 20 s), and a large Sweep left one of

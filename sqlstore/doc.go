@@ -21,16 +21,16 @@
 //	deps := server.Dependencies{
 //		Clients:      db.Clients(),
 //		Transactions: db.Transactions(),
-//		Grants:       db.Grants().Batching(),
+//		Grants:       db.BatchingGrants(),
 //		Replay:       db.Replay(),
 //		Nonces:       db.Nonces(),
-//		Revocation:   db.Revocation().Batching(),
+//		Revocation:   db.BatchingRevocation(),
 //		// ...
 //	}
 //
-// (Batching adds the batch methods the server looks for — see
-// Performance and scaling; db.Grants() and db.Revocation() alone work
-// too, a few statements a request slower.)
+// (BatchingGrants and BatchingRevocation add the batch methods the
+// server looks for — see Performance and scaling; db.Grants() and
+// db.Revocation() alone work too, a few statements a request slower.)
 //
 // and, for the features that need one, its store:
 //
@@ -82,7 +82,7 @@
 //	deps := resource.Dependencies{
 //		AccessTokens: resource.OpaqueAccessTokens{Store: stores.AccessTokens, Issuer: issuer, Audience: audience}, // or JWTAccessTokens
 //		Replay:       stores.Replay,
-//		Revocation:   stores.Revocation.Batching(),
+//		Revocation:   stores.BatchingRevocation,
 //		Nonces:       stores.Nonces,
 //		// ...
 //	}
@@ -492,11 +492,11 @@
 // Two methods beyond the storage interfaces take a little more off,
 // with a fapigo that looks for them (storage.RevocationBatchChecker and
 // storage.IssuedTokensRecorder) and makes the separate calls otherwise.
-// They're on what RevocationStore.Batching and GrantStore.Batching
-// return, not on the stores, so a deployment's own wrapper that embeds
-// a store and overrides its single-key methods can't inherit them by
-// accident and have the server bypass its overrides; wire those for
-// them (as Setup does). IsAnyRevoked checks all of a token's or
+// They're on what DB.BatchingRevocation and DB.BatchingGrants return,
+// not on the stores, so a deployment's own wrapper that embeds a store
+// and overrides its single-key methods can't inherit them, or a way to
+// them, by accident and have the server bypass its overrides; wire
+// those for them (as Setup does). IsAnyRevoked checks all of a token's or
 // grant's revocation keys, current and legacy forms, in one statement
 // rather than one each, on every token request and resource-server
 // check; and RecordIssuedTokens records a code exchange's access and

@@ -15,6 +15,46 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## sqlstore v0.8.0
+
+### The batching adapters move from the stores to `DB` (sqlstore)
+
+**Affects:** a deployment calling `Revocation().Batching()` or
+`Grants().Batching()`, or `stores.Revocation.Batching()` on what
+`sqlstore.ResourceServer` returns — the wiring sqlstore v0.7.0
+recommended.
+
+**Why:** `Batching()` was itself a method of `*sqlstore.RevocationStore`
+and `*sqlstore.GrantStore`, so it was promoted into any wrapper that
+embeds one, as `IsAnyRevoked` had been before v0.7.0. On such a wrapper
+(tenant prefixing, a cache, a fallback), `wrapper.Batching()` reads as
+"batch this wrapper" but returned the inner store's adapter, without
+the wrapper's overrides: its `IsRevoked` and `IsAnyRevoked` answered
+from the inner store, so a token or grant the wrapper revoked read as
+not revoked, and its `RecordIssuedTokens` skipped `RecordIssued*`
+overrides. The adapters are now reached through the `DB`, which a store
+wrapper doesn't embed.
+
+**What fails:** a call to `Batching()` on a store doesn't compile.
+Nothing changes at runtime once it's rewired.
+
+**What to change:**
+
+```go
+deps := server.Dependencies{
+	Grants:     db.BatchingGrants(),     // was db.Grants().Batching()
+	Revocation: db.BatchingRevocation(), // was db.Revocation().Batching()
+	// …
+}
+stores, err := sqlstore.ResourceServer(serverDB, rsDB)
+rsDeps := resource.Dependencies{Revocation: stores.BatchingRevocation /* was stores.Revocation.Batching() */}
+```
+
+If you called `wrapper.Batching()` on a wrapper of your own, that
+wrapper wasn't being consulted: wire the wrapper itself, and implement
+`IsAnyRevoked` (or `RecordIssuedTokens`) on it, consistent with its
+overrides, if you want the batched call.
+
 ## v0.71.0
 
 ### `memstore` stores no longer implement the batch methods (storage)
@@ -55,9 +95,10 @@ run against the wrapper, catch a batch method whose results disagree
 with its per-key overrides'.
 
 `sqlstore` does the same from sqlstore v0.7.0: its stores expose the
-batch methods only through an explicit `Batching()` adapter, so a
-wrapper embedding them no longer inherits them; use the adapter where
-you want the batched calls.
+batch methods only through an explicit adapter, so a wrapper embedding
+them no longer inherits them; use the adapter where you want the
+batched calls (from sqlstore v0.8.0, `db.BatchingRevocation()` and
+`db.BatchingGrants()`).
 
 ## sqlstore v0.7.0
 
@@ -88,17 +129,12 @@ Nothing else fails: a server given `db.Revocation()` and `db.Grants()`
 as before gets the same answers, from one `IsRevoked` per key and the
 two `RecordIssued*` calls, a few more statements per request.
 
-**What to change:** wire the adapters where you want the batched calls:
-
-```go
-deps := server.Dependencies{
-	Grants:     db.Grants().Batching(),
-	Revocation: db.Revocation().Batching(),
-	// …
-}
-stores, err := sqlstore.ResourceServer(serverDB, rsDB)
-rsDeps := resource.Dependencies{Revocation: stores.Revocation.Batching() /* … */}
-```
+**What to change:** wire the adapters where you want the batched calls.
+Upgrade straight to sqlstore v0.8.0 and use its accessors,
+`db.BatchingRevocation()`, `db.BatchingGrants()` and
+`stores.BatchingRevocation` — see [sqlstore v0.8.0](#sqlstore-v080).
+v0.7.0's `Revocation().Batching()` and `Grants().Batching()` were
+promoted into wrappers embedding the stores, and are removed there.
 
 A wrapper of your own keeps embedding `*sqlstore.RevocationStore` or
 `*sqlstore.GrantStore` and now gets no batch method; to keep batching,

@@ -589,10 +589,10 @@ mapping, err := pairwise.NewMapping(db.PairwiseSubjects())          // only for 
 deps := server.Dependencies{
 	Clients:                db.Clients(),
 	Transactions:           db.Transactions(),
-	Grants:                 db.Grants().Batching(), // Batching: one statement where a few would do
+	Grants:                 db.BatchingGrants(), // batching: one statement where a few would do
 	Replay:                 db.Replay(),
 	Nonces:                 db.Nonces(),
-	Revocation:             db.Revocation().Batching(),
+	Revocation:             db.BatchingRevocation(),
 	AccessTokens:           accessTokens,
 	Backchannel:            db.Backchannel(), // only for CIBA
 	PairwiseSubjects:       mapping,

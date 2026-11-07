@@ -59,6 +59,53 @@ batch methods only through an explicit `Batching()` adapter, so a
 wrapper embedding them no longer inherits them; use the adapter where
 you want the batched calls.
 
+## sqlstore v0.7.0
+
+### The batch methods move to `Batching()` (sqlstore)
+
+**Affects:** a deployment using `sqlstore` v0.6.0's
+`RevocationStore.IsAnyRevoked` or `GrantStore.RecordIssuedTokens`, or
+wiring `db.Revocation()` and `db.Grants()` into `server.Dependencies`
+(or `resource.Dependencies`) and wanting their batched calls.
+
+**Why:** with the methods on the store types, a deployment's own
+wrapper that embeds `*sqlstore.RevocationStore` and overrides
+`IsRevoked` (a cache in front of a shared store, tenant prefixing, a
+fallback) inherited `IsAnyRevoked` by promotion. The wrapper was then a
+`storage.RevocationBatchChecker`, and the server and resource verifier
+asked the inner store directly, bypassing the override: a grant the
+override reports revoked could still be refreshed. A wrapper embedding
+`*sqlstore.GrantStore` and overriding `RecordIssuedAccessToken` or
+`RecordIssuedRefreshToken` had its overrides skipped the same way,
+through `RecordIssuedTokens`. The batch methods are now only on what
+`Revocation().Batching()` and `Grants().Batching()` return, typed as
+the plain `storage.RevocationStore` and `storage.GrantStore`, so
+embedding never opts a wrapper in.
+
+**What fails:** a call to `IsAnyRevoked` on a `*sqlstore.RevocationStore`
+or to `RecordIssuedTokens` on a `*sqlstore.GrantStore` doesn't compile.
+Nothing else fails: a server given `db.Revocation()` and `db.Grants()`
+as before gets the same answers, from one `IsRevoked` per key and the
+two `RecordIssued*` calls, a few more statements per request.
+
+**What to change:** wire the adapters where you want the batched calls:
+
+```go
+deps := server.Dependencies{
+	Grants:     db.Grants().Batching(),
+	Revocation: db.Revocation().Batching(),
+	// …
+}
+stores, err := sqlstore.ResourceServer(serverDB, rsDB)
+rsDeps := resource.Dependencies{Revocation: stores.Revocation.Batching() /* … */}
+```
+
+A wrapper of your own keeps embedding `*sqlstore.RevocationStore` or
+`*sqlstore.GrantStore` and now gets no batch method; to keep batching,
+implement `IsAnyRevoked` or `RecordIssuedTokens` on the wrapper itself,
+consistent with its overrides, and run `storage.TestRevocationStoreContract`
+or `storage.TestGrantStoreContract` against it.
+
 ## v0.69.0
 
 ### Pushed requests: core parameter size bounds, and at most eight interactions per `request_uri` (server)

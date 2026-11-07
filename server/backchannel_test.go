@@ -464,7 +464,7 @@ func newHarnessWithBackchannelPing(t *testing.T) (harness, *memstore.Backchannel
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, key: key, serverKey: serverKey, now: now}, backchannel, notifier
+	return harness{server: srv, key: key, serverKey: serverKey, now: now, cfg: cfg, deps: deps}, backchannel, notifier
 }
 
 // backchannelRequestObject builds a signed CIBA backchannel

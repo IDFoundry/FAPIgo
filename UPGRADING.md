@@ -99,6 +99,28 @@ func (w Wrapper) AccessTokenAssurance() server.AccessTokenAssurance {
 }
 ```
 
+### A notifier embedding `NoBackchannelNotifications` declines ping (server)
+
+**Affects:** a deployment whose `Dependencies.BackchannelNotifier` is a
+type of its own that embeds `server.NoBackchannelNotifications` and
+overrides `Notify` to send CIBA ping notifications.
+
+**Why:** such a notifier inherited `NoBackchannelNotifications`'
+`BackchannelNotifierAssurance` declaration, `OutboundHardened`, which is
+true only because that type sends nothing. A notifier sending to
+clients' `client_notification_endpoint` over an unhardened HTTP client
+passed the production gate on that inherited claim, while ping was
+still advertised.
+
+**What fails:** nothing at startup. The server treats the notifier as
+declining ping, as it treats `NoBackchannelNotifications`: metadata
+advertises `poll` alone, a client registered for ping is refused with
+`unauthorized_client`, and `Notify` is never called.
+
+**What to change:** a notifier that sends must not embed
+`NoBackchannelNotifications`. Use `backchannelhttp.Notifier`, or a
+notifier of your own implementing `BackchannelNotifierAssurance` itself.
+
 ## v0.71.0
 
 ### `memstore` stores no longer implement the batch methods (storage)

@@ -250,7 +250,9 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 // notifyBackchannelPing tells a ping client its request was decided,
 // whatever the outcome, best-effort: a ping client may also poll.
 func (s *Server) notifyBackchannelPing(ctx context.Context, decided storage.DecidedBackchannelAuthentication) {
-	if decided.DeliveryMode != "ping" {
+	if decided.DeliveryMode != "ping" || !s.backchannelPingSupported() {
+		// A request begun for ping before the server declined ping
+		// delivery is left to poll, as the client may.
 		return
 	}
 	if regClient, resolveErr := s.deps.Clients.ResolveClient(ctx, decided.ClientID); resolveErr == nil {

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.71.0](https://github.com/IDFoundry/FAPIgo/compare/v0.70.0...v0.71.0) (2026-11-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **memstore:** memstore.RevocationStore no longer has IsAnyRevoked and memstore.GrantStore no longer has RecordIssuedTokens, so neither implements storage.RevocationBatchChecker or storage.IssuedTokensRecorder. Call IsRevoked per key, or RecordIssuedAccessToken then RecordIssuedRefreshToken, in their place.
+
+### Features
+
+* **memstore:** drop the batch methods from the in-memory stores ([0a5103c](https://github.com/IDFoundry/FAPIgo/commit/0a5103cbc21740a3957695155f02f7df6a757aa7))
+
+
+### Bug Fixes
+
+* **server:** keep the two-call record order without a code grant ID ([09673bf](https://github.com/IDFoundry/FAPIgo/commit/09673bf9c57ca6d6585c4751d94475454c7bbb54))
+
 ## [0.70.0](https://github.com/IDFoundry/FAPIgo/compare/v0.69.0...v0.70.0) (2026-11-07)
 
 

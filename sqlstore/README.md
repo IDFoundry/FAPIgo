@@ -33,10 +33,10 @@ if err := db.Migrate(ctx); err != nil { … } // or CheckSchema, if a deployment
 deps := server.Dependencies{
 	Clients:      db.Clients(),
 	Transactions: db.Transactions(),
-	Grants:       db.Grants(),
+	Grants:       db.Grants().Batching(), // Batching: see "Performance and scaling"
 	Replay:       db.Replay(),
 	Nonces:       db.Nonces(),
-	Revocation:   db.Revocation(),
+	Revocation:   db.Revocation().Batching(),
 	// …
 }
 
@@ -123,6 +123,15 @@ upgrading every instance to re-seal them in the current format (byte 3)
 and bind them too. Upgrade every instance sharing a database at once: a
 v0.2 instance can't open what an upgraded one seals, and rolling back
 to v0.2 leaves the records sealed since unreadable.
+
+## Upgrading from v0.6
+
+v0.7 moves `RevocationStore.IsAnyRevoked` and
+`GrantStore.RecordIssuedTokens` onto what `Revocation().Batching()` and
+`Grants().Batching()` return, so a wrapper embedding a store can't
+inherit them and have the server bypass its overrides. Wire
+`db.Revocation().Batching()` and `db.Grants().Batching()` to keep the
+batched calls; see [UPGRADING.md](../UPGRADING.md#sqlstore-v070).
 
 ## Upgrading from v0.3
 
@@ -225,7 +234,7 @@ between instances: use SQLite there.
   deps := resource.Dependencies{
   	AccessTokens: resource.OpaqueAccessTokens{Store: stores.AccessTokens, Issuer: issuer, Audience: audience}, // or JWTs
   	Replay:       stores.Replay,
-  	Revocation:   stores.Revocation,
+  	Revocation:   stores.Revocation.Batching(),
   	Nonces:       stores.Nonces,
   	// …
   }
@@ -278,6 +287,15 @@ and measure your own deployment.
   difference; v0.5's changes raised logins by about a third and
   refreshes by about half. Size the database's CPU for your request
   rates.
+- **Wire `Grants().Batching()` and `Revocation().Batching()`.** They add
+  the batch methods the server and resource servers look for
+  (`storage.IssuedTokensRecorder`, `storage.RevocationBatchChecker`): a
+  code exchange records its tokens in one `UPDATE` rather than two, and
+  a token's or grant's revocation keys are checked in one statement
+  rather than one each. They're kept off the stores themselves so that
+  a wrapper of your own embedding `*GrantStore` or `*RevocationStore`
+  and overriding its single-key methods can't inherit them and have
+  the server bypass its overrides.
 - **`Options.ClientCacheTTL`** skips re-reading a client's row within
   the TTL (a login drops to 24 statements with 5 s), at the cost of a
   change made through another instance taking up to the TTL to apply.

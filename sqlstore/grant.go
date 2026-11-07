@@ -136,14 +136,40 @@ func (s *GrantStore) RecordIssuedRefreshToken(ctx context.Context, codeHash [32]
 	return s.recordIssued(ctx, "refresh_token", "issued_refresh_token_hash = ?", codeHash, nanos(expiresAt), refreshTokenHash[:])
 }
 
-// RecordIssuedTokens is RecordIssuedAccessToken and
+// Batching returns s as a storage.GrantStore that is also a
+// storage.IssuedTokensRecorder, for server.Dependencies.Grants:
+//
+//	Grants: db.Grants().Batching(),
+//
+// Its RecordIssuedTokens is RecordIssuedAccessToken and
 // RecordIssuedRefreshToken together, in one UPDATE of the code's row:
 // both recorded or neither, and the row kept at least until the later
 // of the two tokens expires, as the two calls in turn would keep it.
-// The server discovers it by type assertion (fapigo's
-// storage.IssuedTokensRecorder) and makes one call where it would
-// otherwise make those two.
-func (s *GrantStore) RecordIssuedTokens(ctx context.Context, codeHash [32]byte, accessTokenKey string, accessExpiresAt time.Time, refreshTokenHash [32]byte, refreshExpiresAt time.Time) error {
+// The server discovers it by type assertion and makes one call where it
+// would otherwise make those two. It's otherwise s, a
+// storage.StoreAssurance with s's Capabilities.
+//
+// It's a method returning an interface, rather than a method of s, so
+// that only a deployment asking for it gets it: a wrapper of its own
+// that embeds *GrantStore and overrides RecordIssuedAccessToken or
+// RecordIssuedRefreshToken would otherwise inherit RecordIssuedTokens
+// by promotion, and the server would call that, past the overrides. A
+// wrapper embedding what Batching returns, a storage.GrantStore, isn't
+// an IssuedTokensRecorder unless it implements RecordIssuedTokens
+// itself.
+func (s *GrantStore) Batching() storage.GrantStore { return batchingGrantStore{s} }
+
+// batchingGrantStore is GrantStore.Batching's store.
+type batchingGrantStore struct{ *GrantStore }
+
+// RecordIssuedTokens implements storage.IssuedTokensRecorder — see
+// GrantStore.Batching.
+func (b batchingGrantStore) RecordIssuedTokens(ctx context.Context, codeHash [32]byte, accessTokenKey string, accessExpiresAt time.Time, refreshTokenHash [32]byte, refreshExpiresAt time.Time) error {
+	return b.recordIssuedTokens(ctx, codeHash, accessTokenKey, accessExpiresAt, refreshTokenHash, refreshExpiresAt)
+}
+
+// recordIssuedTokens is batchingGrantStore's RecordIssuedTokens.
+func (s *GrantStore) recordIssuedTokens(ctx context.Context, codeHash [32]byte, accessTokenKey string, accessExpiresAt time.Time, refreshTokenHash [32]byte, refreshExpiresAt time.Time) error {
 	if !validTextKey(accessTokenKey) {
 		return errors.New("sqlstore: record issued tokens: access token key isn't valid UTF-8 without NUL")
 	}

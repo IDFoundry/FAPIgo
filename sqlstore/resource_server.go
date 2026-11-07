@@ -7,9 +7,10 @@ import "errors"
 // process uses serverresource.NewVerifier, which takes the server's
 // Dependencies): ResourceServer returns them.
 type ResourceServerStores struct {
-	// Revocation is resource.Dependencies.Revocation: the server's
-	// revocations, which server.Server.RevokeGrant and a reused
-	// authorization code record.
+	// Revocation is resource.Dependencies.Revocation (as
+	// Revocation.Batching(), which checks a token's keys in one
+	// statement): the server's revocations, which
+	// server.Server.RevokeGrant and a reused authorization code record.
 	Revocation *RevocationStore
 
 	// Replay is resource.Dependencies.Replay: the server's replay

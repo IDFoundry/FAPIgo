@@ -21,12 +21,16 @@
 //	deps := server.Dependencies{
 //		Clients:      db.Clients(),
 //		Transactions: db.Transactions(),
-//		Grants:       db.Grants(),
+//		Grants:       db.Grants().Batching(),
 //		Replay:       db.Replay(),
 //		Nonces:       db.Nonces(),
-//		Revocation:   db.Revocation(),
+//		Revocation:   db.Revocation().Batching(),
 //		// ...
 //	}
+//
+// (Batching adds the batch methods the server looks for — see
+// Performance and scaling; db.Grants() and db.Revocation() alone work
+// too, a few statements a request slower.)
 //
 // and, for the features that need one, its store:
 //
@@ -78,7 +82,7 @@
 //	deps := resource.Dependencies{
 //		AccessTokens: resource.OpaqueAccessTokens{Store: stores.AccessTokens, Issuer: issuer, Audience: audience}, // or JWTAccessTokens
 //		Replay:       stores.Replay,
-//		Revocation:   stores.Revocation,
+//		Revocation:   stores.Revocation.Batching(),
 //		Nonces:       stores.Nonces,
 //		// ...
 //	}
@@ -487,12 +491,18 @@
 //
 // Two methods beyond the storage interfaces take a little more off,
 // with a fapigo that looks for them (storage.RevocationBatchChecker and
-// storage.IssuedTokensRecorder) and makes the separate calls otherwise:
-// RevocationStore.IsAnyRevoked checks all of a token's or grant's
-// revocation keys, current and legacy forms, in one statement rather
-// than one each, on every token request and resource-server check; and
-// GrantStore.RecordIssuedTokens records a code exchange's access and
-// refresh tokens in one UPDATE of the code's row rather than two.
+// storage.IssuedTokensRecorder) and makes the separate calls otherwise.
+// They're on what RevocationStore.Batching and GrantStore.Batching
+// return, not on the stores, so a deployment's own wrapper that embeds
+// a store and overrides its single-key methods can't inherit them by
+// accident and have the server bypass its overrides; wire those for
+// them (as Setup does). IsAnyRevoked checks all of a token's or
+// grant's revocation keys, current and legacy forms, in one statement
+// rather than one each, on every token request and resource-server
+// check; and RecordIssuedTokens records a code exchange's access and
+// refresh tokens in one UPDATE of the code's row rather than two. A
+// wrapper of your own over a store gets neither unless it implements
+// them itself.
 //
 // Options.ClientCacheTTL takes the client's row out of most of those:
 // with 5 seconds, a login was 24 statements, a pushed request 4 and a

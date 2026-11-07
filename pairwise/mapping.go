@@ -61,6 +61,13 @@ func newMapping(store storage.PairwiseSubjectStore, random io.Reader) (*MappingD
 // MappingDeriver is the store-backed Deriver NewMapping returns. It also
 // implements Lookup, so a deployment using it has reversible pairwise
 // subs.
+//
+// A type embedding it inherits LookupInternalSubject, which maps back
+// only the bodies in its store. A wrapper overriding
+// DerivePairwiseSubject (keeping some users' earlier subs, say) must
+// override LookupInternalSubject consistently, or hold the deriver in a
+// named field so the wrapper isn't a Lookup at all; otherwise the subs
+// it derives itself fail to resolve.
 type MappingDeriver struct {
 	store  storage.PairwiseSubjectStore
 	random io.Reader
@@ -124,7 +131,9 @@ func (d *MappingDeriver) LookupInternalSubject(ctx context.Context, issuer, sect
 // KeyCustody implements keys.KeyCustodyAssurance with the store's own
 // declaration, when it makes one (storage.StoreAssurance), or none: the
 // store is what a mapping deriver's identifiers depend on, as a key is
-// for a deriving one.
+// for a deriving one. That describes d's own store: a wrapper overriding
+// DerivePairwiseSubject to keep mappings elsewhere must override this
+// too (see keys.KeyCustodyAssurance).
 func (d *MappingDeriver) KeyCustody() keys.KeyCustody {
 	asserter, ok := d.store.(storage.StoreAssurance)
 	if !ok {

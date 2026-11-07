@@ -144,7 +144,9 @@ func (d *HMACDeriver) DerivePairwiseSubject(ctx context.Context, in Input) (stri
 }
 
 // KeyCustody implements keys.KeyCustodyAssurance: the custody NewHMAC's
-// options declared, or none.
+// options declared, or none. That describes d's own key: a wrapper
+// overriding DerivePairwiseSubject to derive with another must override
+// this too (see keys.KeyCustodyAssurance).
 func (d *HMACDeriver) KeyCustody() keys.KeyCustody { return d.custody }
 
 // writeLengthPrefixed writes field to w (a hash, or a buffer that

@@ -528,7 +528,9 @@ func (a StaticAttesterAnchors) AttesterAnchors(context.Context, storage.Register
 
 // Capabilities implements keys.KeySourceAssurance: StaticAttesterAnchors
 // fetches nothing, so it declares LiveFetchHardened, as
-// AssuranceProduction requires of X5CAttesterChain's anchor source.
+// AssuranceProduction requires of X5CAttesterChain's anchor source. That
+// describes its own AttesterAnchors: a wrapper overriding it to fetch
+// must override Capabilities too (see keys.KeySourceAssurance).
 func (StaticAttesterAnchors) Capabilities() keys.KeySourceCapabilities {
 	return keys.KeySourceCapabilities{LiveFetchHardened: true}
 }
@@ -571,7 +573,9 @@ func (a StaticAttesterTrustAnchors) TrustAnchors(context.Context, storage.Regist
 // Capabilities implements keys.KeySourceAssurance:
 // StaticAttesterTrustAnchors fetches nothing, so it declares
 // LiveFetchHardened, as AssuranceProduction requires of
-// X5CAttesterChain's trust-anchor source.
+// X5CAttesterChain's trust-anchor source. That describes its own
+// TrustAnchors: a wrapper overriding it to fetch must override
+// Capabilities too (see keys.KeySourceAssurance).
 func (StaticAttesterTrustAnchors) Capabilities() keys.KeySourceCapabilities {
 	return keys.KeySourceCapabilities{LiveFetchHardened: true}
 }

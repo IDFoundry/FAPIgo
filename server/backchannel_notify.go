@@ -148,6 +148,15 @@ func (NoBackchannelNotifications) BackchannelNotifierCapabilities() BackchannelN
 // metadata, so an unguarded HTTP client sending to it is a server-side
 // request forgery vector this package can't otherwise see.
 // backchannelhttp.Notifier and NoBackchannelNotifications declare it.
+//
+// A declaration describes the declaring type's own behaviour. A notifier
+// embedding one that declares it inherits the declaration through Go's
+// method promotion, and New can't tell it from one the wrapper made
+// itself: a wrapper embedding backchannelhttp.Notifier whose Notify
+// sends some other way must override BackchannelNotifierCapabilities
+// with what its own sending provides. (A struct embedding
+// NoBackchannelNotifications is treated as declining ping, so its Notify
+// is never called; see that type.)
 type BackchannelNotifierAssurance interface {
 	BackchannelNotifierCapabilities() BackchannelNotifierCapabilities
 }

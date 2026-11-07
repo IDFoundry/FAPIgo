@@ -46,6 +46,18 @@ type KeySourceCapabilities struct {
 // A declaration is the operator's promise about the implementation, not
 // something this library verifies: production assurance trusts it, so
 // declare only what the implementation actually provides.
+//
+// A declaration describes the declaring type's own behaviour. A type
+// embedding a source that declares it inherits the declaration through
+// Go's method promotion, and production assurance can't tell it from one
+// the wrapper made itself. A wrapper that changes how keys are resolved
+// must override Capabilities with what the wrapper does: one embedding
+// StaticClientKeys, StaticAttesterKeys or LocalIssuerKeys (or
+// server.StaticAttesterTrustAnchors or server.StaticAttesterAnchors),
+// whose LiveFetchHardened holds because they fetch nothing, and adding a
+// fetch of its own (a jwks_uri fallback, say) is hardened only if that
+// fetch is; one embedding ClientJWKSSource or JWKSIssuerKeySource, whose
+// declaration covers their own fetcher, likewise.
 type KeySourceAssurance interface {
 	Capabilities() KeySourceCapabilities
 }

@@ -50,7 +50,9 @@ func (s StaticAttesterKeys) ResolveAttesterKeys(_ context.Context, req AttesterK
 }
 
 // Capabilities implements KeySourceAssurance: StaticAttesterKeys never
-// fetches over the network.
+// fetches over the network. That describes its own ResolveAttesterKeys:
+// a wrapper overriding it to fetch must override Capabilities too (see
+// KeySourceAssurance).
 func (StaticAttesterKeys) Capabilities() KeySourceCapabilities {
 	return KeySourceCapabilities{LiveFetchHardened: true}
 }

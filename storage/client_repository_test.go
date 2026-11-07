@@ -704,3 +704,34 @@ func TestNewRegisteredClientAllowedResources(t *testing.T) {
 		}
 	}
 }
+
+// TestRegisteredClientAllowedScopesLength: AllowedScopesLength is the
+// length of the client's allowed scopes, each counted once, joined with
+// single spaces, and 0 when it has none.
+func TestRegisteredClientAllowedScopesLength(t *testing.T) {
+	for name, tc := range map[string]struct {
+		scopes []string
+		want   int
+	}{
+		"none":       {nil, 0},
+		"empty list": {[]string{}, 0},
+		"one":        {[]string{"accounts"}, len("accounts")},
+		"several":    {[]string{"openid", "accounts", "payments"}, len("openid accounts payments")},
+		"repeats":    {[]string{"openid", "accounts", "openid"}, len("openid accounts")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := NewRegisteredClient(RegisteredClientConfig{
+				ID:                           "client-123",
+				ClientAssertionAlgorithm:     fapi.ES256,
+				AllowsClientCredentialsGrant: true,
+				AllowedScopes:                tc.scopes,
+			})
+			if err != nil {
+				t.Fatalf("NewRegisteredClient: %v", err)
+			}
+			if got := c.AllowedScopesLength(); got != tc.want {
+				t.Fatalf("AllowedScopesLength() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

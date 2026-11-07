@@ -7,8 +7,8 @@ own, `github.com/idfoundry/fapigo/sqlstore`, so FAPIgo itself takes no
 database driver: bring the one you use.
 
 The package documentation ([doc.go](doc.go)) is the reference: setup,
-migrations, atomicity, sealing, capabilities, the clients table and
-sweeping. This page is the short version. For a running deployment,
+migrations, atomicity, sealing, capabilities, the clients table,
+sweeping, and performance and scaling. This page is the short version. For a running deployment,
 [examples/linked-accounts](../examples/linked-accounts) keeps an
 Authorization Server's, a resource server's and two relying parties'
 stores in one SQLite file, each under its own table prefix.
@@ -102,8 +102,9 @@ To start sealing a database in use: deploy with `Sealer` and
 `ReadUnsealed`. `SealRecords` trusts what it finds, so run it on a
 database whose contents you trust. Losing the key makes sealed records
 unreadable. `AESGCMSealer` allows 2^32 seals per key (random nonces,
-NIST SP 800-38D), which a busy server reaches in weeks: rotate before
-then with `sqlstore.RotatingSealer(newSealer, oldSealer)`, which seals
+NIST SP 800-38D), which a busy server reaches in weeks, or days (see
+[Performance and scaling](#performance-and-scaling)): rotate before then
+with `sqlstore.RotatingSealer(newSealer, oldSealer)`, which seals
 with the new key and opens with either until the old one's records
 expire. See the package documentation's Sealing section.
 
@@ -253,6 +254,67 @@ between instances: use SQLite there.
   each `Put`, for what only the server knows (RAR types it doesn't
   register, `AllowedResources` without resource indicators, CIBA ping
   without a notifier); `Clients().All(ctx)` lists them.
+
+## Performance and scaling
+
+The package documentation's "Performance and scaling" section has the
+detail and the measurements behind this summary. They were taken on
+sqlstore v0.4, and on a prototype of v0.5's changes, on one shared host
+(PostgreSQL 17 on 4 vCPUs in a Docker VM), so read them as indicative
+and measure your own deployment.
+
+- **PostgreSQL is the limit, not the server instances.** A whole login
+  (PAR, authorization, code exchange) is 31 statements and 14 write
+  transactions (55 statements on v0.4, which wrapped each one-statement
+  write in BEGIN and COMMIT); a refresh 9 and 3. On v0.4 the 4-vCPU
+  database saturated at about 380 logins, 1,300 refreshes or 9,000
+  opaque-token lookups a second, and 1, 2 or 4 server instances made no
+  difference; v0.5's changes raised logins by about a third and
+  refreshes by about half. Size the database's CPU for your request
+  rates.
+- **`Options.ClientCacheTTL`** skips re-reading a client's row within
+  the TTL (a login drops to 24 statements with 5 s), at the cost of a
+  change made through another instance taking up to the TTL to apply.
+  Without it the row is still read each time, but only re-parsed when
+  it changed.
+- **Size the pool on every instance.** `database/sql`'s default
+  `MaxIdleConns` of 2 churns connections: in testing it cut logins from
+  214 to 47 a second. Set `SetMaxIdleConns` equal to `SetMaxOpenConns`,
+  plus `SetConnMaxLifetime` and `SetConnMaxIdleTime`, and keep
+  `MaxOpenConns` × instances (plus headroom) below `max_connections`. A
+  modest pool is enough: busy connections ≈ requests/s × round trips ×
+  round-trip time.
+- **PgBouncer** in transaction mode works: every multi-statement
+  operation is one transaction. Set `default_query_exec_mode=exec` (or
+  `cache_describe`) in the pgx DSN, since pgx's default named prepared
+  statements don't survive transaction pooling, and set
+  `default_transaction_isolation` and similar on the role, not the DSN.
+- **WAL**: digests as primary keys make most WAL full-page images
+  (roughly 70 KB per login): turn on `wal_compression`.
+- **Sweep** often enough that each run deletes a modest number of rows
+  (thousands to tens of thousands per table, not millions), from one
+  instance or a scheduled job. It deletes in short batches, so even a
+  large backlog no longer stalls other writers for seconds as it did on
+  v0.4; on PostgreSQL a concurrent run from another instance stops
+  rather than repeating the work.
+- **SQLite** has one writer, and with the documented DSN
+  (`synchronous=FULL`) every write transaction waits for an fsync. A
+  login is 13 of them, so on a Linux VM disk it managed 13–17 logins a
+  second. Don't size it on macOS, whose `fsync` doesn't flush the drive.
+  `_pragma=synchronous(NORMAL)` reached 286 a second, but an OS crash or
+  power loss then drops the last commits, which here can mean a replay
+  digest, a code's redemption or a revocation forgotten: your call. Keep
+  one writing process per file (a resource server in its own process
+  recording DPoP replay digests counts), add
+  `_pragma=journal_size_limit(67108864)` to cap the WAL file, and move to
+  PostgreSQL for more instances or more writes than the disk allows.
+- **The `Sealer` must be local and fast**: it runs on every sealed write
+  and read, sometimes inside a transaction. Don't call a KMS per record;
+  unwrap the key once at startup and use `AESGCMSealer`.
+- **Rotate the key by seal volume.** `AESGCMSealer` allows 2^32 seals
+  per key. A login seals five records and a refresh one, so 2,000
+  logins a second (10,000 seals) reach the limit in five days; rotating
+  with `RotatingSealer` at a quarter of it is every 30 hours or so.
 
 ## Tests
 

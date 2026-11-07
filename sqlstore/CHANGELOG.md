@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.5.0...sqlstore/v0.6.0) (2026-11-07)
+
+
+### Features
+
+* **sqlstore:** check revocation keys and record issued tokens in one statement ([96a958e](https://github.com/IDFoundry/FAPIgo/commit/96a958ea77446aa6f46b29eeb9ca91a43b6b8d04))
+
+
+### Bug Fixes
+
+* **sqlstore:** lock a polled CIBA request with SELECT … FOR UPDATE ([d73a0b8](https://github.com/IDFoundry/FAPIgo/commit/d73a0b8c0845cc5ac8e0fdc8bc1db4d1cb47510e))
+* **sqlstore:** read a returning user's pairwise subject without a write ([0f7a93c](https://github.com/IDFoundry/FAPIgo/commit/0f7a93c365af22e3bceffc60d50bf967b20aff68))
+* **sqlstore:** require fapigo v0.70.0 ([d4f767c](https://github.com/IDFoundry/FAPIgo/commit/d4f767c0fc3fde8205b83b211e8da13836b75c2f))
+
 ## [0.5.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.4.0...sqlstore/v0.5.0) (2026-11-07)
 
 

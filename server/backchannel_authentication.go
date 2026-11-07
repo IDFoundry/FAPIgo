@@ -411,9 +411,9 @@ func (s *Server) validateBackchannelAuthenticationRequest(ctx context.Context, v
 }
 
 // validateBackchannelAuthenticationParameters checks the CIBA-mandated
-// parameters (scope, exactly one identity hint) against client, plus
-// client_notification_token (see validateClientNotificationToken) and
-// binding_message.
+// parameters (scope, bounded by scopeBound, and exactly one identity
+// hint) against client, plus client_notification_token (see
+// validateClientNotificationToken) and binding_message.
 func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBackchannelRequest, client storage.RegisteredClient) (verifiedBackchannelRequest, *Error) {
 	params := verified.params
 
@@ -424,6 +424,9 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 	scope, err := jsonStringValue(scopeRaw)
 	if err != nil {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "scope must be a string", err)
+	}
+	if err := checkScopeLength(len(scope), client); err != nil {
+		return verifiedBackchannelRequest{}, requestError(ErrorInvalidRequest, err)
 	}
 	if err := s.validateScope(scope, client); err != nil {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidScope, 400, "scope is not valid for this client", err)

@@ -126,7 +126,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	// 9449 §5 does not bind a confidential client's refresh token to a
 	// specific DPoP key at all.
 
-	scope, scopeErr := refreshScope(params, grant)
+	scope, scopeErr := refreshScope(params, grant, client)
 	if scopeErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), scopeErr)
 	}
@@ -435,12 +435,18 @@ func (s *Server) refreshParameters(params map[string]string) (string, requestedA
 	return rawToken, details, nil
 }
 
-// refreshScope is the scope a refresh request asks for: the grant's,
-// or a narrower one named by its scope parameter, never a wider one.
-func refreshScope(params map[string]string, grant grantRecord) ([]string, *Error) {
+// refreshScope is the scope a refresh request from client asks for:
+// the grant's, or a narrower one named by its scope parameter, never a
+// wider one. A scope parameter longer than scopeBound(client) is
+// refused, since an opaque access token's record keeps the scope as
+// requested, repeats and all.
+func refreshScope(params map[string]string, grant grantRecord, client storage.RegisteredClient) ([]string, *Error) {
 	requestedScope, ok := params["scope"]
 	if !ok || requestedScope == "" {
 		return grant.Scope, nil
+	}
+	if err := checkScopeLength(len(requestedScope), client); err != nil {
+		return nil, requestError(ErrorInvalidRequest, err)
 	}
 	narrowed := strings.Fields(requestedScope)
 	if err := validateGrantedScopeSubset(narrowed, strings.Join(grant.Scope, " ")); err != nil {

@@ -29,10 +29,35 @@ import (
 // ClientAuthMethodTLSClientAuth or a SAN* sibling passes
 // NoPKIClientAuthentication{}. Under AssuranceProduction, New refuses
 // NoClientCertificateChainTrust.
+//
+// A struct embedding one of them is a ClientCertificateTrust too, with
+// the embedded one's behaviour: nothing it does can be overridden, so
+// New treats it as the embedded implementation, under
+// AssuranceProduction and in what Metadata and automatic registration
+// offer.
 type ClientCertificateTrust interface {
 	verifyChain(ctx context.Context, cert *x509.Certificate, now time.Time) *Error
 	validate() error
+	chainTrust() clientChainTrust
 }
+
+// clientChainTrust is which of ClientCertificateTrust's implementations
+// decides a chain's trust. New reads it through the interface's own
+// method rather than a type switch, so a struct embedding an
+// implementation is classified as that implementation (whose behaviour
+// it has) instead of slipping past a check that names the concrete type.
+type clientChainTrust int
+
+const (
+	// chainVerifiedHere is TrustedClientCAs.
+	chainVerifiedHere clientChainTrust = iota + 1
+	// chainVerifiedUpstream is ClientCertificateChainVerifiedUpstream.
+	chainVerifiedUpstream
+	// chainNoPKI is NoPKIClientAuthentication.
+	chainNoPKI
+	// chainUntrusted is NoClientCertificateChainTrust.
+	chainUntrusted
+)
 
 // TrustedClientCAs has this package verify a presented client
 // certificate against Roots itself (crypto/x509.Certificate.Verify,
@@ -137,6 +162,8 @@ func revocationError(err error, subject string) *Error {
 	}
 }
 
+func (TrustedClientCAs) chainTrust() clientChainTrust { return chainVerifiedHere }
+
 func (t TrustedClientCAs) validate() error {
 	if t.Roots == nil {
 		return errors.New("trusted client CAs: roots is required")
@@ -180,6 +207,8 @@ func (NoPKIClientAuthentication) verifyChain(context.Context, *x509.Certificate,
 
 func (NoPKIClientAuthentication) validate() error { return nil }
 
+func (NoPKIClientAuthentication) chainTrust() clientChainTrust { return chainNoPKI }
+
 // ClientCertificateChainVerifiedUpstream declares that every client
 // certificate this server is handed has already had its chain verified
 // before this package sees it, so this package's own chain-of-trust
@@ -213,6 +242,10 @@ func (ClientCertificateChainVerifiedUpstream) verifyChain(context.Context, *x509
 
 func (ClientCertificateChainVerifiedUpstream) validate() error { return nil }
 
+func (ClientCertificateChainVerifiedUpstream) chainTrust() clientChainTrust {
+	return chainVerifiedUpstream
+}
+
 // NoClientCertificateChainTrust accepts ClientAuthMethodTLSClientAuth and
 // its SAN* siblings with no chain-of-trust check at all, here or
 // upstream: any self-signed certificate whose subject or SAN matches a
@@ -237,11 +270,12 @@ func (NoClientCertificateChainTrust) verifyChain(context.Context, *x509.Certific
 
 func (NoClientCertificateChainTrust) validate() error { return nil }
 
+func (NoClientCertificateChainTrust) chainTrust() clientChainTrust { return chainUntrusted }
+
 // checkProductionClientCertificateTrust refuses NoClientCertificateChainTrust,
-// by value or pointer, under AssuranceProduction.
+// by value or pointer or embedded in a struct, under AssuranceProduction.
 func checkProductionClientCertificateTrust(trust ClientCertificateTrust) error {
-	switch trust.(type) {
-	case NoClientCertificateChainTrust, *NoClientCertificateChainTrust:
+	if trust.chainTrust() == chainUntrusted {
 		return errors.New("server: dependencies: client_certificate_trust NoClientCertificateChainTrust{} is not permitted under AssuranceProduction: pass ClientCertificateChainVerifiedUpstream{} when your TLS termination verifies client certificate chains, TrustedClientCAs{...} to verify them here, or NoPKIClientAuthentication{} when no client uses tls_client_auth")
 	}
 	return nil

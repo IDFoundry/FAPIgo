@@ -309,7 +309,7 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		// left out under NoPKIClientAuthentication, which refuses it.
 		md.TokenEndpointAuthMethodsSupported = append(md.TokenEndpointAuthMethodsSupported,
 			storage.ClientAuthMethodSelfSignedTLSClientAuth.String())
-		if _, noPKI := s.deps.ClientCertificateTrust.(NoPKIClientAuthentication); !noPKI {
+		if s.deps.ClientCertificateTrust.chainTrust() != chainNoPKI {
 			md.TokenEndpointAuthMethodsSupported = append(md.TokenEndpointAuthMethodsSupported,
 				storage.ClientAuthMethodTLSClientAuth.String())
 		}

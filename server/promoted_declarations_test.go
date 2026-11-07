@@ -194,3 +194,37 @@ func TestRevokeTokenRecognisesAPublishingIssuersAccessToken(t *testing.T) {
 		t.Fatalf("RevokeToken(own access token) code = %q, want %q", code, server.ErrorUnsupportedTokenType)
 	}
 }
+
+// Wrappers embedding ClientCertificateTrust implementations.
+type (
+	embeddedNoChainTrust struct {
+		server.NoClientCertificateChainTrust
+	}
+	embeddedNoChainTrustPointer struct {
+		*server.NoClientCertificateChainTrust
+	}
+	embeddedVerifiedUpstream struct {
+		server.ClientCertificateChainVerifiedUpstream
+	}
+)
+
+// TestProductionRefusesEmbeddedNoClientCertificateChainTrust: a struct
+// embedding NoClientCertificateChainTrust, by value or pointer, has its
+// behaviour (no chain check anywhere), so AssuranceProduction refuses it
+// as it refuses NoClientCertificateChainTrust itself.
+func TestProductionRefusesEmbeddedNoClientCertificateChainTrust(t *testing.T) {
+	for name, trust := range map[string]server.ClientCertificateTrust{
+		"embedded":         embeddedNoChainTrust{},
+		"embedded pointer": embeddedNoChainTrustPointer{&server.NoClientCertificateChainTrust{}},
+	} {
+		err := productionNew(t, func(d *server.Dependencies) { d.ClientCertificateTrust = trust })
+		if err == nil || !strings.Contains(err.Error(), "client_certificate_trust") {
+			t.Errorf("%s: New(production) = %v, want a client_certificate_trust refusal", name, err)
+		}
+	}
+	if err := productionNew(t, func(d *server.Dependencies) {
+		d.ClientCertificateTrust = embeddedVerifiedUpstream{}
+	}); err != nil {
+		t.Errorf("New(production, embedded ClientCertificateChainVerifiedUpstream): %v", err)
+	}
+}

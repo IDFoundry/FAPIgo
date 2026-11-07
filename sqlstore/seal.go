@@ -50,8 +50,10 @@ type Sealer interface {
 // rate), with RotatingSealer.
 //
 // Changing the key makes the blobs sealed under the previous one
-// unreadable; to rotate it, seal with the new key and open with both,
-// until the records sealed under the old one expire: RotatingSealer.
+// unreadable; to rotate it without that, use RotatingSealer, in the
+// three deploys it describes: open with both keys everywhere before
+// sealing with the new one, and keep the old one until the records
+// sealed under it expire.
 func AESGCMSealer(key []byte) (Sealer, error) {
 	if err := checkSealKey(key); err != nil {
 		return nil, fmt.Errorf("sqlstore: record sealer: %w", err)
@@ -93,15 +95,29 @@ func checkSealKey(key []byte) error {
 
 // RotatingSealer is a Sealer for rotating keys: it seals with current,
 // and opens with current or, failing that, each of previous in turn.
-// To rotate, make the new key current and the old one previous, deploy
-// every instance with it, and drop the old key once every record it
-// sealed has expired — the longest-lived are refresh tokens, so after
-// the refresh token lifetime (plus the time to deploy). The sealed
-// blobs' format is current's, unchanged, so the database needs nothing
-// to switch to it, and a blob sealed under no key it holds is refused
-// as before. Every open of an old record tries current first; with an
-// AEAD such as AESGCMSealer, that failure is cheap. It refuses two
-// AESGCMSealers under the same key: a rotation that changes nothing.
+// The sealed blobs' format is current's, unchanged, so the database
+// needs nothing to switch to it, and a blob sealed under no key it
+// holds is refused as before. Every open of an old record tries current
+// first; with an AEAD such as AESGCMSealer, that failure is cheap. It
+// refuses two AESGCMSealers under the same key: a rotation that changes
+// nothing.
+//
+// Rotate in three deploys, so that no instance meets a record it can't
+// open while a deploy rolls out:
+//
+//  1. RotatingSealer(oldSealer, newSealer) on every instance: it still
+//     seals with the old key, and opens with either.
+//  2. Once every instance runs that, RotatingSealer(newSealer,
+//     oldSealer): it seals with the new key, which every instance, on
+//     either configuration, can open.
+//  3. newSealer alone, once the longest-lived record sealed under the
+//     old key has expired — refresh tokens, so the refresh token
+//     lifetime after step 2 finished rolling out.
+//
+// Making the new key current in one deploy instead leaves the instances
+// not yet redeployed unable to open what the redeployed ones seal (a
+// request pushed at one and authorized at another, say), and those
+// requests fail until the deploy completes.
 func RotatingSealer(current Sealer, previous ...Sealer) (Sealer, error) {
 	if current == nil || slices.Contains(previous, nil) {
 		return nil, errors.New("sqlstore: rotating sealer: nil Sealer")

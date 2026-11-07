@@ -287,9 +287,14 @@
 // without it. Losing it makes every sealed record unreadable: clients
 // authorize again, as they would once the records expired.
 // Changing it does the same for the records sealed under the old one;
-// to rotate without that, use RotatingSealer, which seals with the new
-// key and opens with either, until the longest-lived record (a refresh
-// token) sealed under the old one expires. AESGCMSealer's random nonces
+// to rotate without that, use RotatingSealer, in three deploys: first
+// RotatingSealer(oldSealer, newSealer), which still seals with the old
+// key and opens with either; once every instance runs that,
+// RotatingSealer(newSealer, oldSealer); and newSealer alone once the
+// longest-lived record (a refresh token) sealed under the old key
+// expires. Making the new key current in one deploy leaves the
+// instances not yet redeployed unable to open what the others seal,
+// until it completes. AESGCMSealer's random nonces
 // allow 2^32 seals per key (NIST SP 800-38D), which a busy server can
 // reach in weeks, or days: rotate before then — see AESGCMSealer, and
 // Performance and scaling for the cadence. The budget is the key's,
@@ -664,8 +669,8 @@
 // pass it to AESGCMSealer.
 //
 // AESGCMSealer's random nonces allow 2^32 seals per key (about 4.3
-// billion; see AESGCMSealer), so rotate with RotatingSealer at a
-// cadence set by your seal rate. A login seals five records (its pushed
+// billion; see AESGCMSealer), so rotate with RotatingSealer (in the
+// three deploys Sealing describes) at a cadence set by your seal rate. A login seals five records (its pushed
 // request, the interaction's copy, the code's grant, an opaque access
 // token and a refresh token; fewer with JWT access tokens or no refresh
 // token), a refresh one (its opaque access token), a CIBA request two

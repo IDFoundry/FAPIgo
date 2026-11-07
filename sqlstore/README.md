@@ -109,10 +109,20 @@ Losing the key makes sealed records unreadable. `AESGCMSealer` allows
 server reaches in weeks, or days (see
 [Performance and scaling](#performance-and-scaling)). The budget is
 shared by every instance and every other store or service sealing with
-the same key, so count their seals together. Rotate before then
-with `sqlstore.RotatingSealer(newSealer, oldSealer)`, which seals
-with the new key and opens with either until the old one's records
-expire. See the package documentation's Sealing section.
+the same key, so count their seals together. Rotate before then with
+`sqlstore.RotatingSealer`, in three deploys:
+
+1. `RotatingSealer(oldSealer, newSealer)` on every instance: it still
+   seals with the old key, and opens with either.
+2. Once every instance runs that, `RotatingSealer(newSealer, oldSealer)`:
+   it seals with the new key, which every instance can now open.
+3. `newSealer` alone, once the longest-lived record sealed under the old
+   key (a refresh token) has expired.
+
+Making the new key current in one deploy leaves the instances not yet
+redeployed unable to open what the redeployed ones seal, and those
+requests fail until the deploy completes. See the package
+documentation's Sealing section.
 
 ### Upgrading from v0.2
 

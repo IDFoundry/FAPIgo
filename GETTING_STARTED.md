@@ -646,10 +646,14 @@ What to decide when you deploy it:
   backups; losing it makes sealed records unreadable, so clients
   authorize again. `AESGCMSealer` allows 2^32 seals per key (random
   nonces, NIST SP 800-38D), which a busy server reaches in weeks, so
-  rotate the key before then with `sqlstore.RotatingSealer(newSealer,
-  oldSealer)`: it seals with the new key and opens with either, until
-  the longest-lived record sealed under the old one (a refresh token)
-  expires. To start sealing a database already in use: deploy with
+  rotate the key before then with `sqlstore.RotatingSealer`, in three
+  deploys: `RotatingSealer(oldSealer, newSealer)` everywhere (it still
+  seals with the old key and opens with either), then, once every
+  instance runs that, `RotatingSealer(newSealer, oldSealer)`, then
+  `newSealer` alone once the longest-lived record sealed under the old
+  key (a refresh token) expires. Making the new key current in one
+  deploy fails requests whose records an instance not yet redeployed
+  can't open. To start sealing a database already in use: deploy with
   `Sealer` and `ReadUnsealed: true`, run `db.SealRecords(ctx)` once,
   then deploy again without `ReadUnsealed`, which while set lets anyone
   who can write to the database plant a record the sealer never sealed.

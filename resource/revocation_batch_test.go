@@ -159,7 +159,7 @@ func requireBatchCalls(t *testing.T, tc batchRevocationCase) {
 	if tc.wantBatches > 0 && !slices.Equal(tc.checker.batchKeys[0], batchRevocationKeys) {
 		t.Fatalf("IsAnyRevoked keys = %v, want %v", tc.checker.batchKeys[0], batchRevocationKeys)
 	}
-	if gotSingles := len(tc.checker.singleKeys) > 0; gotSingles != tc.wantSingles {
+	if (len(tc.checker.singleKeys) > 0) != tc.wantSingles {
 		t.Fatalf("IsRevoked calls = %v, want some: %v", tc.checker.singleKeys, tc.wantSingles)
 	}
 }

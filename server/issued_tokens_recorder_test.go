@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
+	"errors"
 	"slices"
 	"sync"
 	"testing"
@@ -34,6 +35,8 @@ type recordingGrantStore struct {
 	}
 
 	beforeCreateRefreshToken func()
+	// failCreateRefreshToken, if set, is what CreateRefreshToken returns.
+	failCreateRefreshToken error
 }
 
 func (r *recordingGrantStore) log(call string) {
@@ -54,6 +57,9 @@ func (r *recordingGrantStore) CreateRefreshToken(ctx context.Context, tok storag
 		hook()
 	}
 	r.log("CreateRefreshToken")
+	if r.failCreateRefreshToken != nil {
+		return r.failCreateRefreshToken
+	}
 	return r.fakeGrantStore.CreateRefreshToken(ctx, tok)
 }
 
@@ -249,4 +255,42 @@ func useTokensAfterExchange(t *testing.T, reuse bool) (verifyErr, refreshErr err
 		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	return verifyErr, refreshErr
+}
+
+// TestExchangeAuthorizationCodeRecordsNothingWhenIssuanceFails: with a
+// storage.IssuedTokensRecorder, an exchange whose refresh token or
+// access token can't be issued fails with server_error and records
+// nothing against the code.
+func TestExchangeAuthorizationCodeRecordsNothingWhenIssuanceFails(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		configure func(h *harness, store *recordingGrantStore)
+	}{
+		{"RefreshToken", func(_ *harness, store *recordingGrantStore) {
+			store.failCreateRefreshToken = errors.New("store down")
+		}},
+		{"AccessToken", func(h *harness, _ *recordingGrantStore) {
+			deps := h.deps
+			deps.AccessTokens = failingAccessTokenIssuer{}
+			srv, err := server.New(h.cfg, deps)
+			if err != nil {
+				t.Fatalf("server.New: %v", err)
+			}
+			h.server = srv
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, store := newRecordingHarness(t)
+			tc.configure(&h, store)
+			code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts", "offline_access"})
+			_, err := exchangeCode(t, h, code, generateKey(t))
+			var serr *server.Error
+			if !errors.As(err, &serr) || serr.Code() != server.ErrorServerError {
+				t.Fatalf("ExchangeAuthorizationCode = %v, want server_error", err)
+			}
+			if got := store.loggedCalls(); !slices.Equal(got, []string{"CreateRefreshToken"}) {
+				t.Fatalf("grant store calls = %v, want only the refresh token's creation", got)
+			}
+		})
+	}
 }

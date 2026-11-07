@@ -27,18 +27,26 @@ type PairwiseSubjectStore struct{ d *DB }
 // PairwiseSubjects returns d's storage.PairwiseSubjectStore.
 func (d *DB) PairwiseSubjects() *PairwiseSubjectStore { return &PairwiseSubjectStore{d} }
 
-// GetOrCreate implements storage.PairwiseSubjectStore: one INSERT … ON
-// CONFLICT DO NOTHING stores candidate unless the key already has a
-// body or the body is already another subject's in the same issuer and
-// sector — of concurrent calls for one key, on any instance, exactly
-// one inserts — then the key's body is read back. No body means the
-// insert conflicted on the body alone: a collision, with nothing
-// stored.
+// GetOrCreate implements storage.PairwiseSubjectStore. A returning
+// user's key already has a body, which one SELECT reads. Otherwise one
+// INSERT … ON CONFLICT DO NOTHING stores candidate unless the key has
+// a body by then or the body is already another subject's in the same
+// issuer and sector — of concurrent calls for one key, on any
+// instance, exactly one inserts — then the key's body is read back. No
+// body means the insert conflicted on the body alone: a collision, with
+// nothing stored. A row, once stored, is never changed or deleted, so a
+// body the first SELECT finds is the one the INSERT would have kept.
 func (s *PairwiseSubjectStore) GetOrCreate(ctx context.Context, key storage.PairwiseSubjectKey, candidate string) (string, error) {
 	for _, v := range []string{key.Issuer, key.Sector, key.Subject, candidate} {
 		if !validTextKey(v) {
 			return "", errors.New("sqlstore: get or create pairwise subject: issuer, sector, subject or candidate isn't valid UTF-8 without NUL")
 		}
+	}
+	switch body, err := s.body(ctx, key); {
+	case err == nil:
+		return body, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return "", unavailable(opGetOrCreatePairwiseSubject, err)
 	}
 	var n int64
 	err := s.d.writeOne(ctx, func(q querier) error {
@@ -56,9 +64,7 @@ func (s *PairwiseSubjectStore) GetOrCreate(ctx context.Context, key storage.Pair
 	if n == 1 {
 		return candidate, nil
 	}
-	var body string
-	err = s.d.queryRow(ctx, "SELECT body FROM {pairwise_subjects} WHERE issuer = ? AND sector = ? AND subject = ?",
-		key.Issuer, key.Sector, key.Subject).Scan(&body)
+	body, err := s.body(ctx, key)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return "", fmt.Errorf("sqlstore: get or create pairwise subject: %w", storage.ErrPairwiseSubjectCollision)
@@ -66,6 +72,14 @@ func (s *PairwiseSubjectStore) GetOrCreate(ctx context.Context, key storage.Pair
 		return "", unavailable(opGetOrCreatePairwiseSubject, err)
 	}
 	return body, nil
+}
+
+// body reads key's body: sql.ErrNoRows if it has none.
+func (s *PairwiseSubjectStore) body(ctx context.Context, key storage.PairwiseSubjectKey) (string, error) {
+	var body string
+	err := s.d.queryRow(ctx, "SELECT body FROM {pairwise_subjects} WHERE issuer = ? AND sector = ? AND subject = ?",
+		key.Issuer, key.Sector, key.Subject).Scan(&body)
+	return body, err
 }
 
 // Lookup implements storage.PairwiseSubjectStore. Every argument is

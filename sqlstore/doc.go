@@ -164,7 +164,9 @@
 //     against the table's primary key (issuer, sector, subject) and its
 //     unique (issuer, sector, body), then read back: of concurrent
 //     calls for one user and sector exactly one stores its body, and a
-//     body is never another user's in the same issuer and sector.
+//     body is never another user's in the same issuer and sector (a
+//     returning user's body, which never changes, is read without the
+//     INSERT).
 //
 // On SQLite every write runs in a transaction started with BEGIN
 // IMMEDIATE. Expiry is compared against the time the server passes

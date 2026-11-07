@@ -121,6 +121,28 @@ advertises `poll` alone, a client registered for ping is refused with
 `NoBackchannelNotifications`. Use `backchannelhttp.Notifier`, or a
 notifier of your own implementing `BackchannelNotifierAssurance` itself.
 
+### A checker embedding `NoRevocationUntilExpiry` keeps its bound (resource)
+
+**Affects:** a deployment whose `resource.Dependencies.Revocation` is a
+type of its own that embeds `resource.NoRevocationUntilExpiry`.
+
+**Why:** the `MaxTokenLifetime` bound was found with a concrete type
+switch, so such a checker silently lost it: `Verify` accepted tokens of
+any remaining lifetime, and a zero `MaxTokenLifetime` wasn't refused.
+
+**What fails:** `NewVerifier` refuses the checker when its embedded
+`MaxTokenLifetime` isn't positive, and, under `AssuranceProduction`,
+when it is over 15 minutes. `Verify` refuses a token expiring later
+than `MaxTokenLifetime` (plus `Limits.MaxClockSkew`) from now. Under
+`AssuranceProduction` a checker within 15 minutes is accepted as
+`NoRevocationUntilExpiry` is, without a `storage.StoreAssurance`
+declaration of its own.
+
+**What to change:** set the embedded `MaxTokenLifetime` to at least the
+authorization server's access token lifetime, or hold the checker you
+delegate to in a named field rather than embedding
+`NoRevocationUntilExpiry`.
+
 ## v0.71.0
 
 ### `memstore` stores no longer implement the batch methods (storage)

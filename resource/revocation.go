@@ -68,6 +68,10 @@ const maxUnrevocableTokenLifetime = 15 * time.Minute
 // Prefer a real RevocationChecker over the authorization server's
 // revocation store (serverresource.NewVerifier wires one); this is for a
 // resource server that can't reach it.
+//
+// A struct embedding it, to add a revocation check of its own say, keeps
+// the MaxTokenLifetime bound and its checks: New validates it, and
+// Verify enforces it, as for NoRevocationUntilExpiry itself.
 type NoRevocationUntilExpiry struct {
 	// MaxTokenLifetime bounds how far ahead of now an accepted token's
 	// expiry may be. Required (positive); at most 15 minutes under
@@ -82,7 +86,8 @@ func (NoRevocationUntilExpiry) IsRevoked(context.Context, string) (bool, error) 
 }
 
 // unrevocableLifetime returns the MaxTokenLifetime revocation declares,
-// when it's a NoRevocationUntilExpiry by value or pointer.
+// when it's a NoRevocationUntilExpiry by value or pointer, or a struct
+// embedding one.
 func unrevocableLifetime(revocation RevocationChecker) (time.Duration, bool) {
 	switch r := revocation.(type) {
 	case NoRevocationUntilExpiry:
@@ -91,6 +96,21 @@ func unrevocableLifetime(revocation RevocationChecker) (time.Duration, bool) {
 		if r != nil {
 			return r.MaxTokenLifetime, true
 		}
+	case unrevocableWindow:
+		return r.unrevocableLifetime(), true
 	}
 	return 0, false
 }
+
+// unrevocableWindow is promoted to a struct embedding
+// NoRevocationUntilExpiry, so its MaxTokenLifetime still bounds every
+// token Verify accepts, whatever the struct's own IsRevoked does: the
+// bound is what makes declining revocation acceptable, and since the
+// embedded IsRevoked reports no token revoked, an override can only add
+// revocations to it.
+type unrevocableWindow interface {
+	unrevocableLifetime() time.Duration
+}
+
+// unrevocableLifetime implements unrevocableWindow.
+func (r NoRevocationUntilExpiry) unrevocableLifetime() time.Duration { return r.MaxTokenLifetime }

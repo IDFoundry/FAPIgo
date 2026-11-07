@@ -49,6 +49,46 @@ func TestVerifyBoundsTokenLifetimeWithoutRevocation(t *testing.T) {
 	}
 }
 
+// checkingUnrevocable embeds NoRevocationUntilExpiry, overriding
+// IsRevoked with a check of its own.
+type checkingUnrevocable struct {
+	resource.NoRevocationUntilExpiry
+}
+
+func (checkingUnrevocable) IsRevoked(context.Context, string) (bool, error) { return false, nil }
+
+// TestVerifyBoundsTokenLifetimeUnderEmbeddedUnrevocable: a struct
+// embedding NoRevocationUntilExpiry keeps its MaxTokenLifetime bound,
+// whatever its own IsRevoked does.
+func TestVerifyBoundsTokenLifetimeUnderEmbeddedUnrevocable(t *testing.T) {
+	for name, tc := range map[string]struct {
+		lifetime time.Duration
+		accepted bool
+	}{
+		"within the bound": {5 * time.Minute, true},
+		"past the bound":   {time.Hour, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newOpaqueFixture(t, tc.lifetime)
+			v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{
+				AccessTokens: resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: f.store},
+				Replay:       &fakeReplayStore{},
+				Revocation:   checkingUnrevocable{resource.NoRevocationUntilExpiry{MaxTokenLifetime: 10 * time.Minute}},
+				Clock:        fixedClock{now: f.now},
+			})
+			if err != nil {
+				t.Fatalf("NewVerifier: %v", err)
+			}
+			_, err = v.Verify(context.Background(), resource.VerifyRequest{
+				Method: "GET", URL: f.target,
+				Authorization: "DPoP " + f.rawToken,
+				DPoPProofs:    []string{f.proof(t, f.dpopKey)},
+			})
+			assertLifetimeOutcome(t, err, tc.accepted)
+		})
+	}
+}
+
 // assertLifetimeOutcome checks err is nil when accepted, and otherwise
 // an invalid_token refusal.
 func assertLifetimeOutcome(t *testing.T, err error, accepted bool) {
@@ -67,12 +107,13 @@ func assertLifetimeOutcome(t *testing.T, err error, accepted bool) {
 
 // TestNewVerifierRefusesNonPositiveUnrevocableLifetime covers
 // NoRevocationUntilExpiry's required MaxTokenLifetime, under either
-// assurance level, by value and by pointer.
+// assurance level, by value and by pointer, or embedded in a struct.
 func TestNewVerifierRefusesNonPositiveUnrevocableLifetime(t *testing.T) {
 	for name, revocation := range map[string]resource.RevocationChecker{
 		"zero":             resource.NoRevocationUntilExpiry{},
 		"negative":         resource.NoRevocationUntilExpiry{MaxTokenLifetime: -time.Minute},
 		"pointer, zero":    &resource.NoRevocationUntilExpiry{},
+		"embedded, zero":   checkingUnrevocable{},
 		"production, zero": resource.NoRevocationUntilExpiry{},
 	} {
 		t.Run(name, func(t *testing.T) {

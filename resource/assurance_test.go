@@ -158,6 +158,9 @@ func TestNewVerifierProductionAccepts(t *testing.T) {
 		{"no revocation until expiry pointer", func(_ *resource.Config, d *resource.Dependencies) {
 			d.Revocation = &resource.NoRevocationUntilExpiry{MaxTokenLifetime: time.Minute}
 		}},
+		{"no revocation until expiry embedded", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Revocation = checkingUnrevocable{resource.NoRevocationUntilExpiry{MaxTokenLifetime: time.Minute}}
+		}},
 		{"DPoP limits at their bounds", func(c *resource.Config, _ *resource.Dependencies) {
 			c.Limits.MaxDPoPProofAge = 5 * time.Minute
 			c.Limits.DPoPNonceLifetime = 15 * time.Minute
@@ -304,6 +307,9 @@ func TestNewVerifierProductionRefuses(t *testing.T) {
 		}, "revocation is NoRevocation, which AssuranceProduction refuses"},
 		{"no revocation until expiry over 15m", func(_ *resource.Config, d *resource.Dependencies) {
 			d.Revocation = resource.NoRevocationUntilExpiry{MaxTokenLifetime: 15*time.Minute + time.Second}
+		}, "MaxTokenLifetime must be at most 15m0s"},
+		{"no revocation until expiry embedded over 15m", func(_ *resource.Config, d *resource.Dependencies) {
+			d.Revocation = checkingUnrevocable{resource.NoRevocationUntilExpiry{MaxTokenLifetime: time.Hour}}
 		}, "MaxTokenLifetime must be at most 15m0s"},
 		{"DPoP proof age over 5m", func(c *resource.Config, _ *resource.Dependencies) {
 			c.Limits.MaxDPoPProofAge = 5*time.Minute + time.Second

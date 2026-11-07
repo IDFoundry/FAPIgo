@@ -328,6 +328,31 @@ func currentSchema(t *testing.T, db *sql.DB) string {
 	return schema
 }
 
+// otherSchemaPool creates a schema of its own besides the run's,
+// dropped when the test ends, returning its name and a pool whose
+// search_path is it alone, closed when the test ends.
+func otherSchemaPool(t *testing.T) (string, *sql.DB) {
+	t.Helper()
+	other := currentSchema(t, postgresPool) + "_" + randomHex(4)
+	if _, err := postgresPool.ExecContext(context.Background(), "CREATE SCHEMA "+other); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = postgresPool.ExecContext(context.Background(), "DROP SCHEMA "+other+" CASCADE") })
+	u, err := url.Parse(postgresDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := u.Query()
+	query.Set("search_path", other)
+	u.RawQuery = query.Encode()
+	pool, err := sql.Open("pgx", u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	return other, pool
+}
+
 // The sweep lock is a function of the schema and the TablePrefix
 // alone: the same for every DB on one schema's tables, and different
 // for another prefix, another schema, or the two run together
@@ -371,23 +396,7 @@ func TestPostgresSweepLockIsPerSchema(t *testing.T) {
 		t.Skip("PostgreSQL only: " + postgresDSNEnv + " is unset")
 	}
 	ctx := context.Background()
-	other := currentSchema(t, postgresPool) + "_other"
-	if _, err := postgresPool.ExecContext(ctx, "CREATE SCHEMA "+other); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = postgresPool.ExecContext(context.Background(), "DROP SCHEMA "+other+" CASCADE") })
-	u, err := url.Parse(postgresDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	query := u.Query()
-	query.Set("search_path", other)
-	u.RawQuery = query.Encode()
-	otherPool, err := sql.Open("pgx", u.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = otherPool.Close() })
+	other, otherPool := otherSchemaPool(t)
 
 	p := newPlace(t, sqlstore.Postgres)
 	d := p.migrated()

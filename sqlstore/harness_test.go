@@ -115,13 +115,13 @@ func sqliteDSN(path string) string {
 // and opens handles on it: each *sqlstore.DB on a *sql.DB of its own
 // for SQLite, as another process would have.
 type place struct {
-	t       *testing.T
+	t       testing.TB
 	dialect sqlstore.Dialect
 	path    string // SQLite
 	prefix  string
 }
 
-func newPlace(t *testing.T, dialect sqlstore.Dialect) *place {
+func newPlace(t testing.TB, dialect sqlstore.Dialect) *place {
 	t.Helper()
 	s := &place{t: t, dialect: dialect, prefix: "t" + randomHex(4) + "_"}
 	if dialect == sqlstore.SQLite {
@@ -197,7 +197,7 @@ func (s *place) migrated() *sqlstore.DB {
 }
 
 // freshDB is a migrated handle on fresh, empty tables.
-func freshDB(t *testing.T, dialect sqlstore.Dialect) *sqlstore.DB {
+func freshDB(t testing.TB, dialect sqlstore.Dialect) *sqlstore.DB {
 	t.Helper()
 	return newPlace(t, dialect).migrated()
 }

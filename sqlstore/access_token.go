@@ -50,12 +50,12 @@ func (s *AccessTokenStore) CreateAccessToken(ctx context.Context, tok storage.Ne
 		return fmt.Errorf("sqlstore: create access token: %w", err)
 	}
 	expires := nanos(tok.ExpiresAt)
+	record, err := s.d.seal(blobRef{"access_tokens", recordColumn, string(tok.TokenHash[:]), string(tok.ClientID), expires, nil}, plain)
+	if err != nil {
+		return unavailable("create access token", err)
+	}
 	err = s.d.writeOne(ctx, func(q querier) error {
-		record, err := s.d.seal(blobRef{"access_tokens", recordColumn, string(tok.TokenHash[:]), string(tok.ClientID), expires, nil}, plain)
-		if err != nil {
-			return err
-		}
-		_, err = q.ExecContext(ctx, s.d.q("INSERT INTO {access_tokens} (token_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
+		_, err := q.ExecContext(ctx, s.d.q("INSERT INTO {access_tokens} (token_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
 			tok.TokenHash[:], string(tok.ClientID), record, expires, expires)
 		return err
 	})

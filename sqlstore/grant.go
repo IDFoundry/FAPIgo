@@ -26,12 +26,12 @@ func (s *GrantStore) CreateAuthorizationCode(ctx context.Context, code storage.N
 		return errors.New("sqlstore: create authorization code: client_id isn't valid UTF-8 without NUL")
 	}
 	expires := nanos(code.ExpiresAt)
-	err := s.d.writeOne(ctx, func(q querier) error {
-		record, err := s.d.seal(blobRef{"authorization_codes", recordColumn, string(code.CodeHash[:]), string(code.ClientID), expires, nil}, code.Grant)
-		if err != nil {
-			return err
-		}
-		_, err = q.ExecContext(ctx, s.d.q("INSERT INTO {authorization_codes} (code_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
+	record, err := s.d.seal(blobRef{"authorization_codes", recordColumn, string(code.CodeHash[:]), string(code.ClientID), expires, nil}, code.Grant)
+	if err != nil {
+		return unavailable("create authorization code", err)
+	}
+	err = s.d.writeOne(ctx, func(q querier) error {
+		_, err := q.ExecContext(ctx, s.d.q("INSERT INTO {authorization_codes} (code_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
 			code.CodeHash[:], string(code.ClientID), record, expires, expires)
 		return err
 	})
@@ -164,12 +164,12 @@ func (s *GrantStore) CreateRefreshToken(ctx context.Context, token storage.NewRe
 		return errors.New("sqlstore: create refresh token: client_id isn't valid UTF-8 without NUL")
 	}
 	expires := nanos(token.ExpiresAt)
-	err := s.d.writeOne(ctx, func(q querier) error {
-		record, err := s.d.seal(blobRef{"refresh_tokens", recordColumn, string(token.TokenHash[:]), string(token.ClientID), expires, nil}, token.Grant)
-		if err != nil {
-			return err
-		}
-		_, err = q.ExecContext(ctx, s.d.q("INSERT INTO {refresh_tokens} (token_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
+	record, err := s.d.seal(blobRef{"refresh_tokens", recordColumn, string(token.TokenHash[:]), string(token.ClientID), expires, nil}, token.Grant)
+	if err != nil {
+		return unavailable("create refresh token", err)
+	}
+	err = s.d.writeOne(ctx, func(q querier) error {
+		_, err := q.ExecContext(ctx, s.d.q("INSERT INTO {refresh_tokens} (token_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
 			token.TokenHash[:], string(token.ClientID), record, expires, expires)
 		return err
 	})

@@ -327,11 +327,15 @@ var sealedColumns = []sealedColumn{
 	{sessionsTable, "state", recordColumn, "''", true, nil},
 }
 
-// sealStallLimit is how many batches in a row SealRecords lets read
-// rows without sealing any before it gives up: a row whose
+// sealStallLimit is how many passes over a table in a row SealRecords
+// lets read rows without sealing any before it gives up: a row whose
 // compare-and-swap can never match would otherwise be read again
 // forever.
 const sealStallLimit = 3
+
+// sealBatchSize is how many rows SealRecords reads, and seals, per
+// transaction.
+const sealBatchSize = 100
 
 // SealRecords seals, in place, every record blob that isn't sealed yet
 // — those written before Options.Sealer was set — and re-seals every
@@ -353,11 +357,14 @@ const sealStallLimit = 3
 // changed), is sealed as if the server had written it, so run it on a
 // database whose contents you trust.
 //
-// It seals a batch of rows per transaction, each blob only if it hasn't
-// changed since it was read, so it's safe to run while the server is
-// serving. It requires a Sealer, which must open the v0.2 blobs. It
-// stops with an error if a v0.2 blob doesn't open, or if it keeps
-// reading rows it can't seal.
+// It reads each table in key order, sealing a batch of rows per
+// transaction, each blob only if it hasn't changed since it was read,
+// so it's safe to run while the server is serving, and it reads each
+// row once per pass rather than once per batch. A pass that finds a
+// blob changed before it could seal it is followed by another, which
+// reads that blob again if it's still not sealed. It requires a Sealer,
+// which must open the v0.2 blobs. It stops with an error if a v0.2 blob
+// doesn't open, or if it keeps reading rows it can't seal.
 func (d *DB) SealRecords(ctx context.Context) (int64, error) {
 	if d.sealer == nil {
 		return 0, errors.New("sqlstore: seal records: the DB has no Sealer")
@@ -373,30 +380,54 @@ func (d *DB) SealRecords(ctx context.Context) (int64, error) {
 	return total, nil
 }
 
-// sealColumn is SealRecords for c.
+// sealColumn is SealRecords for c: passes over its table until one
+// leaves no row it read unsealed.
 func (d *DB) sealColumn(ctx context.Context, c sealedColumn) (int64, error) {
 	var total int64
 	for stalls := 0; ; {
-		var sealed, read int64
-		err := d.write(ctx, func(q querier) error {
-			var err error
-			sealed, read, err = d.sealBatch(ctx, q, c)
-			return err
-		})
-		if err != nil {
-			return total, unavailable("seal records in "+c.table, err)
-		}
+		sealed, missed, err := d.sealPass(ctx, c)
 		total += sealed
 		switch {
-		case read == 0:
+		case err != nil:
+			return total, err
+		case missed == 0:
 			return total, nil
 		case sealed > 0:
 			stalls = 0
 		default:
 			if stalls++; stalls >= sealStallLimit {
-				return total, fmt.Errorf("sqlstore: seal records in %s: %d rows read but none sealed, %d batches in a row: their %s changes as it's sealed, or can't be compared", c.table, read, stalls, c.column)
+				return total, fmt.Errorf("sqlstore: seal records in %s: %d rows read but none sealed, %d passes in a row: their %s changes as it's sealed, or can't be compared", c.table, missed, stalls, c.column)
 			}
 		}
+	}
+}
+
+// sealPass reads c's table once, in key order, sealing each of its
+// values that isn't sealed in the current format, a batch of rows per
+// transaction; it returns how many it sealed, and how many it read but
+// didn't seal because they changed since.
+func (d *DB) sealPass(ctx context.Context, c sealedColumn) (sealed, missed int64, err error) {
+	var after []byte // the last key read: nil before the first batch
+	for {
+		var rows []unsealedRow
+		var n int64
+		err := d.write(ctx, func(q querier) error {
+			var err error
+			if rows, err = d.unsealedRows(ctx, q, c, after); err != nil {
+				return err
+			}
+			n, err = d.sealRows(ctx, q, c, rows)
+			return err
+		})
+		if err != nil {
+			return sealed, missed, unavailable("seal records in "+c.table, err)
+		}
+		sealed += n
+		missed += int64(len(rows)) - n
+		if len(rows) < sealBatchSize {
+			return sealed, missed, nil
+		}
+		after = rows[len(rows)-1].key
 	}
 }
 
@@ -412,20 +443,6 @@ type unsealedRow struct {
 // ref is the blobRef of r's value of c.
 func (r unsealedRow) ref(c sealedColumn) blobRef {
 	return blobRef{c.table, c.column, string(r.key), r.clientID, r.expires, r.bound}
-}
-
-// sealBatch reads up to 100 of c's values on q that aren't sealed in
-// the current format and seals each that hasn't changed since,
-// returning how many it sealed and how many it read: none once none is
-// left. One that changed is read again by the next batch, if it's still
-// not sealed.
-func (d *DB) sealBatch(ctx context.Context, q querier, c sealedColumn) (sealed, read int64, err error) {
-	rows, err := d.unsealedRows(ctx, q, c)
-	if err != nil {
-		return 0, 0, err
-	}
-	n, err := d.sealRows(ctx, q, c, rows)
-	return n, int64(len(rows)), err
 }
 
 // sealRows seals rows' values of c on q — opening a v1 one first —
@@ -474,14 +491,24 @@ func (d *DB) asBlob(column string) string {
 	return column
 }
 
-// unsealedRows reads up to 100 of c's table's rows whose column isn't
-// sealed in the current format.
-func (d *DB) unsealedRows(ctx context.Context, q querier, c sealedColumn) ([]unsealedRow, error) {
+// unsealedRows reads up to sealBatchSize of c's table's rows whose
+// column isn't sealed in the current format, in key order, from the
+// first whose key is after after — or from the first, for nil.
+func (d *DB) unsealedRows(ctx context.Context, q querier, c sealedColumn, after []byte) ([]unsealedRow, error) {
 	columns := c.keyColumn + ", " + c.clientID + ", " + d.asBlob(c.column) + ", expires_at"
 	for _, b := range c.bound {
 		columns += ", " + b.name
 	}
-	rows, err := q.QueryContext(ctx, d.q("SELECT "+columns+" FROM {"+c.table+"} WHERE substr("+d.asBlob(c.column)+", 1, 1) <> ? LIMIT 100"), []byte{recordSealed})
+	from, args := "", []any{}
+	if after != nil {
+		var key any = after
+		if c.textKey {
+			key = string(after)
+		}
+		from, args = c.keyColumn+" > ? AND ", append(args, key)
+	}
+	args = append(args, []byte{recordSealed})
+	rows, err := q.QueryContext(ctx, d.q("SELECT "+columns+" FROM {"+c.table+"} WHERE "+from+"substr("+d.asBlob(c.column)+", 1, 1) <> ? ORDER BY "+c.keyColumn+" LIMIT "+strconv.Itoa(sealBatchSize)), args...)
 	if err != nil {
 		return nil, err
 	}

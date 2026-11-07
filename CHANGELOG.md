@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.70.0](https://github.com/IDFoundry/FAPIgo/compare/v0.69.0...v0.70.0) (2026-11-07)
+
+
+### Features
+
+* **server:** bound scope by the client's registered scopes ([73ce83e](https://github.com/IDFoundry/FAPIgo/commit/73ce83e498a2640cf392db49acc99391cd494466))
+* **storage:** check a token's revocation keys in one call ([1d53e90](https://github.com/IDFoundry/FAPIgo/commit/1d53e90b1baf2f3b50ec6eed083dcb364284b514))
+* **storage:** expose a client's allowed scopes' joined length ([73a5b0c](https://github.com/IDFoundry/FAPIgo/commit/73a5b0c86cddfd49a85c11607bb6f4d119ed9ccc))
+* **storage:** record a code exchange's tokens in one write ([933e42f](https://github.com/IDFoundry/FAPIgo/commit/933e42ffba4e1c3ca2829a75150f8fc986b91fc5))
+
 ## [0.69.0](https://github.com/IDFoundry/FAPIgo/compare/v0.68.0...v0.69.0) (2026-11-02)
 
 

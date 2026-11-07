@@ -426,7 +426,9 @@
 // Sweep deletes in batches, each a short transaction of its own, so a
 // large backlog doesn't hold up the stores' writes; on PostgreSQL,
 // instances sweeping the same tables at once leave each other's batches
-// alone (an advisory lock), and on SQLite a Sweep that deleted rows
+// alone (an advisory lock, keyed by the TablePrefix and the schema the
+// tables are in, so tenants with a schema each in one database don't
+// share it), and on SQLite a Sweep that deleted rows
 // then truncates the write-ahead log, when nothing is using it: best
 // effort, never waiting on a reader or writer, so a backup or a
 // long-running read doesn't hold up writes behind it.
@@ -565,7 +567,8 @@
 // about 300, and with 400,000 on SQLite 64 ms rather than 3.5 s. One
 // instance, or one scheduled job, is enough to sweep: a run deletes
 // what every instance wrote, and on PostgreSQL a run that finds another
-// instance's batch in progress stops, leaving the rest to that one.
+// instance's batch on the same tables in progress stops, leaving the
+// rest to that one (see DB.Sweep for what that leaves).
 //
 // SQLite has one writer, and with the DSN in Setup each write
 // transaction waits for an fsync: synchronous is FULL, SQLite's default

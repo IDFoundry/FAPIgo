@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -298,7 +299,8 @@ func TestPostgresSweepSkipsWhileAnotherSweeps(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", sqlstore.SweepLockKey(d)); err != nil {
+	key := sqlstore.SweepLockKey(d, currentSchema(t, postgresPool))
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := d.Sweep(ctx, time.Now()); n != 0 || err != nil {
@@ -307,11 +309,110 @@ func TestPostgresSweepSkipsWhileAnotherSweeps(t *testing.T) {
 	if left := countRows(t, p, postgresPool, "replay"); left != 10 {
 		t.Fatalf("rows left = %d, want 10", left)
 	}
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", sqlstore.SweepLockKey(d)); err != nil {
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", key); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := d.Sweep(ctx, time.Now()); n != 10 || err != nil {
 		t.Fatalf("Sweep once the lock is free = %d, %v, want 10, nil", n, err)
+	}
+}
+
+// currentSchema is the schema db's connections create and find tables
+// in.
+func currentSchema(t *testing.T, db *sql.DB) string {
+	t.Helper()
+	var schema string
+	if err := db.QueryRowContext(context.Background(), "SELECT current_schema()").Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	return schema
+}
+
+// The sweep lock is a function of the schema and the TablePrefix
+// alone: the same for every DB on one schema's tables, and different
+// for another prefix, another schema, or the two run together
+// differently.
+func TestSweepLockKeyDependsOnSchemaAndPrefix(t *testing.T) {
+	key := sqlstore.SweepLockKeyOf("tenant_a", "fapigo_")
+	if again := sqlstore.SweepLockKeyOf("tenant_a", "fapigo_"); again != key {
+		t.Fatalf("the same schema and prefix gave %d, then %d", key, again)
+	}
+	pool, err := sql.Open("pgx", "postgres://unused.invalid/db") // never connected to
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pool.Close() }()
+	d, err := sqlstore.New(pool, sqlstore.Postgres, sqlstore.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sqlstore.SweepLockKey(d, "tenant_a") != key {
+		t.Fatal("a DB's key isn't its default prefix's")
+	}
+	for _, other := range [][2]string{
+		{"tenant_b", "fapigo_"},
+		{"tenant_a", "oid4vc_"},
+		{"public", "fapigo_"},
+		{"tenant_afapigo_", ""},
+		{"tenant_", "afapigo_"},
+	} {
+		if sqlstore.SweepLockKeyOf(other[0], other[1]) == key {
+			t.Errorf("schema %q, prefix %q has tenant_a's fapigo_ key", other[0], other[1])
+		}
+	}
+}
+
+// On PostgreSQL, a Sweep of tables in one schema isn't held up by
+// another's of tables with the same TablePrefix in another schema of
+// the database: each takes a lock of its own, so one tenant's Sweep
+// never silently skips another's tables.
+func TestPostgresSweepLockIsPerSchema(t *testing.T) {
+	if postgresDSN == "" {
+		t.Skip("PostgreSQL only: " + postgresDSNEnv + " is unset")
+	}
+	ctx := context.Background()
+	other := currentSchema(t, postgresPool) + "_other"
+	if _, err := postgresPool.ExecContext(ctx, "CREATE SCHEMA "+other); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = postgresPool.ExecContext(context.Background(), "DROP SCHEMA "+other+" CASCADE") })
+	u, err := url.Parse(postgresDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := u.Query()
+	query.Set("search_path", other)
+	u.RawQuery = query.Encode()
+	otherPool, err := sql.Open("pgx", u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = otherPool.Close() })
+
+	p := newPlace(t, sqlstore.Postgres)
+	d := p.migrated()
+	theirs := p.handle(otherPool) // the same prefix, in the other schema
+	must(t, theirs.Migrate(ctx))
+	if got := currentSchema(t, otherPool); got != other {
+		t.Fatalf("the other pool's schema is %q, want %q", got, other)
+	}
+	insertExpiredReplay(t, p, otherPool, 10, 0)
+
+	conn, err := postgresPool.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	ours := sqlstore.SweepLockKey(d, currentSchema(t, postgresPool))
+	if ours == sqlstore.SweepLockKey(theirs, other) {
+		t.Fatal("the two schemas' tables share a sweep lock")
+	}
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", ours); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", ours) }()
+	if n, err := theirs.Sweep(ctx, time.Now()); n != 10 || err != nil {
+		t.Fatalf("the other schema's Sweep while this one's lock is held = %d, %v, want 10, nil", n, err)
 	}
 }
 

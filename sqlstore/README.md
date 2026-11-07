@@ -295,8 +295,9 @@ and measure your own deployment.
   (thousands to tens of thousands per table, not millions), from one
   instance or a scheduled job. It deletes in short batches, so even a
   large backlog no longer stalls other writers for seconds as it did on
-  v0.4; on PostgreSQL a concurrent run from another instance stops
-  rather than repeating the work.
+  v0.4; on PostgreSQL a concurrent run from another instance on the
+  same tables (the same schema and `TablePrefix`) stops rather than
+  repeating the work.
 - **SQLite** has one writer, and with the documented DSN
   (`synchronous=FULL`) every write transaction waits for an fsync. A
   login is 13 of them, so on a Linux VM disk it managed 13–17 logins a

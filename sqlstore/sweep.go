@@ -52,11 +52,20 @@ var sweptTables = []string{
 // the stores' own writes run between its batches. It stops between batches once ctx ends,
 // returning ctx's error, wrapped, with the count of rows it deleted
 // until then; each batch it ran stays deleted. On Postgres each batch
-// first tries a transaction-level advisory lock of d's TablePrefix, so
-// instances sweeping the same tables at once don't run their batches
-// together: an instance that finds another's batch running stops at
-// once, without an error, returning the count of rows it deleted until
-// then — the other instance is deleting the rest. On SQLite, after a
+// first tries a transaction-level advisory lock keyed by d's
+// TablePrefix and the schema its tables resolve to (on the
+// connection's search_path), so instances sweeping the same tables at
+// once don't run their batches together, while stores with the same
+// prefix in other schemas of the database sweep independently. A
+// Sweep that finds that lock held stops at once, without an error,
+// returning the count of rows it deleted until then and leaving the
+// tables it hadn't reached: the lock's holder is a Sweep on these same
+// tables, of another instance (or another DB on them), in the middle
+// of a batch, which goes on through the tables after it and deletes
+// what had expired by the time it was passed. What expired after that
+// time, or what it leaves if its own context ends, waits for the next
+// Sweep — so (n, nil) doesn't say every expired row is gone, only that
+// nothing failed. On SQLite, after a
 // Sweep that deleted rows, it checkpoints the write-ahead log and, if
 // that copied all of it back, truncates it (PRAGMA
 // wal_checkpoint(PASSIVE), then TRUNCATE), so the space the deletes
@@ -118,7 +127,7 @@ func (d *DB) sweepTable(ctx context.Context, name string, now int64) (int64, err
 		if err := ctx.Err(); err != nil {
 			return total, err
 		}
-		n, err := d.sweepBatch(ctx, query, args)
+		n, err := d.sweepBatch(ctx, name, query, args)
 		total += n
 		if err != nil || n < d.sweepBatchSize() {
 			return total, err
@@ -126,15 +135,20 @@ func (d *DB) sweepTable(ctx context.Context, name string, now int64) (int64, err
 	}
 }
 
-// sweepBatch runs query, one of sweepTable's deletes, with args in a
-// transaction of its own, returning how many rows it deleted. On
-// Postgres it first takes the sweep lock, or returns errSweepLocked.
-func (d *DB) sweepBatch(ctx context.Context, query string, args []any) (int64, error) {
+// sweepBatch runs query, one of sweepTable's deletes from table name,
+// with args in a transaction of its own, returning how many rows it
+// deleted. On Postgres it first takes the sweep lock for the schema
+// name resolves to, or returns errSweepLocked.
+func (d *DB) sweepBatch(ctx context.Context, name, query string, args []any) (int64, error) {
 	var n int64
 	err := d.write(ctx, func(q querier) error {
 		if d.dialect == Postgres {
+			schema, err := d.tableSchema(ctx, q, name)
+			if err != nil {
+				return err
+			}
 			var locked bool
-			if err := q.QueryRowContext(ctx, "SELECT pg_try_advisory_xact_lock($1)", d.sweepLockKey()).Scan(&locked); err != nil {
+			if err := q.QueryRowContext(ctx, "SELECT pg_try_advisory_xact_lock($1)", sweepLockKey(schema, d.prefix)).Scan(&locked); err != nil {
 				return err
 			}
 			if !locked {
@@ -151,11 +165,24 @@ func (d *DB) sweepBatch(ctx context.Context, query string, args []any) (int64, e
 	return n, err
 }
 
+// tableSchema is the name of the Postgres schema that d's table name
+// resolves to on q's connection, as the statements of d's that name it
+// unqualified do: the first schema on the search_path holding it.
+func (d *DB) tableSchema(ctx context.Context, q querier, name string) (string, error) {
+	var schema string
+	err := q.QueryRowContext(ctx, d.q("SELECT n.nspname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = '{"+name+"}'::regclass")).Scan(&schema)
+	return schema, err
+}
+
 // sweepLockKey is the Postgres advisory lock Sweep's batches take for
-// d's table prefix.
-func (d *DB) sweepLockKey() int64 {
+// the tables of TablePrefix prefix in schema: the same for every DB on
+// those tables, on any instance, and distinct (but for a 64-bit hash's
+// collisions) for another prefix or another schema, since advisory
+// locks are shared by the whole database. A NUL, which neither a
+// schema's name nor a prefix can hold, separates the two.
+func sweepLockKey(schema, prefix string) int64 {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte("fapigo sqlstore sweep " + d.prefix))
+	_, _ = h.Write([]byte("fapigo sqlstore sweep\x00" + schema + "\x00" + prefix))
 	return int64(h.Sum64()) //nolint:gosec // a lock key: wrapping around is fine
 }
 

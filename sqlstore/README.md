@@ -99,11 +99,17 @@ serves both.
 
 To start sealing a database in use: deploy with `Sealer` and
 `ReadUnsealed: true`, run `db.SealRecords(ctx)`, then deploy without
-`ReadUnsealed`. `SealRecords` trusts what it finds, so run it on a
-database whose contents you trust. Losing the key makes sealed records
-unreadable. `AESGCMSealer` allows 2^32 seals per key (random nonces,
-NIST SP 800-38D), which a busy server reaches in weeks, or days (see
-[Performance and scaling](#performance-and-scaling)): rotate before then
+`ReadUnsealed`. A row an instance still without the `Sealer` writes
+during a `SealRecords` pass (in a rolling deploy) can be missed, and is
+refused once `ReadUnsealed` is cleared, so run a final `SealRecords`
+after every instance seals, before clearing it. `SealRecords` trusts
+what it finds, so run it on a database whose contents you trust.
+Losing the key makes sealed records unreadable. `AESGCMSealer` allows
+2^32 seals per key (random nonces, NIST SP 800-38D), which a busy
+server reaches in weeks, or days (see
+[Performance and scaling](#performance-and-scaling)). The budget is
+shared by every instance and every other store or service sealing with
+the same key, so count their seals together. Rotate before then
 with `sqlstore.RotatingSealer(newSealer, oldSealer)`, which seals
 with the new key and opens with either until the old one's records
 expire. See the package documentation's Sealing section.
@@ -316,6 +322,8 @@ and measure your own deployment.
   per key. A login seals five records and a refresh one, so 2,000
   logins a second (10,000 seals) reach the limit in five days; rotating
   with `RotatingSealer` at a quarter of it is every 30 hours or so.
+  Count every instance's seals, and any other service's using the key,
+  against the one budget.
 
 ## Tests
 

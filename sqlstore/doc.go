@@ -168,6 +168,14 @@
 //     returning user's body, which never changes, is read without the
 //     INSERT).
 //
+// On PostgreSQL a write that is one statement runs on its own, in the
+// implicit transaction PostgreSQL commits it in (autocommit): if its
+// context is cancelled while the reply is in flight, the change may be
+// committed though the caller sees an error. That fails closed: the
+// request fails with server_error, and a code the statement spent, or
+// a replay digest it recorded, refuses a retry (a revocation it
+// recorded stays recorded); nothing is ever applied twice.
+//
 // On SQLite every write runs in a transaction started with BEGIN
 // IMMEDIATE. Expiry is compared against the time the server passes
 // (storage.BeginAuthorizationTransaction.Now), never the database's
@@ -258,7 +266,12 @@
 // altered. To start sealing a database already in use, deploy with
 // Options.ReadUnsealed set too, which reads the blobs written before,
 // run DB.SealRecords, which seals them in place, then deploy without
-// ReadUnsealed: while it's set, anyone who can write to the database
+// ReadUnsealed. SealRecords reads each table in key order, so a row an
+// instance still without the Sealer writes during a pass (in a rolling
+// deploy, say) can land behind its cursor and stay unsealed, and once
+// ReadUnsealed is cleared it is refused (failing closed): run a final
+// SealRecords after every instance seals, before clearing ReadUnsealed.
+// While ReadUnsealed is set, anyone who can write to the database
 // could plant a blob the Sealer never sealed, so it's for that
 // migration only. SealRecords seals every unsealed blob it finds, one
 // planted before it ran included, which from then on opens as if the
@@ -275,7 +288,11 @@
 // token) sealed under the old one expires. AESGCMSealer's random nonces
 // allow 2^32 seals per key (NIST SP 800-38D), which a busy server can
 // reach in weeks, or days: rotate before then — see AESGCMSealer, and
-// Performance and scaling for the cadence. A resource server reading
+// Performance and scaling for the cadence. The budget is the key's,
+// not an instance's: every instance sealing with the key, and every
+// other store or service sealing with it too (a relying party's
+// sessions, a co-hosted service given the same key), draws on the one
+// 2^32, so count their seals together. A resource server reading
 // opaque access tokens needs the same Sealer.
 //
 // # Errors
@@ -643,7 +660,8 @@
 // token and a refresh token; fewer with JWT access tokens or no refresh
 // token), a refresh one (its opaque access token), a CIBA request two
 // and its decision one, and a relying party's session one, if it shares
-// the key. So 2,000 logins a second are 10,000 seals a second, which
+// the key. Count every instance's seals, and any other service's that
+// uses the key, against the one budget. So 2,000 logins a second are 10,000 seals a second, which
 // reach 2^32 in five days, and 1,000 seals a second in seven weeks;
 // rotating at a quarter of the budget, as AESGCMSealer suggests, is
 // every 30 hours or so at 10,000 seals a second, and every 12 days at

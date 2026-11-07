@@ -346,7 +346,10 @@ const sealBatchSize = 100
 //
 //  1. deploy every instance with Sealer set and ReadUnsealed true, so
 //     they read the rows written before and seal every row they write;
-//  2. run SealRecords once;
+//  2. run SealRecords once every instance seals: a row an instance
+//     without the Sealer writes during a pass can land behind the
+//     pass's key-ordered cursor and stay unsealed, so if any instance
+//     may have, run it again after;
 //  3. deploy again with ReadUnsealed false, so that from then on a blob
 //     that isn't sealed is refused rather than trusted.
 //

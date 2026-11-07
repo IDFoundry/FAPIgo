@@ -173,6 +173,13 @@ func singleStatementRaces() []singleStatementRace {
 		},
 		check: wantNil,
 	}, {
+		name: "record issued tokens", setup: createCode,
+		change: "UPDATE {p}authorization_codes SET redeemed = 1 WHERE code_hash = $1", arg: code[:],
+		call: func(d *sqlstore.DB) error {
+			return d.Grants().RecordIssuedTokens(ctx, code, "at", time.Now().Add(time.Hour), token, time.Now().Add(time.Hour))
+		},
+		check: wantNil,
+	}, {
 		name: "revoke refresh token",
 		setup: func(t *testing.T, d *sqlstore.DB) {
 			t.Helper()

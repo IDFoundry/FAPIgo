@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/idfoundry/fapigo/storage"
@@ -47,6 +48,49 @@ func (s *RevocationStore) IsRevoked(ctx context.Context, key string) (bool, erro
 		return false, unavailable("check revocation", err)
 	}
 	return n > 0, nil
+}
+
+// maxRevocationBatch is the most keys IsAnyRevoked asks about in one
+// statement: callers pass a handful (a token's or grant's current and
+// legacy key forms), and a longer list is asked about this many at a
+// time, keeping the statement's placeholders well inside every
+// dialect's limit and its prepared forms few.
+const maxRevocationBatch = 16
+
+// IsAnyRevoked reports whether any of keys was revoked and hasn't been
+// swept since its expiry, as IsRevoked would for each of them in turn —
+// each compared exactly, and a key Revoke would refuse never revoked —
+// in one SELECT EXISTS … WHERE revocation_key IN (…) for up to
+// maxRevocationBatch keys at a time. No keys is false, nil. The server
+// and a resource server discover it by type assertion (fapigo's
+// storage.RevocationBatchChecker), asking it once where they'd
+// otherwise call IsRevoked once per key.
+func (s *RevocationStore) IsAnyRevoked(ctx context.Context, keys []string) (bool, error) {
+	valid := make([]any, 0, len(keys))
+	for _, key := range keys {
+		if validTextKey(key) {
+			valid = append(valid, key)
+		}
+	}
+	for len(valid) > 0 {
+		n := min(len(valid), maxRevocationBatch)
+		if revoked, err := s.anyRevoked(ctx, valid[:n]); revoked || err != nil {
+			return revoked, err
+		}
+		valid = valid[n:]
+	}
+	return false, nil
+}
+
+// anyRevoked is IsAnyRevoked's statement for keys, 1 to
+// maxRevocationBatch valid ones.
+func (s *RevocationStore) anyRevoked(ctx context.Context, keys []any) (bool, error) {
+	var revoked bool
+	query := "SELECT EXISTS (SELECT 1 FROM {revocations} WHERE revocation_key IN (?" + strings.Repeat(", ?", len(keys)-1) + "))"
+	if err := s.d.queryRow(ctx, query, keys...).Scan(&revoked); err != nil {
+		return false, unavailable("check revocation", err)
+	}
+	return revoked, nil
 }
 
 // Capabilities implements storage.StoreAssurance — see the package

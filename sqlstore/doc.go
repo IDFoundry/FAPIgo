@@ -463,6 +463,15 @@
 //   - a CIBA poll of a pending request: 4 statements, 1 write
 //     transaction.
 //
+// Two methods beyond the storage interfaces take a little more off,
+// with a fapigo that looks for them (storage.RevocationBatchChecker and
+// storage.IssuedTokensRecorder) and makes the separate calls otherwise:
+// RevocationStore.IsAnyRevoked checks all of a token's or grant's
+// revocation keys, current and legacy forms, in one statement rather
+// than one each, on every token request and resource-server check; and
+// GrantStore.RecordIssuedTokens records a code exchange's access and
+// refresh tokens in one UPDATE of the code's row rather than two.
+//
 // Options.ClientCacheTTL takes the client's row out of most of those:
 // with 5 seconds, a login was 24 statements, a pushed request 4 and a
 // refresh 7, at the cost of a client's change made through another

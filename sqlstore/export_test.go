@@ -35,3 +35,24 @@ func ResolveClientCounting(ctx context.Context, d *DB, id fapi.ClientID, parses 
 func LookupClientKeys(ctx context.Context, d *DB, id fapi.ClientID) (fapi.URL, []byte, error) {
 	return d.Clients().lookupKeys(ctx, id)
 }
+
+// PinsIsolation reports whether d runs every Postgres write, single
+// statements included, in a READ COMMITTED transaction.
+func PinsIsolation(d *DB) bool { return d.pinIsolation.Load() }
+
+// HoldSQLiteWrites takes d's SQLite write slot, as a write of d's own
+// would, returning the function that releases it.
+func HoldSQLiteWrites(d *DB) (release func()) {
+	d.sqliteWrites <- struct{}{}
+	return func() { <-d.sqliteWrites }
+}
+
+// SweepLockKey is the Postgres advisory lock d's Sweep batches take.
+func SweepLockKey(d *DB) int64 { return d.sweepLockKey() }
+
+// SweepBatchSize is how many rows each of d's Sweep transactions
+// deletes at most.
+func SweepBatchSize(d *DB) int64 { return d.sweepBatchSize() }
+
+// CheckIsolation is d's check of the database's default isolation level.
+func CheckIsolation(ctx context.Context, d *DB) error { return d.checkIsolation(ctx) }

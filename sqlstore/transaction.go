@@ -37,12 +37,12 @@ func (s *TransactionStore) CreatePAR(ctx context.Context, record storage.NewPARR
 		return errors.New("sqlstore: create pushed request: reference or client_id isn't valid UTF-8 without NUL")
 	}
 	expires := nanos(record.ExpiresAt)
-	err := s.d.writeOne(ctx, func(q querier) error {
-		request, err := s.d.seal(blobRef{"par_requests", requestColumn, record.Reference, string(record.ClientID), expires, nil}, record.Request)
-		if err != nil {
-			return err
-		}
-		_, err = q.ExecContext(ctx, s.d.q("INSERT INTO {par_requests} (reference, client_id, request, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
+	request, err := s.d.seal(blobRef{"par_requests", requestColumn, record.Reference, string(record.ClientID), expires, nil}, record.Request)
+	if err != nil {
+		return unavailable("create pushed request", err)
+	}
+	err = s.d.writeOne(ctx, func(q querier) error {
+		_, err := q.ExecContext(ctx, s.d.q("INSERT INTO {par_requests} (reference, client_id, request, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
 			record.Reference, string(record.ClientID), request, expires, expires)
 		return err
 	})

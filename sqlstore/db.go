@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -60,8 +62,9 @@ type Options struct {
 	// SQLiteBusyTimeout is how long a SQLite write waits for another
 	// connection's write lock before failing. Zero means 10 seconds.
 	// Ignored for Postgres. It applies to this package's writes only,
-	// which set it on their connection: a read waits as long as the
-	// busy_timeout in the DSN says, which is why the DSN needs one too.
+	// which set it on their connection, the first time they use it: a
+	// read waits as long as the busy_timeout in the DSN says, which is
+	// why the DSN needs one too.
 	// In WAL mode, which Migrate and CheckSchema require, a read doesn't
 	// wait for a write at all; it waits only on the rare moments WAL
 	// mode can't serve it, such as a new file's switch to WAL.
@@ -125,7 +128,20 @@ type DB struct {
 	// sqliteWrites serializes this DB's own SQLite write transactions,
 	// which would otherwise only wait on SQLite's busy handler for each
 	// other. Other processes, and other DBs on the same file, still do.
-	sqliteWrites sync.Mutex
+	// It's a semaphore of one slot, rather than a mutex, so a write
+	// whose context ends while it waits stops waiting; and a slot freed
+	// goes to the longest waiter, so a Sweep's batches queue behind the
+	// writes waiting when each one ends.
+	sqliteWrites chan struct{}
+
+	// busyConns are the SQLite connections whose busy timeout is set.
+	busyConns busyConns
+
+	// pinIsolation is whether every Postgres write, single statements
+	// included, runs in a READ COMMITTED transaction: Migrate or
+	// CheckSchema found the database's default isolation level isn't
+	// READ COMMITTED (see writeOne).
+	pinIsolation atomic.Bool
 
 	queries sync.Map // query template → the dialect's query
 
@@ -171,7 +187,7 @@ func New(db *sql.DB, dialect Dialect, opts Options) (*DB, error) {
 	if opts.ClientCacheTTL < 0 {
 		return nil, errors.New("sqlstore: negative ClientCacheTTL")
 	}
-	d := &DB{db: db, dialect: dialect, prefix: prefix, busy: busy, sealer: opts.Sealer, readUnsealed: opts.ReadUnsealed}
+	d := &DB{db: db, dialect: dialect, prefix: prefix, busy: busy, sealer: opts.Sealer, readUnsealed: opts.ReadUnsealed, sqliteWrites: make(chan struct{}, 1)}
 	d.clients.ttl = opts.ClientCacheTTL
 	d.nonces = &NonceStore{d}
 	return d, nil
@@ -250,8 +266,9 @@ func (d *DB) queryRow(ctx context.Context, template string, args ...any) *sql.Ro
 // default_transaction_isolation, which a transaction otherwise
 // inherits — they would fail with a serialization error (SQLSTATE
 // 40001) instead, an outage, and a reused code's tokens wouldn't be
-// revoked. Pinning the level, rather than retrying on 40001, keeps each
-// consume one attempt, as on READ COMMITTED databases.
+// revoked. Pinning the level keeps each multi-statement consume one
+// attempt, as on READ COMMITTED databases; writeOne reruns a single
+// statement under it.
 var readCommitted = &sql.TxOptions{Isolation: sql.LevelReadCommitted}
 
 // write runs fn in a transaction, committing it if fn returns nil and
@@ -274,44 +291,160 @@ func (d *DB) write(ctx context.Context, fn func(q querier) error) error {
 	return tx.Commit()
 }
 
-// writeOne runs fn, which makes one change in one statement, as write
-// does: in a READ COMMITTED transaction on Postgres, since a statement
-// run on its own would take the database's default isolation level,
-// and with the write lock on SQLite, waiting its busy timeout for it.
+// writeOne runs fn, which makes one change in one statement — run
+// last, after anything of fn's that may fail — with write's guarantees.
+// On SQLite it is write. On Postgres the statement runs on its own, in
+// the implicit transaction PostgreSQL gives it, which saves BEGIN and
+// COMMIT's round trips: one statement is atomic at every isolation
+// level, and at READ COMMITTED it re-checks its WHERE against a row a
+// concurrent transaction changed, as in write's transaction. At
+// REPEATABLE READ or SERIALIZABLE it fails instead with a serialization
+// error (SQLSTATE 40001), having changed nothing, and fn is run again in
+// write's READ COMMITTED transaction, where it gets the outcome it
+// would have had there all along: so each change is made at most once,
+// and a lost race is still its typed outcome, never an outage. Where
+// Migrate or CheckSchema found the database's default isolation isn't
+// READ COMMITTED, every statement runs in write's transaction from the
+// start (pinIsolation): that needs no rerun, so it holds too with a
+// driver whose errors don't report their SQLSTATE.
 func (d *DB) writeOne(ctx context.Context, fn func(q querier) error) error {
-	return d.write(ctx, fn)
+	if d.dialect == SQLite || d.pinIsolation.Load() {
+		return d.write(ctx, fn)
+	}
+	err := fn(d.db)
+	if serializationFailure(err) {
+		return d.write(ctx, fn)
+	}
+	return err
+}
+
+// serializationFailure reports whether err is PostgreSQL's
+// serialization failure, SQLSTATE 40001, as a driver reports it: pgx's
+// *pgconn.PgError and lib/pq's *pq.Error each have a SQLState method.
+func serializationFailure(err error) bool {
+	var coded interface{ SQLState() string }
+	return errors.As(err, &coded) && coded.SQLState() == "40001"
+}
+
+// checkIsolation sets pinIsolation unless the database's default
+// isolation level, as a connection of d's pool reports it, is READ
+// COMMITTED. Postgres only.
+func (d *DB) checkIsolation(ctx context.Context) error {
+	if d.dialect != Postgres {
+		return nil
+	}
+	var level string
+	if err := d.db.QueryRowContext(ctx, "SHOW default_transaction_isolation").Scan(&level); err != nil {
+		return fmt.Errorf("read the default transaction isolation: %w", err)
+	}
+	d.pinIsolation.Store(!strings.EqualFold(level, "read committed"))
+	return nil
 }
 
 // sqliteWrite is write for SQLite. database/sql's BeginTx can't ask for
 // BEGIN IMMEDIATE, so this takes a connection and issues the
-// transaction's statements itself.
-func (d *DB) sqliteWrite(ctx context.Context, fn func(q querier) error) (err error) {
-	d.sqliteWrites.Lock()
-	defer d.sqliteWrites.Unlock()
+// transaction's statements itself, under sqliteExclusive.
+func (d *DB) sqliteWrite(ctx context.Context, fn func(q querier) error) error {
+	return d.sqliteExclusive(ctx, func(conn *sql.Conn) (err error) {
+		defer func() {
+			if err != nil {
+				// Never hand the pool a connection still in a transaction.
+				if _, rbErr := conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK"); rbErr != nil && !noTransaction(rbErr) {
+					_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+				}
+			}
+		}()
+		if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+			return err
+		}
+		if err := fn(conn); err != nil {
+			return err
+		}
+		_, err = conn.ExecContext(ctx, "COMMIT")
+		return err
+	})
+}
+
+// sqliteExclusive runs fn on a connection of d's whose busy timeout is
+// d's, holding sqliteWrites. Waiting for it, it stops once ctx ends,
+// returning ctx's error.
+func (d *DB) sqliteExclusive(ctx context.Context, fn func(conn *sql.Conn) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case d.sqliteWrites <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-d.sqliteWrites }()
 	conn, err := d.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			// Never hand the pool a connection still in a transaction.
-			if _, rbErr := conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK"); rbErr != nil && !noTransaction(rbErr) {
-				_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-			}
-		}
-		_ = conn.Close()
-	}()
-	if _, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = "+strconv.FormatInt(d.busy.Milliseconds(), 10)); err != nil { // NOSONAR: go:S2077 — the only value is an integer New validated; PRAGMA takes no bound arguments.
+	defer func() { _ = conn.Close() }()
+	if err := d.setBusyTimeout(ctx, conn); err != nil {
 		return err
 	}
-	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+	return fn(conn)
+}
+
+// busyConns is the set of SQLite driver connections whose busy timeout
+// a DB has set. An entry keeps its connection from being collected, so
+// a connection the pool has closed can't be mistaken for a new one at
+// its address; it is only forgotten, at worst, setting the timeout
+// again: when the set grows past maxBusyConns, it starts over.
+type busyConns struct {
+	mu    sync.Mutex
+	conns map[any]struct{}
+}
+
+// maxBusyConns is how many connections busyConns remembers before it
+// starts over: well past any pool's open connections, so it starts over
+// only after the pool has replaced that many.
+const maxBusyConns = 1024
+
+// setBusyTimeout sets conn's busy timeout to d's, unless d has set it on
+// conn's driver connection already: a busy timeout lasts as long as
+// its connection, so this costs one statement per connection rather
+// than one per write.
+func (d *DB) setBusyTimeout(ctx context.Context, conn *sql.Conn) error {
+	var dc any
+	if err := conn.Raw(func(c any) error { dc = c; return nil }); err != nil {
 		return err
 	}
-	if err := fn(conn); err != nil {
+	if !comparableConn(dc) {
+		return d.execBusyTimeout(ctx, conn)
+	}
+	b := &d.busyConns
+	b.mu.Lock()
+	_, done := b.conns[dc]
+	b.mu.Unlock()
+	if done {
+		return nil
+	}
+	if err := d.execBusyTimeout(ctx, conn); err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, "COMMIT")
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conns == nil || len(b.conns) >= maxBusyConns {
+		b.conns = map[any]struct{}{}
+	}
+	b.conns[dc] = struct{}{}
+	return nil
+}
+
+// execBusyTimeout sets conn's busy timeout to d's.
+func (d *DB) execBusyTimeout(ctx context.Context, conn *sql.Conn) error {
+	_, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = "+strconv.FormatInt(d.busy.Milliseconds(), 10)) // NOSONAR: go:S2077 — the only value is an integer New validated; PRAGMA takes no bound arguments.
 	return err
+}
+
+// comparableConn reports whether dc, a driver connection, is a pointer
+// and so can key busyConns by identity: every SQLite driver's is.
+func comparableConn(dc any) bool {
+	return dc != nil && reflect.TypeOf(dc).Kind() == reflect.Pointer
 }
 
 // noTransaction reports whether err is SQLite's answer to a ROLLBACK

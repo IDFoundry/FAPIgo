@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -427,5 +428,120 @@ func TestRotatingSealer(t *testing.T) {
 	}
 	if _, err := sqlstore.RotatingSealer(newKey, nil); err == nil {
 		t.Error("RotatingSealer(current, nil) = nil error, want an error")
+	}
+}
+
+// SealRecords seals tables of more rows than one of its batches, every
+// row once.
+func TestSealRecordsPagesThroughTables(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		ctx := context.Background()
+		p := newPlace(t, dialect)
+		plain := p.migrated()
+		const rows = 250
+		for i := range rows {
+			createRefreshToken(t, plain, strconv.Itoa(i))
+			must(t, plain.Transactions().CreatePAR(ctx, storage.NewPARRecord{Reference: "ref-" + strconv.Itoa(i), ClientID: "c", Request: secretGrant, ExpiresAt: time.Now().Add(time.Hour)}))
+		}
+		sealer := testSealer(t)
+		d := p.migratedWith(sqlstore.Options{Sealer: sealer, ReadUnsealed: true})
+		if n, err := d.SealRecords(ctx); err != nil || n != 2*rows {
+			t.Fatalf("SealRecords = %d, %v, want %d, nil", n, err, 2*rows)
+		}
+		if n, err := d.SealRecords(ctx); err != nil || n != 0 {
+			t.Fatalf("SealRecords again = %d, %v, want 0, nil", n, err)
+		}
+		sealed := p.migratedWith(sqlstore.Options{Sealer: sealer})
+		for _, i := range []int{0, rows / 2, rows - 1} {
+			if _, err := sealed.Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: sha256.Sum256([]byte("rt-" + strconv.Itoa(i)))}); err != nil {
+				t.Fatalf("RedeemRefreshToken %d after SealRecords, without ReadUnsealed = %v", i, err)
+			}
+		}
+	})
+}
+
+// blockingSealer is a Sealer whose Seal waits for release, after
+// saying so on sealing.
+type blockingSealer struct {
+	sqlstore.Sealer
+	sealing, release chan struct{}
+}
+
+func (s blockingSealer) Seal(plaintext, additionalData []byte) ([]byte, error) {
+	s.sealing <- struct{}{}
+	<-s.release
+	return s.Sealer.Seal(plaintext, additionalData)
+}
+
+// A Create seals its record before it takes SQLite's write lock: a
+// slow Sealer holds up no other write.
+func TestCreateSealsOutsideTheWriteLock(t *testing.T) {
+	sealer := blockingSealer{testSealer(t), make(chan struct{}), make(chan struct{})}
+	d := newPlace(t, sqlstore.SQLite).migratedWith(sqlstore.Options{Sealer: sealer})
+	ctx := context.Background()
+	created := make(chan error, 1)
+	go func() {
+		created <- d.Grants().CreateRefreshToken(ctx, storage.NewRefreshToken{TokenHash: sha256.Sum256([]byte("slow")), ClientID: "c", Grant: secretGrant, ExpiresAt: time.Now().Add(time.Hour)})
+	}()
+	<-sealer.sealing
+	wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	err := d.Replay().UseOnce(wctx, storage.ReplayUse{Namespace: "n", Digest: sha256.Sum256([]byte("meanwhile")), ExpiresAt: time.Now().Add(time.Minute)})
+	close(sealer.release)
+	if err != nil {
+		t.Fatalf("UseOnce while a Create is sealing = %v, want nil", err)
+	}
+	must(t, <-created)
+}
+
+// failingAfterSealer is a Sealer that seals n records, then fails.
+type failingAfterSealer struct {
+	sqlstore.Sealer
+	n *int
+}
+
+func (s failingAfterSealer) Seal(plaintext, additionalData []byte) ([]byte, error) {
+	if *s.n == 0 {
+		return nil, errors.New("kms down")
+	}
+	*s.n--
+	return s.Sealer.Seal(plaintext, additionalData)
+}
+
+// Every Create whose Sealer fails — for a CIBA request, at either of
+// its two blobs — is an outage.
+func TestCreateSealerFailures(t *testing.T) {
+	ctx := context.Background()
+	later := time.Now().Add(time.Hour)
+	creates := map[string]func(d *sqlstore.DB) error{
+		"CreatePAR": func(d *sqlstore.DB) error {
+			return d.Transactions().CreatePAR(ctx, storage.NewPARRecord{Reference: "r", ClientID: "c", Request: secretGrant, ExpiresAt: later})
+		},
+		"CreateAuthorizationCode": func(d *sqlstore.DB) error {
+			return d.Grants().CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{ClientID: "c", Grant: secretGrant, ExpiresAt: later})
+		},
+		"CreateAccessToken": func(d *sqlstore.DB) error {
+			return d.AccessTokens().CreateAccessToken(ctx, storage.NewAccessToken{ClientID: "c", ExpiresAt: later})
+		},
+		"CreateBackchannelAuthentication": func(d *sqlstore.DB) error {
+			return d.Backchannel().CreateBackchannelAuthentication(ctx, cibaRequest("sealing", "poll"))
+		},
+		"Sessions.Create": func(d *sqlstore.DB) error {
+			return d.Sessions().Create(ctx, storage.NewSession{State: "s", Record: secretGrant, ExpiresAt: later})
+		},
+	}
+	for name, create := range creates {
+		for _, sealed := range []int{0, 1} {
+			if sealed == 1 && name != "CreateBackchannelAuthentication" {
+				continue
+			}
+			t.Run(fmt.Sprintf("%s/after %d", name, sealed), func(t *testing.T) {
+				n := sealed
+				d := newPlace(t, sqlstore.SQLite).migratedWith(sqlstore.Options{Sealer: failingAfterSealer{testSealer(t), &n}})
+				if err := create(d); !errors.Is(err, storage.ErrStoreUnavailable) {
+					t.Fatalf("%s with a failing Sealer = %v, want storage.ErrStoreUnavailable", name, err)
+				}
+			})
+		}
 	}
 }

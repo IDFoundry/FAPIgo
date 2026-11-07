@@ -273,23 +273,41 @@ func TestHistoricalKeysIssuerRoundTripsThroughFetchHistoricalKeys(t *testing.T) 
 	if len(claims.Keys) != 2 {
 		t.Fatalf("len(Keys) = %d, want 2", len(claims.Keys))
 	}
-	expired, compromised := claims.Keys[0], claims.Keys[1]
-	if expired.KeyID != "expired-key" || expired.Algorithm != fapi.ES256 || !expired.IssuedAt.Equal(now.Add(-48*time.Hour)) ||
-		!expired.ExpiresAt.Equal(now.Add(-time.Hour)) || expired.Revoked != nil || !expiredKey.PublicKey.Equal(expired.PublicKey) {
-		t.Errorf("Keys[0] = %+v", expired)
+	checkExpiredHistoricalKey(t, claims.Keys[0], &expiredKey.PublicKey, now)
+	checkCompromisedHistoricalKey(t, claims.Keys[1], oldStatement, now)
+}
+
+func checkExpiredHistoricalKey(t *testing.T, got federation.HistoricalKey, pub crypto.PublicKey, now time.Time) {
+	t.Helper()
+	if got.KeyID != "expired-key" || got.Algorithm != fapi.ES256 || !got.IssuedAt.Equal(now.Add(-48*time.Hour)) ||
+		!got.ExpiresAt.Equal(now.Add(-time.Hour)) || got.Revoked != nil || !samePublic(pub, got.PublicKey) {
+		t.Errorf("expired key = %+v", got)
 	}
-	if compromised.KeyID != "compromised-key" || compromised.Algorithm != fapi.EdDSA || !compromised.NotBefore.Equal(now.Add(-72*time.Hour)) ||
-		compromised.Revoked == nil || compromised.Revoked.Reason != federation.KeyRevocationReasonCompromised ||
-		!compromised.Revoked.RevokedAt.Equal(now.Add(-30*time.Minute)) {
-		t.Errorf("Keys[1] = %+v, revoked %+v", compromised, compromised.Revoked)
+}
+
+// checkCompromisedHistoricalKey also checks oldStatement, signed by the
+// compromised key before it was retired, still verifies against the
+// published entry.
+func checkCompromisedHistoricalKey(t *testing.T, got federation.HistoricalKey, oldStatement string, now time.Time) {
+	t.Helper()
+	if got.KeyID != "compromised-key" || got.Algorithm != fapi.EdDSA || !got.NotBefore.Equal(now.Add(-72*time.Hour)) {
+		t.Errorf("compromised key = %+v", got)
+	}
+	if got.Revoked == nil || got.Revoked.Reason != federation.KeyRevocationReasonCompromised || !got.Revoked.RevokedAt.Equal(now.Add(-30*time.Minute)) {
+		t.Errorf("compromised key revoked = %+v", got.Revoked)
 	}
 	parsed, err := jose.ParseCompact(oldStatement)
 	if err != nil {
 		t.Fatalf("ParseCompact: %v", err)
 	}
-	if err := parsed.Verify(compromised.PublicKey, compromised.Algorithm); err != nil {
+	if err := parsed.Verify(got.PublicKey, got.Algorithm); err != nil {
 		t.Errorf("old statement doesn't verify against its published historical key: %v", err)
 	}
+}
+
+func samePublic(a, b crypto.PublicKey) bool {
+	eq, ok := a.(interface{ Equal(crypto.PublicKey) bool })
+	return ok && eq.Equal(b)
 }
 
 func TestWriteHistoricalKeys(t *testing.T) {

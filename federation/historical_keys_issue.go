@@ -206,6 +206,18 @@ func (i *HistoricalKeysIssuer) Response(keys []HistoricalKeyParams) (string, err
 // checks intfed.CreateHistoricalKeysResponse already makes (kid,
 // algorithm, key-type-for-algorithm, exp, revoked_at).
 func (i *HistoricalKeysIssuer) checkRetiredKey(k HistoricalKeyParams) error {
+	if err := checkRetiredKeyShape(k); err != nil {
+		return err
+	}
+	if err := i.checkRevocation(k); err != nil {
+		return err
+	}
+	return i.checkNotActive(k)
+}
+
+// checkRetiredKeyShape checks k's own members: a kid, a public (never
+// private) key, and an exp not before its iat or nbf.
+func checkRetiredKeyShape(k HistoricalKeyParams) error {
 	if k.KeyID == "" {
 		return fmt.Errorf("kid is required")
 	}
@@ -221,14 +233,27 @@ func (i *HistoricalKeysIssuer) checkRetiredKey(k HistoricalKeyParams) error {
 	if (!k.IssuedAt.IsZero() && k.ExpiresAt.Before(k.IssuedAt)) || (!k.NotBefore.IsZero() && k.ExpiresAt.Before(k.NotBefore)) {
 		return fmt.Errorf("kid %q: exp is before iat or nbf", k.KeyID)
 	}
-	if k.Revoked != nil {
-		if k.Revoked.RevokedAt.IsZero() {
-			return fmt.Errorf("kid %q: revoked_at is required", k.KeyID)
-		}
-		if !i.knownRevocationReason(k.Revoked.Reason) {
-			return fmt.Errorf("kid %q: unknown revocation reason %q", k.KeyID, k.Revoked.Reason)
-		}
+	return nil
+}
+
+// checkRevocation checks k's "revoked" object, when present: a
+// revoked_at, and a reason Response accepts.
+func (i *HistoricalKeysIssuer) checkRevocation(k HistoricalKeyParams) error {
+	if k.Revoked == nil {
+		return nil
 	}
+	if k.Revoked.RevokedAt.IsZero() {
+		return fmt.Errorf("kid %q: revoked_at is required", k.KeyID)
+	}
+	if !i.knownRevocationReason(k.Revoked.Reason) {
+		return fmt.Errorf("kid %q: unknown revocation reason %q", k.KeyID, k.Revoked.Reason)
+	}
+	return nil
+}
+
+// checkNotActive refuses k when it is still an active key: Signer's own
+// key or KeyID, or one published in Dependencies.JWKS.
+func (i *HistoricalKeysIssuer) checkNotActive(k HistoricalKeyParams) error {
 	if k.KeyID == i.deps.KeyID || samePublicKey(k.PublicKey, i.deps.Signer.Public()) {
 		return fmt.Errorf("kid %q: is the active signing key", k.KeyID)
 	}

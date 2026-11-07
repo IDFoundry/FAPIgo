@@ -50,6 +50,40 @@ func (s *RevocationStore) IsRevoked(ctx context.Context, key string) (bool, erro
 	return n > 0, nil
 }
 
+// Batching returns s as a storage.RevocationStore that is also a
+// storage.RevocationBatchChecker, for server.Dependencies.Revocation
+// and resource.Dependencies.Revocation:
+//
+//	Revocation: db.Revocation().Batching(),
+//
+// Its IsAnyRevoked reports whether any of keys was revoked and hasn't
+// been swept since its expiry, as IsRevoked would for each of them in
+// turn — each compared exactly, and a key Revoke would refuse never
+// revoked — in one SELECT EXISTS … WHERE revocation_key IN (…) for up
+// to maxRevocationBatch keys at a time. No keys is false, nil. The
+// server and a resource server discover it by type assertion, asking
+// it once where they'd otherwise call IsRevoked once per key. It's
+// otherwise s, a storage.StoreAssurance with s's Capabilities.
+//
+// It's a method returning an interface, rather than a method of s, so
+// that only a deployment asking for it gets it: a wrapper of its own
+// that embeds *RevocationStore and overrides IsRevoked (a cache in
+// front of a shared store, say) would otherwise inherit IsAnyRevoked
+// by promotion, and the server and resource server would ask that,
+// past the override. A wrapper embedding what Batching returns, a
+// storage.RevocationStore, isn't a RevocationBatchChecker unless it
+// implements IsAnyRevoked itself.
+func (s *RevocationStore) Batching() storage.RevocationStore { return batchingRevocationStore{s} }
+
+// batchingRevocationStore is RevocationStore.Batching's store.
+type batchingRevocationStore struct{ *RevocationStore }
+
+// IsAnyRevoked implements storage.RevocationBatchChecker — see
+// RevocationStore.Batching.
+func (b batchingRevocationStore) IsAnyRevoked(ctx context.Context, keys []string) (bool, error) {
+	return b.isAnyRevoked(ctx, keys)
+}
+
 // maxRevocationBatch is the most keys IsAnyRevoked asks about in one
 // statement: callers pass a handful (a token's or grant's current and
 // legacy key forms), and a longer list is asked about this many at a
@@ -57,15 +91,8 @@ func (s *RevocationStore) IsRevoked(ctx context.Context, key string) (bool, erro
 // dialect's limit and its prepared forms few.
 const maxRevocationBatch = 16
 
-// IsAnyRevoked reports whether any of keys was revoked and hasn't been
-// swept since its expiry, as IsRevoked would for each of them in turn —
-// each compared exactly, and a key Revoke would refuse never revoked —
-// in one SELECT EXISTS … WHERE revocation_key IN (…) for up to
-// maxRevocationBatch keys at a time. No keys is false, nil. The server
-// and a resource server discover it by type assertion (fapigo's
-// storage.RevocationBatchChecker), asking it once where they'd
-// otherwise call IsRevoked once per key.
-func (s *RevocationStore) IsAnyRevoked(ctx context.Context, keys []string) (bool, error) {
+// isAnyRevoked is batchingRevocationStore's IsAnyRevoked.
+func (s *RevocationStore) isAnyRevoked(ctx context.Context, keys []string) (bool, error) {
 	valid := make([]any, 0, len(keys))
 	for _, key := range keys {
 		if validTextKey(key) {
@@ -82,7 +109,7 @@ func (s *RevocationStore) IsAnyRevoked(ctx context.Context, keys []string) (bool
 	return false, nil
 }
 
-// anyRevoked is IsAnyRevoked's statement for keys, 1 to
+// anyRevoked is isAnyRevoked's statement for keys, 1 to
 // maxRevocationBatch valid ones.
 func (s *RevocationStore) anyRevoked(ctx context.Context, keys []any) (bool, error) {
 	var revoked bool

@@ -33,10 +33,10 @@ if err := db.Migrate(ctx); err != nil { … } // or CheckSchema, if a deployment
 deps := server.Dependencies{
 	Clients:      db.Clients(),
 	Transactions: db.Transactions(),
-	Grants:       db.Grants(),
+	Grants:       db.Grants().Batching(), // Batching: see "Performance and scaling"
 	Replay:       db.Replay(),
 	Nonces:       db.Nonces(),
-	Revocation:   db.Revocation(),
+	Revocation:   db.Revocation().Batching(),
 	// …
 }
 
@@ -99,11 +99,17 @@ serves both.
 
 To start sealing a database in use: deploy with `Sealer` and
 `ReadUnsealed: true`, run `db.SealRecords(ctx)`, then deploy without
-`ReadUnsealed`. `SealRecords` trusts what it finds, so run it on a
-database whose contents you trust. Losing the key makes sealed records
-unreadable. `AESGCMSealer` allows 2^32 seals per key (random nonces,
-NIST SP 800-38D), which a busy server reaches in weeks, or days (see
-[Performance and scaling](#performance-and-scaling)): rotate before then
+`ReadUnsealed`. A row an instance still without the `Sealer` writes
+during a `SealRecords` pass (in a rolling deploy) can be missed, and is
+refused once `ReadUnsealed` is cleared, so run a final `SealRecords`
+after every instance seals, before clearing it. `SealRecords` trusts
+what it finds, so run it on a database whose contents you trust.
+Losing the key makes sealed records unreadable. `AESGCMSealer` allows
+2^32 seals per key (random nonces, NIST SP 800-38D), which a busy
+server reaches in weeks, or days (see
+[Performance and scaling](#performance-and-scaling)). The budget is
+shared by every instance and every other store or service sealing with
+the same key, so count their seals together. Rotate before then
 with `sqlstore.RotatingSealer(newSealer, oldSealer)`, which seals
 with the new key and opens with either until the old one's records
 expire. See the package documentation's Sealing section.
@@ -117,6 +123,15 @@ upgrading every instance to re-seal them in the current format (byte 3)
 and bind them too. Upgrade every instance sharing a database at once: a
 v0.2 instance can't open what an upgraded one seals, and rolling back
 to v0.2 leaves the records sealed since unreadable.
+
+## Upgrading from v0.6
+
+v0.7 moves `RevocationStore.IsAnyRevoked` and
+`GrantStore.RecordIssuedTokens` onto what `Revocation().Batching()` and
+`Grants().Batching()` return, so a wrapper embedding a store can't
+inherit them and have the server bypass its overrides. Wire
+`db.Revocation().Batching()` and `db.Grants().Batching()` to keep the
+batched calls; see [UPGRADING.md](../UPGRADING.md#sqlstore-v070).
 
 ## Upgrading from v0.3
 
@@ -219,7 +234,7 @@ between instances: use SQLite there.
   deps := resource.Dependencies{
   	AccessTokens: resource.OpaqueAccessTokens{Store: stores.AccessTokens, Issuer: issuer, Audience: audience}, // or JWTs
   	Replay:       stores.Replay,
-  	Revocation:   stores.Revocation,
+  	Revocation:   stores.Revocation.Batching(),
   	Nonces:       stores.Nonces,
   	// …
   }
@@ -272,6 +287,15 @@ and measure your own deployment.
   difference; v0.5's changes raised logins by about a third and
   refreshes by about half. Size the database's CPU for your request
   rates.
+- **Wire `Grants().Batching()` and `Revocation().Batching()`.** They add
+  the batch methods the server and resource servers look for
+  (`storage.IssuedTokensRecorder`, `storage.RevocationBatchChecker`): a
+  code exchange records its tokens in one `UPDATE` rather than two, and
+  a token's or grant's revocation keys are checked in one statement
+  rather than one each. They're kept off the stores themselves so that
+  a wrapper of your own embedding `*GrantStore` or `*RevocationStore`
+  and overriding its single-key methods can't inherit them and have
+  the server bypass its overrides.
 - **`Options.ClientCacheTTL`** skips re-reading a client's row within
   the TTL (a login drops to 24 statements with 5 s), at the cost of a
   change made through another instance taking up to the TTL to apply.
@@ -295,8 +319,9 @@ and measure your own deployment.
   (thousands to tens of thousands per table, not millions), from one
   instance or a scheduled job. It deletes in short batches, so even a
   large backlog no longer stalls other writers for seconds as it did on
-  v0.4; on PostgreSQL a concurrent run from another instance stops
-  rather than repeating the work.
+  v0.4; on PostgreSQL a concurrent run from another instance on the
+  same tables (the same schema and `TablePrefix`) stops rather than
+  repeating the work.
 - **SQLite** has one writer, and with the documented DSN
   (`synchronous=FULL`) every write transaction waits for an fsync. A
   login is 13 of them, so on a Linux VM disk it managed 13–17 logins a
@@ -315,6 +340,8 @@ and measure your own deployment.
   per key. A login seals five records and a refresh one, so 2,000
   logins a second (10,000 seals) reach the limit in five days; rotating
   with `RotatingSealer` at a quarter of it is every 30 hours or so.
+  Count every instance's seals, and any other service's using the key,
+  against the one budget.
 
 ## Tests
 

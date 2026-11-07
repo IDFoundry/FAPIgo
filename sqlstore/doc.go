@@ -21,12 +21,16 @@
 //	deps := server.Dependencies{
 //		Clients:      db.Clients(),
 //		Transactions: db.Transactions(),
-//		Grants:       db.Grants(),
+//		Grants:       db.Grants().Batching(),
 //		Replay:       db.Replay(),
 //		Nonces:       db.Nonces(),
-//		Revocation:   db.Revocation(),
+//		Revocation:   db.Revocation().Batching(),
 //		// ...
 //	}
+//
+// (Batching adds the batch methods the server looks for — see
+// Performance and scaling; db.Grants() and db.Revocation() alone work
+// too, a few statements a request slower.)
 //
 // and, for the features that need one, its store:
 //
@@ -78,7 +82,7 @@
 //	deps := resource.Dependencies{
 //		AccessTokens: resource.OpaqueAccessTokens{Store: stores.AccessTokens, Issuer: issuer, Audience: audience}, // or JWTAccessTokens
 //		Replay:       stores.Replay,
-//		Revocation:   stores.Revocation,
+//		Revocation:   stores.Revocation.Batching(),
 //		Nonces:       stores.Nonces,
 //		// ...
 //	}
@@ -167,6 +171,14 @@
 //     body is never another user's in the same issuer and sector (a
 //     returning user's body, which never changes, is read without the
 //     INSERT).
+//
+// On PostgreSQL a write that is one statement runs on its own, in the
+// implicit transaction PostgreSQL commits it in (autocommit): if its
+// context is cancelled while the reply is in flight, the change may be
+// committed though the caller sees an error. That fails closed: the
+// request fails with server_error, and a code the statement spent, or
+// a replay digest it recorded, refuses a retry (a revocation it
+// recorded stays recorded); nothing is ever applied twice.
 //
 // On SQLite every write runs in a transaction started with BEGIN
 // IMMEDIATE. Expiry is compared against the time the server passes
@@ -258,7 +270,12 @@
 // altered. To start sealing a database already in use, deploy with
 // Options.ReadUnsealed set too, which reads the blobs written before,
 // run DB.SealRecords, which seals them in place, then deploy without
-// ReadUnsealed: while it's set, anyone who can write to the database
+// ReadUnsealed. SealRecords reads each table in key order, so a row an
+// instance still without the Sealer writes during a pass (in a rolling
+// deploy, say) can land behind its cursor and stay unsealed, and once
+// ReadUnsealed is cleared it is refused (failing closed): run a final
+// SealRecords after every instance seals, before clearing ReadUnsealed.
+// While ReadUnsealed is set, anyone who can write to the database
 // could plant a blob the Sealer never sealed, so it's for that
 // migration only. SealRecords seals every unsealed blob it finds, one
 // planted before it ran included, which from then on opens as if the
@@ -275,7 +292,11 @@
 // token) sealed under the old one expires. AESGCMSealer's random nonces
 // allow 2^32 seals per key (NIST SP 800-38D), which a busy server can
 // reach in weeks, or days: rotate before then — see AESGCMSealer, and
-// Performance and scaling for the cadence. A resource server reading
+// Performance and scaling for the cadence. The budget is the key's,
+// not an instance's: every instance sealing with the key, and every
+// other store or service sealing with it too (a relying party's
+// sessions, a co-hosted service given the same key), draws on the one
+// 2^32, so count their seals together. A resource server reading
 // opaque access tokens needs the same Sealer.
 //
 // # Errors
@@ -426,8 +447,12 @@
 // Sweep deletes in batches, each a short transaction of its own, so a
 // large backlog doesn't hold up the stores' writes; on PostgreSQL,
 // instances sweeping the same tables at once leave each other's batches
-// alone (an advisory lock), and on SQLite a Sweep that deleted rows
-// truncates the write-ahead log after.
+// alone (an advisory lock, keyed by the TablePrefix and the schema the
+// tables are in, so tenants with a schema each in one database don't
+// share it), and on SQLite a Sweep that deleted rows
+// then truncates the write-ahead log, when nothing is using it: best
+// effort, never waiting on a reader or writer, so a backup or a
+// long-running read doesn't hold up writes behind it.
 //
 // # Performance and scaling
 //
@@ -466,12 +491,18 @@
 //
 // Two methods beyond the storage interfaces take a little more off,
 // with a fapigo that looks for them (storage.RevocationBatchChecker and
-// storage.IssuedTokensRecorder) and makes the separate calls otherwise:
-// RevocationStore.IsAnyRevoked checks all of a token's or grant's
-// revocation keys, current and legacy forms, in one statement rather
-// than one each, on every token request and resource-server check; and
-// GrantStore.RecordIssuedTokens records a code exchange's access and
-// refresh tokens in one UPDATE of the code's row rather than two.
+// storage.IssuedTokensRecorder) and makes the separate calls otherwise.
+// They're on what RevocationStore.Batching and GrantStore.Batching
+// return, not on the stores, so a deployment's own wrapper that embeds
+// a store and overrides its single-key methods can't inherit them by
+// accident and have the server bypass its overrides; wire those for
+// them (as Setup does). IsAnyRevoked checks all of a token's or
+// grant's revocation keys, current and legacy forms, in one statement
+// rather than one each, on every token request and resource-server
+// check; and RecordIssuedTokens records a code exchange's access and
+// refresh tokens in one UPDATE of the code's row rather than two. A
+// wrapper of your own over a store gets neither unless it implements
+// them itself.
 //
 // Options.ClientCacheTTL takes the client's row out of most of those:
 // with 5 seconds, a login was 24 statements, a pushed request 4 and a
@@ -563,7 +594,8 @@
 // about 300, and with 400,000 on SQLite 64 ms rather than 3.5 s. One
 // instance, or one scheduled job, is enough to sweep: a run deletes
 // what every instance wrote, and on PostgreSQL a run that finds another
-// instance's batch in progress stops, leaving the rest to that one.
+// instance's batch on the same tables in progress stops, leaving the
+// rest to that one (see DB.Sweep for what that leaves).
 //
 // SQLite has one writer, and with the DSN in Setup each write
 // transaction waits for an fsync: synchronous is FULL, SQLite's default
@@ -638,7 +670,8 @@
 // token and a refresh token; fewer with JWT access tokens or no refresh
 // token), a refresh one (its opaque access token), a CIBA request two
 // and its decision one, and a relying party's session one, if it shares
-// the key. So 2,000 logins a second are 10,000 seals a second, which
+// the key. Count every instance's seals, and any other service's that
+// uses the key, against the one budget. So 2,000 logins a second are 10,000 seals a second, which
 // reach 2^32 in five days, and 1,000 seals a second in seven weeks;
 // rotating at a quarter of the budget, as AESGCMSealer suggests, is
 // every 30 hours or so at 10,000 seals a second, and every 12 days at

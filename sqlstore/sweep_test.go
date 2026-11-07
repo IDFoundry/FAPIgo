@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -298,7 +299,8 @@ func TestPostgresSweepSkipsWhileAnotherSweeps(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", sqlstore.SweepLockKey(d)); err != nil {
+	key := sqlstore.SweepLockKey(d, currentSchema(t, postgresPool))
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := d.Sweep(ctx, time.Now()); n != 0 || err != nil {
@@ -307,10 +309,177 @@ func TestPostgresSweepSkipsWhileAnotherSweeps(t *testing.T) {
 	if left := countRows(t, p, postgresPool, "replay"); left != 10 {
 		t.Fatalf("rows left = %d, want 10", left)
 	}
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", sqlstore.SweepLockKey(d)); err != nil {
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", key); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := d.Sweep(ctx, time.Now()); n != 10 || err != nil {
 		t.Fatalf("Sweep once the lock is free = %d, %v, want 10, nil", n, err)
+	}
+}
+
+// currentSchema is the schema db's connections create and find tables
+// in.
+func currentSchema(t *testing.T, db *sql.DB) string {
+	t.Helper()
+	var schema string
+	if err := db.QueryRowContext(context.Background(), "SELECT current_schema()").Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	return schema
+}
+
+// The sweep lock is a function of the schema and the TablePrefix
+// alone: the same for every DB on one schema's tables, and different
+// for another prefix, another schema, or the two run together
+// differently.
+func TestSweepLockKeyDependsOnSchemaAndPrefix(t *testing.T) {
+	key := sqlstore.SweepLockKeyOf("tenant_a", "fapigo_")
+	if again := sqlstore.SweepLockKeyOf("tenant_a", "fapigo_"); again != key {
+		t.Fatalf("the same schema and prefix gave %d, then %d", key, again)
+	}
+	pool, err := sql.Open("pgx", "postgres://unused.invalid/db") // never connected to
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pool.Close() }()
+	d, err := sqlstore.New(pool, sqlstore.Postgres, sqlstore.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sqlstore.SweepLockKey(d, "tenant_a") != key {
+		t.Fatal("a DB's key isn't its default prefix's")
+	}
+	for _, other := range [][2]string{
+		{"tenant_b", "fapigo_"},
+		{"tenant_a", "oid4vc_"},
+		{"public", "fapigo_"},
+		{"tenant_afapigo_", ""},
+		{"tenant_", "afapigo_"},
+	} {
+		if sqlstore.SweepLockKeyOf(other[0], other[1]) == key {
+			t.Errorf("schema %q, prefix %q has tenant_a's fapigo_ key", other[0], other[1])
+		}
+	}
+}
+
+// On PostgreSQL, a Sweep of tables in one schema isn't held up by
+// another's of tables with the same TablePrefix in another schema of
+// the database: each takes a lock of its own, so one tenant's Sweep
+// never silently skips another's tables.
+func TestPostgresSweepLockIsPerSchema(t *testing.T) {
+	if postgresDSN == "" {
+		t.Skip("PostgreSQL only: " + postgresDSNEnv + " is unset")
+	}
+	ctx := context.Background()
+	other := currentSchema(t, postgresPool) + "_other"
+	if _, err := postgresPool.ExecContext(ctx, "CREATE SCHEMA "+other); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = postgresPool.ExecContext(context.Background(), "DROP SCHEMA "+other+" CASCADE") })
+	u, err := url.Parse(postgresDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := u.Query()
+	query.Set("search_path", other)
+	u.RawQuery = query.Encode()
+	otherPool, err := sql.Open("pgx", u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = otherPool.Close() })
+
+	p := newPlace(t, sqlstore.Postgres)
+	d := p.migrated()
+	theirs := p.handle(otherPool) // the same prefix, in the other schema
+	must(t, theirs.Migrate(ctx))
+	if got := currentSchema(t, otherPool); got != other {
+		t.Fatalf("the other pool's schema is %q, want %q", got, other)
+	}
+	insertExpiredReplay(t, p, otherPool, 10, 0)
+
+	conn, err := postgresPool.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	ours := sqlstore.SweepLockKey(d, currentSchema(t, postgresPool))
+	if ours == sqlstore.SweepLockKey(theirs, other) {
+		t.Fatal("the two schemas' tables share a sweep lock")
+	}
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", ours); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", ours) }()
+	if n, err := theirs.Sweep(ctx, time.Now()); n != 10 || err != nil {
+		t.Fatalf("the other schema's Sweep while this one's lock is held = %d, %v, want 10, nil", n, err)
+	}
+}
+
+// On SQLite, a Sweep whose checkpoint can't complete — another
+// connection, as another process's would be, holds a read snapshot from
+// before its deletes — returns at once rather than waiting the busy
+// timeout: a write of the same DB made alongside it isn't held up, nor
+// is another process's, with a shorter busy timeout; the log is left
+// for later, and the connection's busy timeout is set back. Once the
+// reader lets go, the next Sweep truncates the log.
+func TestSQLiteSweepCheckpointNeverWaits(t *testing.T) {
+	ctx := context.Background()
+	const busy = 3 * time.Second
+	p := newPlace(t, sqlstore.SQLite)
+	_, db := p.openPool()
+	db.SetMaxOpenConns(1) // so the busy timeout read at the end is the checkpoint's connection's
+	d := p.handleWith(db, sqlstore.Options{SQLiteBusyTimeout: busy})
+	must(t, d.Migrate(ctx))
+	insertExpiredReplay(t, p, db, 50, 0)
+
+	_, other := p.openPool()
+	reader, err := other.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Rollback() }()
+	if n := 0; reader.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+p.prefix+"replay").Scan(&n) != nil || n != 50 {
+		t.Fatalf("reader's snapshot: %d rows, want 50", n)
+	}
+
+	writeTook := make(chan time.Duration, 1)
+	start := time.Now()
+	go func() {
+		s := time.Now()
+		err := d.Replay().UseOnce(ctx, storage.ReplayUse{Namespace: "n", Digest: sha256.Sum256([]byte("alongside")), ExpiresAt: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Error(err)
+		}
+		writeTook <- time.Since(s)
+	}()
+	if n, err := d.Sweep(ctx, time.Now()); n != 50 || err != nil {
+		t.Fatalf("Sweep = %d, %v, want 50, nil", n, err)
+	}
+	if took := time.Since(start); took > busy/3 {
+		t.Fatalf("Sweep took %v with a reader on an older snapshot: its checkpoint waited", took)
+	}
+	if took := <-writeTook; took > busy/3 {
+		t.Fatalf("a write alongside Sweep took %v", took)
+	}
+	_, shorter := p.openPool()
+	d2 := p.handleWith(shorter, sqlstore.Options{SQLiteBusyTimeout: 200 * time.Millisecond})
+	must(t, d2.Replay().UseOnce(ctx, storage.ReplayUse{Namespace: "n", Digest: sha256.Sum256([]byte("other process")), ExpiresAt: time.Now().Add(time.Hour)}))
+	if info, err := os.Stat(p.path + "-wal"); err != nil || info.Size() == 0 {
+		t.Fatalf("write-ahead log with a reader on an older snapshot: %v, %v, want it left as it was", info, err)
+	}
+
+	var ms int64
+	if err := db.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&ms); err != nil || ms != busy.Milliseconds() {
+		t.Fatalf("busy_timeout after Sweep's checkpoint = %d, %v, want %d: set back", ms, err, busy.Milliseconds())
+	}
+
+	must(t, reader.Rollback())
+	insertExpiredReplay(t, p, db, 5, 0)
+	if n, err := d.Sweep(ctx, time.Now()); n != 5 || err != nil {
+		t.Fatalf("Sweep after the reader = %d, %v, want 5, nil", n, err)
+	}
+	if info, err := os.Stat(p.path + "-wal"); err != nil || info.Size() != 0 {
+		t.Fatalf("write-ahead log after the reader let go: %v, %v, want it truncated", info, err)
 	}
 }

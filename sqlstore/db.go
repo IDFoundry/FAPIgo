@@ -101,10 +101,12 @@ type Options struct {
 	// cost is staleness: a client deleted, reconfigured or rekeyed by
 	// anything but this DB's own Put, PutWithKeys or Delete — another
 	// DB, another instance of the server, SQL run on the table — goes on
-	// being served as it was, by this DB, for up to the TTL after its
-	// last read: a removed client still authenticates, and a rekeyed
-	// one's old keys are still accepted (a client added is seen at once,
-	// as an unknown client is never kept). This DB's own writes drop
+	// being served as it was, by this DB, for up to the TTL after the
+	// start of its last read: a removed client still authenticates,
+	// and a rekeyed one's old keys are still accepted (a client added is
+	// seen at once, as an unknown client is never kept); a read that
+	// began before another never replaces what the other read. This
+	// DB's own writes drop
 	// their client at once; nothing reaches another DB. Set it only as
 	// short as an emergency revocation can wait — seconds, not minutes.
 	//

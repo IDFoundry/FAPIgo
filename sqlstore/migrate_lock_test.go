@@ -3,7 +3,6 @@ package sqlstore_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"testing"
 	"time"
 
@@ -62,18 +61,32 @@ func holdLock(t *testing.T, key int64, shared bool) {
 	})
 }
 
-// migrateWaits reports whether d's Migrate waits on a lock rather than
-// completing within a short deadline, failing the test on any other
-// error.
-func migrateWaits(t *testing.T, d *sqlstore.DB) bool {
+// migrateCompletes fails the test unless d's Migrate succeeds, within
+// a deadline long enough for a loaded machine but short of waiting
+// forever on a lock that is held until the test ends.
+func migrateCompletes(t *testing.T, d *sqlstore.DB) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	err := d.Migrate(ctx)
-	if err != nil && !errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+	if err := d.Migrate(ctx); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	return err != nil
+}
+
+// migrateWaits fails the test unless d's Migrate waits on a lock: once
+// a session of the database does, it cancels the Migrate, which must
+// then fail.
+func migrateWaits(t *testing.T, d *sqlstore.DB) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- d.Migrate(ctx) }()
+	waitForLockWaiter(t)
+	cancel()
+	if err := <-done; err == nil {
+		t.Fatal("Migrate, cancelled while it waits on a lock = nil error")
+	}
 }
 
 // On PostgreSQL, a Migrate of tables in one schema isn't held up by
@@ -92,15 +105,11 @@ func TestPostgresMigrationLockIsPerSchema(t *testing.T) {
 	t.Run("exclusive", func(t *testing.T) {
 		p := newPlace(t, sqlstore.Postgres)
 		holdLock(t, sqlstore.MigrationLockKeyOf(ours, p.prefix), false)
-		if migrateWaits(t, p.handle(otherPool)) {
-			t.Fatal("the other schema's Migrate waited on this one's lock")
-		}
+		migrateCompletes(t, p.handle(otherPool))
 		if currentSchema(t, otherPool) != other {
 			t.Fatal("the other pool's schema isn't the other schema")
 		}
-		if !migrateWaits(t, p.handle(postgresPool)) {
-			t.Fatal("this schema's Migrate didn't wait on its own lock")
-		}
+		migrateWaits(t, p.handle(postgresPool))
 	})
 	t.Run("concurrent", func(t *testing.T) {
 		// One Migrate holds its schema's lock, mid-transaction, while the
@@ -118,19 +127,13 @@ func TestPostgresMigrationLockIsPerSchema(t *testing.T) {
 		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", sqlstore.MigrationLockKeyOf(ours, p.prefix)); err != nil {
 			t.Fatal(err)
 		}
-		if migrateWaits(t, p.handle(otherPool)) {
-			t.Fatal("the other schema's Migrate waited on a Migrate of this one's")
-		}
+		migrateCompletes(t, p.handle(otherPool))
 	})
 	t.Run("legacy", func(t *testing.T) {
 		p := newPlace(t, sqlstore.Postgres)
 		holdLock(t, sqlstore.LegacyMigrationLockKeyOf(p.prefix), false)
-		if !migrateWaits(t, p.handle(postgresPool)) {
-			t.Error("this schema's Migrate didn't wait on the legacy lock")
-		}
-		if !migrateWaits(t, p.handle(otherPool)) {
-			t.Error("the other schema's Migrate didn't wait on the legacy lock")
-		}
+		migrateWaits(t, p.handle(postgresPool))
+		migrateWaits(t, p.handle(otherPool))
 	})
 	t.Run("legacy shared", func(t *testing.T) {
 		// Holding the legacy lock shared, as another Migrate of this
@@ -138,9 +141,7 @@ func TestPostgresMigrationLockIsPerSchema(t *testing.T) {
 		p := newPlace(t, sqlstore.Postgres)
 		holdLock(t, sqlstore.LegacyMigrationLockKeyOf(p.prefix), true)
 		for _, db := range []*sql.DB{postgresPool, otherPool} {
-			if migrateWaits(t, p.handle(db)) {
-				t.Fatal("Migrate waited on a shared hold of the legacy lock")
-			}
+			migrateCompletes(t, p.handle(db))
 		}
 	})
 }

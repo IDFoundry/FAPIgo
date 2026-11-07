@@ -243,11 +243,8 @@ func (d *DB) apply(ctx context.Context, q querier, m migration) error {
 // each other on it. Both are taken in the same order every time, so
 // none of these deadlocks.
 func (d *DB) lockMigration(ctx context.Context, q querier) error {
-	if _, err := q.ExecContext(ctx, "SELECT pg_advisory_xact_lock_shared($1)", legacyMigrationLockKey(d.prefix)); err != nil {
-		return err
-	}
 	var schema string
-	if err := q.QueryRowContext(ctx, "SELECT COALESCE(current_schema(), '')").Scan(&schema); err != nil {
+	if err := q.QueryRowContext(ctx, "SELECT COALESCE(current_schema(), '') FROM pg_advisory_xact_lock_shared($1)", legacyMigrationLockKey(d.prefix)).Scan(&schema); err != nil {
 		return err
 	}
 	_, err := q.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", migrationLockKey(schema, d.prefix))

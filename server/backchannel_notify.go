@@ -125,7 +125,9 @@ func (s *Server) backchannelPingSupported() bool {
 // declinesBackchannelPing marks NoBackchannelNotifications, and any
 // struct embedding it, as declining ping delivery; see
 // backchannelPingSupported.
-func (NoBackchannelNotifications) declinesBackchannelPing() {}
+func (NoBackchannelNotifications) declinesBackchannelPing() {
+	// A marker: its presence in the method set is all that's read.
+}
 
 // Notify implements BackchannelNotifier by doing nothing.
 func (NoBackchannelNotifications) Notify(context.Context, BackchannelNotification) error {

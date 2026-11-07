@@ -96,21 +96,16 @@ func unrevocableLifetime(revocation RevocationChecker) (time.Duration, bool) {
 		if r != nil {
 			return r.MaxTokenLifetime, true
 		}
-	case unrevocableWindow:
+	case interface{ unrevocableLifetime() time.Duration }:
 		return r.unrevocableLifetime(), true
 	}
 	return 0, false
 }
 
-// unrevocableWindow is promoted to a struct embedding
+// unrevocableLifetime is promoted to a struct embedding
 // NoRevocationUntilExpiry, so its MaxTokenLifetime still bounds every
 // token Verify accepts, whatever the struct's own IsRevoked does: the
 // bound is what makes declining revocation acceptable, and since the
 // embedded IsRevoked reports no token revoked, an override can only add
 // revocations to it.
-type unrevocableWindow interface {
-	unrevocableLifetime() time.Duration
-}
-
-// unrevocableLifetime implements unrevocableWindow.
 func (r NoRevocationUntilExpiry) unrevocableLifetime() time.Duration { return r.MaxTokenLifetime }

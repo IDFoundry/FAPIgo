@@ -51,16 +51,13 @@ type AccessTokenKeyPublisher interface {
 	AccessTokenSigningKeys() (keys.KeyManager, fapi.SignatureAlgorithm)
 }
 
-// embeddedJWTAccessTokens is promoted to any type embedding
-// JWTAccessTokens or *JWTAccessTokens. It's never used to read the
-// embedded keys: New uses it only to refuse a wrapper that hasn't
-// declared its own (see AccessTokenKeyPublisher).
-type embeddedJWTAccessTokens interface {
-	isJWTAccessTokens()
+// isJWTAccessTokens is promoted to any type embedding JWTAccessTokens or
+// *JWTAccessTokens. It's never used to read the embedded keys:
+// checkEmbeddedJWTAccessTokens uses it only to refuse a wrapper that
+// hasn't declared its own (see AccessTokenKeyPublisher).
+func (JWTAccessTokens) isJWTAccessTokens() {
+	// A marker: its presence in the method set is all that's read.
 }
-
-// isJWTAccessTokens implements embeddedJWTAccessTokens.
-func (JWTAccessTokens) isJWTAccessTokens() {}
 
 // accessTokenSigningKeys returns the keys issuer signs its access tokens
 // with: JWTAccessTokens' own, by value or pointer, or what an
@@ -95,7 +92,7 @@ func checkEmbeddedJWTAccessTokens(issuer AccessTokenIssuer) error {
 	switch issuer.(type) {
 	case JWTAccessTokens, *JWTAccessTokens, AccessTokenKeyPublisher:
 		return nil
-	case embeddedJWTAccessTokens:
+	case interface{ isJWTAccessTokens() }:
 		return fmt.Errorf("server: dependencies: access_tokens %T embeds JWTAccessTokens, so it must implement server.AccessTokenKeyPublisher, naming the keys its access tokens are signed with (a nil key manager when it signs none); its embedded keys aren't published or checked on its behalf", issuer)
 	}
 	return nil

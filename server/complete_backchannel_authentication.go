@@ -164,20 +164,9 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		return nil
 	}
 
-	requestedScope, _ := jsonString(request.Parameters, "scope")
-	if scopeErr := validateGrantedScopeSubset(result.grant.Scope, requestedScope); scopeErr != nil {
-		wrapped := newError(ErrorInvalidRequest, 400, "granted scope is empty or exceeds requested scope", scopeErr)
-		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
-		return wrapped
-	}
-	// A CIBA request carries "openid" (CIBA Core §7.1), and its token
-	// response must carry an ID token (§10.1.1), so an approval can't
-	// drop it. (A request stored before "openid" was required, without
-	// it, isn't held to this.)
-	if containsScope(strings.Fields(requestedScope), "openid") && !containsScope(result.grant.Scope, "openid") {
-		wrapped := newError(ErrorInvalidRequest, 400, `granted scope must keep "openid", which a CIBA token response's ID token requires`, nil)
-		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
-		return wrapped
+	if scopeErr := grantedBackchannelScopeError(request, result.grant.Scope); scopeErr != nil {
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(scopeErr.Code()))
+		return scopeErr
 	}
 
 	resources, resourcesErr := grantedResources(request.Resources, result.grant.Resources)
@@ -244,6 +233,23 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 	}
 	decision.Status = storage.BackchannelAuthenticationApproved
 	decision.Grant = grant
+	return nil
+}
+
+// grantedBackchannelScopeError checks an approval's granted scope
+// against the request's: a non-empty subset of it that, when the request
+// asked for "openid", keeps it. A CIBA request carries "openid" (CIBA
+// Core §7.1), and its token response must carry an ID token (§10.1.1),
+// so an approval can't drop it. (A request stored before "openid" was
+// required, without it, isn't held to this.)
+func grantedBackchannelScopeError(request requestRecord, granted []string) *Error {
+	requestedScope, _ := jsonString(request.Parameters, "scope")
+	if scopeErr := validateGrantedScopeSubset(granted, requestedScope); scopeErr != nil {
+		return newError(ErrorInvalidRequest, 400, "granted scope is empty or exceeds requested scope", scopeErr)
+	}
+	if containsScope(strings.Fields(requestedScope), "openid") && !containsScope(granted, "openid") {
+		return newError(ErrorInvalidRequest, 400, `granted scope must keep "openid", which a CIBA token response's ID token requires`, nil)
+	}
 	return nil
 }
 

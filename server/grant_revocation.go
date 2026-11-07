@@ -8,6 +8,7 @@ import (
 
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/timeutil"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // maxGrantIDLength bounds GrantedAuthorization.GrantID.
@@ -18,7 +19,9 @@ const maxGrantIDLength = 128
 // before redeeming its authorization code or refresh token.
 // storage/memstore.RevocationStore does; so does any store
 // serverresource.NewVerifier can use, which needs the same method
-// (resource.RevocationChecker).
+// (resource.RevocationChecker). One that is also a
+// storage.RevocationBatchChecker is asked about all of a grant's keys in
+// one IsAnyRevoked call (anyRevoked).
 type revocationReader interface {
 	IsRevoked(ctx context.Context, key string) (bool, error)
 }
@@ -146,16 +149,30 @@ func (s *Server) checkGrantNotRevoked(ctx context.Context, grant grantRecord) *E
 		// Dependencies.Revocation: fail closed.
 		return newError(ErrorServerError, 500, "the grant's revocation can't be checked", nil)
 	}
-	for _, key := range keys {
-		revoked, err := reader.IsRevoked(ctx, key)
-		if err != nil {
-			return newError(ErrorServerError, 500, "failed to check the grant's revocation", err)
-		}
-		if revoked {
-			return newError(ErrorInvalidGrant, 400, "the grant has been revoked", nil)
-		}
+	revoked, err := anyRevoked(ctx, reader, keys)
+	if err != nil {
+		return newError(ErrorServerError, 500, "failed to check the grant's revocation", err)
+	}
+	if revoked {
+		return newError(ErrorInvalidGrant, 400, "the grant has been revoked", nil)
 	}
 	return nil
+}
+
+// anyRevoked reports whether any of keys is revoked: in one call when
+// reader is a storage.RevocationBatchChecker, otherwise one IsRevoked
+// per key, stopping at the first that is revoked or fails.
+func anyRevoked(ctx context.Context, reader revocationReader, keys []string) (bool, error) {
+	if batch, ok := reader.(storage.RevocationBatchChecker); ok {
+		return batch.IsAnyRevoked(ctx, keys)
+	}
+	for _, key := range keys {
+		revoked, err := reader.IsRevoked(ctx, key)
+		if err != nil || revoked {
+			return revoked, err
+		}
+	}
+	return false, nil
 }
 
 // grantRevocationHorizon is how long after now anything issued from a

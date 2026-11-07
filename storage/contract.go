@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -81,6 +82,69 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 	t.Run("RedeemAuthorizationCodeDoesNotReturnRefreshToken", func(t *testing.T) {
 		testGrantStoreRedeemAuthorizationCodeDoesNotReturnRefreshToken(t, factory)
 	})
+	if _, ok := factory().(IssuedTokensRecorder); ok {
+		t.Run("RecordIssuedTokensMatchesTwoCalls", func(t *testing.T) { testGrantStoreRecordIssuedTokensMatchesTwoCalls(t, factory) })
+	}
+}
+
+// testGrantStoreRecordIssuedTokensMatchesTwoCalls checks an
+// IssuedTokensRecorder's RecordIssuedTokens against
+// RecordIssuedAccessToken plus RecordIssuedRefreshToken: a reuse of a
+// code recorded either way reports the same issued tokens, and recording
+// one code leaves another's records alone.
+func testGrantStoreRecordIssuedTokensMatchesTwoCalls(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	recorder := store.(IssuedTokensRecorder)
+	ctx := context.Background()
+	accessExpiry, refreshExpiry := time.Now().Add(time.Minute), time.Now().Add(time.Hour)
+	redeemed := func(name string) [32]byte {
+		t.Helper()
+		hash := sha256.Sum256([]byte(name))
+		if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
+			CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+		}); err != nil {
+			t.Fatalf("CreateAuthorizationCode(%s): %v", name, err)
+		}
+		if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err != nil {
+			t.Fatalf("first RedeemAuthorizationCode(%s): %v", name, err)
+		}
+		return hash
+	}
+	twoCalls, combined, untouched := redeemed("record-two-calls-code"), redeemed("record-combined-code"), redeemed("record-untouched-code")
+	refreshHash := sha256.Sum256([]byte("record-refresh"))
+	if err := store.RecordIssuedAccessToken(ctx, twoCalls, "jti-1", accessExpiry); err != nil {
+		t.Fatalf("RecordIssuedAccessToken: %v", err)
+	}
+	if err := store.RecordIssuedRefreshToken(ctx, twoCalls, refreshHash, refreshExpiry); err != nil {
+		t.Fatalf("RecordIssuedRefreshToken: %v", err)
+	}
+	if err := recorder.RecordIssuedTokens(ctx, combined, "jti-1", accessExpiry, refreshHash, refreshExpiry); err != nil {
+		t.Fatalf("RecordIssuedTokens: %v", err)
+	}
+
+	want := reusedCodeReport(t, store, twoCalls)
+	if want.IssuedAccessTokenKey != "jti-1" || want.IssuedRefreshTokenHash == nil || *want.IssuedRefreshTokenHash != refreshHash {
+		t.Fatalf("reuse after the two calls reported %q, %v, want jti-1 and the refresh token's hash", want.IssuedAccessTokenKey, want.IssuedRefreshTokenHash)
+	}
+	got := reusedCodeReport(t, store, combined)
+	if got.IssuedAccessTokenKey != want.IssuedAccessTokenKey || got.IssuedRefreshTokenHash == nil || *got.IssuedRefreshTokenHash != *want.IssuedRefreshTokenHash {
+		t.Fatalf("reuse after RecordIssuedTokens reported %q, %v, want %q, %v as after the two calls", got.IssuedAccessTokenKey, got.IssuedRefreshTokenHash, want.IssuedAccessTokenKey, *want.IssuedRefreshTokenHash)
+	}
+	if other := reusedCodeReport(t, store, untouched); other.IssuedAccessTokenKey != "" || other.IssuedRefreshTokenHash != nil {
+		t.Fatalf("reuse of an unrecorded code reported %q, %v, want nothing: RecordIssuedTokens recorded another code", other.IssuedAccessTokenKey, other.IssuedRefreshTokenHash)
+	}
+}
+
+// reusedCodeReport redeems hash again, as a reuse, and returns what the
+// store reports the first redemption issued.
+func reusedCodeReport(t *testing.T, store GrantStore, hash [32]byte) *AuthorizationCodeAlreadyRedeemedError {
+	t.Helper()
+	_, err := store.RedeemAuthorizationCode(context.Background(), AuthorizationCodeRedemption{CodeHash: hash})
+	var alreadyRedeemed *AuthorizationCodeAlreadyRedeemedError
+	if !errors.As(err, &alreadyRedeemed) {
+		t.Fatalf("RedeemAuthorizationCode (reuse) error = %v, want errors.As into *AuthorizationCodeAlreadyRedeemedError", err)
+	}
+	return alreadyRedeemed
 }
 
 func testGrantStoreCreateAndRedeemAuthorizationCode(t *testing.T, factory func() GrantStore) {
@@ -1538,6 +1602,57 @@ func TestRevocationStoreContract(t *testing.T, factory func() RevocationStore) {
 			}
 		}
 	})
+	if _, ok := factory().(RevocationBatchChecker); ok {
+		t.Run("IsAnyRevokedMatchesIsRevoked", func(t *testing.T) { testRevocationStoreIsAnyRevoked(t, factory) })
+	}
+}
+
+// testRevocationStoreIsAnyRevoked checks a RevocationBatchChecker's
+// IsAnyRevoked against IsRevoked: true exactly when some key is revoked,
+// wherever it is among keys, with keys compared exactly; false for no
+// keys.
+func testRevocationStoreIsAnyRevoked(t *testing.T, factory func() RevocationStore) {
+	ctx := context.Background()
+	s := factory()
+	batch := s.(RevocationBatchChecker)
+	revokedKey := "grant:g1@https://as.example.com"
+	if err := s.Revoke(ctx, revokedKey, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	near := []string{"jti-1", "grant:g1", "grant:g1@https://as.example.com/", "GRANT:g1@https://as.example.com", "code-grant:g1@https://as.example.com"}
+	for _, tc := range []struct {
+		name string
+		keys []string
+		want bool
+	}{
+		{"None", nil, false},
+		{"Empty", []string{}, false},
+		{"OnlyUnrevoked", near, false},
+		{"EmptyKey", []string{""}, false},
+		{"OnlyRevoked", []string{revokedKey}, true},
+		{"RevokedFirst", append([]string{revokedKey}, near...), true},
+		{"RevokedLast", append(slices.Clone(near), revokedKey), true},
+		{"RevokedInMiddle", []string{near[0], near[1], revokedKey, near[2], near[3]}, true},
+		{"RevokedTwice", []string{revokedKey, revokedKey}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := batch.IsAnyRevoked(ctx, tc.keys)
+			if err != nil || got != tc.want {
+				t.Fatalf("IsAnyRevoked(%q) = %v, %v, want %v, nil", tc.keys, got, err, tc.want)
+			}
+			each := false
+			for _, key := range tc.keys {
+				revoked, err := s.IsRevoked(ctx, key)
+				if err != nil {
+					t.Fatalf("IsRevoked(%q): %v", key, err)
+				}
+				each = each || revoked
+			}
+			if got != each {
+				t.Fatalf("IsAnyRevoked(%q) = %v, but IsRevoked says %v", tc.keys, got, each)
+			}
+		})
+	}
 }
 
 // TestClientRepositoryContract exercises the security-critical behaviour

@@ -26,7 +26,9 @@ type RevocationChecker interface {
 	// and for one carrying a code_grant_id claim, the key the server
 	// records when the authorization code the token's grant came from
 	// is reused. Run storage.TestRevocationStoreContract against an
-	// implementation.
+	// implementation. An implementation that is also a
+	// storage.RevocationBatchChecker is asked about all of a token's
+	// keys in one IsAnyRevoked call instead.
 	IsRevoked(ctx context.Context, key string) (bool, error)
 }
 

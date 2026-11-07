@@ -33,8 +33,17 @@
 # against a live OIDF suite instance, verified by actually running it
 # (conformance/server/scripts/README.md's own "OpenID Federation"
 # section), not by unit tests.
+#
+# storage/contract.go and pairwise/contract.go are reusable contract
+# test suites that a storage or Deriver implementation imports and runs
+# against its own factory: test code in all but filename (Go can't import
+# another package's _test.go files), excluded from Sonar by
+# sonar.exclusions for the same reason. Their t.Fatalf branches run only
+# when an implementation fails the contract, so they're never covered.
 ignore:
   - "conformance/**"
   - "cmd/conformance-client/**"
   - "cmd/conformance-as/main.go"
   - "cmd/conformance-federation-trust-anchor/**"
+  - "storage/contract.go"
+  - "pairwise/contract.go"

@@ -8,6 +8,29 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 )
 
+// IssuedTokensRecorder is an optional interface a GrantStore may
+// implement to record both tokens a code exchange issues in one write.
+// When the authorization includes "offline_access", the server issues
+// the refresh token and then the access token, and calls
+// RecordIssuedTokens once with both, in place of RecordIssuedAccessToken
+// followed later by RecordIssuedRefreshToken; without "offline_access",
+// or for a store without it, it calls RecordIssuedAccessToken alone as
+// before.
+//
+// RecordIssuedTokens must have exactly the effect of
+// RecordIssuedAccessToken(ctx, codeHash, accessTokenKey,
+// accessExpiresAt) and RecordIssuedRefreshToken(ctx, codeHash,
+// refreshTokenHash, refreshExpiresAt) together, atomically: a
+// RedeemAuthorizationCode reusing codeHash reports both recorded tokens
+// in its AuthorizationCodeAlreadyRedeemedError, or neither, never only
+// one. Like those two, a failure is tolerated (the server discards it),
+// at the cost of a reused code's tokens staying usable.
+// TestGrantStoreContract checks a store that implements it against the
+// two-call form.
+type IssuedTokensRecorder interface {
+	RecordIssuedTokens(ctx context.Context, codeHash [32]byte, accessTokenKey string, accessExpiresAt time.Time, refreshTokenHash [32]byte, refreshExpiresAt time.Time) error
+}
+
 // AuthorizationCodeAlreadyRedeemedError is what RedeemAuthorizationCode
 // must return (satisfying errors.As) when CodeHash was already
 // consumed — as opposed to any other failure (e.g. an unknown code),

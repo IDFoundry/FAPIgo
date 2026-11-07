@@ -204,3 +204,9 @@ func TestClientRepositoryContract(t *testing.T) {
 func TestPairwiseSubjectStoreContract(t *testing.T) {
 	storage.TestPairwiseSubjectStoreContract(t, func() storage.PairwiseSubjectStore { return NewPairwiseSubjectStore() })
 }
+
+// The optional capabilities the server and resource.Verifier look for.
+var (
+	_ storage.IssuedTokensRecorder   = (*GrantStore)(nil)
+	_ storage.RevocationBatchChecker = (*RevocationStore)(nil)
+)

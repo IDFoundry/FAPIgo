@@ -272,36 +272,19 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
 	sub, internal := grant.accessTokenSubjects()
-	accessToken, accessKey, issueErr := s.issueAccessToken(ctx, AccessTokenParams{
-		ClientID: client.ID(), Subject: sub, InternalSubject: internal, Scope: grant.Scope,
-		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
-		Issuer: s.cfg.Issuer.String(), Audience: audience, Audiences: audiences,
-		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
-	})
-	if issueErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), issueErr)
-	}
-	// Best-effort, discarded like every other side-record here (see
-	// s.audit's own "_ = ..." pattern) — Grants is already a mandatory
-	// dependency, so this is called unconditionally the same way
-	// CreateAuthorizationCode is; a no-op implementation is entirely
-	// valid for a deployment that doesn't want revocation support.
-	_ = s.deps.Grants.RecordIssuedAccessToken(ctx, codeHash, accessKey, now.Add(s.cfg.Limits.AccessTokenLifetime))
-
 	result := TokenResult{
-		AccessToken:          fapi.NewSecret(accessToken),
 		TokenType:            tokenTypeFor(client.SenderConstrain()),
 		ExpiresIn:            s.cfg.Limits.AccessTokenLifetime,
 		Scope:                strings.Join(grant.Scope, " "),
 		AuthorizationDetails: accessGrant.AuthorizationDetails,
 	}
-
-	if idErr := s.issueOptionalIDToken(ctx, client, grant, accessToken, &result); idErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), idErr)
-	}
-
-	if refreshErr := s.issueOptionalRefreshToken(ctx, client, grant, refreshBinding{Thumbprint: thumbprint, InstanceKey: authn.InstanceKey}, codeHash, now, &result); refreshErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), refreshErr)
+	if issueErr := s.issueCodeExchangeTokens(ctx, client, grant, AccessTokenParams{
+		ClientID: client.ID(), Subject: sub, InternalSubject: internal, Scope: grant.Scope,
+		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
+		Issuer: s.cfg.Issuer.String(), Audience: audience, Audiences: audiences,
+		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
+	}, refreshBinding{Thumbprint: thumbprint, InstanceKey: authn.InstanceKey}, codeHash, &result); issueErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), issueErr)
 	}
 
 	if nonceErr := s.addNextDPoPNonce(ctx, client, now, &result); nonceErr != nil {
@@ -497,6 +480,54 @@ func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, prese
 		_ = s.deps.Revocation.Revoke(ctx, grantrevocation.CodeKey(s.cfg.Issuer.String(), grantrevocation.CodeGrantID(codeHash)), until)
 	}
 	return false
+}
+
+// issueCodeExchangeTokens issues the code exchange's access token, ID
+// token (with "openid") and refresh token (with "offline_access") onto
+// result, and records the access and refresh tokens against codeHash, so
+// a reuse of the code can revoke them (RFC 6749 §4.1.2). The records are
+// best-effort, discarded like every other side-record here (see
+// s.audit's own "_ = ..." pattern): a no-op GrantStore implementation is
+// valid for a deployment that doesn't want revocation support.
+//
+// With a refresh token and a storage.IssuedTokensRecorder Grants, the
+// refresh token is issued first, then the access token, and both are
+// recorded in one RecordIssuedTokens write straight after: nothing runs
+// between issuing the access token and recording it, as in the two-call
+// form, and the refresh token is recorded before the ID token is signed
+// rather than after. Either way, a reuse that reads the code before the
+// record can't revoke these tokens by their own keys — but when grants
+// are revocable each token also carries the code grant ID
+// (grantRecord.CodeGrantID), which the reuse revokes whenever it comes,
+// so they are refused regardless.
+func (s *Server) issueCodeExchangeTokens(ctx context.Context, client storage.RegisteredClient, grant grantRecord, params AccessTokenParams, binding refreshBinding, codeHash [32]byte, result *TokenResult) *Error {
+	recorder, ok := s.deps.Grants.(storage.IssuedTokensRecorder)
+	if !ok || !containsScope(grant.Scope, "offline_access") {
+		accessToken, accessKey, issueErr := s.issueAccessToken(ctx, params)
+		if issueErr != nil {
+			return issueErr
+		}
+		_ = s.deps.Grants.RecordIssuedAccessToken(ctx, codeHash, accessKey, params.Now.Add(s.cfg.Limits.AccessTokenLifetime))
+		result.AccessToken = fapi.NewSecret(accessToken)
+		if idErr := s.issueOptionalIDToken(ctx, client, grant, accessToken, result); idErr != nil {
+			return idErr
+		}
+		return s.issueOptionalRefreshToken(ctx, client, grant, binding, codeHash, params.Now, result)
+	}
+	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, binding)
+	if err != nil {
+		return newError(ErrorServerError, 500, "failed to issue refresh token", err)
+	}
+	accessToken, accessKey, issueErr := s.issueAccessToken(ctx, params)
+	if issueErr != nil {
+		return issueErr
+	}
+	_ = recorder.RecordIssuedTokens(ctx, codeHash, accessKey, params.Now.Add(s.cfg.Limits.AccessTokenLifetime),
+		sha256.Sum256([]byte(refreshToken)), params.Now.Add(s.cfg.Limits.RefreshTokenLifetime))
+	result.AccessToken = fapi.NewSecret(accessToken)
+	result.RefreshToken = fapi.NewSecret(refreshToken)
+	result.HasRefreshToken = true
+	return s.issueOptionalIDToken(ctx, client, grant, accessToken, result)
 }
 
 // issueOptionalIDToken issues an ID token and records it onto result

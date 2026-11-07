@@ -470,6 +470,21 @@ func (v *Verifier) checkNotRevoked(ctx context.Context, resolved ResolvedAccessT
 	if resolved.Key == "" {
 		return newError(ErrorServerError, 500, "access token resolver returned no revocation key", nil)
 	}
+	answered, anyRevoked := v.checkAnyRevoked(ctx, resolved)
+	if answered && !anyRevoked {
+		return nil
+	}
+	if verr := v.checkEachNotRevoked(ctx, resolved); verr != nil || !answered {
+		return verr
+	}
+	// The batch said revoked but no single key does now (one has expired
+	// since, say): refuse, rather than accept on the later answer.
+	return newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
+}
+
+// checkEachNotRevoked is checkNotRevoked one IsRevoked call at a time:
+// the token's own key, then each of its grants' keys.
+func (v *Verifier) checkEachNotRevoked(ctx context.Context, resolved ResolvedAccessToken) *Error {
 	revoked, err := v.deps.Revocation.IsRevoked(ctx, resolved.Key)
 	if err != nil {
 		return newError(ErrorServerError, 500, "failed to check token revocation", err)
@@ -560,13 +575,7 @@ func (v *Verifier) consumeDPoPProof(ctx context.Context, proof dpop.VerifiedProo
 // known: a resolver that reports none for a token carrying either claim
 // is a 500, since the revocation couldn't be checked.
 func (v *Verifier) checkGrantNotRevoked(ctx context.Context, issuer string, claims map[string]json.RawMessage) *Error {
-	for _, c := range []struct {
-		claim string
-		keys  func(issuer, id string) []string
-	}{
-		{grantrevocation.Claim, grantrevocation.Keys},
-		{grantrevocation.CodeClaim, grantrevocation.CodeKeys},
-	} {
+	for _, c := range grantRevocationClaims {
 		raw, ok := claims[c.claim]
 		if !ok {
 			continue
@@ -583,6 +592,60 @@ func (v *Verifier) checkGrantNotRevoked(ctx context.Context, issuer string, clai
 		}
 	}
 	return nil
+}
+
+// grantRevocationClaims are the access token claims naming a grant the
+// server may have revoked, each with the revocation keys it records that
+// grant under.
+var grantRevocationClaims = []struct {
+	claim string
+	keys  func(issuer, id string) []string
+}{
+	{grantrevocation.Claim, grantrevocation.Keys},
+	{grantrevocation.CodeClaim, grantrevocation.CodeKeys},
+}
+
+// checkAnyRevoked asks a storage.RevocationBatchChecker
+// Dependencies.Revocation, in one IsAnyRevoked call, whether any of
+// resolved's revocation keys — its own and its grants' — is revoked.
+// answered is false when it couldn't: no batch checker, a grant claim
+// checkGrantNotRevoked refuses, or an error. Only "answered, none
+// revoked" lets the token through on this answer alone; anything else,
+// checkNotRevoked asks about each key in turn as it would without a
+// batch checker, so every outcome keeps its own response.
+func (v *Verifier) checkAnyRevoked(ctx context.Context, resolved ResolvedAccessToken) (answered, revoked bool) {
+	batch, ok := v.deps.Revocation.(storage.RevocationBatchChecker)
+	if !ok {
+		return false, false
+	}
+	keys, ok := grantRevocationKeys(resolved.Issuer, resolved.Claims)
+	if !ok {
+		return false, false
+	}
+	revoked, err := batch.IsAnyRevoked(ctx, append([]string{resolved.Key}, keys...))
+	if err != nil {
+		return false, false
+	}
+	return true, revoked
+}
+
+// grantRevocationKeys is every revocation key of the grants claims name
+// (grantRevocationClaims), or false when checkGrantNotRevoked would
+// refuse them instead: a malformed claim, or one without an issuer.
+func grantRevocationKeys(issuer string, claims map[string]json.RawMessage) ([]string, bool) {
+	var keys []string
+	for _, c := range grantRevocationClaims {
+		raw, ok := claims[c.claim]
+		if !ok {
+			continue
+		}
+		var id string
+		if err := json.Unmarshal(raw, &id); err != nil || id == "" || issuer == "" {
+			return nil, false
+		}
+		keys = append(keys, c.keys(issuer, id)...)
+	}
+	return keys, true
 }
 
 // checkKeysNotRevoked refuses a token when any of keys, one grant's

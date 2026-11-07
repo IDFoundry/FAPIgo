@@ -15,6 +15,50 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.71.0
+
+### `memstore` stores no longer implement the batch methods (storage)
+
+**Affects:** code that calls `IsAnyRevoked` on a
+`*memstore.RevocationStore` or `RecordIssuedTokens` on a
+`*memstore.GrantStore`, or asserts that they implement
+`storage.RevocationBatchChecker` or `storage.IssuedTokensRecorder`; and
+a deployment whose own store implements either interface and is
+wrapped by struct embedding.
+
+**Why:** the server and `resource.Verifier` find both interfaces by
+type assertion. A wrapper that embeds a store and overrides `IsRevoked`
+(a cache tier, tenant prefixing, a fallback), or `RecordIssuedAccessToken`
+and `RecordIssuedRefreshToken`, inherits the store's batch method
+through Go's method promotion. The server then calls the inner store's
+batch method and never the override: a token the wrapper's `IsRevoked`
+says is revoked is accepted. An in-memory store gains nothing from
+batching, so `memstore` drops the methods, and a wrapper embedding a
+`memstore` store gets the per-key calls its overrides answer.
+
+**What fails:** nothing at startup. A call to `IsAnyRevoked` or
+`RecordIssuedTokens` on a `memstore` store no longer compiles, and an
+assertion to either interface on one is false. The server and
+`resource.Verifier` make the per-key calls (`IsRevoked`,
+`RecordIssuedAccessToken`, `RecordIssuedRefreshToken`) to a `memstore`
+store, with the same results.
+
+**What to change:** call `IsRevoked` for each key, or
+`RecordIssuedAccessToken` then `RecordIssuedRefreshToken`, in place of
+the batch methods on a `memstore` store. If your own store implements
+`RevocationBatchChecker` or `IssuedTokensRecorder` and a wrapper embeds
+it, have the wrapper override the batch method too, or deliberately
+forward it, whenever it overrides the per-key methods — or hold the
+inner store in a field of the plain interface type, so nothing is
+promoted. `TestRevocationStoreContract` and `TestGrantStoreContract`,
+run against the wrapper, catch a batch method whose results disagree
+with its per-key overrides'.
+
+`sqlstore` does the same from sqlstore v0.7.0: its stores expose the
+batch methods only through an explicit `Batching()` adapter, so a
+wrapper embedding them no longer inherits them; use the adapter where
+you want the batched calls.
+
 ## v0.69.0
 
 ### Pushed requests: core parameter size bounds, and at most eight interactions per `request_uri` (server)

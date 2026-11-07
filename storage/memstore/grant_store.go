@@ -86,16 +86,6 @@ func (s *GrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash [32]by
 	return nil
 }
 
-// RecordIssuedTokens implements storage.IssuedTokensRecorder: both
-// records under one lock.
-func (s *GrantStore) RecordIssuedTokens(_ context.Context, codeHash [32]byte, accessTokenKey string, _ time.Time, refreshTokenHash [32]byte, _ time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.codeAccessKey[codeHash] = accessTokenKey
-	s.codeRefreshHash[codeHash] = refreshTokenHash
-	return nil
-}
-
 // CreateRefreshToken implements storage.GrantStore.
 func (s *GrantStore) CreateRefreshToken(_ context.Context, token storage.NewRefreshToken) error {
 	token.Grant = cloneRawMessage(token.Grant)

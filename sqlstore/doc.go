@@ -427,7 +427,9 @@
 // large backlog doesn't hold up the stores' writes; on PostgreSQL,
 // instances sweeping the same tables at once leave each other's batches
 // alone (an advisory lock), and on SQLite a Sweep that deleted rows
-// truncates the write-ahead log after.
+// then truncates the write-ahead log, when nothing is using it: best
+// effort, never waiting on a reader or writer, so a backup or a
+// long-running read doesn't hold up writes behind it.
 //
 // # Performance and scaling
 //

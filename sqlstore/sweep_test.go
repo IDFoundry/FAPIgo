@@ -314,3 +314,71 @@ func TestPostgresSweepSkipsWhileAnotherSweeps(t *testing.T) {
 		t.Fatalf("Sweep once the lock is free = %d, %v, want 10, nil", n, err)
 	}
 }
+
+// On SQLite, a Sweep whose checkpoint can't complete — another
+// connection, as another process's would be, holds a read snapshot from
+// before its deletes — returns at once rather than waiting the busy
+// timeout: a write of the same DB made alongside it isn't held up, nor
+// is another process's, with a shorter busy timeout; the log is left
+// for later, and the connection's busy timeout is set back. Once the
+// reader lets go, the next Sweep truncates the log.
+func TestSQLiteSweepCheckpointNeverWaits(t *testing.T) {
+	ctx := context.Background()
+	const busy = 3 * time.Second
+	p := newPlace(t, sqlstore.SQLite)
+	_, db := p.openPool()
+	db.SetMaxOpenConns(1) // so the busy timeout read at the end is the checkpoint's connection's
+	d := p.handleWith(db, sqlstore.Options{SQLiteBusyTimeout: busy})
+	must(t, d.Migrate(ctx))
+	insertExpiredReplay(t, p, db, 50, 0)
+
+	_, other := p.openPool()
+	reader, err := other.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Rollback() }()
+	if n := 0; reader.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+p.prefix+"replay").Scan(&n) != nil || n != 50 {
+		t.Fatalf("reader's snapshot: %d rows, want 50", n)
+	}
+
+	writeTook := make(chan time.Duration, 1)
+	start := time.Now()
+	go func() {
+		s := time.Now()
+		err := d.Replay().UseOnce(ctx, storage.ReplayUse{Namespace: "n", Digest: sha256.Sum256([]byte("alongside")), ExpiresAt: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Error(err)
+		}
+		writeTook <- time.Since(s)
+	}()
+	if n, err := d.Sweep(ctx, time.Now()); n != 50 || err != nil {
+		t.Fatalf("Sweep = %d, %v, want 50, nil", n, err)
+	}
+	if took := time.Since(start); took > busy/3 {
+		t.Fatalf("Sweep took %v with a reader on an older snapshot: its checkpoint waited", took)
+	}
+	if took := <-writeTook; took > busy/3 {
+		t.Fatalf("a write alongside Sweep took %v", took)
+	}
+	_, shorter := p.openPool()
+	d2 := p.handleWith(shorter, sqlstore.Options{SQLiteBusyTimeout: 200 * time.Millisecond})
+	must(t, d2.Replay().UseOnce(ctx, storage.ReplayUse{Namespace: "n", Digest: sha256.Sum256([]byte("other process")), ExpiresAt: time.Now().Add(time.Hour)}))
+	if info, err := os.Stat(p.path + "-wal"); err != nil || info.Size() == 0 {
+		t.Fatalf("write-ahead log with a reader on an older snapshot: %v, %v, want it left as it was", info, err)
+	}
+
+	var ms int64
+	if err := db.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&ms); err != nil || ms != busy.Milliseconds() {
+		t.Fatalf("busy_timeout after Sweep's checkpoint = %d, %v, want %d: set back", ms, err, busy.Milliseconds())
+	}
+
+	must(t, reader.Rollback())
+	insertExpiredReplay(t, p, db, 5, 0)
+	if n, err := d.Sweep(ctx, time.Now()); n != 5 || err != nil {
+		t.Fatalf("Sweep after the reader = %d, %v, want 5, nil", n, err)
+	}
+	if info, err := os.Stat(p.path + "-wal"); err != nil || info.Size() != 0 {
+		t.Fatalf("write-ahead log after the reader let go: %v, %v, want it truncated", info, err)
+	}
+}

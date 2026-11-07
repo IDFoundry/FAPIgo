@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"hash/fnv"
 	"strconv"
@@ -56,11 +57,16 @@ var sweptTables = []string{
 // together: an instance that finds another's batch running stops at
 // once, without an error, returning the count of rows it deleted until
 // then — the other instance is deleting the rest. On SQLite, after a
-// Sweep that deleted rows, it checkpoints the write-ahead log and
-// truncates it (PRAGMA wal_checkpoint(TRUNCATE)), so the space the
-// deletes took in it is given back; a checkpoint that can't complete,
-// because a connection is still reading, is left to SQLite's next
-// automatic one, and isn't an error.
+// Sweep that deleted rows, it checkpoints the write-ahead log and, if
+// that copied all of it back, truncates it (PRAGMA
+// wal_checkpoint(PASSIVE), then TRUNCATE), so the space the deletes
+// took in it is given back. The checkpoint is best effort and never
+// waits: it runs outside d's write slot, on a connection whose busy
+// timeout it sets to zero meanwhile, so while a connection — of any
+// process — still reads an older snapshot, or writes, it gives up at
+// once rather than holding up the writes behind it, leaves the rest to
+// SQLite's next automatic checkpoint (or the next Sweep's), and isn't
+// an error.
 func (d *DB) Sweep(ctx context.Context, now time.Time) (int64, error) {
 	var total int64
 	for _, name := range sweptTables {
@@ -153,13 +159,66 @@ func (d *DB) sweepLockKey() int64 {
 	return int64(h.Sum64()) //nolint:gosec // a lock key: wrapping around is fine
 }
 
-// checkpoint checkpoints a SQLite database's write-ahead log and
-// truncates it, as a write would: holding sqliteWrites, on a connection
-// with d's busy timeout. It's best effort: SQLite checkpoints
-// automatically anyway, only without truncating the file.
+// checkpoint checkpoints a SQLite database's write-ahead log, and
+// truncates it if that copied all of it back: best effort, and never
+// waiting on another connection. A PASSIVE checkpoint takes no lock
+// that writers wait for, and copies what no reader's snapshot still
+// needs; only once it has copied everything does a TRUNCATE follow,
+// which takes the write lock (as a write would) to reset the log, with
+// almost nothing left to copy. Both run with a busy timeout of zero, so
+// the TRUNCATE, finding a writer, or a reader that hasn't let go of the
+// log, gives up at once rather than waiting the busy timeout while
+// d's writes, and other processes', queue behind it. It runs outside
+// sqliteWrites for the same reason: it never holds up a write of d's
+// for longer than the reset itself. A checkpoint that gives up (its
+// busy column is 1) isn't an error; SQLite's automatic checkpoints, or
+// the next Sweep, take it further.
 func (d *DB) checkpoint(ctx context.Context) {
-	_ = d.sqliteExclusive(ctx, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
+	conn, err := d.db.Conn(ctx)
+	if err != nil {
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	_ = withoutBusyWait(ctx, conn, func() error {
+		complete, err := walCheckpoint(ctx, conn, "PASSIVE")
+		if err != nil || !complete {
+			return err
+		}
+		_, err = walCheckpoint(ctx, conn, "TRUNCATE")
 		return err
 	})
+}
+
+// walCheckpoint runs PRAGMA wal_checkpoint(mode) on conn, reporting
+// whether it completed: not blocked (busy 0), with every frame of the
+// log copied back to the database (log, -1 outside WAL mode, equal to
+// checkpointed).
+func walCheckpoint(ctx context.Context, conn *sql.Conn, mode string) (bool, error) {
+	var busy, log, checkpointed int64
+	if err := conn.QueryRowContext(ctx, "PRAGMA wal_checkpoint("+mode+")").Scan(&busy, &log, &checkpointed); err != nil { // NOSONAR: go:S2077 — mode is one of checkpoint's constants; PRAGMA takes no bound arguments.
+		return false, err
+	}
+	return busy == 0 && log >= 0 && log == checkpointed, nil
+}
+
+// withoutBusyWait runs fn with conn's busy timeout set to zero, then
+// sets it back to what it was. A connection whose timeout can't be set
+// back is discarded, never handed back to the pool, where a write of
+// d's would take it for one with d's busy timeout (busyConns) and fail
+// at once rather than wait.
+func withoutBusyWait(ctx context.Context, conn *sql.Conn, fn func() error) (err error) {
+	var ms int64
+	if err := conn.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&ms); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = 0"); err != nil {
+		return err
+	}
+	defer func() {
+		if _, rsErr := conn.ExecContext(context.WithoutCancel(ctx), "PRAGMA busy_timeout = "+strconv.FormatInt(ms, 10)); rsErr != nil { // NOSONAR: go:S2077 — the only value is the integer the connection reported; PRAGMA takes no bound arguments.
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+			err = errors.Join(err, rsErr)
+		}
+	}()
+	return fn()
 }

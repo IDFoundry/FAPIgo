@@ -50,3 +50,15 @@ func (s *RevocationStore) IsRevoked(_ context.Context, key string) (bool, error)
 	_, ok := s.revoked[key]
 	return ok, nil
 }
+
+// IsAnyRevoked implements storage.RevocationBatchChecker.
+func (s *RevocationStore) IsAnyRevoked(_ context.Context, keys []string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, key := range keys {
+		if _, ok := s.revoked[key]; ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}

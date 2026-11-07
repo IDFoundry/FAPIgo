@@ -206,4 +206,7 @@ func TestPairwiseSubjectStoreContract(t *testing.T) {
 }
 
 // The optional capabilities the server and resource.Verifier look for.
-var _ storage.IssuedTokensRecorder = (*GrantStore)(nil)
+var (
+	_ storage.IssuedTokensRecorder   = (*GrantStore)(nil)
+	_ storage.RevocationBatchChecker = (*RevocationStore)(nil)
+)

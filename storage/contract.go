@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -1601,6 +1602,57 @@ func TestRevocationStoreContract(t *testing.T, factory func() RevocationStore) {
 			}
 		}
 	})
+	if _, ok := factory().(RevocationBatchChecker); ok {
+		t.Run("IsAnyRevokedMatchesIsRevoked", func(t *testing.T) { testRevocationStoreIsAnyRevoked(t, factory) })
+	}
+}
+
+// testRevocationStoreIsAnyRevoked checks a RevocationBatchChecker's
+// IsAnyRevoked against IsRevoked: true exactly when some key is revoked,
+// wherever it is among keys, with keys compared exactly; false for no
+// keys.
+func testRevocationStoreIsAnyRevoked(t *testing.T, factory func() RevocationStore) {
+	ctx := context.Background()
+	s := factory()
+	batch := s.(RevocationBatchChecker)
+	revokedKey := "grant:g1@https://as.example.com"
+	if err := s.Revoke(ctx, revokedKey, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	near := []string{"jti-1", "grant:g1", "grant:g1@https://as.example.com/", "GRANT:g1@https://as.example.com", "code-grant:g1@https://as.example.com"}
+	for _, tc := range []struct {
+		name string
+		keys []string
+		want bool
+	}{
+		{"None", nil, false},
+		{"Empty", []string{}, false},
+		{"OnlyUnrevoked", near, false},
+		{"EmptyKey", []string{""}, false},
+		{"OnlyRevoked", []string{revokedKey}, true},
+		{"RevokedFirst", append([]string{revokedKey}, near...), true},
+		{"RevokedLast", append(slices.Clone(near), revokedKey), true},
+		{"RevokedInMiddle", []string{near[0], near[1], revokedKey, near[2], near[3]}, true},
+		{"RevokedTwice", []string{revokedKey, revokedKey}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := batch.IsAnyRevoked(ctx, tc.keys)
+			if err != nil || got != tc.want {
+				t.Fatalf("IsAnyRevoked(%q) = %v, %v, want %v, nil", tc.keys, got, err, tc.want)
+			}
+			each := false
+			for _, key := range tc.keys {
+				revoked, err := s.IsRevoked(ctx, key)
+				if err != nil {
+					t.Fatalf("IsRevoked(%q): %v", key, err)
+				}
+				each = each || revoked
+			}
+			if got != each {
+				t.Fatalf("IsAnyRevoked(%q) = %v, but IsRevoked says %v", tc.keys, got, each)
+			}
+		})
+	}
 }
 
 // TestClientRepositoryContract exercises the security-critical behaviour

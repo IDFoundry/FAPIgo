@@ -178,7 +178,7 @@ func TestRefreshScopeBound(t *testing.T) {
 		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), repeatedScope("accounts", 4<<10))},
 		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
-	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+	if serverErrorCode(t, err) != server.ErrorInvalidRequest {
 		t.Fatalf("error = %v, want invalid_request", err)
 	}
 }
@@ -306,7 +306,7 @@ func TestClientCredentialsScopeBoundFollowsTheClientsRegistration(t *testing.T) 
 				}
 				return
 			}
-			if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+			if serverErrorCode(t, err) != server.ErrorInvalidRequest {
 				t.Fatalf("error = %v, want invalid_request", err)
 			}
 		})

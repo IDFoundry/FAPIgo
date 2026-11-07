@@ -259,15 +259,24 @@ between instances: use SQLite there.
 
 The package documentation's "Performance and scaling" section has the
 detail and the measurements behind this summary. They were taken on
-sqlstore v0.4 on one shared host (PostgreSQL 17 on 4 vCPUs in a Docker
-VM), so read them as indicative and measure your own deployment.
+sqlstore v0.4, and on a prototype of v0.5's changes, on one shared host
+(PostgreSQL 17 on 4 vCPUs in a Docker VM), so read them as indicative
+and measure your own deployment.
 
 - **PostgreSQL is the limit, not the server instances.** A whole login
-  (PAR, authorization, code exchange) was 55 statements and 14 write
-  transactions; a refresh 15 and 3. The 4-vCPU database saturated at
-  about 380 logins, 1,300 refreshes or 9,000 opaque-token lookups a
-  second, and 1, 2 or 4 server instances made no difference. Size the
-  database's CPU for your request rates.
+  (PAR, authorization, code exchange) is 31 statements and 14 write
+  transactions (55 statements on v0.4, which wrapped each one-statement
+  write in BEGIN and COMMIT); a refresh 9 and 3. On v0.4 the 4-vCPU
+  database saturated at about 380 logins, 1,300 refreshes or 9,000
+  opaque-token lookups a second, and 1, 2 or 4 server instances made no
+  difference; v0.5's changes raised logins by about a third and
+  refreshes by about half. Size the database's CPU for your request
+  rates.
+- **`Options.ClientCacheTTL`** skips re-reading a client's row within
+  the TTL (a login drops to 24 statements with 5 s), at the cost of a
+  change made through another instance taking up to the TTL to apply.
+  Without it the row is still read each time, but only re-parsed when
+  it changed.
 - **Size the pool on every instance.** `database/sql`'s default
   `MaxIdleConns` of 2 churns connections: in testing it cut logins from
   214 to 47 a second. Set `SetMaxIdleConns` equal to `SetMaxOpenConns`,
@@ -284,8 +293,10 @@ VM), so read them as indicative and measure your own deployment.
   (roughly 70 KB per login): turn on `wal_compression`.
 - **Sweep** often enough that each run deletes a modest number of rows
   (thousands to tens of thousands per table, not millions), from one
-  instance or a scheduled job. A large backlog is the expensive case: on
-  v0.4, millions of rows stalled other writers for seconds.
+  instance or a scheduled job. It deletes in short batches, so even a
+  large backlog no longer stalls other writers for seconds as it did on
+  v0.4; on PostgreSQL a concurrent run from another instance stops
+  rather than repeating the work.
 - **SQLite** has one writer, and with the documented DSN
   (`synchronous=FULL`) every write transaction waits for an fsync. A
   login is 13 of them, so on a Linux VM disk it managed 13–17 logins a

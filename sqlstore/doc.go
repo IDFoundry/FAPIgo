@@ -431,8 +431,8 @@
 // # Performance and scaling
 //
 // The figures here are indicative, not a benchmark: measured on
-// sqlstore v0.4 (a later release may issue fewer statements) on one
-// 8-core Xeon host shared with other load (so ±30%), with PostgreSQL 17
+// sqlstore v0.4, and for v0.5's changes on a prototype of them with the
+// same harness, on one 8-core Xeon host shared with other load (so ±30%), with PostgreSQL 17
 // limited to 4 vCPUs and 2 GB in a Docker VM, SQLite through
 // modernc.org/sqlite, Go 1.26 and pgx through database/sql, and a
 // FAPI 2.0 login with private_key_jwt, DPoP with
@@ -444,32 +444,42 @@
 // saturated first in every scenario, and adding instances added nothing
 // (244, 246 and 224 logins a second with 1, 2 and 4 of them). Its cost
 // is statements and commits, not query plans: every hot statement is
-// an index lookup by key, touching a few pages. What a request costs:
+// an index lookup by key, touching a few pages. A write that is one
+// statement runs on its own, without BEGIN and COMMIT, on a database
+// whose default isolation is READ COMMITTED (see Capabilities), which v0.4
+// didn't. What a request costs:
 //
-//   - a pushed authorization request: 12 statements, 3 of them write
-//     transactions;
-//   - an authorization (BeginAuthorization and CompleteAuthorization):
-//     about 19 statements, 4 write transactions;
-//   - an authorization code exchange: about 24 statements, 7 write
-//     transactions;
-//   - so a whole login: 55 statements and 14 write transactions, 28 of
-//     the statements BEGIN or COMMIT, 7 reads of the client's row and 5
-//     replay digests;
-//   - a refresh: 15 statements, 3 write transactions (refresh tokens
-//     aren't rotated, as FAPI 2.0 requires);
+//   - a pushed authorization request: 6 statements (12 on v0.4), 3 of
+//     them writes;
+//   - a whole login (pushed request, authorization and code exchange):
+//     31 statements (55 on v0.4) and 14 write transactions, 7 of the
+//     statements reads of the client's row and 5 writes of replay
+//     digests;
+//   - a refresh: 9 statements (15 on v0.4), 3 of them writes (refresh
+//     tokens aren't rotated, as FAPI 2.0 requires);
 //   - a resource server's check of an opaque access token: about 4
 //     reads (the token and its grant's revocations), and one write for a
 //     DPoP proof's replay digest;
 //   - a CIBA poll of a pending request: 4 statements, 1 write
 //     transaction.
 //
-// The 4-vCPU database saturated at about 380 logins, 1,600 pushed
-// requests, 1,300 refreshes or 9,000 opaque access-token lookups (with
-// their revocation checks) a second, at about 19 ms of its CPU per
-// login and 5 per refresh, inflated by the VM's costly system calls:
-// dedicated hardware should need less per statement. Size the
-// database's CPU from your request rates and those costs; it scales
-// with cores, not with server instances.
+// Options.ClientCacheTTL takes the client's row out of most of those:
+// with 5 seconds, a login was 24 statements, a pushed request 4 and a
+// refresh 7, at the cost of a client's change made through another
+// instance (or outside this package) taking up to that long to reach
+// this one. Without it, the row is still read on every lookup, but
+// parsed again only when it changed.
+//
+// On v0.4 the 4-vCPU database saturated at about 380 logins, 1,600
+// pushed requests, 1,300 refreshes or 9,000 opaque access-token lookups
+// (with their revocation checks) a second, at about 19 ms of its CPU
+// per login and 5 per refresh, inflated by the VM's costly system
+// calls: dedicated hardware should need less per statement. v0.5's
+// changes, on the same setup, took about a quarter off the database's
+// CPU per login, and raised logins a second by about a third and
+// pushed requests and refreshes by about half. Size the database's CPU
+// from your request rates and those costs; it scales with cores, not
+// with server instances.
 //
 // Size the connection pool explicitly, on every instance: database/sql's
 // defaults are wrong for this load. Its MaxIdleConns of 2 keeps at most
@@ -490,8 +500,8 @@
 // and headroom for maintenance, below max_connections. n needn't be
 // large: the connections busy at once are about the requests a second
 // times the round trips each makes times the round-trip time (plus the
-// database's own time), so 2,000 code exchanges a second at 26 round
-// trips of 0.4 ms keep about 21 busy. Once the database's CPU
+// database's own time), so 2,000 code exchanges a second at about a
+// dozen round trips of 0.4 ms keep about 10 busy. Once the database's CPU
 // saturates, a larger pool only moves the queue into the database: 50
 // and 200 connections per instance did the same, while 10 capped logins
 // at about 110 a second. (A pool of one never deadlocks; it serializes.)
@@ -533,15 +543,17 @@
 // per table rather than millions: a login leaves four or five replay
 // digests, so at 300 logins a second a five-minute interval leaves
 // about 400,000 replay rows for each run. The costly case is a backlog,
-// the first Sweep after sweeping was off or failing. Measured on v0.4,
-// which deletes each table in one statement: on PostgreSQL, 6.9 million
-// expired rows took 135 s, stalling every other writer on the WAL for 2
-// to 4 s at a time, and 10.3 million in one table took one 59 s
-// transaction and 1.6 GB of WAL; on SQLite, 500,000 rows in one table
-// held the write lock for 9 s. One instance, or one scheduled job, is
-// enough to sweep: a run deletes what every instance wrote, and runs
-// from several instances at once are safe but repeat the work and
-// contend with each other.
+// the first Sweep after sweeping was off or failing. v0.4 deleted each
+// table in one statement: on PostgreSQL, 6.9 million expired rows took
+// 135 s, stalling every other writer on the WAL for 2 to 4 s at a time;
+// on SQLite, 500,000 rows in one table held the write lock for 9 s.
+// Sweep now deletes in batches, which takes longer in all but leaves
+// the other writes running: with 2 million expired rows on PostgreSQL,
+// the slowest 1% of concurrent writes took 23 to 99 ms rather than
+// about 300, and with 400,000 on SQLite 64 ms rather than 3.5 s. One
+// instance, or one scheduled job, is enough to sweep: a run deletes
+// what every instance wrote, and on PostgreSQL a run that finds another
+// instance's batch in progress stops, leaving the rest to that one.
 //
 // SQLite has one writer, and with the DSN in Setup each write
 // transaction waits for an fsync: synchronous is FULL, SQLite's default

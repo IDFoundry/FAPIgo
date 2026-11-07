@@ -490,19 +490,28 @@ func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, prese
 // s.audit's own "_ = ..." pattern): a no-op GrantStore implementation is
 // valid for a deployment that doesn't want revocation support.
 //
-// With a refresh token and a storage.IssuedTokensRecorder Grants, the
+// With a refresh token, a storage.IssuedTokensRecorder Grants and a
+// readable Dependencies.Revocation (so grant.CodeGrantID is set), the
 // refresh token is issued first, then the access token, and both are
 // recorded in one RecordIssuedTokens write straight after: nothing runs
 // between issuing the access token and recording it, as in the two-call
 // form, and the refresh token is recorded before the ID token is signed
-// rather than after. Either way, a reuse that reads the code before the
-// record can't revoke these tokens by their own keys — but when grants
-// are revocable each token also carries the code grant ID
-// (grantRecord.CodeGrantID), which the reuse revokes whenever it comes,
-// so they are refused regardless.
+// rather than after. A reuse that reads the code before the record
+// can't revoke these tokens by their own keys, but each token carries
+// the code grant ID, which the reuse revokes whenever it comes, so both
+// are refused regardless.
+//
+// Otherwise the access token is issued and recorded with
+// RecordIssuedAccessToken first, then the ID token and the refresh
+// token, recorded with RecordIssuedRefreshToken. Without a code grant
+// ID — a write-only Revocation — the token keys are all a reuse can
+// revoke, so the access token is recorded before the refresh token's
+// store write: a reuse landing during CreateRefreshToken still revokes
+// the access token, and only the refresh token, recorded after the ID
+// token is signed, can escape a reuse that comes before its record.
 func (s *Server) issueCodeExchangeTokens(ctx context.Context, client storage.RegisteredClient, grant grantRecord, params AccessTokenParams, binding refreshBinding, codeHash [32]byte, result *TokenResult) *Error {
 	recorder, ok := s.deps.Grants.(storage.IssuedTokensRecorder)
-	if !ok || !containsScope(grant.Scope, "offline_access") {
+	if !ok || grant.CodeGrantID == "" || !containsScope(grant.Scope, "offline_access") {
 		accessToken, accessKey, issueErr := s.issueAccessToken(ctx, params)
 		if issueErr != nil {
 			return issueErr

@@ -205,8 +205,19 @@ func TestPairwiseSubjectStoreContract(t *testing.T) {
 	storage.TestPairwiseSubjectStoreContract(t, func() storage.PairwiseSubjectStore { return NewPairwiseSubjectStore() })
 }
 
-// The optional capabilities the server and resource.Verifier look for.
-var (
-	_ storage.IssuedTokensRecorder   = (*GrantStore)(nil)
-	_ storage.RevocationBatchChecker = (*RevocationStore)(nil)
-)
+// TestStoresHaveNoBatchMethods: GrantStore and RevocationStore don't
+// implement storage.IssuedTokensRecorder or
+// storage.RevocationBatchChecker. The server and resource.Verifier find
+// those by type assertion, so a method on the store type would be
+// promoted to every wrapper embedding it, and the server would call it
+// in place of the wrapper's own RecordIssued* or IsRevoked.
+func TestStoresHaveNoBatchMethods(t *testing.T) {
+	var grants any = NewGrantStore()
+	if _, ok := grants.(storage.IssuedTokensRecorder); ok {
+		t.Error("*GrantStore implements storage.IssuedTokensRecorder")
+	}
+	var revocation any = NewRevocationStore()
+	if _, ok := revocation.(storage.RevocationBatchChecker); ok {
+		t.Error("*RevocationStore implements storage.RevocationBatchChecker")
+	}
+}

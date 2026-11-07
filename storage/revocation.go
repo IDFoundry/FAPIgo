@@ -50,6 +50,18 @@ type RevocationStore interface {
 // most five today); a store may refuse an unreasonably long keys with an
 // error. TestRevocationStoreContract checks a store that implements it
 // against IsRevoked.
+//
+// The server and resource.Verifier find IsAnyRevoked by type assertion,
+// and then don't call IsRevoked at all. A wrapper that embeds a store
+// implementing it inherits IsAnyRevoked through Go's method promotion,
+// so a wrapper overriding IsRevoked (a cache tier, tenant prefixing, a
+// fallback) is bypassed: the server asks the inner store, and a key the
+// wrapper's IsRevoked reports revoked is accepted. A wrapper that
+// overrides IsRevoked must also override IsAnyRevoked, or hold the
+// inner store in a field of the plain RevocationStore (or
+// resource.RevocationChecker) type, so nothing is promoted.
+// TestRevocationStoreContract run against the wrapper catches the
+// mismatch whenever IsAnyRevoked's answers disagree with the override's.
 type RevocationBatchChecker interface {
 	IsAnyRevoked(ctx context.Context, keys []string) (bool, error)
 }

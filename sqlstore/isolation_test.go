@@ -242,6 +242,30 @@ func TestPostgresSingleStatementRaces(t *testing.T) {
 	}
 }
 
+// A CIBA poll waits for a concurrent poll's lock on the request's row
+// and then sees what that poll committed — here, the approval spent —
+// whatever the database's default isolation: of concurrent polls of an
+// approval, exactly one gets it.
+func TestPostgresPollWaitsForAConcurrentPoll(t *testing.T) {
+	ctx := context.Background()
+	for _, level := range []string{"read committed", "repeatable read", "serializable"} {
+		t.Run(level, func(t *testing.T) {
+			p, d := isolationPlace(t, level, false)
+			r := cibaRequest("race", "poll")
+			must(t, d.Backchannel().CreateBackchannelAuthentication(ctx, r))
+			_, err := d.Backchannel().DecideBackchannelAuthentication(ctx, storage.DecideBackchannelAuthentication{HandleHash: r.HandleHash, Status: storage.BackchannelAuthenticationApproved, Grant: secretGrant})
+			must(t, err)
+			err = raceLockedRow(t, "UPDATE "+p.prefix+"backchannel_authentications SET redeemed = 1 WHERE auth_req_id_hash = $1", r.AuthReqIDHash[:], func() error {
+				return pollAt(d.Backchannel(), r, time.Now())
+			})
+			var redeemed *storage.BackchannelAuthenticationAlreadyRedeemedError
+			if !errors.As(err, &redeemed) {
+				t.Fatalf("poll losing a race = %v, want *BackchannelAuthenticationAlreadyRedeemedError", err)
+			}
+		})
+	}
+}
+
 // On a database whose default isolation is READ COMMITTED, Migrate and
 // CheckSchema leave single-statement writes to run on their own.
 func TestPostgresReadCommittedDefaultIsNotPinned(t *testing.T) {

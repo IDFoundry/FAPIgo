@@ -153,11 +153,10 @@
 //     per pushed request ever completes;
 //   - a CIBA decision is an UPDATE … RETURNING that matches only a
 //     pending request, so exactly one is recorded; a poll locks the
-//     request's row (an UPDATE … RETURNING that changes nothing), then
-//     checks it, records the poll and, for an approval, marks it
-//     redeemed, in one transaction, so exactly one poll observes an
-//     approval, and the poll interval (slow_down) is checked and
-//     recorded atomically;
+//     request's row (SELECT … FOR UPDATE on PostgreSQL), then checks
+//     it, records the poll and, for an approval, marks it redeemed, in
+//     one transaction, so exactly one poll observes an approval, and
+//     the poll interval (slow_down) is checked and recorded atomically;
 //   - a relying party's session is consumed by one DELETE … RETURNING,
 //     in a transaction that also opens its record, so exactly one
 //     Consume of a state returns it;

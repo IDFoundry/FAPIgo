@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,45 +16,45 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// batchingRevocation is d's Revocation().Batching() as the
+// batchingRevocation is d's BatchingRevocation() as the
 // storage.RevocationBatchChecker it is.
 func batchingRevocation(t *testing.T, d *sqlstore.DB) interface {
 	storage.RevocationStore
 	storage.RevocationBatchChecker
 } {
 	t.Helper()
-	r, ok := d.Revocation().Batching().(interface {
+	r, ok := d.BatchingRevocation().(interface {
 		storage.RevocationStore
 		storage.RevocationBatchChecker
 	})
 	if !ok {
-		t.Fatal("Revocation().Batching() isn't a storage.RevocationBatchChecker")
+		t.Fatal("BatchingRevocation() isn't a storage.RevocationBatchChecker")
 	}
 	return r
 }
 
-// batchingGrants is d's Grants().Batching() as the
+// batchingGrants is d's BatchingGrants() as the
 // storage.IssuedTokensRecorder it is.
 func batchingGrants(t *testing.T, d *sqlstore.DB) interface {
 	storage.GrantStore
 	storage.IssuedTokensRecorder
 } {
 	t.Helper()
-	g, ok := d.Grants().Batching().(interface {
+	g, ok := d.BatchingGrants().(interface {
 		storage.GrantStore
 		storage.IssuedTokensRecorder
 	})
 	if !ok {
-		t.Fatal("Grants().Batching() isn't a storage.IssuedTokensRecorder")
+		t.Fatal("BatchingGrants() isn't a storage.IssuedTokensRecorder")
 	}
 	return g
 }
 
 // The stores themselves aren't the optional interfaces — only what
-// Batching returns is — and neither is a wrapper that embeds one, or
-// that embeds what Batching returns: such a wrapper, overriding
-// IsRevoked or RecordIssued*, would otherwise have the server call the
-// inner store's batch method, past its overrides.
+// DB.BatchingRevocation and DB.BatchingGrants return are — and neither
+// is a wrapper that embeds one, or that embeds what those return: such
+// a wrapper, overriding IsRevoked or RecordIssued*, would otherwise have
+// the server call the inner store's batch method, past its overrides.
 func TestBatchMethodsAreNotPromoted(t *testing.T) {
 	type embedsRevocation struct{ *sqlstore.RevocationStore }
 	type embedsGrants struct{ *sqlstore.GrantStore }
@@ -61,18 +62,18 @@ func TestBatchMethodsAreNotPromoted(t *testing.T) {
 	type embedsBatchingGrants struct{ storage.GrantStore }
 	d := freshDB(t, sqlstore.SQLite)
 	for name, v := range map[string]any{
-		"*RevocationStore":                           d.Revocation(),
-		"a struct embedding *RevocationStore":        embedsRevocation{d.Revocation()},
-		"a struct embedding Revocation().Batching()": embedsBatchingRevocation{d.Revocation().Batching()},
+		"*RevocationStore":                        d.Revocation(),
+		"a struct embedding *RevocationStore":     embedsRevocation{d.Revocation()},
+		"a struct embedding BatchingRevocation()": embedsBatchingRevocation{d.BatchingRevocation()},
 	} {
 		if _, ok := v.(storage.RevocationBatchChecker); ok {
 			t.Errorf("%s is a storage.RevocationBatchChecker", name)
 		}
 	}
 	for name, v := range map[string]any{
-		"*GrantStore":                            d.Grants(),
-		"a struct embedding *GrantStore":         embedsGrants{d.Grants()},
-		"a struct embedding Grants().Batching()": embedsBatchingGrants{d.Grants().Batching()},
+		"*GrantStore":                         d.Grants(),
+		"a struct embedding *GrantStore":      embedsGrants{d.Grants()},
+		"a struct embedding BatchingGrants()": embedsBatchingGrants{d.BatchingGrants()},
 	} {
 		if _, ok := v.(storage.IssuedTokensRecorder); ok {
 			t.Errorf("%s is a storage.IssuedTokensRecorder", name)
@@ -80,19 +81,84 @@ func TestBatchMethodsAreNotPromoted(t *testing.T) {
 	}
 }
 
-// What Batching returns keeps every other interface the server finds
-// on the store by type assertion: StoreAssurance, with the store's own
-// Capabilities.
+// Nor can a wrapper embedding a store reach the batching store through
+// it: the stores have no Batching method (as they did in v0.7.0), which
+// such a wrapper would inherit and which would hand out the inner
+// store's batching adapter, without the wrapper's overrides.
+func TestStoresHaveNoBatchingMethod(t *testing.T) {
+	type embedsRevocation struct{ *sqlstore.RevocationStore }
+	type embedsGrants struct{ *sqlstore.GrantStore }
+	type embedsResourceServerStores struct{ sqlstore.ResourceServerStores }
+	for _, v := range []any{
+		&sqlstore.RevocationStore{}, embedsRevocation{}, &embedsRevocation{},
+		&sqlstore.GrantStore{}, embedsGrants{}, &embedsGrants{},
+		sqlstore.ResourceServerStores{}, &embedsResourceServerStores{},
+	} {
+		typ := reflect.TypeOf(v)
+		for i := range typ.NumMethod() {
+			if name := typ.Method(i).Name; strings.Contains(name, "Batching") {
+				t.Errorf("%v has a method %s", typ, name)
+			}
+		}
+	}
+}
+
+// A wrapper of a deployment's own that embeds *RevocationStore and
+// prefixes its keys sees what it revoked; DB.BatchingRevocation, its
+// only way to the batched check, is reached through the DB, never the
+// wrapper, so the wrapper can't hand out an adapter that skips its
+// prefix. (In v0.7.0 the wrapper's promoted Batching() did, and a key
+// it revoked read as not revoked there.) A wrapper wanting the batched
+// check implements IsAnyRevoked itself, and the server asks that.
+type tenantRevocation struct {
+	*sqlstore.RevocationStore
+	tenant string
+}
+
+func (r tenantRevocation) Revoke(ctx context.Context, key string, until time.Time) error {
+	return r.RevocationStore.Revoke(ctx, r.tenant+"/"+key, until)
+}
+
+func (r tenantRevocation) IsRevoked(ctx context.Context, key string) (bool, error) {
+	return r.RevocationStore.IsRevoked(ctx, r.tenant+"/"+key)
+}
+
+func TestWrapperCantHandOutInnerBatching(t *testing.T) {
+	ctx := context.Background()
+	d := freshDB(t, sqlstore.SQLite)
+	var w storage.RevocationStore = tenantRevocation{d.Revocation(), "tenant-a"}
+	must(t, w.Revoke(ctx, "jti-1", time.Now().Add(time.Hour)))
+	if revoked, err := w.IsRevoked(ctx, "jti-1"); err != nil || !revoked {
+		t.Fatalf("wrapper IsRevoked = %v, %v, want true", revoked, err)
+	}
+	if _, ok := w.(interface {
+		Batching() storage.RevocationStore
+	}); ok {
+		t.Fatal("the wrapper has a Batching method, promoted from *RevocationStore")
+	}
+	if _, ok := w.(storage.RevocationBatchChecker); ok {
+		t.Fatal("the wrapper is a storage.RevocationBatchChecker, promoted from *RevocationStore")
+	}
+	// The DB's batching store answers for the key as stored, the
+	// wrapper's prefixed form, consistently with IsRevoked.
+	if revoked, err := batchingRevocation(t, d).IsAnyRevoked(ctx, []string{"tenant-a/jti-1"}); err != nil || !revoked {
+		t.Errorf("BatchingRevocation().IsAnyRevoked(the stored key) = %v, %v, want true", revoked, err)
+	}
+}
+
+// What DB.BatchingRevocation and DB.BatchingGrants return keep every
+// other interface the server finds on the store by type assertion:
+// StoreAssurance, with the store's own Capabilities.
 func TestBatchingKeepsStoreAssurance(t *testing.T) {
 	for name, d := range map[string]*sqlstore.DB{"plain": freshDB(t, sqlstore.SQLite), "sealed": newPlace(t, sqlstore.SQLite).migratedWith(sqlstore.Options{Sealer: testSealer(t)})} {
 		for store, pair := range map[string][2]any{
-			"Revocation": {d.Revocation(), d.Revocation().Batching()},
-			"Grants":     {d.Grants(), d.Grants().Batching()},
+			"Revocation": {d.Revocation(), d.BatchingRevocation()},
+			"Grants":     {d.Grants(), d.BatchingGrants()},
 		} {
 			plain, okPlain := pair[0].(storage.StoreAssurance)
 			batching, ok := pair[1].(storage.StoreAssurance)
 			if !okPlain || !ok || batching.Capabilities() != plain.Capabilities() {
-				t.Errorf("%s %s().Batching() isn't a storage.StoreAssurance with the store's Capabilities", name, store)
+				t.Errorf("%s Batching%s() isn't a storage.StoreAssurance with the store's Capabilities", name, store)
 			}
 		}
 	}

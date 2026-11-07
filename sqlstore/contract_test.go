@@ -23,7 +23,7 @@ func TestGrantStoreContract(t *testing.T) {
 			storage.TestGrantStoreContract(t, func() storage.GrantStore { return freshDB(t, dialect).Grants() })
 		})
 		t.Run("Batching", func(t *testing.T) {
-			storage.TestGrantStoreContract(t, func() storage.GrantStore { return freshDB(t, dialect).Grants().Batching() })
+			storage.TestGrantStoreContract(t, func() storage.GrantStore { return freshDB(t, dialect).BatchingGrants() })
 		})
 	})
 }
@@ -46,7 +46,7 @@ func TestRevocationStoreContract(t *testing.T) {
 			storage.TestRevocationStoreContract(t, func() storage.RevocationStore { return freshDB(t, dialect).Revocation() })
 		})
 		t.Run("Batching", func(t *testing.T) {
-			storage.TestRevocationStoreContract(t, func() storage.RevocationStore { return freshDB(t, dialect).Revocation().Batching() })
+			storage.TestRevocationStoreContract(t, func() storage.RevocationStore { return freshDB(t, dialect).BatchingRevocation() })
 		})
 	})
 }
@@ -87,7 +87,7 @@ func TestSealedStoreContracts(t *testing.T) {
 			storage.TestGrantStoreContract(t, func() storage.GrantStore { return sealed().Grants() })
 		})
 		t.Run("BatchingGrants", func(t *testing.T) {
-			storage.TestGrantStoreContract(t, func() storage.GrantStore { return sealed().Grants().Batching() })
+			storage.TestGrantStoreContract(t, func() storage.GrantStore { return sealed().BatchingGrants() })
 		})
 		t.Run("AccessTokens", func(t *testing.T) {
 			storage.TestAccessTokenStoreContract(t, func() storage.AccessTokenStore { return sealed().AccessTokens() })

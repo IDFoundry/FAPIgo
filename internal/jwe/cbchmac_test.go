@@ -2,6 +2,7 @@ package jwe
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -182,6 +183,25 @@ func TestSealCBCHMACRejectsWrongCEKSize(t *testing.T) {
 func TestOpenCBCHMACRejectsWrongCEKSize(t *testing.T) {
 	if _, err := openCBCHMAC(make([]byte, 32), make([]byte, cbcIVSize), []byte("x"), make([]byte, cbcHMACTagSize), nil); err == nil {
 		t.Fatalf("openCBCHMAC(32-byte cek) = nil error, want error")
+	}
+}
+
+// An IV of the wrong length carrying a tag that matches it — which a
+// sender holding the CEK can produce — must be refused as a decryption
+// failure, not reach cipher.NewCBCDecrypter, which panics on it.
+func TestOpenCBCHMACRejectsWrongIVSizeWithValidTag(t *testing.T) {
+	cek := make([]byte, cekSizeA256CBCHS512)
+	aad := []byte("aad")
+	ciphertext, _, err := sealCBCHMAC(cek, make([]byte, cbcIVSize), []byte("plaintext"), aad)
+	if err != nil {
+		t.Fatalf("sealCBCHMAC: %v", err)
+	}
+	for _, size := range []int{0, 8, cbcIVSize - 1, cbcIVSize + 1} {
+		iv := make([]byte, size)
+		tag := cbcHMACTag(cek[:32], aad, iv, ciphertext)
+		if _, err := openCBCHMAC(cek, iv, ciphertext, tag, aad); !errors.Is(err, ErrDecryptionFailed) {
+			t.Errorf("openCBCHMAC(%d-byte iv, matching tag) = %v, want ErrDecryptionFailed", size, err)
+		}
 	}
 }
 

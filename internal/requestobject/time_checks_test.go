@@ -64,6 +64,32 @@ func TestVerifyBoundsFutureIssuedAt(t *testing.T) {
 	}
 }
 
+// FAPI 2.0 Security Profile §5.3.2.1 item 13 applies to nbf as to iat:
+// up to MaxClockSkew in the future is accepted, beyond it refused.
+func TestVerifyBoundsFutureNotBefore(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	policy := basePolicy(now)
+	policy.MaxClockSkew = 10 * time.Second
+	exp := now.Add(time.Minute).Unix()
+	for _, tc := range []struct {
+		name string
+		nbf  time.Time
+		want error
+	}{
+		{"nbf now", now, nil},
+		{"nbf within the skew", now.Add(10 * time.Second), nil},
+		{"nbf past the skew", now.Add(11 * time.Second), ErrNotYetValid},
+		{"nbf an hour ahead", now.Add(time.Hour), ErrNotYetValid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := verifyClaimsAt(t, map[string]any{"exp": exp, "nbf": tc.nbf.Unix()}, policy)
+			if !errors.Is(err, tc.want) {
+				t.Errorf("Verify = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
 // The exp bound allows the client's clock to run MaxClockSkew ahead: a
 // request object made with the longest lifetime the server accepts
 // still verifies when the client is 5s fast.

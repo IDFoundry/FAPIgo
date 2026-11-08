@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1262,6 +1263,63 @@ func TestHandleAuthorizationResponseRejectsEmptyIssuerKeySetForJARM(t *testing.T
 	const want = "no matching issuer key for authorization response"
 	if cerr.PublicDescription() != want {
 		t.Fatalf("PublicDescription() = %q, want %q", cerr.PublicDescription(), want)
+	}
+}
+
+// Each JARM response here is well formed and carries a valid code and
+// state, but fails one of jarm.Verify's checks: the client must refuse
+// it rather than proceed with the parameters it carries.
+func TestHandleAuthorizationResponseRejectsUnverifiableJARM(t *testing.T) {
+	otherKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	tests := []struct {
+		name    string
+		mutate  func(p *jarm.CreateParams)
+		wantErr error
+	}{
+		{"wrong signing key", func(p *jarm.CreateParams) { p.Signer = otherKey }, jose.ErrInvalidSignature},
+		{"wrong issuer", func(p *jarm.CreateParams) { p.Issuer = "https://other-as.example" }, jarm.ErrIssuerMismatch},
+		{"wrong audience", func(p *jarm.CreateParams) { p.Audience = "other-client" }, jarm.ErrAudienceMismatch},
+		{"expired", func(p *jarm.CreateParams) { p.Now = time.Now().Add(-10 * time.Minute) }, jarm.ErrExpired},
+		{"exp beyond MaxJARMResponseLifetime", func(p *jarm.CreateParams) { p.Lifetime = 10 * time.Minute }, jarm.ErrLifetimeExceeded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, as, _ := newTestClient(t, true)
+			ctx := context.Background()
+			session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+			if err != nil {
+				t.Fatalf("BeginAuthorization: %v", err)
+			}
+			state, _ := json.Marshal(session.Handle().String())
+			params := jarm.CreateParams{
+				Signer: as.jarmKey, Algorithm: fapi.ES256, KeyID: "as-jarm-kid",
+				Issuer: as.issuer, Audience: testClientID,
+				Now: time.Now(), Lifetime: time.Minute,
+				Parameters: map[string]json.RawMessage{"code": json.RawMessage(`"auth-code-jarm-bad"`), "state": state},
+			}
+			tt.mutate(&params)
+			responseJWT, err := jarm.Create(params)
+			if err != nil {
+				t.Fatalf("jarm.Create: %v", err)
+			}
+			q := url.Values{}
+			q.Set("response", responseJWT)
+
+			_, err = c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode(), Session: session.Handle()})
+			cerr, ok := err.(*client.Error)
+			if !ok {
+				t.Fatalf("HandleAuthorizationResponse error = %v (%T), want *client.Error", err, err)
+			}
+			if cerr.Code() != client.ErrorInvalidResponse {
+				t.Fatalf("Code() = %q, want %q", cerr.Code(), client.ErrorInvalidResponse)
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("HandleAuthorizationResponse error = %v, want %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 

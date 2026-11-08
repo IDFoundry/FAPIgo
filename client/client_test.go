@@ -397,6 +397,64 @@ func TestNewRequiresMessageSigningConfigUnderThatProfile(t *testing.T) {
 	}
 }
 
+// TestNewNamesEachEncryptionAndMessageSigningRefusal: each of these
+// fields, set to something invalid on an otherwise valid
+// message-signing config, is refused with its own error — a 60-minute
+// request object lifetime is FAPI 2.0 Message Signing §5.3.2 item 4's
+// limit, and accepted.
+func TestNewNamesEachEncryptionAndMessageSigningRefusal(t *testing.T) {
+	for name, tc := range map[string]struct {
+		mutate  func(*client.Config)
+		wantErr string
+	}{
+		"invalid id_token key management": {func(c *client.Config) {
+			c.Algorithms.IDTokenKeyManagement = fapi.KeyManagementAlgorithm(99)
+			c.Algorithms.IDTokenContentEncryption = fapi.A256GCM
+		}, "algorithms.id_token_key_management is invalid"},
+		"invalid id_token content encryption": {func(c *client.Config) {
+			c.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
+			c.Algorithms.IDTokenContentEncryption = fapi.ContentEncryptionAlgorithm(99)
+		}, "algorithms.id_token_content_encryption is invalid"},
+		"invalid userinfo key management": {func(c *client.Config) {
+			c.Algorithms.UserInfoKeyManagement = fapi.KeyManagementAlgorithm(99)
+			c.Algorithms.UserInfoContentEncryption = fapi.A256GCM
+		}, "algorithms.userinfo_key_management is invalid"},
+		"invalid userinfo content encryption": {func(c *client.Config) {
+			c.Algorithms.UserInfoKeyManagement = fapi.RSAOAEP256
+			c.Algorithms.UserInfoContentEncryption = fapi.ContentEncryptionAlgorithm(99)
+		}, "algorithms.userinfo_content_encryption is invalid"},
+		"no jarm algorithm": {func(c *client.Config) { c.Algorithms.JARM = 0 },
+			"algorithms.jarm is required under ProfileFAPISecurityWithMessageSigning"},
+		"zero request object lifetime": {func(c *client.Config) { c.Limits.RequestObjectLifetime = 0 },
+			"limits.request_object_lifetime must be positive under ProfileFAPISecurityWithMessageSigning"},
+		"request object lifetime over 60 minutes": {func(c *client.Config) { c.Limits.RequestObjectLifetime = 60*time.Minute + time.Second },
+			"limits.request_object_lifetime must be at most 60 minutes"},
+		"request object lifetime of 60 minutes": {func(c *client.Config) { c.Limits.RequestObjectLifetime = 60 * time.Minute }, ""},
+		"zero max jarm response lifetime": {func(c *client.Config) { c.Limits.MaxJARMResponseLifetime = 0 },
+			"limits.max_jarm_response_lifetime must be positive under ProfileFAPISecurityWithMessageSigning"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig(t)
+			cfg.Profile = client.ProfileFAPISecurityWithMessageSigning
+			cfg.Algorithms.RequestObject = fapi.ES256
+			cfg.Algorithms.JARM = fapi.ES256
+			cfg.Limits.RequestObjectLifetime = time.Minute
+			cfg.Limits.MaxJARMResponseLifetime = time.Minute
+			tc.mutate(&cfg)
+			_, err := client.New(cfg, validDependencies(t))
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("New: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("New error = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // PushedRequestEncodingRequestObject needs the request-object half of
 // the message-signing configuration, but never JARM's.
 func TestNewRequiresRequestObjectConfigUnderRequestObjectEncoding(t *testing.T) {

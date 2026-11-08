@@ -50,6 +50,13 @@ func (l fakeLookup) LookupInternalSubject(_ context.Context, issuer, sector, bod
 	return "user-1", nil
 }
 
+// emptyLookup answers every lookup with no subject and no error.
+type emptyLookup struct{}
+
+func (emptyLookup) LookupInternalSubject(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
+
 func mustPrefix(t *testing.T, s string) pairwise.Prefix {
 	t.Helper()
 	p, err := pairwise.NewPrefix(s)
@@ -110,6 +117,8 @@ func TestVerifyResolvesPairwiseSubjects(t *testing.T) {
 		"malformed sector": {subject: "pw:abc", issuer: testPairwiseIssuer, claims: map[string]json.RawMessage{"pairwise_sector": json.RawMessage(`1`)}, lookup: lookup,
 			wantErr: resource.ErrorInvalidToken},
 		"lookup unavailable": {subject: "pw:abc", issuer: testPairwiseIssuer, claims: sector, lookup: fakeLookup{err: errors.New("store down")},
+			wantErr: resource.ErrorServerError},
+		"lookup returns no subject": {subject: "pw:abc", issuer: testPairwiseIssuer, claims: sector, lookup: emptyLookup{},
 			wantErr: resource.ErrorServerError},
 	} {
 		t.Run(name, func(t *testing.T) {

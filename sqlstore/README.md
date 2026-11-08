@@ -33,10 +33,10 @@ if err := db.Migrate(ctx); err != nil { … } // or CheckSchema, if a deployment
 deps := server.Dependencies{
 	Clients:      db.Clients(),
 	Transactions: db.Transactions(),
-	Grants:       db.Grants().Batching(), // Batching: see "Performance and scaling"
+	Grants:       db.BatchingGrants(), // batching: see "Performance and scaling"
 	Replay:       db.Replay(),
 	Nonces:       db.Nonces(),
-	Revocation:   db.Revocation().Batching(),
+	Revocation:   db.BatchingRevocation(),
 	// …
 }
 
@@ -109,10 +109,20 @@ Losing the key makes sealed records unreadable. `AESGCMSealer` allows
 server reaches in weeks, or days (see
 [Performance and scaling](#performance-and-scaling)). The budget is
 shared by every instance and every other store or service sealing with
-the same key, so count their seals together. Rotate before then
-with `sqlstore.RotatingSealer(newSealer, oldSealer)`, which seals
-with the new key and opens with either until the old one's records
-expire. See the package documentation's Sealing section.
+the same key, so count their seals together. Rotate before then with
+`sqlstore.RotatingSealer`, in three deploys:
+
+1. `RotatingSealer(oldSealer, newSealer)` on every instance: it still
+   seals with the old key, and opens with either.
+2. Once every instance runs that, `RotatingSealer(newSealer, oldSealer)`:
+   it seals with the new key, which every instance can now open.
+3. `newSealer` alone, once the longest-lived record sealed under the old
+   key (a refresh token) has expired.
+
+Making the new key current in one deploy leaves the instances not yet
+redeployed unable to open what the redeployed ones seal, and those
+requests fail until the deploy completes. See the package
+documentation's Sealing section.
 
 ### Upgrading from v0.2
 
@@ -124,14 +134,23 @@ and bind them too. Upgrade every instance sharing a database at once: a
 v0.2 instance can't open what an upgraded one seals, and rolling back
 to v0.2 leaves the records sealed since unreadable.
 
+## Upgrading from v0.7
+
+v0.8 removes `RevocationStore.Batching` and `GrantStore.Batching`: a
+wrapper embedding a store inherited them, and `wrapper.Batching()`
+returned the inner store's adapter, bypassing the wrapper's overrides.
+Wire `db.BatchingRevocation()` and `db.BatchingGrants()` instead, and
+`stores.BatchingRevocation` on a standalone resource server; see
+[UPGRADING.md](../UPGRADING.md#sqlstore-v080).
+
 ## Upgrading from v0.6
 
 v0.7 moves `RevocationStore.IsAnyRevoked` and
-`GrantStore.RecordIssuedTokens` onto what `Revocation().Batching()` and
-`Grants().Batching()` return, so a wrapper embedding a store can't
-inherit them and have the server bypass its overrides. Wire
-`db.Revocation().Batching()` and `db.Grants().Batching()` to keep the
-batched calls; see [UPGRADING.md](../UPGRADING.md#sqlstore-v070).
+`GrantStore.RecordIssuedTokens` onto batching adapters, so a wrapper
+embedding a store can't inherit them and have the server bypass its
+overrides. Wire `db.BatchingRevocation()` and `db.BatchingGrants()`
+(v0.8; v0.7's `Batching()` methods are removed) to keep the batched
+calls; see [UPGRADING.md](../UPGRADING.md#sqlstore-v070).
 
 ## Upgrading from v0.3
 
@@ -234,7 +253,7 @@ between instances: use SQLite there.
   deps := resource.Dependencies{
   	AccessTokens: resource.OpaqueAccessTokens{Store: stores.AccessTokens, Issuer: issuer, Audience: audience}, // or JWTs
   	Replay:       stores.Replay,
-  	Revocation:   stores.Revocation.Batching(),
+  	Revocation:   stores.BatchingRevocation,
   	Nonces:       stores.Nonces,
   	// …
   }
@@ -287,15 +306,16 @@ and measure your own deployment.
   difference; v0.5's changes raised logins by about a third and
   refreshes by about half. Size the database's CPU for your request
   rates.
-- **Wire `Grants().Batching()` and `Revocation().Batching()`.** They add
+- **Wire `db.BatchingGrants()` and `db.BatchingRevocation()`.** They add
   the batch methods the server and resource servers look for
   (`storage.IssuedTokensRecorder`, `storage.RevocationBatchChecker`): a
   code exchange records its tokens in one `UPDATE` rather than two, and
   a token's or grant's revocation keys are checked in one statement
-  rather than one each. They're kept off the stores themselves so that
-  a wrapper of your own embedding `*GrantStore` or `*RevocationStore`
-  and overriding its single-key methods can't inherit them and have
-  the server bypass its overrides.
+  rather than one each. They're methods of `DB`, kept off the stores
+  themselves, so that a wrapper of your own embedding `*GrantStore` or
+  `*RevocationStore` and overriding its single-key methods can't
+  inherit them, or a way to them, and have the server bypass its
+  overrides.
 - **`Options.ClientCacheTTL`** skips re-reading a client's row within
   the TTL (a login drops to 24 statements with 5 s), at the cost of a
   change made through another instance taking up to the TTL to apply.

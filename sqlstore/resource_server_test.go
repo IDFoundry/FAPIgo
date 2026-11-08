@@ -29,6 +29,12 @@ func TestResourceServerStores(t *testing.T) {
 		expires := time.Now().Add(time.Hour)
 		must(t, serverDB.Revocation().Revoke(ctx, "grant:g1", expires))
 		wantRevoked(t, "the resource server's Revocation", rs.Revocation, true)
+		wantRevoked(t, "the resource server's BatchingRevocation", rs.BatchingRevocation, true)
+		if batch, ok := rs.BatchingRevocation.(storage.RevocationBatchChecker); !ok {
+			t.Error("the resource server's BatchingRevocation isn't a storage.RevocationBatchChecker")
+		} else if revoked, err := batch.IsAnyRevoked(ctx, []string{"grant:g0", "grant:g1"}); err != nil || !revoked {
+			t.Errorf("the resource server's BatchingRevocation: IsAnyRevoked(a grant the server revoked) = %v, %v, want true", revoked, err)
+		}
 		wantRevoked(t, "the resource server's own DB's Revocation", ownDB.Revocation(), false)
 
 		hash := sha256.Sum256([]byte("opaque access token"))

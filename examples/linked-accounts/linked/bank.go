@@ -149,14 +149,14 @@ func (w *World) newBank(ctx context.Context, apps apps) (*bank, error) {
 		Clients:      store.Clients(),
 		Transactions: store.Transactions(),
 		// Authorization codes and the 90-day refresh tokens.
-		Grants:       store.Grants().Batching(),
+		Grants:       store.BatchingGrants(),
 		Replay:       store.Replay(),
 		ClientKeys:   clientKeys,
 		Keys:         manager,
 		AccessTokens: accessTokens,
 		// The revocation store the bank and its API share: RevokeGrant
 		// writes to it, and both read it.
-		Revocation: store.Revocation().Batching(),
+		Revocation: store.BatchingRevocation(),
 		// DPoP server nonces (RFC 9449 §8): a DPoP proof at PAR or the
 		// token endpoint must carry a nonce the bank handed out, so a
 		// proof made ahead of time, or captured, is refused. A client's

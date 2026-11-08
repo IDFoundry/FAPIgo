@@ -21,16 +21,16 @@
 //	deps := server.Dependencies{
 //		Clients:      db.Clients(),
 //		Transactions: db.Transactions(),
-//		Grants:       db.Grants().Batching(),
+//		Grants:       db.BatchingGrants(),
 //		Replay:       db.Replay(),
 //		Nonces:       db.Nonces(),
-//		Revocation:   db.Revocation().Batching(),
+//		Revocation:   db.BatchingRevocation(),
 //		// ...
 //	}
 //
-// (Batching adds the batch methods the server looks for — see
-// Performance and scaling; db.Grants() and db.Revocation() alone work
-// too, a few statements a request slower.)
+// (BatchingGrants and BatchingRevocation add the batch methods the
+// server looks for — see Performance and scaling; db.Grants() and
+// db.Revocation() alone work too, a few statements a request slower.)
 //
 // and, for the features that need one, its store:
 //
@@ -82,7 +82,7 @@
 //	deps := resource.Dependencies{
 //		AccessTokens: resource.OpaqueAccessTokens{Store: stores.AccessTokens, Issuer: issuer, Audience: audience}, // or JWTAccessTokens
 //		Replay:       stores.Replay,
-//		Revocation:   stores.Revocation.Batching(),
+//		Revocation:   stores.BatchingRevocation,
 //		Nonces:       stores.Nonces,
 //		// ...
 //	}
@@ -287,9 +287,14 @@
 // without it. Losing it makes every sealed record unreadable: clients
 // authorize again, as they would once the records expired.
 // Changing it does the same for the records sealed under the old one;
-// to rotate without that, use RotatingSealer, which seals with the new
-// key and opens with either, until the longest-lived record (a refresh
-// token) sealed under the old one expires. AESGCMSealer's random nonces
+// to rotate without that, use RotatingSealer, in three deploys: first
+// RotatingSealer(oldSealer, newSealer), which still seals with the old
+// key and opens with either; once every instance runs that,
+// RotatingSealer(newSealer, oldSealer); and newSealer alone once the
+// longest-lived record (a refresh token) sealed under the old key
+// expires. Making the new key current in one deploy leaves the
+// instances not yet redeployed unable to open what the others seal,
+// until it completes. AESGCMSealer's random nonces
 // allow 2^32 seals per key (NIST SP 800-38D), which a busy server can
 // reach in weeks, or days: rotate before then — see AESGCMSealer, and
 // Performance and scaling for the cadence. The budget is the key's,
@@ -492,11 +497,11 @@
 // Two methods beyond the storage interfaces take a little more off,
 // with a fapigo that looks for them (storage.RevocationBatchChecker and
 // storage.IssuedTokensRecorder) and makes the separate calls otherwise.
-// They're on what RevocationStore.Batching and GrantStore.Batching
-// return, not on the stores, so a deployment's own wrapper that embeds
-// a store and overrides its single-key methods can't inherit them by
-// accident and have the server bypass its overrides; wire those for
-// them (as Setup does). IsAnyRevoked checks all of a token's or
+// They're on what DB.BatchingRevocation and DB.BatchingGrants return,
+// not on the stores, so a deployment's own wrapper that embeds a store
+// and overrides its single-key methods can't inherit them, or a way to
+// them, by accident and have the server bypass its overrides; wire
+// those for them (as Setup does). IsAnyRevoked checks all of a token's or
 // grant's revocation keys, current and legacy forms, in one statement
 // rather than one each, on every token request and resource-server
 // check; and RecordIssuedTokens records a code exchange's access and
@@ -664,8 +669,8 @@
 // pass it to AESGCMSealer.
 //
 // AESGCMSealer's random nonces allow 2^32 seals per key (about 4.3
-// billion; see AESGCMSealer), so rotate with RotatingSealer at a
-// cadence set by your seal rate. A login seals five records (its pushed
+// billion; see AESGCMSealer), so rotate with RotatingSealer (in the
+// three deploys Sealing describes) at a cadence set by your seal rate. A login seals five records (its pushed
 // request, the interaction's copy, the code's grant, an opaque access
 // token and a refresh token; fewer with JWT access tokens or no refresh
 // token), a refresh one (its opaque access token), a CIBA request two

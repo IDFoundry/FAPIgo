@@ -50,11 +50,12 @@ func (s *RevocationStore) IsRevoked(ctx context.Context, key string) (bool, erro
 	return n > 0, nil
 }
 
-// Batching returns s as a storage.RevocationStore that is also a
-// storage.RevocationBatchChecker, for server.Dependencies.Revocation
-// and resource.Dependencies.Revocation:
+// BatchingRevocation returns d's RevocationStore as a
+// storage.RevocationStore that is also a storage.RevocationBatchChecker,
+// for server.Dependencies.Revocation and
+// resource.Dependencies.Revocation:
 //
-//	Revocation: db.Revocation().Batching(),
+//	Revocation: db.BatchingRevocation(),
 //
 // Its IsAnyRevoked reports whether any of keys was revoked and hasn't
 // been swept since its expiry, as IsRevoked would for each of them in
@@ -63,23 +64,28 @@ func (s *RevocationStore) IsRevoked(ctx context.Context, key string) (bool, erro
 // to maxRevocationBatch keys at a time. No keys is false, nil. The
 // server and a resource server discover it by type assertion, asking
 // it once where they'd otherwise call IsRevoked once per key. It's
-// otherwise s, a storage.StoreAssurance with s's Capabilities.
+// otherwise d.Revocation(), a storage.StoreAssurance with its
+// Capabilities.
 //
-// It's a method returning an interface, rather than a method of s, so
-// that only a deployment asking for it gets it: a wrapper of its own
-// that embeds *RevocationStore and overrides IsRevoked (a cache in
-// front of a shared store, say) would otherwise inherit IsAnyRevoked
-// by promotion, and the server and resource server would ask that,
-// past the override. A wrapper embedding what Batching returns, a
+// It's a method of DB, rather than of RevocationStore, so that a
+// wrapper of a deployment's own that embeds *RevocationStore and
+// overrides IsRevoked (a cache in front of a shared store, or a tenant
+// prefix, say) inherits neither IsAnyRevoked nor a way to get this
+// store: the server and resource server would ask either past the
+// override, and a key the wrapper revoked would read as not revoked. A
+// wrapper embedding what BatchingRevocation returns, a
 // storage.RevocationStore, isn't a RevocationBatchChecker unless it
-// implements IsAnyRevoked itself.
-func (s *RevocationStore) Batching() storage.RevocationStore { return batchingRevocationStore{s} }
+// implements IsAnyRevoked itself, which a wrapper wanting the batched
+// check does, consistently with its IsRevoked.
+func (d *DB) BatchingRevocation() storage.RevocationStore {
+	return batchingRevocationStore{d.Revocation()}
+}
 
-// batchingRevocationStore is RevocationStore.Batching's store.
+// batchingRevocationStore is DB.BatchingRevocation's store.
 type batchingRevocationStore struct{ *RevocationStore }
 
 // IsAnyRevoked implements storage.RevocationBatchChecker — see
-// RevocationStore.Batching.
+// DB.BatchingRevocation.
 func (b batchingRevocationStore) IsAnyRevoked(ctx context.Context, keys []string) (bool, error) {
 	return b.isAnyRevoked(ctx, keys)
 }

@@ -168,9 +168,10 @@ For a deployment keeping its stores in the
   share.
 - [ ] *(yours)* **A sealing key kept outside the database** and its
   backups (`Options.Sealer`, `AESGCMSealer`), with a rotation plan:
-  `RotatingSealer`, which opens with the old and new keys until the old
-  one's records expire, well before a key's 2^32 seals (weeks, on a busy
-  server).
+  `RotatingSealer`, in three deploys (open with both keys everywhere,
+  then seal with the new one, then drop the old one once its records
+  expire; see sqlstore's Sealing documentation), well before a key's
+  2^32 seals (weeks, on a busy server).
 - [ ] *(yours)* **`CheckClientRegistration` on every client** at
   startup (`Clients().All`) and after each `Clients().Put`.
 - [ ] **`ReadUnsealed` only while migrating** an existing database to

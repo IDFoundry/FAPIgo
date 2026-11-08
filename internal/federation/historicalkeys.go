@@ -339,8 +339,9 @@ type CreateHistoricalKeysResponseParams struct {
 	// Now is the response's issuance time ("iat").
 	Now time.Time
 
-	// Keys is the "keys" claim — every historical key to publish.
-	// Required, at least one.
+	// Keys is the "keys" claim — every historical key to publish. May be
+	// empty: an entity that hasn't yet retired a key publishes an empty
+	// array, which §8.7.2's REQUIRED "keys" claim still permits.
 	Keys []HistoricalKeyParams
 }
 
@@ -362,10 +363,9 @@ func CreateHistoricalKeysResponse(p CreateHistoricalKeysResponseParams) (string,
 	if p.Now.IsZero() {
 		return "", fmt.Errorf("federation: now is zero")
 	}
-	if len(p.Keys) == 0 {
-		return "", fmt.Errorf("federation: keys is empty")
-	}
 
+	// make, not a nil slice, so an empty Keys still encodes as the
+	// REQUIRED "keys" array (§8.7.2) rather than null.
 	keys := make([]json.RawMessage, len(p.Keys))
 	for i, k := range p.Keys {
 		raw, err := historicalKeyJSON(k)
@@ -399,6 +399,9 @@ func historicalKeyJSON(k HistoricalKeyParams) (json.RawMessage, error) {
 	if k.ExpiresAt.IsZero() {
 		return nil, fmt.Errorf("exp is required")
 	}
+	if k.Revoked != nil && k.Revoked.RevokedAt.IsZero() {
+		return nil, fmt.Errorf("revoked_at is required")
+	}
 
 	jwk, err := jose.NewJWK(k.PublicKey, k.Algorithm)
 	if err != nil {
@@ -421,9 +424,13 @@ func historicalKeyJSON(k HistoricalKeyParams) (json.RawMessage, error) {
 		fields["nbf"], _ = json.Marshal(k.NotBefore.Unix())
 	}
 	if k.Revoked != nil {
-		fields["revoked"], _ = json.Marshal(map[string]any{
-			"revoked_at": k.Revoked.RevokedAt.Unix(), "reason": string(k.Revoked.Reason),
-		})
+		revoked := map[string]any{"revoked_at": k.Revoked.RevokedAt.Unix()}
+		// §8.7.3: "The reason MAY be omitted" — an empty Reason omits the
+		// member rather than publishing "" as though it were a reason.
+		if k.Revoked.Reason != "" {
+			revoked["reason"] = string(k.Revoked.Reason)
+		}
+		fields["revoked"], _ = json.Marshal(revoked)
 	}
 	return json.Marshal(fields)
 }

@@ -152,16 +152,24 @@
 // one) and folds each entry's own expiry into the response's "exp" the
 // same way resolved.ExpiresAt already is.
 //
-// The Federation Historical Keys endpoint (§8.7) is covered on the
-// querying side: Resolver.FetchHistoricalKeys queries a peer's endpoint
-// and authenticates the response the identical way ResolveViaEndpoint
-// does (resolve the response's own issuer as a fresh Trust Chain first,
-// verify against that resolution's own vouched-for key). This package
-// doesn't yet offer a public way to sign such a response for an
-// entity's own retired keys. Consulting
-// this endpoint is always an explicit, separate call — Resolve itself
-// never falls back to it automatically when a statement's own "kid"
-// isn't found among an issuer's current jwks.
+// The Federation Historical Keys endpoint (§8.7) is covered on both
+// sides. Resolver.FetchHistoricalKeys queries a peer's endpoint and
+// authenticates the response the identical way ResolveViaEndpoint does
+// (resolve the response's own issuer as a fresh Trust Chain first,
+// verify against that resolution's own vouched-for key).
+// HistoricalKeysIssuer.Response signs the response for an entity's own
+// retired keys, as caller-supplied HistoricalKeyParams (this package
+// keeps no record of which keys were retired), refusing a key still
+// active — its own signing key, or one still in its published jwks —
+// and a revocation reason §8.7.3 doesn't define unless the federation
+// does (HistoricalKeysIssueConfig.AdditionalRevocationReasons);
+// WriteHistoricalKeys serves it, and the entity publishes the URL as
+// federation_historical_keys_endpoint in its own federation_entity
+// metadata. server.Server.HistoricalKeys signs one with the server's
+// own federation key. Only §8.7.1's GET request shape is covered, on
+// either side. Consulting this endpoint is always an explicit, separate
+// call — Resolve itself never falls back to it automatically when a
+// statement's own "kid" isn't found among an issuer's current jwks.
 //
 // Automatic client registration (OpenID Federation 1.0 §12.1) is
 // implemented by AutomaticClientRepository/AutomaticClientKeySource,

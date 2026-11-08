@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -36,22 +37,9 @@ import (
 // own doc comment. trustMarks are published as the "trust_marks"
 // claim, as federation.SelfIssuer.EntityConfiguration describes.
 func (s *Server) EntityConfiguration(ctx context.Context, metadata map[string]json.RawMessage, trustMarks ...federation.RawTrustMark) (string, error) {
-	if s.cfg.Federation.EntityID == "" {
-		return "", fmt.Errorf("server: federation self-issuance is not configured (config.federation.entity_id is empty)")
-	}
-	signer, kid, err := s.newSigner(ctx, keys.FederationEntitySigning, s.cfg.Federation.Algorithm)
+	signer, kid, jwks, err := s.federationKeys(ctx)
 	if err != nil {
-		return "", fmt.Errorf("server: resolve federation signing key: %w", err)
-	}
-	keySet, err := keys.PublicJWKS(ctx, []keys.SigningKeyUse{
-		{Manager: s.deps.Keys, Purpose: keys.FederationEntitySigning, Algorithm: s.cfg.Federation.Algorithm},
-	}, nil)
-	if err != nil {
-		return "", fmt.Errorf("server: build federation jwks: %w", err)
-	}
-	jwks, err := json.Marshal(keySet)
-	if err != nil {
-		return "", fmt.Errorf("server: marshal federation jwks: %w", err)
+		return "", err
 	}
 
 	issuer, err := federation.NewSelfIssuer(federation.SelfIssueConfig{
@@ -70,6 +58,71 @@ func (s *Server) EntityConfiguration(ctx context.Context, metadata map[string]js
 		return "", err
 	}
 	return issuer.EntityConfiguration(metadata, trustMarks...)
+}
+
+// HistoricalKeys signs and returns this server's own Federation
+// Historical Keys response (OpenID Federation 1.0 §8.7.2;
+// federation.HistoricalKeysIssuer's own Response) listing retiredKeys,
+// the federation signing keys this server no longer publishes. It signs
+// with the same keys.FederationEntitySigning key EntityConfiguration
+// does, and refuses any entry still in this server's federation jwks —
+// the current key, or one a keys.RotatingKeyManager still publishes
+// during a rotation's overlap — along with every other entry
+// federation.HistoricalKeysIssuer.Response refuses. Which keys were
+// retired, when, and whether revoked is the caller's own key
+// management's record: this server keeps none.
+//
+// Opt-in, like the endpoint itself (§5.1.1: "All Federation Entities
+// MAY publish a federation_historical_keys_endpoint"): to offer it,
+// serve the result with federation.WriteHistoricalKeys at an https URL
+// of the caller's choosing, and publish that URL as
+// federation_historical_keys_endpoint in the federation_entity metadata
+// passed to EntityConfiguration — this package doesn't own HTTP
+// transport, so it adds no endpoint to the metadata itself.
+//
+// Fails if Config.Federation.EntityID is unset — see FederationConfig's
+// own doc comment.
+func (s *Server) HistoricalKeys(ctx context.Context, retiredKeys []federation.HistoricalKeyParams) (string, error) {
+	signer, kid, jwks, err := s.federationKeys(ctx)
+	if err != nil {
+		return "", err
+	}
+	issuer, err := federation.NewHistoricalKeysIssuer(federation.HistoricalKeysIssueConfig{
+		EntityID: s.cfg.Federation.EntityID,
+	}, federation.HistoricalKeysIssueDependencies{
+		Signer: signer, Algorithm: s.cfg.Federation.Algorithm, KeyID: kid,
+		JWKS: jwks, Clock: s.deps.Clock,
+	})
+	if err != nil {
+		return "", fmt.Errorf("server: %w", err)
+	}
+	return issuer.Response(retiredKeys)
+}
+
+// federationKeys resolves this server's federation signing key and kid,
+// and its published federation jwks (every keys.FederationEntitySigning
+// key at Config.Federation.Algorithm, a rotation's outgoing one
+// included), for EntityConfiguration and HistoricalKeys. Fails if
+// federation self-issuance isn't configured.
+func (s *Server) federationKeys(ctx context.Context) (crypto.Signer, string, json.RawMessage, error) {
+	if s.cfg.Federation.EntityID == "" {
+		return nil, "", nil, fmt.Errorf("server: federation self-issuance is not configured (config.federation.entity_id is empty)")
+	}
+	signer, kid, err := s.newSigner(ctx, keys.FederationEntitySigning, s.cfg.Federation.Algorithm)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("server: resolve federation signing key: %w", err)
+	}
+	keySet, err := keys.PublicJWKS(ctx, []keys.SigningKeyUse{
+		{Manager: s.deps.Keys, Purpose: keys.FederationEntitySigning, Algorithm: s.cfg.Federation.Algorithm},
+	}, nil)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("server: build federation jwks: %w", err)
+	}
+	jwks, err := json.Marshal(keySet)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("server: marshal federation jwks: %w", err)
+	}
+	return signer, kid, jwks, nil
 }
 
 // withAutomaticRegistrationMetadata returns metadata with its

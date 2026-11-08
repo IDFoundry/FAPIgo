@@ -176,5 +176,7 @@ The code:
 ## Not shown
 
 - Explicit registration (§12.2) — FAPIgo implements automatic registration only.
-- Key rollover through the Federation Historical Keys endpoint.
+- Key rollover through the Federation Historical Keys endpoint
+  (`federation.HistoricalKeysIssuer` and `Resolver.FetchHistoricalKeys`;
+  see the [federation guide](../../docs/guides/openid-federation.md)).
 - Trust Mark status queries.

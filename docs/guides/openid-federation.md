@@ -141,6 +141,34 @@ use someone's resolve endpoint, call `Resolver.ResolveViaEndpoint` with
 Anchor (§17.3): a response issued by anyone else is refused before any
 fetch.
 
+## Key rollover: historical keys
+
+After rotating its federation signing key, any entity can keep
+statements its old key signed checkable by publishing that key at a
+Federation Historical Keys endpoint (§8.7). `federation.HistoricalKeysIssuer`
+signs the response from the retired keys you list (on an authorization
+server, `Server.HistoricalKeys` signs with its own federation key), each
+with its `exp` and, if it was revoked, when and why:
+
+```go
+token, err := srv.HistoricalKeys(ctx, []federation.HistoricalKeyParams{{
+	KeyID: "fed-2025", Algorithm: fapi.ES256, PublicKey: oldKey,
+	ExpiresAt: rotatedAt,
+	Revoked:   &federation.KeyRevocation{RevokedAt: rotatedAt, Reason: federation.KeyRevocationReasonSuperseded},
+}})
+// ...
+federation.WriteHistoricalKeys(w, token)
+```
+
+Publish the endpoint's URL as `federation_historical_keys_endpoint` in
+your `federation_entity` metadata. A key still in your Entity
+Configuration's `jwks` is refused, and so is a revocation reason other
+than §8.7.3's `unspecified`, `compromised` and `superseded` unless you
+list it in `HistoricalKeysIssueConfig.AdditionalRevocationReasons`. You
+keep the record of which keys you retired. To read a peer's, call
+`Resolver.FetchHistoricalKeys`: the response is checked against the
+peer's current key from its resolved Trust Chain.
+
 ## What's checked for you
 
 `federation.Resolver` validates every statement's signature and expiry at

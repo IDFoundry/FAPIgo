@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,6 +50,8 @@ func TestParseRefusesStatementsSection32Rejects(t *testing.T) {
 		"§6.1.2 duplicate metadata_policy entity type": {ss, `"metadata_policy":{"openid_relying_party":{},"openid_relying_party":{}}`, true},
 		"RFC 7519 §4 duplicate claim":                  {ec, `"iss":"https://a.example.org"`, true},
 		"duplicate member inside an array":             {ec, `"metadata":{"openid_relying_party":{"contacts":[{"a":1,"a":2}]}}`, true},
+		"nesting at maxJSONDepth":                      {ec, `"metadata":{"openid_relying_party":{"x":` + nestedArrays(maxJSONDepth-2) + `}}`, true},
+		"nesting just under maxJSONDepth":              {ec, `"metadata":{"openid_relying_party":{"x":` + nestedArrays(maxJSONDepth-3) + `}}`, false},
 	} {
 		payload := fmt.Sprintf(`{"iss":"https://a.example.org","sub":%q,"iat":%d,"exp":%d,"jwks":%s,%s}`, tc.sub, time.Now().Unix(), time.Now().Unix()+60, string(testJWKS(t, key)), tc.extra)
 		_, err := Parse(signTestStatement(t, key, `{"alg":"ES256","typ":"entity-statement+jwt","kid":"test-kid"}`, payload))
@@ -56,6 +59,12 @@ func TestParseRefusesStatementsSection32Rejects(t *testing.T) {
 			t.Errorf("%s: Parse = %v, want ErrMalformedClaims %v", name, err, tc.wantErr)
 		}
 	}
+}
+
+// nestedArrays is n nested JSON arrays, [[...]]; inside the payload,
+// metadata and an Entity Type's object, the innermost sits at depth n+2.
+func nestedArrays(n int) string {
+	return strings.Repeat("[", n) + strings.Repeat("]", n)
 }
 
 // TestParseRefusesTrustChainHeaders covers §4.3 and §4.4: "Entity

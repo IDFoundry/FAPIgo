@@ -743,6 +743,31 @@ func TestResolveAppliesTrustAnchorMetadataToItsSubordinate(t *testing.T) {
 	}
 }
 
+// TestResolveIgnoresSuperiorMetadataForUndeclaredEntityType: superior
+// metadata for an Entity Type the leaf doesn't declare neither adds that
+// type nor touches the types the leaf does declare.
+func TestResolveIgnoresSuperiorMetadataForUndeclaredEntityType(t *testing.T) {
+	f := setupThreeLevelFederationWith(t, threeLevelOptions{
+		i1AboutLEMetadata: map[string]json.RawMessage{
+			"federation_entity": json.RawMessage(`{"organization_name":"Named by I1"}`),
+		},
+	})
+	result, err := f.newResolver(t).Resolve(context.Background(), f.leID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	rp := resolvedParams(t, result, "openid_relying_party")
+	if got, want := string(rp["redirect_uris"]), `["`+f.leID+`/cb"]`; got != want {
+		t.Errorf("redirect_uris = %s, want the leaf's own %s", got, want)
+	}
+	if got := string(rp["response_types"]); got != `["code"]` {
+		t.Errorf("response_types = %s, want the leaf's own value", got)
+	}
+	if _, ok := result.Metadata["federation_entity"]; ok {
+		t.Error("federation_entity present, want absent: the leaf declares no such Entity Type")
+	}
+}
+
 func TestResolveRejectsMalformedSuperiorMetadata(t *testing.T) {
 	f := setupThreeLevelFederationWith(t, threeLevelOptions{
 		i1AboutLEMetadata: map[string]json.RawMessage{"openid_relying_party": json.RawMessage(`["not","an","object"]`)},

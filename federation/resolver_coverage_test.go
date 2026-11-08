@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -303,6 +304,8 @@ type threeLevelParams struct {
 
 	taAboutI1Signer *ecdsa.PrivateKey // zero means the real TA key
 	taAboutI1JWKS   json.RawMessage   // zero means I1's own real JWKS
+	i1ConfigSigner  *ecdsa.PrivateKey // zero means I1's real key
+	i1AboutLEJWKS   json.RawMessage   // zero means LE's own real JWKS
 
 	taAboutI1Policy intfed.MetadataPolicy
 	taAboutI1Crit   []string
@@ -351,6 +354,14 @@ func buildThreeLevelFederation(t *testing.T, p threeLevelParams) *threeLevelFede
 	if p.taAboutI1JWKS != nil {
 		taAboutI1JWKS = p.taAboutI1JWKS
 	}
+	i1ConfigSigner := i1Key
+	if p.i1ConfigSigner != nil {
+		i1ConfigSigner = p.i1ConfigSigner
+	}
+	i1AboutLEJWKS := leJWKS
+	if p.i1AboutLEJWKS != nil {
+		i1AboutLEJWKS = p.i1AboutLEJWKS
+	}
 
 	taConfig := sign(intfed.CreateParams{
 		Signer: taKey, Algorithm: fapi.ES256, KeyID: "ta",
@@ -363,14 +374,14 @@ func buildThreeLevelFederation(t *testing.T, p threeLevelParams) *threeLevelFede
 		MetadataPolicy: p.taAboutI1Policy, MetadataPolicyCritical: p.taAboutI1Crit,
 	})
 	i1Config := sign(intfed.CreateParams{
-		Signer: i1Key, Algorithm: fapi.ES256, KeyID: "i1",
+		Signer: i1ConfigSigner, Algorithm: fapi.ES256, KeyID: "i1",
 		Issuer: i1ID, Subject: i1ID, Now: now, Lifetime: lifetime(p.i1Lifetime), JWKS: i1JWKS,
 		AuthorityHints: []string{taID},
 		Metadata:       federationEntityMetadata(t, i1ID+"/fetch"),
 	})
 	i1AboutLE := sign(intfed.CreateParams{
 		Signer: i1Key, Algorithm: fapi.ES256, KeyID: "i1",
-		Issuer: i1ID, Subject: leID, Now: now, Lifetime: lifetime(p.i1Lifetime), JWKS: leJWKS,
+		Issuer: i1ID, Subject: leID, Now: now, Lifetime: lifetime(p.i1Lifetime), JWKS: i1AboutLEJWKS,
 		MetadataPolicy: p.i1AboutLEPolicy, MetadataPolicyCritical: p.i1AboutLECrit,
 	})
 	leConfig := sign(intfed.CreateParams{
@@ -437,6 +448,30 @@ func TestResolveRejectsSubordinateStatementWithMismatchedVouchedJWKS(t *testing.
 	r := f.newResolver(t)
 	if _, err := r.Resolve(context.Background(), f.leID); err == nil {
 		t.Fatalf("Resolve(trust anchor vouches for a different I1 key than I1's own statement about LE was actually signed with) = nil error, want error")
+	}
+}
+
+// TestResolveRejectsLeafNotSignedByIntermediateVouchedKey: in a
+// three-level chain the leaf's own Entity Configuration is verified
+// against the keys I1 vouches for it, so a leaf self-signed with a key
+// I1 never vouched for doesn't resolve.
+func TestResolveRejectsLeafNotSignedByIntermediateVouchedKey(t *testing.T) {
+	f := buildThreeLevelFederation(t, threeLevelParams{
+		i1AboutLEJWKS: jwksFor(t, "le", generateKey(t)),
+	})
+	if _, err := f.newResolver(t).Resolve(context.Background(), f.leID); err == nil {
+		t.Fatalf("Resolve(leaf signed by a key I1 doesn't vouch for) = nil error, want error")
+	}
+}
+
+// TestResolveRejectsSuperiorEntityConfigurationWithBadSelfSignature: an
+// Intermediate's Entity Configuration that doesn't verify against its
+// own jwks is refused for that reason, not fetched through.
+func TestResolveRejectsSuperiorEntityConfigurationWithBadSelfSignature(t *testing.T) {
+	f := buildThreeLevelFederation(t, threeLevelParams{i1ConfigSigner: generateKey(t)})
+	_, err := f.newResolver(t).Resolve(context.Background(), f.leID)
+	if !errors.Is(err, jose.ErrInvalidSignature) {
+		t.Fatalf("Resolve(I1's Entity Configuration signed by a key not in its jwks) = %v, want jose.ErrInvalidSignature", err)
 	}
 }
 

@@ -293,29 +293,32 @@ between instances: use SQLite there.
 
 The package documentation's "Performance and scaling" section has the
 detail and the measurements behind this summary. They were taken on
-sqlstore v0.4, and on a prototype of v0.5's changes, on one shared host
+sqlstore v0.7 with fapigo v0.71, compared with v0.4 in interleaved
+runs, on one host whose CPU clock throttled under sustained load
 (PostgreSQL 17 on 4 vCPUs in a Docker VM), so read them as indicative
 and measure your own deployment.
 
 - **PostgreSQL is the limit, not the server instances.** A whole login
   (PAR, authorization, code exchange) is 31 statements and 14 write
   transactions (55 statements on v0.4, which wrapped each one-statement
-  write in BEGIN and COMMIT); a refresh 9 and 3. On v0.4 the 4-vCPU
-  database saturated at about 380 logins, 1,300 refreshes or 9,000
-  opaque-token lookups a second, and 1, 2 or 4 server instances made no
-  difference; v0.5's changes raised logins by about a third and
-  refreshes by about half. Size the database's CPU for your request
-  rates.
+  write in BEGIN and COMMIT); a refresh 9 and 3. The 4-vCPU database
+  saturated at about 740 logins, 2,300 refreshes or 4,500
+  resource-server checks of an opaque, DPoP-bound token a second, and 2
+  or 4 server instances didn't add to that; against v0.4, logins a
+  second rose by a fifth to a third and refreshes by about 40%. Size
+  the database's CPU for your request rates.
 - **Wire `db.BatchingGrants()` and `db.BatchingRevocation()`.** They add
   the batch methods the server and resource servers look for
   (`storage.IssuedTokensRecorder`, `storage.RevocationBatchChecker`): a
   code exchange records its tokens in one `UPDATE` rather than two, and
   a token's or grant's revocation keys are checked in one statement
-  rather than one each. They're methods of `DB`, kept off the stores
-  themselves, so that a wrapper of your own embedding `*GrantStore` or
-  `*RevocationStore` and overriding its single-key methods can't
-  inherit them, or a way to them, and have the server bypass its
-  overrides.
+  rather than one each. A resource server's check drops from 5
+  statements to 3 (about 40% more checks a second, and 30% less
+  database CPU each), a login from 31 to 29 and a refresh from 9 to 8.
+  They're methods of `DB`, kept off the stores themselves, so that a
+  wrapper of your own embedding `*GrantStore` or `*RevocationStore`
+  and overriding its single-key methods can't inherit them, or a way to
+  them, and have the server bypass its overrides.
 - **`Options.ClientCacheTTL`** skips re-reading a client's row within
   the TTL (a login drops to 24 statements with 5 s), at the cost of a
   change made through another instance taking up to the TTL to apply.
@@ -323,7 +326,7 @@ and measure your own deployment.
   it changed.
 - **Size the pool on every instance.** `database/sql`'s default
   `MaxIdleConns` of 2 churns connections: in testing it cut logins from
-  214 to 47 a second. Set `SetMaxIdleConns` equal to `SetMaxOpenConns`,
+  417 to 70 a second. Set `SetMaxIdleConns` equal to `SetMaxOpenConns`,
   plus `SetConnMaxLifetime` and `SetConnMaxIdleTime`, and keep
   `MaxOpenConns` × instances (plus headroom) below `max_connections`. A
   modest pool is enough: busy connections ≈ requests/s × round trips ×
@@ -344,9 +347,10 @@ and measure your own deployment.
   repeating the work.
 - **SQLite** has one writer, and with the documented DSN
   (`synchronous=FULL`) every write transaction waits for an fsync. A
-  login is 13 of them, so on a Linux VM disk it managed 13–17 logins a
-  second. Don't size it on macOS, whose `fsync` doesn't flush the drive.
-  `_pragma=synchronous(NORMAL)` reached 286 a second, but an OS crash or
+  login is 13 of them (12 with `db.BatchingGrants()`), so on a Linux VM
+  disk it managed about 55 logins a second. Don't size it on macOS,
+  whose `fsync` doesn't flush the drive.
+  `_pragma=synchronous(NORMAL)` reached 241 a second, but an OS crash or
   power loss then drops the last commits, which here can mean a replay
   digest, a code's redemption or a revocation forgotten: your call. Keep
   one writing process per file (a resource server in its own process

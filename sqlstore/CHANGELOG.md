@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.7.0...sqlstore/v0.8.0) (2026-11-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sqlstore:** RevocationStore.Batching and GrantStore.Batching are removed. Use db.BatchingRevocation() and db.BatchingGrants() instead, and stores.BatchingRevocation on a standalone resource server.
+
+### Bug Fixes
+
+* **sqlstore:** key the Postgres migration lock by schema and prefix ([c5c1b07](https://github.com/IDFoundry/FAPIgo/commit/c5c1b07bb8ddc9f941eff3bfdb57342c1a847b52))
+* **sqlstore:** move the batching adapters from the stores to DB ([b201a36](https://github.com/IDFoundry/FAPIgo/commit/b201a36fe7cdb32d54ad8b533aadf7c1f26c9c83))
+
 ## [0.7.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.6.0...sqlstore/v0.7.0) (2026-11-07)
 
 

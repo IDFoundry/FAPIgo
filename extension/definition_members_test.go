@@ -71,6 +71,20 @@ func TestRegistryParseRefusesRepeatedMembers(t *testing.T) {
 	})
 }
 
+// TestRegistryParseRefusesValueValidateRejects: a well-formed value the
+// definition's own Validate refuses (over cappedLimitDef's cap) isn't
+// parsed.
+func TestRegistryParseRefusesValueValidateRejects(t *testing.T) {
+	reg, err := extension.NewRegistry(cappedLimitDef)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	params := map[string]json.RawMessage{"x_payment_limit": json.RawMessage(`{"amount":101}`)}
+	if _, err := reg.Parse(params, nil, extension.SourcePlainParameter); err == nil {
+		t.Fatal("Parse(amount over Validate's cap) = nil error, want it refused")
+	}
+}
+
 // repeatingMarshaler emits a repeated member from its own MarshalJSON.
 type repeatingMarshaler struct{}
 

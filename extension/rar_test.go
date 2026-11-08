@@ -374,6 +374,31 @@ func TestRARRegistryValidateGrantRejectsTypeNeverRequested(t *testing.T) {
 	}
 }
 
+// TestRARRegistryValidateRefusesUnregisteredGrantedType: RARValues
+// decoded from JSON (a stored grant, say) never went through this
+// registry's Parse, so ValidateGrant and ValidateNarrowing themselves
+// refuse a type it never registered.
+func TestRARRegistryValidateRefusesUnregisteredGrantedType(t *testing.T) {
+	reg, err := extension.NewRARRegistry(4096, 4, paymentDef)
+	if err != nil {
+		t.Fatalf("NewRARRegistry: %v", err)
+	}
+	requested, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"100.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(requested): %v", err)
+	}
+	var unregistered extension.RARValues
+	if err := json.Unmarshal([]byte(`[{"type":"unregistered_x"}]`), &unregistered); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if err := reg.ValidateGrant(requested, unregistered); !errors.Is(err, extension.ErrRARUnregisteredType) {
+		t.Errorf("ValidateGrant(granted holds an unregistered type) = %v, want ErrRARUnregisteredType", err)
+	}
+	if err := reg.ValidateNarrowing(requested, unregistered); !errors.Is(err, extension.ErrRARUnregisteredType) {
+		t.Errorf("ValidateNarrowing(narrowed holds an unregistered type) = %v, want ErrRARUnregisteredType", err)
+	}
+}
+
 // --- RARSet ---------------------------------------------------------------
 
 // bareInstructedAmount deliberately has no "type" field at all, to prove

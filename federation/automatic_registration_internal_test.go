@@ -282,6 +282,36 @@ func TestRegisteredClientConfigFromMetadataRejectsTLSClientAuthWithoutSubjectDN(
 	}
 }
 
+// TestRegisteredClientConfigFromMetadataRejectsTLSClientAuthWithoutUsableKey:
+// a CA-issued certificate method needs a signing key in the RP JWK Set
+// for the certificate to carry (OpenID Federation 1.0 §12.1.1.2); a set
+// with only encryption keys, or none, would leave the subject DN alone
+// authenticating the client.
+func TestRegisteredClientConfigFromMetadataRejectsTLSClientAuthWithoutUsableKey(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	encOnly, err := json.Marshal(map[string]any{"keys": []map[string]any{{
+		"kty": "EC", "crv": "P-256", "kid": "rp-enc", "use": "enc",
+		"x": base64URLEncode(key.X.FillBytes(make([]byte, 32))), "y": base64URLEncode(key.Y.FillBytes(make([]byte, 32))),
+	}}})
+	if err != nil {
+		t.Fatalf("marshal jwks: %v", err)
+	}
+	for name, jwks := range map[string]string{
+		"encryption keys only": string(encOnly),
+		"no keys":              `{"keys":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"tls_client_auth","tls_client_auth_subject_dn":"CN=rp.example.org","jwks":` + jwks + `}`
+			if cfg, _, err := call(t, newTestAutomaticClientRepository(AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}}), raw); err == nil {
+				t.Fatalf("registeredClientConfigFromMetadata(tls_client_auth, %s) = nil error (CertificateKeyThumbprints %v), want error", name, cfg.CertificateKeyThumbprints)
+			}
+		})
+	}
+}
+
 func TestRegisteredClientConfigFromMetadataAcceptsSANMethods(t *testing.T) {
 	cases := map[string]struct {
 		method, field, value string

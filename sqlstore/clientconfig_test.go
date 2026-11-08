@@ -155,6 +155,7 @@ func TestParseClientConfigRefusals(t *testing.T) {
 		"case-variant in display": `{"version":1,"display":{"Name":"a"}}`,
 		"invalid UTF-8":           "{\"version\":1,\"expected_san_dns\":\"rp\xff.example\"}",
 		"lone surrogate":          `{"version":1,"expected_san_dns":"rp\ud800.example"}`,
+		"surrogate split by text": `{"version":1,"expected_san_dns":"rp\ud800.\udc00example"}`,
 	} {
 		if _, err := sqlstore.ParseClientConfig("c", []byte(doc)); !errors.Is(err, sqlstore.ErrClientConfig) {
 			t.Errorf("%s: ParseClientConfig(%s) = %v, want ErrClientConfig", name, doc, err)

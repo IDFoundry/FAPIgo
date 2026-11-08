@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.72.0](https://github.com/IDFoundry/FAPIgo/compare/v0.71.0...v0.72.0) (2026-11-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** an AccessTokenIssuer embedding server.JWTAccessTokens must implement server.AccessTokenKeyPublisher, or New refuses it; under AssuranceProduction it must also implement server.AccessTokenIssuerAssurance. See UPGRADING.md for v0.72.0.
+
+### Features
+
+* **federation:** publish an entity's own Federation Historical Keys ([91e97e6](https://github.com/IDFoundry/FAPIgo/commit/91e97e6c384a18e264505e4be1cc4424820dce53)), closes [#423](https://github.com/IDFoundry/FAPIgo/issues/423)
+
+
+### Bug Fixes
+
+* **resource:** keep the lifetime bound of an embedded NoRevocationUntilExpiry ([fc852da](https://github.com/IDFoundry/FAPIgo/commit/fc852dad96150f4c2cd5c2d7f6a665bb43865315))
+* **server:** check an embedded AttesterTrust's sources under production ([2730eb1](https://github.com/IDFoundry/FAPIgo/commit/2730eb1bf12916fe3e04dfcb6c57d2f081a29fd2))
+* **server:** classify an embedded ClientCertificateTrust by its behaviour ([b4c0f3b](https://github.com/IDFoundry/FAPIgo/commit/b4c0f3bfec0307d0579169eeb380822dba19ed37))
+* **server:** stop treating a JWTAccessTokens wrapper as JWTAccessTokens ([e874b6f](https://github.com/IDFoundry/FAPIgo/commit/e874b6fedb6894dd71b54228a450c1cdbd8b79db))
+* **server:** treat a notifier embedding NoBackchannelNotifications as declining ping ([4b29593](https://github.com/IDFoundry/FAPIgo/commit/4b295934f6738ed7e993114c10fa84aaae9d4665))
+
 ## [0.71.0](https://github.com/IDFoundry/FAPIgo/compare/v0.70.0...v0.71.0) (2026-11-07)
 
 

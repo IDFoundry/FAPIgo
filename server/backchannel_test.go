@@ -837,6 +837,31 @@ func TestBeginBackchannelAuthenticationRejectsMalformedRequestObject(t *testing.
 	}
 }
 
+// TestBeginBackchannelAuthenticationRejectsAlgorithmNotEnabledServerWide
+// guards Algorithms.BackchannelAuthenticationRequest: a client registered
+// for ES256 signed requests is refused when the operator has enabled only
+// PS256, even though its key and signature would otherwise verify.
+func TestBeginBackchannelAuthenticationRejectsAlgorithmNotEnabledServerWide(t *testing.T) {
+	h := newHarnessWithBackchannelConfig(t, memstore.NewBackchannelAuthenticationStore(), func(cfg *server.Config) {
+		cfg.Algorithms.BackchannelAuthenticationRequest = server.AlgorithmSet{fapi.PS256}
+	})
+	requestObj := h.backchannelRequestObject(t, standardBackchannelParams(t))
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
 func TestBeginBackchannelAuthenticationRejectsNoMatchingClientKey(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 	decoyKey := generateKey(t)

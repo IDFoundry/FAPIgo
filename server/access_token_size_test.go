@@ -113,3 +113,47 @@ func TestRecommendedMaxAccessTokenBytesIsTheResourceDefault(t *testing.T) {
 		}
 	}
 }
+
+// fixedSizeAccessTokenIssuer is a custom AccessTokenIssuer returning an
+// opaque token of exactly size bytes.
+type fixedSizeAccessTokenIssuer struct{ size int }
+
+func (f fixedSizeAccessTokenIssuer) IssueAccessToken(context.Context, server.AccessTokenParams) (string, string, error) {
+	return strings.Repeat("a", f.size), "key", nil
+}
+
+// TestIssuedAccessTokenBoundedForTheResourceServer guards the cap on the
+// token an AccessTokenIssuer returns, not just on its claims: a custom
+// issuer's token one byte over Limits.MaxAccessTokenBytes fails the
+// exchange as server_error, and one exactly at it is issued.
+func TestIssuedAccessTokenBoundedForTheResourceServer(t *testing.T) {
+	base := newHarness(t, server.ProfileFAPISecurity, true)
+	limit := base.cfg.Limits.MaxAccessTokenBytes()
+	for size, wantErr := range map[int]bool{limit: false, limit + 1: true} {
+		h := newHarness(t, server.ProfileFAPISecurity, true)
+		deps := h.deps
+		deps.AccessTokens = fixedSizeAccessTokenIssuer{size: size}
+		srv, err := server.New(h.cfg, deps)
+		if err != nil {
+			t.Fatalf("server.New: %v", err)
+		}
+		h.server = srv
+		code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+		res, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+			HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+			DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+		})
+		if !wantErr {
+			if err != nil {
+				t.Fatalf("%d-byte access token: %v", size, err)
+			}
+			if got := len(res.AccessToken.Reveal()); got != size {
+				t.Fatalf("access token is %d bytes, want %d", got, size)
+			}
+			continue
+		}
+		if code := serverErrorCode(t, err); code != server.ErrorServerError {
+			t.Fatalf("%d-byte access token: error code = %q, want %q", size, code, server.ErrorServerError)
+		}
+	}
+}

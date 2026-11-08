@@ -300,3 +300,31 @@ func TestSignUserInfoResponseRejectsEncryptionNotPermittedByServer(t *testing.T)
 		t.Fatalf("error code = %q, want %q", srvErr.Code(), server.ErrorServerError)
 	}
 }
+
+// TestSignUserInfoResponseRejectsContentEncryptionNotPermittedByServer
+// is the content-encryption half of the case above: the key-management
+// algorithm is enabled and the client's key resolves, but its registered
+// "enc" (A256GCM) isn't in the server-wide allow-list.
+func TestSignUserInfoResponseRejectsContentEncryptionNotPermittedByServer(t *testing.T) {
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey: %v", err)
+	}
+	encKeys := &fakeClientEncryptionKeys{keysByClient: map[fapi.ClientID][]keys.ClientEncryptionKey{
+		testClientID: {{KeyID: "enc-key-1", Algorithm: fapi.RSAOAEP256, PublicKey: &rsaKey.PublicKey}},
+	}}
+	h, client := newHarnessWithUserInfo(t,
+		server.KeyManagementAlgorithmSet{fapi.RSAOAEP256},
+		server.ContentEncryptionAlgorithmSet{fapi.A256CBCHS512},
+		fapi.RSAOAEP256, fapi.A256GCM,
+		encKeys,
+	)
+
+	_, srvErr := h.server.SignUserInfoResponse(context.Background(), client, testUserInfoClaims(t))
+	if srvErr == nil {
+		t.Fatalf("SignUserInfoResponse(server disallows configured enc) = nil error, want error")
+	}
+	if srvErr.Code() != server.ErrorServerError {
+		t.Fatalf("error code = %q, want %q", srvErr.Code(), server.ErrorServerError)
+	}
+}

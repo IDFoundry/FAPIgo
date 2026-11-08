@@ -270,6 +270,59 @@ func TestCompleteAuthorizationRejectsInvalidHandle(t *testing.T) {
 	}
 }
 
+// completeAfterInteractionLifetime begins an interaction on h, then
+// completes it on a server over the same stores whose clock reads
+// InteractionLifetime plus after past h.now.
+func completeAfterInteractionLifetime(t *testing.T, h harness, after time.Duration) server.AuthorizationResult {
+	t.Helper()
+	handle := beginInteraction(t, h)
+	deps := h.deps
+	deps.Clock = fixedClock{now: h.now.Add(h.cfg.Limits.InteractionLifetime + after)}
+	later, err := server.New(h.cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	result, err := later.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+		Handle: handle, Result: authorizeResult(t),
+	})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	return result
+}
+
+// TestCompleteAuthorizationRejectsHandleExpiredByServerClock guards the
+// server's own expiry check on a completed interaction: the test store
+// returns a handle regardless of age, so completing it at or after
+// InteractionLifetime by the server's clock must still be refused, while
+// just before it succeeds.
+func TestCompleteAuthorizationRejectsHandleExpiredByServerClock(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	if result := completeAfterInteractionLifetime(t, h, -time.Second); !isAuthorizationRedirect(result) {
+		t.Fatalf("just before expiry: result = %T, want server.AuthorizationRedirect", result)
+	}
+
+	for name, after := range map[string]time.Duration{"at expiry": 0, "after expiry": time.Minute} {
+		h := newHarness(t, server.ProfileFAPISecurity, true)
+		result := completeAfterInteractionLifetime(t, h, after)
+		localErr, ok := result.(server.AuthorizationLocalError)
+		if !ok {
+			t.Fatalf("%s: result = %T, want server.AuthorizationLocalError", name, result)
+		}
+		if localErr.Error.Code() != server.ErrorInvalidRequest {
+			t.Fatalf("%s: Error.Code() = %q, want %q", name, localErr.Error.Code(), server.ErrorInvalidRequest)
+		}
+		if n := len(h.grants.all()); n != 0 {
+			t.Fatalf("%s: issued %d authorization codes, want 0", name, n)
+		}
+	}
+}
+
+func isAuthorizationRedirect(result server.AuthorizationResult) bool {
+	_, ok := result.(server.AuthorizationRedirect)
+	return ok
+}
+
 func TestCompleteAuthorizationHandleIsSingleUse(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	handle := beginInteraction(t, h)

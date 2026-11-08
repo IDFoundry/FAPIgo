@@ -1127,6 +1127,34 @@ func TestPushAuthorizationRequestJARSuccess(t *testing.T) {
 	}
 }
 
+// TestPushAuthorizationRequestRejectsRequestObjectAlgorithmNotEnabledServerWide
+// guards Algorithms.RequestObject: a client registered for ES256 request
+// objects is refused when the operator has enabled only PS256, even
+// though its key and signature would otherwise verify.
+func TestPushAuthorizationRequestRejectsRequestObjectAlgorithmNotEnabledServerWide(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
+	cfg := h.cfg
+	cfg.Algorithms.RequestObject = server.AlgorithmSet{fapi.PS256}
+	srv, err := server.New(cfg, h.deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	_, err = srv.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("request", h.requestObject(t, standardAuthParams(t))),
+		}},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequestObject {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequestObject)
+	}
+	if len(h.transactions.records) != 0 {
+		t.Fatalf("stored %d PAR records, want 0", len(h.transactions.records))
+	}
+}
+
 // RFC 9101 §5 (PAR-2.1): "request" and "request_uri" are mutually
 // exclusive ways of conveying the same authorization request. PAR
 // generates its own request_uri as this call's *result* — a client

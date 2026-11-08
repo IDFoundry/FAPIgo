@@ -245,6 +245,38 @@ func TestExchangeAuthorizationCodeRejectsIDTokenEncryptionNotPermittedByServer(t
 	}
 }
 
+// TestExchangeAuthorizationCodeRejectsIDTokenContentEncryptionNotPermittedByServer
+// is the content-encryption half of the case above: the client's
+// key-management algorithm is enabled and its key resolves, but its
+// registered "enc" (A256GCM) isn't in the server-wide allow-list, so
+// the exchange fails rather than encrypting with it.
+func TestExchangeAuthorizationCodeRejectsIDTokenContentEncryptionNotPermittedByServer(t *testing.T) {
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey: %v", err)
+	}
+	encKeys := &fakeClientEncryptionKeys{keysByClient: map[fapi.ClientID][]keys.ClientEncryptionKey{
+		testClientID: {{KeyID: "enc-key-1", Algorithm: fapi.RSAOAEP256, PublicKey: &rsaKey.PublicKey}},
+	}}
+	h := newHarnessWithIDTokenEncryption(t,
+		server.KeyManagementAlgorithmSet{fapi.RSAOAEP256},
+		server.ContentEncryptionAlgorithmSet{fapi.A256CBCHS512},
+		encKeys,
+	)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+
+	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	})
+	if err == nil {
+		t.Fatalf("ExchangeAuthorizationCode(server disallows configured enc) = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorServerError {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorServerError)
+	}
+}
+
 // TestExchangeAuthorizationCodeRejectsIDTokenEncryptionKeyResolutionFailure
 // covers the ClientEncryptionKeySource returning no matching key —
 // e.g. a client mid-rotation with no key registered yet for the

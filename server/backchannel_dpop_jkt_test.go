@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"net/url"
 	"testing"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 func dpopThumbprint(t *testing.T, key *ecdsa.PrivateKey) string {
@@ -136,5 +138,55 @@ func TestBackchannelAuthenticationRefusesBadDPoPJKT(t *testing.T) {
 				t.Fatalf("Code = %q, want invalid_request", localErr.Error.Code())
 			}
 		})
+	}
+}
+
+// TestBackchannelAuthenticationChallengesDPoPNonce guards the nonce
+// check on a DPoP proof sent to the backchannel authentication endpoint
+// when Dependencies.Nonces is set: a proof without a nonce is refused
+// with use_dpop_nonce carrying a fresh nonce, and a retry whose proof
+// carries that nonce is accepted.
+func TestBackchannelAuthenticationChallengesDPoPNonce(t *testing.T) {
+	endpoint, err := url.Parse(testBackchannelAuthenticationEndpoint)
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+	h := newHarnessWithBackchannelOptions(t, memstore.NewBackchannelAuthenticationStore(),
+		func(cfg *server.Config) { cfg.Limits.DPoPNonceLifetime = time.Minute },
+		func(deps *server.Dependencies) { deps.Nonces = memstore.NewNonceStore() },
+	)
+	dpopKey := generateKey(t)
+	begin := func(nonce string) server.BackchannelAuthenticationAction {
+		t.Helper()
+		proof, err := dpop.CreateProof(dpop.ProofRequest{Signer: dpopKey, Algorithm: fapi.ES256, Method: "POST", URL: endpoint, Now: h.now, Nonce: nonce})
+		if err != nil {
+			t.Fatalf("CreateProof: %v", err)
+		}
+		action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+			HTTP:       server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, standardBackchannelParams(t)))},
+			DPoPProofs: []string{proof},
+		})
+		if err != nil {
+			t.Fatalf("BeginBackchannelAuthentication: %v", err)
+		}
+		return action
+	}
+
+	action := begin("")
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("proof without a nonce: action = %T, want BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorUseDPoPNonce {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorUseDPoPNonce)
+	}
+	issued := localErr.Error.Nonce()
+	if issued == "" {
+		t.Fatalf("use_dpop_nonce challenge carries no nonce")
+	}
+
+	action = begin(issued)
+	if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		t.Fatalf("proof with the issued nonce: action = %T, want BackchannelInteractionRequired", action)
 	}
 }

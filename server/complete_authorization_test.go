@@ -270,6 +270,56 @@ func TestCompleteAuthorizationRejectsInvalidHandle(t *testing.T) {
 	}
 }
 
+// TestCompleteAuthorizationRejectsHandleExpiredByServerClock guards the
+// server's own expiry check on a completed interaction: the test store
+// returns a handle regardless of age, so completing it at or after
+// InteractionLifetime by the server's clock must still be refused, while
+// just before it succeeds.
+func TestCompleteAuthorizationRejectsHandleExpiredByServerClock(t *testing.T) {
+	for name, tc := range map[string]struct {
+		after   time.Duration
+		expired bool
+	}{
+		"just before expiry": {-time.Second, false},
+		"at expiry":          {0, true},
+		"after expiry":       {time.Minute, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, server.ProfileFAPISecurity, true)
+			handle := beginInteraction(t, h)
+			deps := h.deps
+			deps.Clock = fixedClock{now: h.now.Add(h.cfg.Limits.InteractionLifetime + tc.after)}
+			later, err := server.New(h.cfg, deps)
+			if err != nil {
+				t.Fatalf("server.New: %v", err)
+			}
+
+			result, err := later.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+				Handle: handle, Result: authorizeResult(t),
+			})
+			if err != nil {
+				t.Fatalf("CompleteAuthorization: %v", err)
+			}
+			if !tc.expired {
+				if _, ok := result.(server.AuthorizationRedirect); !ok {
+					t.Fatalf("result = %T, want server.AuthorizationRedirect", result)
+				}
+				return
+			}
+			localErr, ok := result.(server.AuthorizationLocalError)
+			if !ok {
+				t.Fatalf("result = %T, want server.AuthorizationLocalError", result)
+			}
+			if localErr.Error.Code() != server.ErrorInvalidRequest {
+				t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+			}
+			if len(h.grants.all()) != 0 {
+				t.Fatalf("issued %d authorization codes, want 0", len(h.grants.all()))
+			}
+		})
+	}
+}
+
 func TestCompleteAuthorizationHandleIsSingleUse(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	handle := beginInteraction(t, h)

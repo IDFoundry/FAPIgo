@@ -573,6 +573,34 @@ func TestRequestClientCredentialsTokenRejectsDisallowedScope(t *testing.T) {
 	}
 }
 
+// TestRequestClientCredentialsTokenRejectsUnregisteredScope guards the
+// per-client scope allow-list: "payments" isn't in the client's
+// AllowedScopes, so asking for it (alone or next to the registered
+// "accounts") is refused with invalid_scope and audited as a failure.
+func TestRequestClientCredentialsTokenRejectsUnregisteredScope(t *testing.T) {
+	h := newHarnessWithClientCredentialsGrant(t, storage.SenderConstrainDPoP, true)
+
+	for _, scope := range []string{"payments", "accounts payments"} {
+		before := len(h.audit.events)
+		_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+			HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), scope)},
+			DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+		})
+		if err == nil {
+			t.Fatalf("scope %q: RequestClientCredentialsToken = nil error, want error", scope)
+		}
+		if code := serverErrorCode(t, err); code != server.ErrorInvalidScope {
+			t.Fatalf("scope %q: error code = %q, want %q", scope, code, server.ErrorInvalidScope)
+		}
+		if len(h.audit.events) != before+1 {
+			t.Fatalf("scope %q: recorded %d audit events, want 1", scope, len(h.audit.events)-before)
+		}
+		if ev := h.audit.events[before]; ev.Type != server.AuditEventRequestClientCredentialsToken || ev.Outcome != server.AuditOutcomeFailure {
+			t.Fatalf("scope %q: audit event = %+v, want RequestClientCredentialsToken/Failure", scope, ev)
+		}
+	}
+}
+
 func TestRequestClientCredentialsTokenRejectsWrongGrantType(t *testing.T) {
 	h := newHarnessWithClientCredentialsGrant(t, storage.SenderConstrainDPoP, true)
 	params := clientCredentialsFormParams(h.clientAssertion(t), "accounts")

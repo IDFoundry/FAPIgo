@@ -96,3 +96,35 @@ func TestMatchesRegisteredSubjectDN(t *testing.T) {
 		})
 	}
 }
+
+// TestMatchesRegisteredSubjectDNNonStringValueAnyToolchain covers the
+// non-string-attribute cases above without x509.ParseCertificate, which
+// Go before 1.27 refuses for such a subject (so subjectCert skips them
+// there): the certificate is assembled as a parser that accepts it
+// would fill it, RawSubject as encoded and Subject from the same RDN
+// sequence, so Go's form drops the INTEGER OU.
+func TestMatchesRegisteredSubjectDNNonStringValueAnyToolchain(t *testing.T) {
+	rdns := pkix.RDNSequence{{dnAttr(oidOrganization, "Bank")}, {intAttr(oidOrganizationalUnit, 7)}, {dnAttr(oidCommonName, "client")}}
+	raw, err := asn1.Marshal(rdns)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var parsed pkix.RDNSequence
+	if rest, err := asn1.Unmarshal(raw, &parsed); err != nil || len(rest) != 0 {
+		t.Fatalf("Unmarshal: %v (rest %d bytes)", err, len(rest))
+	}
+	cert := &x509.Certificate{RawSubject: raw}
+	cert.Subject.FillFromRDNSequence(&parsed)
+	if got := cert.Subject.String(); got != "CN=client,O=Bank" {
+		t.Fatalf("Subject.String() = %q, want the OU dropped", got)
+	}
+
+	for expected, want := range map[string]bool{
+		"CN=client,O=Bank":      false, // Go's form, which hides the OU
+		"CN=client,OU=7,O=Bank": true,  // the exact form
+	} {
+		if got := matchesRegisteredSubjectDN(cert, expected); got != want {
+			t.Errorf("matchesRegisteredSubjectDN(%q) = %v, want %v", expected, got, want)
+		}
+	}
+}

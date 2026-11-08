@@ -55,6 +55,15 @@ func SweepLockKey(d *DB, schema string) int64 { return sweepLockKey(schema, d.pr
 // the tables of TablePrefix prefix in schema.
 func SweepLockKeyOf(schema, prefix string) int64 { return sweepLockKey(schema, prefix) }
 
+// MigrationLockKeyOf is the Postgres advisory lock Migrate takes,
+// exclusively, for the tables of TablePrefix prefix in schema.
+func MigrationLockKeyOf(schema, prefix string) int64 { return migrationLockKey(schema, prefix) }
+
+// LegacyMigrationLockKeyOf is the Postgres advisory lock sqlstore
+// v0.7.0 and earlier took for Migrate's tables of TablePrefix prefix,
+// which Migrate now holds shared.
+func LegacyMigrationLockKeyOf(prefix string) int64 { return legacyMigrationLockKey(prefix) }
+
 // SweepBatchSize is how many rows each of d's Sweep transactions
 // deletes at most.
 func SweepBatchSize(d *DB) int64 { return d.sweepBatchSize() }

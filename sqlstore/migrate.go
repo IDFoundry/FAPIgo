@@ -101,7 +101,10 @@ func (d *DB) statements(m migration) []string {
 // Migrate brings the database's tables up to SchemaVersion, applying
 // each migration it hasn't yet in a transaction of its own. It's safe
 // to run from several processes at once: they apply each migration
-// once between them (a Postgres advisory lock; SQLite's write lock).
+// once between them (on Postgres, an advisory lock keyed by the
+// TablePrefix and the schema the tables are created in, so tenants
+// with a schema each in one database don't wait for each other; on
+// SQLite, the write lock).
 // It refuses a database a newer release of this package has migrated
 // further, and reads a Postgres database's default isolation level, as
 // CheckSchema does.
@@ -193,9 +196,9 @@ func (d *DB) migrate(ctx context.Context) error {
 // apply applies m on q, a transaction, unless it has been already.
 func (d *DB) apply(ctx context.Context, q querier, m migration) error {
 	if d.dialect == Postgres {
-		// Serializes concurrent Migrates of this prefix, before either
-		// creates a table.
-		if _, err := q.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", d.migrationLockKey()); err != nil {
+		// Serializes concurrent Migrates of these tables, before either
+		// creates one.
+		if err := d.lockMigration(ctx, q); err != nil {
 			return err
 		}
 	}
@@ -218,11 +221,55 @@ func (d *DB) apply(ctx context.Context, q querier, m migration) error {
 	return err
 }
 
-// migrationLockKey is the Postgres advisory lock Migrate takes for d's
-// table prefix.
-func (d *DB) migrationLockKey() int64 {
+// lockMigration takes, for the rest of q's transaction, the Postgres
+// advisory locks that serialize Migrates of d's tables: a shared hold
+// of legacyMigrationLockKey(d.prefix), then migrationLockKey for the
+// schema they are created in. That schema is current_schema(), the
+// first schema on the search_path that exists: where Migrate's
+// unqualified CREATE TABLE IF NOT EXISTS creates them, and checks for
+// them (it doesn't look further along the path) — read on q, before any
+// table exists, so a regclass, as Sweep resolves, can't be used. With
+// no such schema, the key is the empty schema's, and the CREATE TABLE
+// that follows fails as Postgres words it.
+//
+// Two Migrates of one schema's tables can't run at once: their
+// concurrent CREATE TABLE IF NOT EXISTS of the same table fails one of
+// them (a duplicate key in pg_type), rolling it back. The exclusive,
+// per-schema lock keeps them apart without holding up a Migrate of the
+// same TablePrefix in another schema. The shared hold of the legacy
+// key, which only sqlstore v0.7.0 and earlier take, exclusively and
+// alone, keeps those releases' Migrates apart from this one's during a
+// rolling upgrade, while two Migrates of this release never wait for
+// each other on it. Both are taken in the same order every time, so
+// none of these deadlocks.
+func (d *DB) lockMigration(ctx context.Context, q querier) error {
+	var schema string
+	if err := q.QueryRowContext(ctx, "SELECT COALESCE(current_schema(), '') FROM pg_advisory_xact_lock_shared($1)", legacyMigrationLockKey(d.prefix)).Scan(&schema); err != nil {
+		return err
+	}
+	_, err := q.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", migrationLockKey(schema, d.prefix))
+	return err
+}
+
+// migrationLockKey is the Postgres advisory lock Migrate takes,
+// exclusively, for the tables of TablePrefix prefix in schema: the same
+// for every DB on those tables, on any instance, and distinct (but for
+// a 64-bit hash's collisions) for another prefix or another schema,
+// since advisory locks are shared by the whole database — and from
+// sweepLockKey's and legacyMigrationLockKey's. A NUL, which neither a
+// schema's name nor a prefix can hold, separates the two.
+func migrationLockKey(schema, prefix string) int64 {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte("fapigo sqlstore migrate " + d.prefix))
+	_, _ = h.Write([]byte("fapigo sqlstore migrate\x00" + schema + "\x00" + prefix))
+	return int64(h.Sum64()) //nolint:gosec // a lock key: wrapping around is fine
+}
+
+// legacyMigrationLockKey is the Postgres advisory lock sqlstore v0.7.0
+// and earlier took, exclusively, for Migrate's tables of TablePrefix
+// prefix, whichever schema they were in. lockMigration holds it shared.
+func legacyMigrationLockKey(prefix string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("fapigo sqlstore migrate " + prefix))
 	return int64(h.Sum64()) //nolint:gosec // a lock key: wrapping around is fine
 }
 

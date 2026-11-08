@@ -562,6 +562,11 @@ func newMetadataTestServer(t *testing.T, trust server.ClientCertificateTrust, mu
 	return srv
 }
 
+// embeddedNoPKI is a wrapper embedding NoPKIClientAuthentication.
+type embeddedNoPKI struct {
+	server.NoPKIClientAuthentication
+}
+
 // TestServerMetadataAdvertisesMutualTLSAtEndpoints: with
 // Config.MutualTLSAtEndpoints, a server without mTLS aliases (RFC 8705
 // §5 makes them optional) still advertises certificate-bound tokens and
@@ -576,6 +581,8 @@ func TestServerMetadataAdvertisesMutualTLSAtEndpoints(t *testing.T) {
 	}{
 		{"chain verified upstream", server.NoClientCertificateChainTrust{}, true},
 		{"no PKI client authentication", server.NoPKIClientAuthentication{}, false},
+		{"no PKI client authentication pointer", &server.NoPKIClientAuthentication{}, false},
+		{"no PKI client authentication embedded", embeddedNoPKI{}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newMetadataTestServer(t, tc.trust, func(cfg *server.Config) { cfg.MutualTLSAtEndpoints = true })

@@ -99,18 +99,34 @@ func NewBackchannelNotificationRequest(ctx context.Context, notification Backcha
 // NoBackchannelNotifications exists so declining is a conscious,
 // visible line of code (BackchannelNotifier: server.NoBackchannelNotifications{})
 // instead of an easily-forgotten omission.
+//
+// A struct embedding it declines ping delivery too, whatever its own
+// Notify does: the server never calls Notify on it. That keeps its
+// inherited BackchannelNotifierAssurance declaration (it sends nothing)
+// true. A notifier that does send must not embed it.
 type NoBackchannelNotifications struct{}
 
 // backchannelPingSupported reports whether this server can deliver a
 // CIBA §10.2 ping: false when Dependencies.BackchannelNotifier is
-// NoBackchannelNotifications, which declines it. Metadata then
-// advertises poll alone, and a client registered for ping is refused.
+// NoBackchannelNotifications, by value or pointer or embedded in a
+// struct, which declines it. Metadata then advertises poll alone, a
+// client registered for ping is refused, and Notify is never called.
+//
+// It reads declinesBackchannelPing, promoted through embedding, rather
+// than switching on the type: a struct embedding
+// NoBackchannelNotifications also inherits its "sends nothing"
+// BackchannelNotifierAssurance declaration, which holds for the struct
+// only if the server never asks it to send.
 func (s *Server) backchannelPingSupported() bool {
-	switch s.deps.BackchannelNotifier.(type) {
-	case NoBackchannelNotifications, *NoBackchannelNotifications:
-		return false
-	}
-	return true
+	_, declined := s.deps.BackchannelNotifier.(interface{ declinesBackchannelPing() })
+	return !declined
+}
+
+// declinesBackchannelPing marks NoBackchannelNotifications, and any
+// struct embedding it, as declining ping delivery; see
+// backchannelPingSupported.
+func (NoBackchannelNotifications) declinesBackchannelPing() {
+	// A marker: its presence in the method set is all that's read.
 }
 
 // Notify implements BackchannelNotifier by doing nothing.
@@ -134,6 +150,15 @@ func (NoBackchannelNotifications) BackchannelNotifierCapabilities() BackchannelN
 // metadata, so an unguarded HTTP client sending to it is a server-side
 // request forgery vector this package can't otherwise see.
 // backchannelhttp.Notifier and NoBackchannelNotifications declare it.
+//
+// A declaration describes the declaring type's own behaviour. A notifier
+// embedding one that declares it inherits the declaration through Go's
+// method promotion, and New can't tell it from one the wrapper made
+// itself: a wrapper embedding backchannelhttp.Notifier whose Notify
+// sends some other way must override BackchannelNotifierCapabilities
+// with what its own sending provides. (A struct embedding
+// NoBackchannelNotifications is treated as declining ping, so its Notify
+// is never called; see that type.)
 type BackchannelNotifierAssurance interface {
 	BackchannelNotifierCapabilities() BackchannelNotifierCapabilities
 }

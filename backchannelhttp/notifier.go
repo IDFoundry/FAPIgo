@@ -81,7 +81,9 @@ func newWithClient(client fapihttp.HTTPClient, timeout time.Duration) *Notifier 
 // grants a loopback exception (fapihttp.TransportConfig's
 // AllowsLoopback), which is for local development only: a client
 // registers its own notification endpoint. AllowedPrivateHosts doesn't
-// count — it names the operator's own fixed hosts.
+// count — it names the operator's own fixed hosts. That describes n's own
+// Notify: a wrapper overriding Notify to send another way must override
+// this too (see server.BackchannelNotifierAssurance).
 func (n *Notifier) BackchannelNotifierCapabilities() server.BackchannelNotifierCapabilities {
 	return server.BackchannelNotifierCapabilities{OutboundHardened: n.hardened}
 }

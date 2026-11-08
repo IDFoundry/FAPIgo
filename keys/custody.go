@@ -42,6 +42,13 @@ type KeyCustody struct {
 // A declaration is the operator's promise about the implementation, not
 // something this library verifies: production assurance trusts it, so
 // declare only what the implementation actually provides.
+//
+// A declaration describes the declaring type's own behaviour. A type
+// embedding a KeyManager, Decrypter or pairwise deriver that declares it
+// inherits the declaration through Go's method promotion, and production
+// assurance can't tell it from one the wrapper made itself. A wrapper
+// that signs, decrypts or derives with keys of its own (a per-process
+// key, say) must override KeyCustody with their custody.
 type KeyCustodyAssurance interface {
 	KeyCustody() KeyCustody
 }

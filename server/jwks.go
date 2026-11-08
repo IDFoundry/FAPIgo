@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
 )
@@ -19,21 +20,82 @@ type PublicJWK = keys.PublicJWK
 // type's own doc comment for why this package doesn't define its own.
 type PublicKeySet = keys.PublicKeySet
 
-// accessTokenKeyPublisher is implemented by an AccessTokenIssuer that
-// has a public verification key worth publishing at
-// Config.Endpoints.JWKS — JWTAccessTokens does; OpaqueAccessTokens
-// doesn't (an opaque token has no signature, so there's nothing for a
-// resource server to verify against a published key).
-// PublicJWKS type-asserts Dependencies.AccessTokens against this
-// rather than making it part of AccessTokenIssuer itself, so a
-// non-JWT issuer never needs a meaningless stub implementation.
-type accessTokenKeyPublisher interface {
-	accessTokenSigningKeyUse() keys.SigningKeyUse
+// AccessTokenKeyPublisher is implemented by an AccessTokenIssuer of the
+// application's own to name the keys its JWT access tokens are signed
+// with, so PublicJWKS publishes them (letting a JWT-verifying resource
+// server verify those tokens) and RevokeToken recognises a live one, as
+// it does JWTAccessTokens'. AccessTokenSigningKeys returns the key
+// manager and algorithm the issuer signs with, or a nil key manager when
+// it signs no access tokens (an opaque-only issuer), in which case
+// nothing is published.
+//
+// JWTAccessTokens and *JWTAccessTokens don't implement it: the server
+// reads their Keys and Algorithm directly. A type embedding
+// JWTAccessTokens must implement it, and New refuses one that doesn't,
+// whatever Config.Assurance is. The embedded Keys describe what
+// JWTAccessTokens.IssueAccessToken signs with, which only the wrapper
+// knows to be still true once it overrides IssueAccessToken — it may
+// sign with other keys, or issue opaque tokens kept somewhere else
+// entirely — so the server never publishes or relies on keys only
+// because they were embedded. A wrapper that still signs with the
+// embedded keys declares exactly that:
+//
+//	func (w Wrapper) AccessTokenSigningKeys() (keys.KeyManager, fapi.SignatureAlgorithm) {
+//		return w.Keys, w.Algorithm
+//	}
+//
+// Under AssuranceProduction such a wrapper must also implement
+// AccessTokenIssuerAssurance; publishing keys is not a declaration of
+// what the issuer relies on.
+type AccessTokenKeyPublisher interface {
+	AccessTokenSigningKeys() (keys.KeyManager, fapi.SignatureAlgorithm)
 }
 
-// accessTokenSigningKeyUse implements accessTokenKeyPublisher.
-func (j JWTAccessTokens) accessTokenSigningKeyUse() keys.SigningKeyUse {
-	return keys.SigningKeyUse{Manager: j.Keys, Purpose: keys.AccessTokenSigning, Algorithm: j.Algorithm}
+// isJWTAccessTokens is promoted to any type embedding JWTAccessTokens or
+// *JWTAccessTokens. It's never used to read the embedded keys:
+// checkEmbeddedJWTAccessTokens uses it only to refuse a wrapper that
+// hasn't declared its own (see AccessTokenKeyPublisher).
+func (JWTAccessTokens) isJWTAccessTokens() {
+	// A marker: its presence in the method set is all that's read.
+}
+
+// accessTokenSigningKeys returns the keys issuer signs its access tokens
+// with: JWTAccessTokens' own, by value or pointer, or what an
+// AccessTokenKeyPublisher declares. ok is false for an issuer that signs
+// none, or doesn't say: OpaqueAccessTokens, a nil *JWTAccessTokens, an
+// issuer that doesn't implement AccessTokenKeyPublisher, or one
+// declaring a nil key manager.
+func accessTokenSigningKeys(issuer AccessTokenIssuer) (use keys.SigningKeyUse, ok bool) {
+	var manager keys.KeyManager
+	var algorithm fapi.SignatureAlgorithm
+	switch t := issuer.(type) {
+	case JWTAccessTokens:
+		manager, algorithm = t.Keys, t.Algorithm
+	case *JWTAccessTokens:
+		if t == nil {
+			return keys.SigningKeyUse{}, false
+		}
+		manager, algorithm = t.Keys, t.Algorithm
+	case AccessTokenKeyPublisher:
+		manager, algorithm = t.AccessTokenSigningKeys()
+	}
+	if manager == nil {
+		return keys.SigningKeyUse{}, false
+	}
+	return keys.SigningKeyUse{Manager: manager, Purpose: keys.AccessTokenSigning, Algorithm: algorithm}, true
+}
+
+// checkEmbeddedJWTAccessTokens refuses an issuer that embeds
+// JWTAccessTokens without implementing AccessTokenKeyPublisher; see
+// that interface's doc comment.
+func checkEmbeddedJWTAccessTokens(issuer AccessTokenIssuer) error {
+	switch issuer.(type) {
+	case JWTAccessTokens, *JWTAccessTokens, AccessTokenKeyPublisher:
+		return nil
+	case interface{ isJWTAccessTokens() }:
+		return fmt.Errorf("server: dependencies: access_tokens %T embeds JWTAccessTokens, so it must implement server.AccessTokenKeyPublisher, naming the keys its access tokens are signed with (a nil key manager when it signs none); its embedded keys aren't published or checked on its behalf", issuer)
+	}
+	return nil
 }
 
 // PublicJWKS returns this server's current public keys: the union (one
@@ -44,8 +106,8 @@ func (j JWTAccessTokens) accessTokenSigningKeyUse() keys.SigningKeyUse {
 // (under ProfileFAPISecurityWithMessageSigning) JARM, and (when
 // Config.Algorithms.UserInfo is set) UserInfo signing, all from
 // Dependencies.Keys, plus an access-token signing key from
-// Dependencies.AccessTokens if it has one to publish (see
-// accessTokenKeyPublisher). Publishing the result at
+// Dependencies.AccessTokens if it signs its tokens (JWTAccessTokens, or
+// an AccessTokenKeyPublisher). Publishing the result at
 // Config.Endpoints.JWKS is what lets clients verify a JARM response,
 // ID token or signed UserInfo response, and what lets a JWT-verifying
 // resource server verify an access token.
@@ -85,8 +147,8 @@ func (s *Server) publishedSigningKeys() []namedSigningKeyUse {
 	if s.cfg.Algorithms.UserInfo != 0 {
 		active = append(active, namedSigningKeyUse{keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.UserInfoSigning, Algorithm: s.cfg.Algorithms.UserInfo}, "keys"})
 	}
-	if publisher, ok := s.deps.AccessTokens.(accessTokenKeyPublisher); ok {
-		active = append(active, namedSigningKeyUse{publisher.accessTokenSigningKeyUse(), "access_tokens keys"})
+	if use, ok := accessTokenSigningKeys(s.deps.AccessTokens); ok {
+		active = append(active, namedSigningKeyUse{use, "access_tokens keys"})
 	}
 	return active
 }

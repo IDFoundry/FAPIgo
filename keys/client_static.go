@@ -157,7 +157,10 @@ func (s *StaticClientKeys) ResolveEncryptionKeys(_ context.Context, req ClientEn
 }
 
 // Capabilities implements KeySourceAssurance: StaticClientKeys never
-// fetches over the network.
+// fetches over the network. That describes its own
+// ResolveVerificationKeys and ResolveEncryptionKeys: a wrapper overriding
+// either to fetch must override Capabilities too (see
+// KeySourceAssurance).
 func (s *StaticClientKeys) Capabilities() KeySourceCapabilities {
 	return KeySourceCapabilities{LiveFetchHardened: true}
 }

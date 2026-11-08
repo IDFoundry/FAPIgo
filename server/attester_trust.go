@@ -45,9 +45,18 @@ import (
 // which also binds each anchor to the attesters it may vouch for),
 // never by resolving keys itself, so certificate path validation always
 // happens here rather than in code that could forget to do it.
+//
+// A struct embedding X5CAttesterChain or RegisteredAttesterKeys is an
+// AttesterTrust too, with the embedded one's behaviour, so New checks it
+// as the embedded one: its key or trust-anchor sources included, under
+// AssuranceProduction.
 type AttesterTrust interface {
 	attesterKey(ctx context.Context, s *Server, client storage.RegisteredClient, attestation clientattestation.Attestation) (attesterSigner, error)
 	validate() error
+	// trustSources is the sources the trust draws from, for the
+	// AssuranceProduction checks. A method of the sealed interface, not
+	// a type switch, so an embedding struct's sources are still checked.
+	trustSources() []namedSource
 }
 
 // attesterSigner is what an AttesterTrust establishes for an
@@ -112,6 +121,10 @@ func (r RegisteredAttesterKeys) attesterKey(ctx context.Context, _ *Server, clie
 		return attesterSigner{}, err
 	}
 	return attesterSigner{key: key}, nil
+}
+
+func (r RegisteredAttesterKeys) trustSources() []namedSource {
+	return []namedSource{{"attester_trust keys", r.Keys}}
 }
 
 func (r RegisteredAttesterKeys) validate() error {
@@ -282,6 +295,19 @@ const (
 	// own CAs.
 	AttesterIssuerBoundToAnchor
 )
+
+// trustSources returns c's trust-anchor sources: TrustAnchors or
+// Anchors, whichever is set.
+func (c X5CAttesterChain) trustSources() []namedSource {
+	var sources []namedSource
+	if c.TrustAnchors != nil {
+		sources = append(sources, namedSource{"attester_trust trust_anchors", c.TrustAnchors})
+	}
+	if c.Anchors != nil {
+		sources = append(sources, namedSource{"attester_trust anchors", c.Anchors})
+	}
+	return sources
+}
 
 func (c X5CAttesterChain) validate() error {
 	if c.Revocation == nil {
@@ -502,7 +528,9 @@ func (a StaticAttesterAnchors) AttesterAnchors(context.Context, storage.Register
 
 // Capabilities implements keys.KeySourceAssurance: StaticAttesterAnchors
 // fetches nothing, so it declares LiveFetchHardened, as
-// AssuranceProduction requires of X5CAttesterChain's anchor source.
+// AssuranceProduction requires of X5CAttesterChain's anchor source. That
+// describes its own AttesterAnchors: a wrapper overriding it to fetch
+// must override Capabilities too (see keys.KeySourceAssurance).
 func (StaticAttesterAnchors) Capabilities() keys.KeySourceCapabilities {
 	return keys.KeySourceCapabilities{LiveFetchHardened: true}
 }
@@ -545,7 +573,9 @@ func (a StaticAttesterTrustAnchors) TrustAnchors(context.Context, storage.Regist
 // Capabilities implements keys.KeySourceAssurance:
 // StaticAttesterTrustAnchors fetches nothing, so it declares
 // LiveFetchHardened, as AssuranceProduction requires of
-// X5CAttesterChain's trust-anchor source.
+// X5CAttesterChain's trust-anchor source. That describes its own
+// TrustAnchors: a wrapper overriding it to fetch must override
+// Capabilities too (see keys.KeySourceAssurance).
 func (StaticAttesterTrustAnchors) Capabilities() keys.KeySourceCapabilities {
 	return keys.KeySourceCapabilities{LiveFetchHardened: true}
 }

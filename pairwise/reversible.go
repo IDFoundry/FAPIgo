@@ -229,13 +229,22 @@ func (o memoryReversibleOps) EncryptCTR(_ context.Context, iv, data []byte) ([]b
 // ReversibleDeriver is the reversible Deriver NewReversible and
 // NewReversibleWith return. It also implements Lookup, so a deployment
 // using it has reversible pairwise subs.
+//
+// A type embedding it inherits LookupInternalSubject, which maps back
+// only the bodies ReversibleDeriver itself derives. A wrapper overriding
+// DerivePairwiseSubject (keeping some users' earlier subs, say) must
+// override LookupInternalSubject consistently, or hold the deriver in a
+// named field so the wrapper isn't a Lookup at all; otherwise the subs
+// it derives itself fail to resolve.
 type ReversibleDeriver struct {
 	ops     ReversibleOps
 	custody keys.KeyCustody
 }
 
 // KeyCustody implements keys.KeyCustodyAssurance: the custody the
-// constructor's options declared, or none.
+// constructor's options declared, or none. That describes d's own keys:
+// a wrapper overriding DerivePairwiseSubject to derive with others must
+// override this too (see keys.KeyCustodyAssurance).
 func (d *ReversibleDeriver) KeyCustody() keys.KeyCustody { return d.custody }
 
 // DerivePairwiseSubject implements Deriver.

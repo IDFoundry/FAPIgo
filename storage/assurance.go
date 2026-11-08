@@ -32,6 +32,15 @@ package storage
 // A declaration is the operator's promise about the implementation, not
 // something this library verifies: production assurance trusts it, so
 // declare only what the implementation actually provides.
+//
+// A declaration describes the declaring type's own behaviour. A type
+// embedding a store that declares it (any sqlstore store, say) inherits
+// the declaration through Go's method promotion, and production
+// assurance can't tell it from one the wrapper made itself. A wrapper
+// that changes what the declaration covers must override Capabilities
+// with what the wrapper provides: a per-process cache in front of a
+// shared store isn't CrossInstanceConsistent, and a copy of records kept
+// unencrypted isn't EncryptedAtRest.
 type StoreAssurance interface {
 	Capabilities() Capabilities
 }

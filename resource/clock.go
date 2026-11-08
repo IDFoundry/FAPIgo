@@ -24,6 +24,12 @@ type Clock interface {
 // verifies, beyond NewVerifier's one sanity check under
 // AssuranceProduction: Now must be within Limits.MaxClockSkew of
 // time.Now when NewVerifier runs.
+//
+// A declaration describes the declaring type's own behaviour: SystemClock
+// declares it because its Now is time.Now. A clock embedding SystemClock
+// inherits the declaration through Go's method promotion, so one
+// overriding Now (frozen, offset, or stepped for a test) must also
+// override ReadsSystemTime to return false, or not embed SystemClock.
 type ClockAssurance interface {
 	ReadsSystemTime() bool
 }
@@ -37,5 +43,6 @@ type SystemClock struct{}
 // Now returns time.Now().
 func (SystemClock) Now() time.Time { return time.Now() }
 
-// ReadsSystemTime implements ClockAssurance: Now is time.Now.
+// ReadsSystemTime implements ClockAssurance: Now is time.Now. A clock
+// embedding SystemClock and overriding Now must override this too.
 func (SystemClock) ReadsSystemTime() bool { return true }

@@ -32,7 +32,8 @@ type declaringIssuer struct{ fieldWrappedIssuer }
 func (d declaringIssuer) AccessTokenAssurance() server.AccessTokenAssurance { return *d.declared }
 
 // embeddingIssuer embeds JWTAccessTokens, as a wrapper adding claims or
-// metrics might.
+// metrics might, declaring nothing of its own: refused, since only the
+// wrapper can say what its IssueAccessToken relies on.
 type embeddingIssuer struct{ server.JWTAccessTokens }
 
 func productionNew(t *testing.T, mutate func(*server.Dependencies)) error {
@@ -84,7 +85,7 @@ func TestProductionChecksCustomAccessTokenIssuers(t *testing.T) {
 		"declares keys without custody":       {declaringIssuer{fieldWrappedIssuer{inner: undeclaredKeys, declared: &server.AccessTokenAssurance{SigningKeys: undeclaredKeys.Keys}}}, true},
 		"declares a store without assurance":  {declaringIssuer{fieldWrappedIssuer{inner: jwt, declared: &server.AccessTokenAssurance{Store: memstore.NewAccessTokenStore()}}}, true},
 		"declares nothing":                    {declaringIssuer{fieldWrappedIssuer{inner: jwt, declared: &server.AccessTokenAssurance{}}}, true},
-		"embeds JWTAccessTokens with custody": {embeddingIssuer{jwt}, false},
+		"embeds JWTAccessTokens with custody": {embeddingIssuer{jwt}, true},
 		"embeds JWTAccessTokens without":      {embeddingIssuer{undeclaredKeys}, true},
 		"pointer JWTAccessTokens without":     {&undeclaredKeys, true},
 		"nil *JWTAccessTokens":                {(*server.JWTAccessTokens)(nil), true},
@@ -148,9 +149,18 @@ func (bareAttesterKeys) ResolveAttesterKeys(context.Context, keys.AttesterKeyReq
 	return keys.VerificationKeySet{}, nil
 }
 
+// Wrappers embedding AttesterTrust implementations, whose sources are
+// still checked.
+type (
+	embeddedRegisteredAttesterKeys struct{ server.RegisteredAttesterKeys }
+	embeddedX5CAttesterChain       struct{ server.X5CAttesterChain }
+	embeddedX5CAttesterChainPtr    struct{ *server.X5CAttesterChain }
+)
+
 // TestProductionChecksAttesterKeySource covers RegisteredAttesterKeys'
 // key source getting the same KeySourceAssurance check as ClientKeys
-// when attestation is enabled, by value or pointer.
+// when attestation is enabled, by value or pointer, or embedded in a
+// struct.
 func TestProductionChecksAttesterKeySource(t *testing.T) {
 	for name, tc := range map[string]struct {
 		trust   server.AttesterTrust
@@ -159,6 +169,7 @@ func TestProductionChecksAttesterKeySource(t *testing.T) {
 		"static keys":            {server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{}}, false},
 		"undeclared":             {server.RegisteredAttesterKeys{Keys: bareAttesterKeys{}}, true},
 		"undeclared, by pointer": {&server.RegisteredAttesterKeys{Keys: bareAttesterKeys{}}, true},
+		"undeclared, embedded":   {embeddedRegisteredAttesterKeys{server.RegisteredAttesterKeys{Keys: bareAttesterKeys{}}}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := validAttestationConfig(t)
@@ -213,7 +224,8 @@ func (unhardenedAnchorSource) Capabilities() keys.KeySourceCapabilities {
 // TestProductionChecksAttesterTrustAnchors covers X5CAttesterChain's
 // trust-anchor source getting the same KeySourceAssurance check as
 // RegisteredAttesterKeys' key source, under each binding mode, by value
-// or pointer; the bundled static sources declare it.
+// or pointer, or embedded in a struct; the bundled static sources
+// declare it.
 func TestProductionChecksAttesterTrustAnchors(t *testing.T) {
 	root := newTestCert(t, "attester CA", certOptions{isCA: true})
 	for name, tc := range map[string]struct {
@@ -236,6 +248,14 @@ func TestProductionChecksAttesterTrustAnchors(t *testing.T) {
 			Revocation:   server.NoClientCertificateRevocationCheck{},
 			TrustAnchors: bareTrustAnchors{}, IssuerBinding: server.AttesterIssuerByTrustAnchors,
 		}, "attester_trust trust_anchors must implement keys.KeySourceAssurance"},
+		"undeclared trust anchors, embedded": {embeddedX5CAttesterChain{server.X5CAttesterChain{
+			Revocation:   server.NoClientCertificateRevocationCheck{},
+			TrustAnchors: bareTrustAnchors{}, IssuerBinding: server.AttesterIssuerInCertificate,
+		}}, "attester_trust trust_anchors must implement keys.KeySourceAssurance"},
+		"undeclared bound anchors, embedded by pointer": {embeddedX5CAttesterChainPtr{&server.X5CAttesterChain{
+			Revocation: server.NoClientCertificateRevocationCheck{},
+			Anchors:    bareAnchorSource{}, IssuerBinding: server.AttesterIssuerBoundToAnchor,
+		}}, "attester_trust anchors must implement keys.KeySourceAssurance"},
 		"undeclared bound anchors": {server.X5CAttesterChain{
 			Revocation: server.NoClientCertificateRevocationCheck{},
 			Anchors:    bareAnchorSource{}, IssuerBinding: server.AttesterIssuerBoundToAnchor,

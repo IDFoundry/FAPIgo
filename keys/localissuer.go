@@ -68,7 +68,9 @@ func (l *LocalIssuerKeys) ResolveIssuerKeys(ctx context.Context, req IssuerKeyRe
 }
 
 // Capabilities implements KeySourceAssurance: LocalIssuerKeys never
-// fetches over the network.
+// fetches over the network. That describes its own ResolveIssuerKeys: a
+// wrapper overriding it to fetch must override Capabilities too (see
+// KeySourceAssurance).
 func (l *LocalIssuerKeys) Capabilities() KeySourceCapabilities {
 	return KeySourceCapabilities{LiveFetchHardened: true}
 }

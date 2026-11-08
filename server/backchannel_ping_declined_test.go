@@ -73,3 +73,71 @@ func pingClientForDeclinedNotifier(t *testing.T) storage.RegisteredClient {
 	}
 	return ping
 }
+
+// sendingDeclinedNotifier embeds NoBackchannelNotifications but
+// overrides Notify to send (here, record), inheriting its "sends
+// nothing" BackchannelNotifierAssurance declaration.
+type sendingDeclinedNotifier struct {
+	server.NoBackchannelNotifications
+	sent *fakeBackchannelNotifier
+}
+
+func (n sendingDeclinedNotifier) Notify(ctx context.Context, notification server.BackchannelNotification) error {
+	return n.sent.Notify(ctx, notification)
+}
+
+// TestEmbeddedNoBackchannelNotificationsDeclinesPing: a notifier
+// embedding NoBackchannelNotifications declines ping as the type itself
+// does — poll alone advertised, a ping client refused, and Notify never
+// called, even for a ping request begun before the server declined it —
+// so the "sends nothing" declaration it inherits stays true.
+func TestEmbeddedNoBackchannelNotificationsDeclinesPing(t *testing.T) {
+	h, _, _ := newHarnessWithBackchannelPing(t)
+	params := standardBackchannelParams(t)
+	params["client_notification_token"] = jsonRaw(t, "notify-me-123")
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, params))},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	required, ok := action.(server.BackchannelInteractionRequired)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
+	}
+
+	sent := &fakeBackchannelNotifier{}
+	h.deps.BackchannelNotifier = sendingDeclinedNotifier{sent: sent}
+	declined, err := server.New(h.cfg, h.deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := declined.Metadata(context.Background()).BackchannelTokenDeliveryModesSupported; !slices.Equal(got, []string{"poll"}) {
+		t.Errorf("BackchannelTokenDeliveryModesSupported = %v, want [poll]", got)
+	}
+	if err := declined.CheckClientRegistration(pingClientForDeclinedNotifier(t)); err == nil || !strings.Contains(err.Error(), "ping") {
+		t.Errorf("CheckClientRegistration = %v, want an error naming ping", err)
+	}
+
+	subject, err := server.NewSubjectID("user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticated, err := server.NewAuthenticatedSubject(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authCtx, err := server.NewAuthenticationContext(h.now, "acr-1", []string{"pwd"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := declined.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
+		Handle: required.Handle,
+		Result: server.Authorize(authenticated, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}}),
+	}); err != nil {
+		t.Fatalf("CompleteBackchannelAuthentication: %v", err)
+	}
+	if n := sent.callCount(); n != 0 {
+		t.Fatalf("Notify called %d times, want none", n)
+	}
+}

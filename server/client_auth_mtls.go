@@ -194,8 +194,7 @@ func isPKICertificateAuthMethod(method storage.ClientAuthMethod) bool {
 // NoPKIClientAuthentication, which refuses them, it's a contradiction,
 // refused.
 func automaticClientAuthMethods(allowed []storage.ClientAuthMethod, trust ClientCertificateTrust) ([]storage.ClientAuthMethod, error) {
-	switch trust.(type) {
-	case TrustedClientCAs, *TrustedClientCAs:
+	if trust.chainTrust() == chainVerifiedHere {
 		return allowed, nil
 	}
 	if len(allowed) == 0 {
@@ -204,7 +203,7 @@ func automaticClientAuthMethods(allowed []storage.ClientAuthMethod, trust Client
 			storage.ClientAuthMethodSelfSignedTLSClientAuth,
 		}, nil
 	}
-	if _, noPKI := trust.(NoPKIClientAuthentication); !noPKI {
+	if trust.chainTrust() != chainNoPKI {
 		return allowed, nil
 	}
 	for _, method := range allowed {

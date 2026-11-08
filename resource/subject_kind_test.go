@@ -97,7 +97,9 @@ func TestEndUser(t *testing.T) {
 
 // TestVerifyChecksTheCodeGrantRevocation covers a token's code_grant_id
 // claim, which the server revokes when the code the grant came from is
-// reused.
+// reused. Each case runs against a plain storage.RevocationChecker and a
+// storage.RevocationBatchChecker: a token carrying code_grant_id but no
+// grant_id must have its code grant checked on the batch path too.
 func TestVerifyChecksTheCodeGrantRevocation(t *testing.T) {
 	now := time.Now()
 	cert := selfSignedTestClientCert(t, "client-1")
@@ -117,27 +119,32 @@ func TestVerifyChecksTheCodeGrantRevocation(t *testing.T) {
 		"grant key differs":      {json.RawMessage(`"cg-1"`), map[string]bool{"grant:cg-1@" + testIssuer: true}, ""},
 		"malformed":              {json.RawMessage(`42`), nil, resource.ErrorInvalidToken},
 	} {
-		t.Run(name, func(t *testing.T) {
-			v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{
-				AccessTokens: grantClaimResolver{thumbprint: mtls.Thumbprint(cert), claims: map[string]json.RawMessage{"code_grant_id": tc.claim}, now: now},
-				Replay:       &fakeReplayStore{},
-				Revocation:   &fakeRevocationChecker{revoked: tc.revoked},
-				Clock:        fixedClock{now: now},
-			})
-			if err != nil {
-				t.Fatalf("NewVerifier: %v", err)
-			}
-			_, err = v.Verify(context.Background(), resource.VerifyRequest{Method: "GET", URL: target, Authorization: "Bearer token", PeerCertificate: cert})
-			if tc.want == "" {
+		for kind, checker := range map[string]resource.RevocationChecker{
+			"single": &fakeRevocationChecker{revoked: tc.revoked},
+			"batch":  &batchRevocationChecker{revoked: tc.revoked},
+		} {
+			t.Run(name+"/"+kind, func(t *testing.T) {
+				v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{
+					AccessTokens: grantClaimResolver{thumbprint: mtls.Thumbprint(cert), claims: map[string]json.RawMessage{"code_grant_id": tc.claim}, now: now},
+					Replay:       &fakeReplayStore{},
+					Revocation:   checker,
+					Clock:        fixedClock{now: now},
+				})
 				if err != nil {
-					t.Fatalf("Verify: %v", err)
+					t.Fatalf("NewVerifier: %v", err)
 				}
-				return
-			}
-			var rerr *resource.Error
-			if !errors.As(err, &rerr) || rerr.Code() != tc.want {
-				t.Fatalf("Verify = %v, want %s", err, tc.want)
-			}
-		})
+				_, err = v.Verify(context.Background(), resource.VerifyRequest{Method: "GET", URL: target, Authorization: "Bearer token", PeerCertificate: cert})
+				if tc.want == "" {
+					if err != nil {
+						t.Fatalf("Verify: %v", err)
+					}
+					return
+				}
+				var rerr *resource.Error
+				if !errors.As(err, &rerr) || rerr.Code() != tc.want {
+					t.Fatalf("Verify = %v, want %s", err, tc.want)
+				}
+			})
+		}
 	}
 }

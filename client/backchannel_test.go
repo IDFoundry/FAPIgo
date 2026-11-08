@@ -579,6 +579,34 @@ func TestPollBackchannelAuthenticationApproved(t *testing.T) {
 	}
 }
 
+// A DPoP-configured client must refuse a poll response that issues a
+// Bearer token: accepting it would silently downgrade the sender
+// constraint.
+func TestPollBackchannelAuthenticationRejectsBearerUnderDPoP(t *testing.T) {
+	c, as, _ := newTestClientWithCIBA(t)
+	session := beginTestBackchannelSession(t, c)
+
+	as.tokenResponses = []cibaTokenResponse{{
+		status: http.StatusOK,
+		body: map[string]any{
+			"access_token": "opaque-access-token",
+			"token_type":   "Bearer",
+			"expires_in":   300,
+			"scope":        "openid accounts",
+			"id_token":     newCIBAIDToken(t, as),
+		},
+	}}
+
+	_, err := c.PollBackchannelAuthentication(context.Background(), session)
+	var cerr *client.Error
+	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
+		t.Fatalf("PollBackchannelAuthentication(token_type Bearer) = %v, want invalid_response", err)
+	}
+	if want := "token response token_type is not DPoP"; cerr.PublicDescription() != want {
+		t.Fatalf("PublicDescription() = %q, want %q", cerr.PublicDescription(), want)
+	}
+}
+
 func TestPollBackchannelAuthenticationPending(t *testing.T) {
 	c, as, _ := newTestClientWithCIBA(t)
 	session := beginTestBackchannelSession(t, c)

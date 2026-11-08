@@ -301,6 +301,11 @@ func hardenedHTTPClient(t *testing.T, cfg fapihttp.TransportConfig) *http.Client
 // test-only KeyCustody.
 type undeclaredClientKeys struct{ keys.KeyManager }
 
+// nonDurableClientKeys declares key custody, but not Durable custody.
+type nonDurableClientKeys struct{ keys.KeyManager }
+
+func (nonDurableClientKeys) KeyCustody() keys.KeyCustody { return keys.KeyCustody{} }
+
 func TestNewProductionRequiresClientKeyCustody(t *testing.T) {
 	cfg := validConfig(t)
 	asProduction(&cfg)
@@ -315,6 +320,12 @@ func TestNewProductionRequiresClientKeyCustody(t *testing.T) {
 	deps.Keys = undeclaredClientKeys{deps.Keys}
 	if _, err := client.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "keys must implement keys.KeyCustodyAssurance") {
 		t.Fatalf("New(production, undeclared keys) error = %v, want a key custody error", err)
+	}
+
+	deps = productionDeps(t)
+	deps.Keys = nonDurableClientKeys{deps.Keys}
+	if _, err := client.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "keys must declare Durable key custody") {
+		t.Fatalf("New(production, non-durable keys) error = %v, want a Durable key custody error", err)
 	}
 
 	ephemeralKeys, err := ephemeral.NewKeyManager(map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.ClientAuthentication: fapi.ES256, keys.DPoPProofSigning: fapi.ES256})
@@ -351,11 +362,20 @@ func TestNewProductionRequiresDecryptionKeyCustody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSingleKeyDecrypter: %v", err)
 	}
+	nonDurable, err := keys.NewSingleKeyDecrypter(backend, keys.DeclareCustody(keys.KeyCustody{}))
+	if err != nil {
+		t.Fatalf("NewSingleKeyDecrypter: %v", err)
+	}
 
 	deps := productionDeps(t)
 	deps.Decryption = undeclared
 	if _, err := client.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "decryption must implement keys.KeyCustodyAssurance") {
 		t.Fatalf("New(production, undeclared decryption) error = %v, want a key custody error", err)
+	}
+	deps = productionDeps(t)
+	deps.Decryption = nonDurable
+	if _, err := client.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "decryption must declare Durable key custody") {
+		t.Fatalf("New(production, non-durable decryption) error = %v, want a Durable key custody error", err)
 	}
 	deps = productionDeps(t)
 	deps.Decryption = declared

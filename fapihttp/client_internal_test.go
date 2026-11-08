@@ -88,6 +88,25 @@ func TestFetchRejectsHTTPSResolvingToLoopback(t *testing.T) {
 	}
 }
 
+// TestFetchRejectsHostResolvingToNoAddresses: a resolver that answers
+// with no addresses and no error leaves nothing to vet, so the fetch is
+// refused before any round trip rather than handed to the dialer.
+func TestFetchRejectsHostResolvingToNoAddresses(t *testing.T) {
+	resolver := &fakeIPResolver{results: [][]net.IP{{}}}
+	c := &Client{
+		http:       failIfCalledHTTPClient{t: t},
+		cfg:        Config{MaxResponseBytes: 1024, RequestTimeout: 5 * time.Second, MaxRedirects: 1},
+		resolveIPs: resolver.resolve,
+	}
+	_, err := c.Fetch(context.Background(), FetchRequest{
+		URL:                 mustParseTestURL(t, "https://issuer.example.com/jwks"),
+		ExpectedContentType: "application/json",
+	})
+	if !errors.Is(err, ErrSSRFBlocked) {
+		t.Fatalf("Fetch error = %v, want ErrSSRFBlocked", err)
+	}
+}
+
 // TestFetchAllowsPrivateIPForAllowedHost proves Config.AllowedPrivateHosts
 // lets Fetch through for a host that resolves to a private address, when
 // (and only when) that exact host is on the list — a real docker-compose

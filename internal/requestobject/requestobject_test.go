@@ -935,3 +935,26 @@ func TestParseClaimsNullOrNonPositiveIssuedAt(t *testing.T) {
 		t.Fatalf("parseClaims(iat 1) = %v, %v", c.IssuedAt, err)
 	}
 }
+
+// jti and sub must be non-empty strings and nbf a NumericDate: a
+// wrongly typed or empty jti would otherwise parse as no jti at all and
+// skip the replay check, and a wrongly typed sub as no sub.
+func TestParseClaimsRejectsMalformedOptionalClaims(t *testing.T) {
+	base := `{"iss":"client-123","aud":"https://as.example","exp":4102444800,`
+	for _, claim := range []string{
+		`"jti":123`, `"jti":""`, `"jti":null`, `"jti":["a"]`,
+		`"sub":123`, `"sub":""`, `"sub":{}`,
+		`"nbf":"1800000000"`, `"nbf":true`,
+	} {
+		if _, err := parseClaims([]byte(base + claim + `}`)); !errors.Is(err, ErrMalformedClaims) {
+			t.Errorf("parseClaims(%s) = %v, want ErrMalformedClaims", claim, err)
+		}
+	}
+	c, err := parseClaims([]byte(base + `"jti":"j-1","sub":"client-123","nbf":1800000000}`))
+	if err != nil {
+		t.Fatalf("parseClaims(well-formed jti, sub, nbf): %v", err)
+	}
+	if c.JTI != "j-1" || !c.HasSubject || c.NotBefore.Unix() != 1_800_000_000 {
+		t.Fatalf("parseClaims = JTI %q, HasSubject %v, NotBefore %v", c.JTI, c.HasSubject, c.NotBefore)
+	}
+}

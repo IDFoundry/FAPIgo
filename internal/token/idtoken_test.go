@@ -388,6 +388,48 @@ func TestIDTokenValidateAcceptsTrustedSecondAudience(t *testing.T) {
 	}
 }
 
+// OIDC Core §3.1.3.7 step 3: aud MUST contain the client's own
+// client_id — a token whose every audience is merely trusted, but which
+// never names this client, is a token issued to someone else and must
+// be rejected whatever azp says.
+func TestIDTokenValidateRejectsOnlyTrustedAudiences(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	tests := []struct {
+		name string
+		aud  []string
+		azp  string
+	}{
+		{name: "single trusted aud, no azp", aud: []string{"trusted-party"}},
+		{name: "single trusted aud, azp is client", aud: []string{"trusted-party"}, azp: "client-123"},
+		{name: "two trusted auds, azp is client", aud: []string{"trusted-party", "other-trusted"}, azp: "client-123"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claims := map[string]any{
+				"iss": "https://as.example",
+				"sub": "user-1",
+				"aud": tt.aud,
+				"exp": now.Add(time.Minute).Unix(),
+				"iat": now.Unix(),
+			}
+			if tt.azp != "" {
+				claims["azp"] = tt.azp
+			}
+			parsed, err := ParseIDToken(buildRawIDTokenWithClaims(t, key, claims))
+			if err != nil {
+				t.Fatalf("ParseIDToken: %v", err)
+			}
+			policy := baseIDTokenPolicy(now)
+			policy.TrustedAudiences = []string{"trusted-party", "other-trusted"}
+			if _, err := parsed.Validate(&key.PublicKey, policy); !errors.Is(err, ErrAudienceMismatch) {
+				t.Fatalf("Validate(aud %v, azp %q) = %v, want ErrAudienceMismatch", tt.aud, tt.azp, err)
+			}
+		})
+	}
+}
+
 // OIDC Core §3.1.3.7 step 9: when aud names more than one audience, the
 // Client SHOULD verify azp is present — enforced here even though every
 // audience is individually trusted, since azp is what disambiguates

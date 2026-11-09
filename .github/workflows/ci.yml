@@ -170,8 +170,9 @@ jobs:
       postgres:
         # Pinned by digest. Dependabot can't update a workflow's service
         # image, but it does update .github/postgres/Dockerfile's copy of
-        # this pin, and the lint job fails until the two match: when a
-        # Dependabot pull request moves that one, copy it here.
+        # this pin, and the lint job fails until they match: when a
+        # Dependabot pull request moves that one, copy it here and to
+        # mutation.yml.
         image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
         env:
           # A throwaway server reachable only from this job: no password.
@@ -309,9 +310,10 @@ jobs:
       - name: Check fuzz.yml lists every fuzz target
         run: .github/scripts/check-fuzz-matrix.sh
 
-      # Dependabot can't update the sqlstore job's Postgres service image,
-      # so .github/postgres/Dockerfile carries the same pin where it can,
-      # and this fails until a digest it moves is copied to ci.yml.
+      # Dependabot can't update a workflow's Postgres service image (the
+      # sqlstore job's, mutation.yml's), so .github/postgres/Dockerfile
+      # carries the same pin where it can, and this fails until a digest
+      # it moves is copied to both.
       - name: Check the Postgres service image matches .github/postgres/Dockerfile
         run: .github/scripts/check-postgres-pin.sh
 

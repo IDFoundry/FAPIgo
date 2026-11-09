@@ -1,0 +1,81 @@
+name: Mutation
+
+# Re-applies a curated list of mutations to the library's security
+# checks (.github/mutation/mutants.json: delete a check, invert it, or
+# move a boundary by one) and runs the tests that should catch each one
+# (.github/scripts/mutation-check.go). A mutant that survives — no test
+# fails with the check broken — means a refactor has quietly removed
+# the protection a test used to give that check, while `go test ./...`
+# stays green. The mutants each run a few named tests, so the whole list
+# takes minutes, but it guards against slow drift rather than anything
+# a single diff does, so it runs weekly (Sunday 9am UTC, clear of
+# conformance.yml's and fuzz.yml's daily 6am and 7am runs) and on
+# demand. It also runs on a pull request that changes the list or the
+# runner, so an edited entry is checked before it lands.
+#
+# Each entry anchors its check by a literal snippet that must occur
+# exactly once in its file, never by line number. A refactor that moves
+# or rewrites an anchored check fails this run until its entry is
+# updated, in the same PR when it's known. To run it locally (from the
+# repository root; the PostgreSQL mutants need
+# FAPIGO_SQLSTORE_POSTGRES_DSN, as in sqlstore/README.md, or are
+# skipped):
+#
+#   go run .github/scripts/mutation-check.go [mutant-id ...]
+#
+# Informational only: not a required check in branch protection, and it
+# should stay that way, since it runs on pull requests only when the
+# list or runner changes. The job summary has a table of every mutant
+# and the tests that killed it.
+
+on:
+  schedule:
+    - cron: '0 9 * * 0' # weekly, Sunday 9am UTC
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - .github/mutation/**
+      - .github/scripts/mutation-check.go
+      - .github/workflows/mutation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        # The same pin as ci.yml's sqlstore job, checked against
+        # .github/postgres/Dockerfile by ci.yml's lint job.
+        image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
+        env:
+          # A throwaway server reachable only from this job: no password.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      FAPIGO_SQLSTORE_POSTGRES_DSN: postgres://postgres@localhost:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          # See ci.yml: no go.sum at the root, and sqlstore's own for its
+          # drivers.
+          cache-dependency-path: |
+            go.mod
+            sqlstore/go.sum
+
+      - name: Mutation check
+        run: go run .github/scripts/mutation-check.go

@@ -225,6 +225,7 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12
+          install-mode: goinstall
           working-directory: sqlstore
 
       # go.mod's replace builds against this checkout, but a consumer of
@@ -321,9 +322,17 @@ jobs:
       # plus golangci-lint's own "standard" set (errcheck, staticcheck,
       # govet, ineffassign, unused, gosimple). gofmt is enforced
       # separately above, not duplicated here.
+      #
+      # install-mode goinstall builds golangci-lint through the Go module
+      # proxy (checksum-verified against sum.golang.org) instead of
+      # downloading the release binary from GitHub releases, whose
+      # intermittent 504s fail the step outright. It also builds with
+      # this job's own Go, so its export-data reader always matches. The
+      # sqlstore and examples jobs do the same.
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12
+          install-mode: goinstall
 
   # Each example, and the demokit package they share, is its own Go
   # module (building against this checkout through replace directives),
@@ -368,4 +377,5 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12
+          install-mode: goinstall
           working-directory: ${{ matrix.module }}

@@ -156,20 +156,41 @@ func TestNewKeyManagerFromSignersRejectsMissingAlgorithm(t *testing.T) {
 	}
 }
 
-// TestNewKeyManagerFromSignersRejectsWrongKeyType confirms an RSA key
-// registered for ES256 (or vice versa) fails at construction, not on
-// the first Sign call.
+// TestNewKeyManagerFromSignersRejectsWrongKeyType confirms a key of
+// the wrong type for its algorithm — an RSA key registered for ES256,
+// say — fails at construction, not on the first Sign call.
 func TestNewKeyManagerFromSignersRejectsWrongKeyType(t *testing.T) {
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate rsa key: %v", err)
 	}
-	if _, err := keys.NewKeyManagerFromSigners(
-		[]keys.SignerSpec{
-			{Purpose: keys.AccessTokenSigning, Algorithm: fapi.ES256, Signer: priv},
-		},
-	); err == nil {
-		t.Fatal("NewKeyManagerFromSigners(rsa key for ES256) = nil error, want error")
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ecdsa key: %v", err)
+	}
+	_, edKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ed25519 key: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		alg    fapi.SignatureAlgorithm
+		signer crypto.Signer
+	}{
+		"rsa key for ES256":     {fapi.ES256, rsaKey},
+		"ecdsa key for PS256":   {fapi.PS256, ecKey},
+		"ed25519 key for PS256": {fapi.PS256, edKey},
+		"ecdsa key for EdDSA":   {fapi.EdDSA, ecKey},
+		"rsa key for EdDSA":     {fapi.EdDSA, rsaKey},
+	} {
+		if _, err := keys.NewKeyManagerFromSigners(
+			[]keys.SignerSpec{
+				// An explicit KeyID, so the key-type check itself refuses
+				// the key rather than kid derivation failing on it.
+				{Purpose: keys.AccessTokenSigning, Algorithm: tc.alg, Signer: tc.signer, KeyID: "k1"},
+			},
+		); err == nil {
+			t.Errorf("NewKeyManagerFromSigners(%s) = nil error, want error", name)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -121,5 +122,23 @@ func TestBackchannelHintsNotAskedForUnauthenticatedClient(t *testing.T) {
 	}
 	if checker.calls != 0 {
 		t.Error("the hint was checked for an unauthenticated client")
+	}
+}
+
+// TestBackchannelInteractionCarriesLoginHintTokenAndACRValues: a
+// login_hint_token and the requested acr_values reach the interaction
+// the integrator authenticates the user against.
+func TestBackchannelInteractionCarriesLoginHintTokenAndACRValues(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	params := standardBackchannelParams(t)
+	delete(params, "login_hint")
+	params["login_hint_token"] = jsonRaw(t, "opaque-login-hint-token")
+	params["acr_values"] = jsonRaw(t, "urn:acr:one urn:acr:two")
+	required := beginBackchannel(t, h, params)
+	if got := required.Interaction.Hints.LoginHintToken; got != "opaque-login-hint-token" {
+		t.Errorf("Hints.LoginHintToken = %q, want opaque-login-hint-token", got)
+	}
+	if got := required.Interaction.ACRValues; !slices.Equal(got, []string{"urn:acr:one", "urn:acr:two"}) {
+		t.Errorf("ACRValues = %q, want [urn:acr:one urn:acr:two]", got)
 	}
 }

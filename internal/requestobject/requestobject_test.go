@@ -197,6 +197,36 @@ func TestCreateRejectsReservedClaimName(t *testing.T) {
 	}
 }
 
+// TestCreateRefusesMissingFields: Create never signs a request object
+// with an empty iss/client_id or aud, or one that is already expired.
+func TestCreateRefusesMissingFields(t *testing.T) {
+	key := generateKey(t)
+	cases := []struct {
+		name   string
+		mutate func(*CreateParams)
+	}{
+		// The client_id parameter goes too, so the empty ClientID itself
+		// is refused rather than its mismatch with the parameter.
+		{"empty client ID", func(p *CreateParams) { p.ClientID = ""; delete(p.Parameters, "client_id") }},
+		{"empty audience", func(p *CreateParams) { p.Audience = "" }},
+		{"zero now", func(p *CreateParams) { p.Now = time.Time{} }},
+		{"zero lifetime", func(p *CreateParams) { p.Lifetime = 0 }},
+		{"negative lifetime", func(p *CreateParams) { p.Lifetime = -time.Minute }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := CreateParams{
+				Signer: key, Algorithm: fapi.ES256, ClientID: "client-123",
+				Audience: "https://as.example", Now: time.Now(), Lifetime: time.Minute, Parameters: testParameters(t),
+			}
+			tc.mutate(&p)
+			if _, err := Create(p); err == nil {
+				t.Fatalf("Create(%s) = nil error, want error", tc.name)
+			}
+		})
+	}
+}
+
 func TestCreateRejectsInconsistentClientID(t *testing.T) {
 	key := generateKey(t)
 	params := testParameters(t)

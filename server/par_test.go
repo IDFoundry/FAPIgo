@@ -1776,6 +1776,36 @@ func TestPushAuthorizationRequestRejectsInvalidRegisteredParameterAlongsideUnreg
 	}
 }
 
+// TestPushAuthorizationRequestRejectsInvalidRegisteredParameterInsideRequestObject:
+// a registered parameter failing its Definition inside a signed request
+// object is invalid_request_object (JAR §6.2), not the
+// invalid_request a plain form parameter gets.
+func TestPushAuthorizationRequestRejectsInvalidRegisteredParameterInsideRequestObject(t *testing.T) {
+	def := extension.Definition[string]{
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_custom", Cardinality: extension.Single,
+		AllowedSources: extension.SourceRequestObject, MaxBytes: 4,
+	}
+	registry, err := extension.NewRegistry(def)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	h := newHarnessWithExtensions(t, server.ProfileFAPISecurity, registry)
+	params := standardAuthParams(t)
+	params["x_custom"] = jsonRaw(t, "this value exceeds the 4 byte limit")
+
+	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("request", h.requestObject(t, params)),
+		}},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequestObject {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequestObject)
+	}
+}
+
 // OIDC Core §3.1.2.1's "prompt" parameter must not be rejected as an
 // unregistered extension parameter — it's core, not a
 // deployment-specific extension (see coreAuthorizationParameters). A

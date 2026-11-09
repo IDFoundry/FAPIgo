@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 // fakeClientEncryptionKeySource is the encryption-side counterpart of
@@ -100,14 +102,20 @@ func TestNewAcceptsValidConfig(t *testing.T) {
 
 func TestNewRejectsInvalidConfig(t *testing.T) {
 	cases := map[string]func(*server.Config){
-		"zero issuer":                        func(c *server.Config) { c.Issuer = fapi.URL{} },
-		"zero token endpoint":                func(c *server.Config) { c.Endpoints.Token = fapi.URL{} },
-		"zero authorization endpoint":        func(c *server.Config) { c.Endpoints.Authorization = fapi.URL{} },
-		"zero par endpoint":                  func(c *server.Config) { c.Endpoints.PushedAuthorizationRequest = fapi.URL{} },
-		"zero jwks endpoint":                 func(c *server.Config) { c.Endpoints.JWKS = fapi.URL{} },
-		"invalid profile":                    func(c *server.Config) { c.Profile = 0 },
-		"empty client assertion algs":        func(c *server.Config) { c.Algorithms.ClientAssertion = nil },
-		"empty request object algs":          func(c *server.Config) { c.Algorithms.RequestObject = nil },
+		"zero issuer":                 func(c *server.Config) { c.Issuer = fapi.URL{} },
+		"zero token endpoint":         func(c *server.Config) { c.Endpoints.Token = fapi.URL{} },
+		"zero authorization endpoint": func(c *server.Config) { c.Endpoints.Authorization = fapi.URL{} },
+		"zero par endpoint":           func(c *server.Config) { c.Endpoints.PushedAuthorizationRequest = fapi.URL{} },
+		"zero jwks endpoint":          func(c *server.Config) { c.Endpoints.JWKS = fapi.URL{} },
+		"invalid profile":             func(c *server.Config) { c.Profile = 0 },
+		"empty client assertion algs": func(c *server.Config) { c.Algorithms.ClientAssertion = nil },
+		"empty request object algs":   func(c *server.Config) { c.Algorithms.RequestObject = nil },
+		"invalid client assertion alg": func(c *server.Config) {
+			c.Algorithms.ClientAssertion = server.AlgorithmSet{fapi.ES256, fapi.SignatureAlgorithm(99)}
+		},
+		"invalid request object alg": func(c *server.Config) {
+			c.Algorithms.RequestObject = server.AlgorithmSet{fapi.ES256, fapi.SignatureAlgorithm(99)}
+		},
 		"invalid id token alg":               func(c *server.Config) { c.Algorithms.IDToken = 0 },
 		"zero pushed request lifetime":       func(c *server.Config) { c.Limits.PushedRequestLifetime = 0 },
 		"zero max assertion lifetime":        func(c *server.Config) { c.Limits.MaxClientAssertionLifetime = 0 },
@@ -164,16 +172,17 @@ func TestNewOpaqueAccessTokensRejectsInvalid(t *testing.T) {
 
 func TestNewRejectsMissingDependencies(t *testing.T) {
 	cases := map[string]func(*server.Dependencies){
-		"nil clients":       func(d *server.Dependencies) { d.Clients = nil },
-		"nil transactions":  func(d *server.Dependencies) { d.Transactions = nil },
-		"nil grants":        func(d *server.Dependencies) { d.Grants = nil },
-		"nil replay":        func(d *server.Dependencies) { d.Replay = nil },
-		"nil client keys":   func(d *server.Dependencies) { d.ClientKeys = nil },
-		"nil keys":          func(d *server.Dependencies) { d.Keys = nil },
-		"nil access tokens": func(d *server.Dependencies) { d.AccessTokens = nil },
-		"nil revocation":    func(d *server.Dependencies) { d.Revocation = nil },
-		"nil clock":         func(d *server.Dependencies) { d.Clock = nil },
-		"nil random":        func(d *server.Dependencies) { d.Random = nil },
+		"nil clients":                  func(d *server.Dependencies) { d.Clients = nil },
+		"nil transactions":             func(d *server.Dependencies) { d.Transactions = nil },
+		"nil grants":                   func(d *server.Dependencies) { d.Grants = nil },
+		"nil replay":                   func(d *server.Dependencies) { d.Replay = nil },
+		"nil client keys":              func(d *server.Dependencies) { d.ClientKeys = nil },
+		"nil keys":                     func(d *server.Dependencies) { d.Keys = nil },
+		"nil access tokens":            func(d *server.Dependencies) { d.AccessTokens = nil },
+		"nil revocation":               func(d *server.Dependencies) { d.Revocation = nil },
+		"nil client certificate trust": func(d *server.Dependencies) { d.ClientCertificateTrust = nil },
+		"nil clock":                    func(d *server.Dependencies) { d.Clock = nil },
+		"nil random":                   func(d *server.Dependencies) { d.Random = nil },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -425,6 +434,13 @@ func TestNewRejectsLoopbackHTTPURLsUnderProduction(t *testing.T) {
 		"loopback par ep":           func(c *server.Config) { c.Endpoints.PushedAuthorizationRequest = loopbackEndpoint },
 		"loopback jwks ep":          func(c *server.Config) { c.Endpoints.JWKS = loopbackEndpoint },
 		"loopback revocation ep":    func(c *server.Config) { c.Endpoints.Revocation = loopbackEndpoint },
+		"loopback backchannel ep": func(c *server.Config) {
+			c.Endpoints.BackchannelAuthentication = loopbackEndpoint
+			c.Algorithms.BackchannelAuthenticationRequest = server.AlgorithmSet{fapi.ES256}
+			c.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+			c.Limits.MaxBackchannelAuthenticationRequestLifetime = time.Minute
+			c.Limits.BackchannelAuthenticationPollInterval = 5 * time.Second
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -434,8 +450,9 @@ func TestNewRejectsLoopbackHTTPURLsUnderProduction(t *testing.T) {
 			mutate(&cfg)
 			deps := validDependencies()
 			deps.Audit = &fakeAuditSink{}
-			if _, err := server.New(cfg, deps); err == nil {
-				t.Fatalf("New(production, %s) = nil error, want error", name)
+			deps.Backchannel = memstore.NewBackchannelAuthenticationStore()
+			if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "fapi.AllowLoopbackHTTP") {
+				t.Fatalf("New(production, %s) = %v, want the loopback URL refused", name, err)
 			}
 		})
 	}

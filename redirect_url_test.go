@@ -22,10 +22,13 @@ func TestParseRedirectURL(t *testing.T) {
 		"com.example.app:////evil.example/cb":         false,
 		"com..app:/cb":                                false,
 		"com.-example.app:/cb":                        false,
-		"com.example.app:/cb#frag":                    false,
-		"com.example.app:":                            false,
-		"http://rp.example/cb":                        false,
-		"":                                            false,
+		// RFC 3986 allows "+" and "." in a scheme, but RFC 8252 §7.1's
+		// reverse domain name takes DNS labels: letters, digits and "-".
+		"com.exa+mple.app:/cb":     false,
+		"com.example.app:/cb#frag": false,
+		"com.example.app:":         false,
+		"http://rp.example/cb":     false,
+		"":                         false,
 	} {
 		if _, err := fapi.ParseRedirectURL(raw, native...); (err == nil) != want {
 			t.Errorf("ParseRedirectURL(%q, native) = %v, want accepted %v", raw, err, want)

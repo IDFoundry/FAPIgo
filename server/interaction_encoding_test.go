@@ -116,15 +116,18 @@ func TestTamperedInteractionCantWidenGrant(t *testing.T) {
 func TestParseInteractionRequestRejects(t *testing.T) {
 	enc := func(s string) string { return "v1." + base64.RawURLEncoding.EncodeToString([]byte(s)) }
 	for name, text := range map[string]string{
-		"empty":           "",
-		"unknown version": "v9." + base64.RawURLEncoding.EncodeToString([]byte(`{"client_id":"c"}`)),
-		"not base64":      "v1.!!!",
-		"not JSON":        enc("x"),
-		"unknown member":  enc(`{"client_id":"c","authorization_details":[],"extensions":{},"z":1}`),
-		"no client":       enc(`{"authorization_details":[],"extensions":{}}`),
-		"untyped detail":  enc(`{"client_id":"c","authorization_details":[{"amount":"1"}],"extensions":{}}`),
-		"bad logo URL":    enc(`{"client_id":"c","logo_uri":"javascript:alert(1)","authorization_details":[],"extensions":{}}`),
-		"too long":        "v1." + strings.Repeat("A", 64<<10),
+		"empty":            "",
+		"unknown version":  "v9." + base64.RawURLEncoding.EncodeToString([]byte(`{"client_id":"c"}`)),
+		"not base64":       "v1.!!!",
+		"not JSON":         enc("x"),
+		"unknown member":   enc(`{"client_id":"c","authorization_details":[],"extensions":{},"z":1}`),
+		"no client":        enc(`{"authorization_details":[],"extensions":{}}`),
+		"untyped detail":   enc(`{"client_id":"c","authorization_details":[{"amount":"1"}],"extensions":{}}`),
+		"bad logo URL":     enc(`{"client_id":"c","logo_uri":"javascript:alert(1)","authorization_details":[],"extensions":{}}`),
+		"bad redirect":     enc(`{"client_id":"c","redirect_uri":"javascript:alert(1)","authorization_details":[],"extensions":{}}`),
+		"negative max_age": enc(`{"client_id":"c","max_age":-1,"authorization_details":[],"extensions":{}}`),
+		"huge max_age":     enc(`{"client_id":"c","max_age":9223372036,"authorization_details":[],"extensions":{}}`),
+		"too long":         "v1." + strings.Repeat("A", 64<<10),
 	} {
 		if _, err := server.ParseInteractionRequest(text); err == nil {
 			t.Errorf("ParseInteractionRequest(%s) = nil error, want error", name)

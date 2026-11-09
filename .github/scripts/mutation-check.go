@@ -35,6 +35,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -94,7 +96,7 @@ func run(only []string) error {
 		return errors.New("FAPIGO_SQLSTORE_POSTGRES_DSN is unset under CI: the postgres mutants must run there")
 	}
 
-	if err := baseline(mutants, havePG); err != nil {
+	if err := baseline(runnable(mutants, havePG)); err != nil {
 		return err
 	}
 
@@ -123,40 +125,46 @@ func load(only []string) ([]mutant, error) {
 	if err := dec.Decode(&all); err != nil {
 		return nil, fmt.Errorf("%s: %w", listPath, err)
 	}
-	seen := map[string]bool{}
+	byID := map[string]mutant{}
 	for _, m := range all {
-		switch {
-		case m.ID == "" || seen[m.ID]:
+		if _, dup := byID[m.ID]; dup || m.ID == "" {
 			return nil, fmt.Errorf("%s: missing or duplicate id %q", listPath, m.ID)
-		case modules[m.Module] == "":
-			return nil, fmt.Errorf("%s: %s: module must be root or sqlstore", listPath, m.ID)
-		case !filepath.IsLocal(m.File) || filepath.Clean(m.File) != m.File:
-			return nil, fmt.Errorf("%s: %s: file must be a clean path inside the repository", listPath, m.ID)
-		case m.Module == "sqlstore" && !strings.HasPrefix(m.File, "sqlstore/"):
-			return nil, fmt.Errorf("%s: %s: a sqlstore mutant's file must be under sqlstore/", listPath, m.ID)
-		case m.Old == "" || m.Old == m.New || len(m.Packages) == 0 || m.Why == "":
-			return nil, fmt.Errorf("%s: %s: needs old, a different new, packages and why", listPath, m.ID)
 		}
-		if _, err := regexp.Compile(m.Run); err != nil {
-			return nil, fmt.Errorf("%s: %s: run: %w", listPath, m.ID, err)
+		if err := check(m); err != nil {
+			return nil, fmt.Errorf("%s: %s: %w", listPath, m.ID, err)
 		}
-		seen[m.ID] = true
+		byID[m.ID] = m
 	}
 	if len(only) == 0 {
 		return all, nil
 	}
-	var picked []mutant
+	picked := make([]mutant, 0, len(only))
 	for _, id := range only {
-		if !seen[id] {
+		m, ok := byID[id]
+		if !ok {
 			return nil, fmt.Errorf("no mutant %q in %s", id, listPath)
 		}
-		for _, m := range all {
-			if m.ID == id {
-				picked = append(picked, m)
-			}
-		}
+		picked = append(picked, m)
 	}
 	return picked, nil
+}
+
+// check reports what's wrong with an entry of the list, if anything.
+func check(m mutant) error {
+	switch {
+	case modules[m.Module] == "":
+		return errors.New("module must be root or sqlstore")
+	case !filepath.IsLocal(m.File) || filepath.Clean(m.File) != m.File:
+		return errors.New("file must be a clean path inside the repository")
+	case m.Module == "sqlstore" && !strings.HasPrefix(m.File, "sqlstore/"):
+		return errors.New("a sqlstore mutant's file must be under sqlstore/")
+	case m.Old == "" || m.Old == m.New || len(m.Packages) == 0 || m.Why == "":
+		return errors.New("needs old, a different new, packages and why")
+	}
+	if _, err := regexp.Compile(m.Run); err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+	return nil
 }
 
 func needsPostgres(mutants []mutant) bool {
@@ -168,35 +176,53 @@ func needsPostgres(mutants []mutant) bool {
 	return false
 }
 
+// pkgKey is one package of one module.
+type pkgKey struct{ module, pkg string }
+
+// runnable is mutants without the postgres ones when there's no
+// PostgreSQL to run them against.
+func runnable(mutants []mutant, havePG bool) []mutant {
+	var out []mutant
+	for _, m := range mutants {
+		if havePG || !m.Postgres {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// baselineFilters is the -run filter for each package mutants test: the
+// union of their filters, or "" when one of them runs the whole package.
+func baselineFilters(mutants []mutant) map[pkgKey]string {
+	runs := map[pkgKey][]string{}
+	whole := map[pkgKey]bool{}
+	for _, m := range mutants {
+		for _, p := range m.Packages {
+			k := pkgKey{m.Module, p}
+			whole[k] = whole[k] || m.Run == ""
+			runs[k] = append(runs[k], m.Run)
+		}
+	}
+	filters := make(map[pkgKey]string, len(runs))
+	for k, r := range runs {
+		if whole[k] {
+			filters[k] = ""
+		} else {
+			filters[k] = strings.Join(r, "|")
+		}
+	}
+	return filters
+}
+
 // baseline runs, unmutated, every test a mutant below will run, once per
 // package: a test that already fails would kill its mutant for the
 // wrong reason. It also checks each mutant's run filter names a test in
 // its packages, or the mutant would survive with nothing run.
-func baseline(mutants []mutant, havePG bool) error {
-	type pkgKey struct{ module, pkg string }
-	runs := map[pkgKey][]string{}
-	whole := map[pkgKey]bool{}
-	for _, m := range mutants {
-		if m.Postgres && !havePG {
-			continue
-		}
-		for _, p := range m.Packages {
-			k := pkgKey{m.Module, p}
-			if m.Run == "" {
-				whole[k] = true
-			} else {
-				runs[k] = append(runs[k], m.Run)
-			}
-		}
-	}
-	keys := make([]pkgKey, 0, len(runs)+len(whole))
-	for k := range runs {
+func baseline(mutants []mutant) error {
+	filters := baselineFilters(mutants)
+	keys := make([]pkgKey, 0, len(filters))
+	for k := range filters {
 		keys = append(keys, k)
-	}
-	for k := range whole {
-		if _, ok := runs[k]; !ok {
-			keys = append(keys, k)
-		}
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		return keys[i].module+keys[i].pkg < keys[j].module+keys[j].pkg
@@ -204,11 +230,7 @@ func baseline(mutants []mutant, havePG bool) error {
 	start := time.Now()
 	ran := map[pkgKey][]string{}
 	for _, k := range keys {
-		filter := ""
-		if !whole[k] {
-			filter = strings.Join(runs[k], "|")
-		}
-		out, err := goTest(k.module, []string{k.pkg}, filter, true)
+		out, err := goTest(k.module, []string{k.pkg}, filters[k], true)
 		if err != nil {
 			fmt.Fprint(os.Stderr, tail(out, 60))
 			return fmt.Errorf("baseline: %s tests fail before any mutation: fix them first", k.pkg)
@@ -220,22 +242,27 @@ func baseline(mutants []mutant, havePG bool) error {
 		}
 	}
 	for _, m := range mutants {
-		if m.Run == "" || (m.Postgres && !havePG) {
-			continue
-		}
-		re := regexp.MustCompile(m.Run)
-		found := false
-		for _, p := range m.Packages {
-			for _, name := range ran[pkgKey{m.Module, p}] {
-				found = found || re.MatchString(name)
-			}
-		}
-		if !found {
+		if !filterMatches(m, ran) {
 			return fmt.Errorf("%s: run filter %q matches no test in %s: update %s", m.ID, m.Run, strings.Join(m.Packages, " "), listPath)
 		}
 	}
 	fmt.Printf("baseline: %d packages pass unmutated (%.0fs)\n", len(keys), time.Since(start).Seconds())
 	return nil
+}
+
+// filterMatches reports whether m's run filter, if it has one, matches
+// a top-level test the baseline ran in one of its packages.
+func filterMatches(m mutant, ran map[pkgKey][]string) bool {
+	if m.Run == "" {
+		return true
+	}
+	re := regexp.MustCompile(m.Run)
+	for _, p := range m.Packages {
+		if slices.ContainsFunc(ran[pkgKey{m.Module, p}], re.MatchString) {
+			return true
+		}
+	}
+	return false
 }
 
 var runRE = regexp.MustCompile(`(?m)^=== RUN\s+(\S+)`)
@@ -317,7 +344,9 @@ func goTest(module string, pkgs []string, filter string, verbose bool) (string, 
 		args = append(args, "-run", filter)
 	}
 	args = append(args, pkgs...)
-	cmd := exec.Command("go", args...)
+	// The go command running this one, by absolute path, so the tests
+	// run on the same toolchain whatever PATH holds.
+	cmd := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), args...)
 	cmd.Dir = modules[module]
 	out, err := cmd.CombinedOutput()
 	return string(out), err

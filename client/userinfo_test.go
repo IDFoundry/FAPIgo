@@ -794,3 +794,90 @@ func TestFetchUserInfoRequireSignedUserInfo(t *testing.T) {
 		t.Fatalf("New(RequireSignedUserInfo without algorithms.userinfo) = %v, want refused", err)
 	}
 }
+
+// fetchUserInfoDescription is FetchUserInfo's error description for a
+// 200 UserInfo response with contentType (none, for nil) and body, from
+// a client mutateCfg/mutateDeps adjust (either may be nil).
+func fetchUserInfoDescription(t *testing.T, contentType []string, body string, mutateCfg func(*client.Config), mutateDeps func(*client.Dependencies)) string {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Content-Type"] = contentType
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer ts.Close()
+	c := newUserInfoTestClient(t, ts, nil, mutateCfg, mutateDeps)
+	_, err := c.FetchUserInfo(context.Background(), userInfoTestTokens())
+	var cerr *client.Error
+	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
+		t.Fatalf("FetchUserInfo = %v, want invalid_response", err)
+	}
+	return cerr.PublicDescription()
+}
+
+// TestFetchUserInfoRejectsMalformedResponses: a UserInfo response
+// without a parseable Content-Type, with one whose parameters don't
+// parse (which mime.ParseMediaType still returns the media type for),
+// a plain JSON body that isn't a JSON object, or an application/jwt
+// body that has neither a JWS's 3 segments nor a JWE's 5, is refused
+// for exactly that reason.
+func TestFetchUserInfoRejectsMalformedResponses(t *testing.T) {
+	plain := `{"sub":"` + userInfoTestSubject + `"}`
+	for name, tc := range map[string]struct {
+		contentType []string
+		body, want  string
+	}{
+		"no Content-Type":     {nil, plain, "UserInfo response has no valid Content-Type"},
+		"malformed parameter": {[]string{"application/json; charset"}, plain, "UserInfo response has no valid Content-Type"},
+		"truncated JSON":      {[]string{"application/json"}, `{"sub":`, "malformed UserInfo response"},
+		"JSON array":          {[]string{"application/json"}, `["sub"]`, "malformed UserInfo response"},
+		"JWT of 2 segments":   {[]string{"application/jwt"}, "a.b", "malformed UserInfo JWT"},
+		"JWT of 4 segments":   {[]string{"application/jwt"}, "a.b.c.d", "malformed UserInfo JWT"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := fetchUserInfoDescription(t, tc.contentType, tc.body, nil, nil); got != tc.want {
+				t.Errorf("PublicDescription() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFetchUserInfoRejectsUndecryptableResponse: an encrypted UserInfo
+// response the client's own key can't open is refused as a decryption
+// failure.
+func TestFetchUserInfoRejectsUndecryptableResponse(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	purposes := map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{keys.UserInfoDecryption: fapi.ECDHESA256KW}
+	decrypter, err := ephemeral.NewKeyManagerWithDecryption(nil, purposes)
+	if err != nil {
+		t.Fatalf("NewKeyManagerWithDecryption: %v", err)
+	}
+	other, err := ephemeral.NewKeyManagerWithDecryption(nil, purposes)
+	if err != nil {
+		t.Fatalf("NewKeyManagerWithDecryption: %v", err)
+	}
+	otherInfo, err := other.EncryptionPublicKey(context.Background(), keys.UserInfoDecryption, fapi.ECDHESA256KW)
+	if err != nil {
+		t.Fatalf("EncryptionPublicKey: %v", err)
+	}
+	signed := signUserInfoJWS(t, userInfoKey, map[string]any{"sub": userInfoTestSubject, "iss": testIssuer, "aud": testClientID})
+	encrypted, err := jwe.Encrypt(jwe.EncryptRequest{
+		Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM,
+		RecipientKey: otherInfo.PublicKey, ContentType: "JWT", Plaintext: []byte(signed),
+	})
+	if err != nil {
+		t.Fatalf("jwe.Encrypt: %v", err)
+	}
+	got := fetchUserInfoDescription(t, []string{"application/jwt"}, encrypted, func(cfg *client.Config) {
+		cfg.Algorithms.UserInfoKeyManagement = fapi.ECDHESA256KW
+		cfg.Algorithms.UserInfoContentEncryption = fapi.A256GCM
+	}, func(deps *client.Dependencies) {
+		deps.Decryption = decrypter
+	})
+	if want := "UserInfo response decryption failed"; got != want {
+		t.Errorf("PublicDescription() = %q, want %q", got, want)
+	}
+}

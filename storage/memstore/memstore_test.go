@@ -174,6 +174,17 @@ func TestBackchannelAuthenticationStoreRefusesAnotherClientsPoll(t *testing.T) {
 	}
 }
 
+// TestBackchannelAuthenticationStoreRefusesDecisionOnUnknownHandle: a
+// decision for a handle no request was created with is refused.
+func TestBackchannelAuthenticationStoreRefusesDecisionOnUnknownHandle(t *testing.T) {
+	store := NewBackchannelAuthenticationStore()
+	if _, err := store.DecideBackchannelAuthentication(context.Background(), storage.DecideBackchannelAuthentication{
+		HandleHash: sha256.Sum256([]byte("no such handle")), Status: storage.BackchannelAuthenticationApproved,
+	}); err == nil {
+		t.Fatal("decision on an unknown handle = nil error, want refused")
+	}
+}
+
 // TestGrantStoreRefusesAnotherClientsCode pins that memstore checks
 // AuthorizationCodeRedemption.ClientID, so the contract's subtest for it
 // runs rather than skips here.

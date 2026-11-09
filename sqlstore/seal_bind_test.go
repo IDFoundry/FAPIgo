@@ -273,3 +273,27 @@ func TestSealRecordsStopsWithoutProgress(t *testing.T) {
 		t.Fatalf("SealRecords on a row it can't seal = %v, want an error before its deadline", err)
 	}
 }
+
+// SealRecords keeps going while each pass seals something, however many
+// passes leave rows behind: only passes in a row that seal nothing count
+// toward giving up. Here every other UPDATE is skipped, so passes over 8
+// rows seal 4, 2, 1 and 1 of them.
+func TestSealRecordsKeepsGoingWhileItProgresses(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	p := newPlace(t, sqlstore.SQLite)
+	plain := p.migrated()
+	_, db := p.open()
+	for _, id := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
+		createRefreshToken(t, plain, id)
+	}
+	rawExec(t, p, db, "CREATE TABLE "+p.prefix+"ticks (n INTEGER)")
+	rawExec(t, p, db, "INSERT INTO "+p.prefix+"ticks (n) VALUES (0)")
+	rawExec(t, p, db, "CREATE TRIGGER "+p.prefix+"every_other BEFORE UPDATE ON "+p.prefix+"refresh_tokens BEGIN "+
+		"UPDATE "+p.prefix+"ticks SET n = n + 1; "+
+		"SELECT RAISE(IGNORE) WHERE (SELECT n FROM "+p.prefix+"ticks) % 2 = 0; END")
+	d := p.migratedWith(sqlstore.Options{Sealer: testSealer(t), ReadUnsealed: true})
+	if n, err := d.SealRecords(ctx); err != nil || n != 8 {
+		t.Fatalf("SealRecords = %d, %v, want 8, nil", n, err)
+	}
+}

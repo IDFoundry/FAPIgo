@@ -166,6 +166,44 @@ func TestApplyPolicyEssentialSubsetOfTable(t *testing.T) {
 	}
 }
 
+// TestApplyPolicyEssentialSupersetOfTable is
+// TestApplyPolicyEssentialSubsetOfTable for superset_of (§6.1.3.1.5):
+// a present parameter must hold every superset_of value, and an absent
+// one is left absent — only essential (§6.1.3.1.7) makes absence an
+// error.
+func TestApplyPolicyEssentialSupersetOfTable(t *testing.T) {
+	supersetOf := `["a","b"]`
+	cases := []struct {
+		name      string
+		essential bool
+		input     string // "" means the parameter is absent
+		wantJSON  string // "" means the parameter must be absent from the result
+		wantErr   bool
+	}{
+		{name: "essential true, superset input", essential: true, input: `["a","b","e"]`, wantJSON: `["a","b","e"]`},
+		{name: "essential false, superset input", essential: false, input: `["a","b","e"]`, wantJSON: `["a","b","e"]`},
+		{name: "essential true, input missing a value", essential: true, input: `["a","e"]`, wantErr: true},
+		{name: "essential false, input missing a value", essential: false, input: `["a","e"]`, wantErr: true},
+		{name: "essential true, no parameter", essential: true, input: "", wantErr: true},
+		{name: "essential false, no parameter", essential: false, input: "", wantJSON: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ops := PolicyOperators{
+				opEssential:  json.RawMessage(boolJSON(tc.essential)),
+				opSupersetOf: json.RawMessage(supersetOf),
+			}
+			var value json.RawMessage
+			present := tc.input != ""
+			if present {
+				value = json.RawMessage(tc.input)
+			}
+			result, resultPresent, err := applyClaimPolicy(ops, nil, value, present)
+			checkClaimPolicyResult(t, result, resultPresent, err, tc.wantJSON, tc.wantErr)
+		})
+	}
+}
+
 // checkClaimPolicyResult asserts applyClaimPolicy's output against one
 // table row's expectation: an error (wantErr), an absent parameter
 // (wantJSON == ""), or a present one equal to wantJSON.

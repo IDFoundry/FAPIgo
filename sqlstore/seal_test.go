@@ -431,6 +431,31 @@ func TestRotatingSealer(t *testing.T) {
 	}
 }
 
+// kmsSealer stands for a Sealer other than AESGCMSealer, a key
+// management service's, say: RotatingSealer can't tell its keys apart.
+type kmsSealer struct{ sqlstore.Sealer }
+
+// RotatingSealer rotates between Sealers it can't compare keys of, two
+// of them included, as it does between AESGCMSealers.
+func TestRotatingSealerOfOtherSealers(t *testing.T) {
+	ctx := context.Background()
+	oldKey, newKey := kmsSealer{testSealer(t)}, kmsSealer{testSealer(t)}
+	p := newPlace(t, sqlstore.SQLite)
+	oldHash := createRefreshToken(t, p.migratedWith(sqlstore.Options{Sealer: oldKey}), "old")
+	rotating, err := sqlstore.RotatingSealer(newKey, oldKey)
+	must(t, err)
+	after := p.migratedWith(sqlstore.Options{Sealer: rotating})
+	newHash := createRefreshToken(t, after, "new")
+	for name, hash := range map[string][32]byte{"old": oldHash, "new": newHash} {
+		if _, err := after.Grants().RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: hash}); err != nil {
+			t.Errorf("RedeemRefreshToken(%s key's record) through the rotating sealer = %v", name, err)
+		}
+	}
+	if _, err := sqlstore.RotatingSealer(kmsSealer{testSealer(t)}, testSealer(t), kmsSealer{testSealer(t)}); err != nil {
+		t.Errorf("RotatingSealer(mixed sealers) = %v", err)
+	}
+}
+
 // SealRecords seals tables of more rows than one of its batches, every
 // row once.
 func TestSealRecordsPagesThroughTables(t *testing.T) {

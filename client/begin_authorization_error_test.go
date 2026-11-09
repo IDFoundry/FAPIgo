@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -128,5 +129,47 @@ func TestBeginAuthorizationPropagatesTransportFailureOnPARRetry(t *testing.T) {
 	}
 	if as.parCallCount != 1 {
 		t.Fatalf("parCallCount = %d, want 1 (the retry failed at the transport, never reaching the fake AS)", as.parCallCount)
+	}
+}
+
+// TestBeginAuthorizationRejectsMalformedPARResponse: a 201 PAR response
+// that isn't RFC 9126 §2.2's request_uri and positive expires_in is
+// invalid_response, and no session is created for it.
+func TestBeginAuthorizationRejectsMalformedPARResponse(t *testing.T) {
+	for name, body := range map[string]string{
+		"not JSON":       `{"request_uri":`,
+		"no request_uri": `{"expires_in":60}`,
+		"no expires_in":  `{"request_uri":"urn:ietf:params:oauth:request_uri:abc123"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(body))
+			}))
+			t.Cleanup(ts.Close)
+			cfg := validConfig(t)
+			parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
+			if err != nil {
+				t.Fatalf("ParseEndpointURL(par): %v", err)
+			}
+			cfg.Endpoints.PushedAuthorizationRequest = parURL
+			deps := validDependencies(t)
+			deps.HTTP = ts.Client()
+			sessions := newFakeSessionStore()
+			deps.Sessions = sessions
+			c, err := client.New(cfg, deps)
+			if err != nil {
+				t.Fatalf("client.New: %v", err)
+			}
+			_, err = c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+			var cerr *client.Error
+			if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
+				t.Fatalf("BeginAuthorization(%s) = %v, want invalid_response", name, err)
+			}
+			if len(sessions.sessions) != 0 {
+				t.Errorf("%d sessions created, want none", len(sessions.sessions))
+			}
+		})
 	}
 }

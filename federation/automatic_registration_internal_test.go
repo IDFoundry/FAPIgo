@@ -261,6 +261,58 @@ func TestRegisteredClientConfigFromMetadataAcceptsSelfSignedTLSClientAuth(t *tes
 	}
 }
 
+// TestRegisteredClientConfigFromMetadataSkipsUnparseableX5C: an entry
+// whose x5c isn't a certificate is skipped, not fatal, so the
+// certificate of another key in the same RP JWK Set still registers.
+func TestRegisteredClientConfigFromMetadataSkipsUnparseableX5C(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	cert := testSelfSignedCert(t, key)
+	otherKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	var good, bad map[string][]map[string]any
+	if err := json.Unmarshal([]byte(jwksWithCertificate(t, key, cert)), &good); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(jwksWithCertificate(t, otherKey, cert)), &bad); err != nil {
+		t.Fatal(err)
+	}
+	bad["keys"][0]["kid"] = "rp-bad-x5c"
+	bad["keys"][0]["x5c"] = []string{base64.StdEncoding.EncodeToString([]byte("not a real DER certificate"))}
+	body, err := json.Marshal(map[string]any{"keys": []map[string]any{bad["keys"][0], good["keys"][0]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwks := string(body)
+	raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"self_signed_tls_client_auth","jwks":` + jwks + `}`
+	cfg, _, err := call(t, newTestAutomaticClientRepository(AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}}), raw)
+	if err != nil {
+		t.Fatalf("registeredClientConfigFromMetadata: %v", err)
+	}
+	if want := mtls.Thumbprint(cert); cfg.ExpectedCertificateThumbprint != want {
+		t.Errorf("ExpectedCertificateThumbprint = %q, want the second key's %q", cfg.ExpectedCertificateThumbprint, want)
+	}
+}
+
+// TestRegisteredClientConfigFromMetadataRejectsJWKSURIServingNoJWKS: a
+// jwks_uri whose document, though served as JSON, isn't a JWK Set is
+// refused at registration, not registered as the client's keys.
+func TestRegisteredClientConfigFromMetadataRejectsJWKSURIServingNoJWKS(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":"not an array"}`))
+	}))
+	t.Cleanup(ts.Close)
+	raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"private_key_jwt","token_endpoint_auth_signing_alg":"ES256","jwks_uri":"` + ts.URL + `/jwks.json"}`
+	if _, _, err := call(t, newTestAutomaticClientRepositoryWithFetcher(t, AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}}, testFetcher(t, ts)), raw); err == nil || !strings.Contains(err.Error(), "parse fetched jwks") {
+		t.Fatalf("registeredClientConfigFromMetadata(jwks_uri serving no JWK Set) = %v, want a parse fetched jwks error", err)
+	}
+}
+
 func TestRegisteredClientConfigFromMetadataAcceptsTLSClientAuthSubjectDN(t *testing.T) {
 	raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"tls_client_auth","tls_client_auth_subject_dn":"CN=rp.example.org","jwks":` + generatedRPJWKS(t) + `}`
 	cfg, _, err := call(t, newTestAutomaticClientRepository(AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}}), raw)

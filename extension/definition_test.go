@@ -76,6 +76,17 @@ func TestNewRegistryRejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestNewRegistryRejectsEmptyName(t *testing.T) {
+	unnamed := extension.Definition[string]{
+		Sensitivity: extension.NotSensitive,
+		Name:        "", Cardinality: extension.Single,
+		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
+	}
+	if _, err := extension.NewRegistry(unnamed); err == nil {
+		t.Fatalf("NewRegistry(empty name) = nil error, want error")
+	}
+}
+
 func TestNewRegistryRejectsCardinalityMismatch(t *testing.T) {
 	bad := extension.Definition[accountHint]{
 		Sensitivity: extension.NotSensitive,

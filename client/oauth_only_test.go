@@ -2,6 +2,9 @@ package client_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"errors"
 	"strings"
 	"testing"
@@ -9,6 +12,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // oauthOnly makes a test client OAuthOnly with no issuer keys and no
@@ -187,5 +191,29 @@ func TestNewMaxIDTokenLifetimeRequirement(t *testing.T) {
 				t.Fatalf("client.New() error = %v, want one about max_id_token_lifetime", err)
 			}
 		})
+	}
+}
+
+// TestOAuthOnlyClientWithoutIssuerKeysRefusesIssuerJWS: an OAuthOnly
+// client built without Dependencies.IssuerKeys has nothing to verify an
+// issuer-signed JWS with, and says so rather than failing some other
+// way.
+func TestOAuthOnlyClientWithoutIssuerKeysRefusesIssuerJWS(t *testing.T) {
+	cfg, deps := validConfig(t), validDependencies(t)
+	oauthOnly(&cfg, &deps)
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, KeyID: "as-kid"}, []byte(`{"iss":"`+testIssuer+`"}`))
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+	if _, err := c.VerifyIssuerJWS(context.Background(), compact); clientErrorCode(t, err) != client.ErrorInternal {
+		t.Fatalf("VerifyIssuerJWS without issuer keys = %v, want an internal error", err)
 	}
 }

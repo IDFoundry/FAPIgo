@@ -253,3 +253,33 @@ func advertisedSubjectTypes(t *testing.T, op json.RawMessage) []string {
 	}
 	return md.SubjectTypesSupported
 }
+
+// TestEntityConfigurationRefusesMalformedOpenIDProviderMetadata: with
+// automatic registration configured, the embedder's openid_provider
+// metadata is rewritten, so one that isn't a JSON object, or whose
+// client_registration_types_supported isn't an array of strings, is
+// refused rather than signed.
+func TestEntityConfigurationRefusesMalformedOpenIDProviderMetadata(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, "")
+	cfg, deps := automaticRegistrationTestConfig(t, f, func(cfg *server.Config, deps *server.Dependencies) {
+		cfg.Federation = server.FederationConfig{EntityID: testIssuer, Lifetime: time.Hour, Algorithm: fapi.ES256}
+		deps.Keys.(*fakeKeyManager).federationKey = generateKey(t)
+	})
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for name, op := range map[string]string{
+		"null":     `null`,
+		"an array": `[]`,
+		"a string": `"openid_provider"`,
+		"client_registration_types_supported string": `{"issuer":"` + testIssuer + `","client_registration_types_supported":"automatic"}`,
+		"client_registration_types_supported number": `{"issuer":"` + testIssuer + `","client_registration_types_supported":[1]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := srv.EntityConfiguration(context.Background(), map[string]json.RawMessage{"openid_provider": json.RawMessage(op)}); err == nil {
+				t.Errorf("EntityConfiguration(openid_provider %s) = nil error, want an error", op)
+			}
+		})
+	}
+}

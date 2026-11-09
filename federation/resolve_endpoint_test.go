@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +25,13 @@ import (
 // resolve endpoint URL, and a *federation.Resolver already configured
 // to trust it.
 func selfAnchoredResolveEndpoint(t *testing.T, subject string, metadata map[string]json.RawMessage) (entityID, resolveEndpoint string, resolver *federation.Resolver, server *httptest.Server) {
+	t.Helper()
+	return selfAnchoredResolveEndpointRecording(t, subject, metadata, nil)
+}
+
+// selfAnchoredResolveEndpointRecording is selfAnchoredResolveEndpoint,
+// sending each resolve request's query to queries when it isn't nil.
+func selfAnchoredResolveEndpointRecording(t *testing.T, subject string, metadata map[string]json.RawMessage, queries chan<- url.Values) (entityID, resolveEndpoint string, resolver *federation.Resolver, server *httptest.Server) {
 	t.Helper()
 	key := generateKey(t)
 	jwks := jwksFor(t, "resolver-key", key)
@@ -53,6 +62,9 @@ func selfAnchoredResolveEndpoint(t *testing.T, subject string, metadata map[stri
 		t.Fatalf("intfed.CreateResolveResponse: %v", err)
 	}
 	mux.HandleFunc("/resolve", func(w http.ResponseWriter, r *http.Request) {
+		if queries != nil {
+			queries <- r.URL.Query()
+		}
 		if r.URL.Query().Get("sub") != subject {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -89,6 +101,28 @@ func TestResolveViaEndpoint(t *testing.T) {
 	}
 	if _, ok := claims.Metadata["openid_provider"]; !ok {
 		t.Errorf("Metadata missing openid_provider: %v", claims.Metadata)
+	}
+}
+
+// TestResolveViaEndpointSendsEntityTypes: §8.3.1's entity_type
+// parameter is sent once per requested Entity Type, alongside sub and
+// trust_anchor.
+func TestResolveViaEndpointSendsEntityTypes(t *testing.T) {
+	metadata := map[string]json.RawMessage{"openid_provider": json.RawMessage(`{}`)}
+	queries := make(chan url.Values, 1)
+	entityID, resolveEndpoint, resolver, _ := selfAnchoredResolveEndpointRecording(t, "https://op.example.org", metadata, queries)
+	if _, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
+		Endpoint: resolveEndpoint, Subject: "https://op.example.org", TrustAnchor: entityID, ExpectedIssuer: entityID,
+		EntityTypes: []string{"openid_provider", "federation_entity"},
+	}); err != nil {
+		t.Fatalf("ResolveViaEndpoint: %v", err)
+	}
+	q := <-queries
+	if got := q["entity_type"]; !slices.Equal(got, []string{"openid_provider", "federation_entity"}) {
+		t.Errorf("entity_type = %q, want both requested types", got)
+	}
+	if q.Get("sub") != "https://op.example.org" || q.Get("trust_anchor") != entityID {
+		t.Errorf("query = %v, want sub and trust_anchor too", q)
 	}
 }
 

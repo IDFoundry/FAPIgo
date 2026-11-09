@@ -5,7 +5,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -324,6 +326,19 @@ func TestResolveAccessTokenAcceptsKeyWithinMaxCandidates(t *testing.T) {
 	}
 	if resolved.Subject != "user-1" {
 		t.Fatalf("Subject = %q, want %q", resolved.Subject, "user-1")
+	}
+}
+
+// TestResolveAccessTokenKeyResolutionFailureIsServerError: when the
+// issuer's keys can't be resolved, the token isn't the problem, so the
+// error is a 500 server_error, not a 401 invalid_token.
+func TestResolveAccessTokenKeyResolutionFailureIsServerError(t *testing.T) {
+	jwt, accessToken := jwtAccessTokensWithCandidateKeys(t, 0, 1, 0)
+	jwt.IssuerKeys = &fakeIssuerKeySource{err: errors.New("key source unavailable")}
+	_, err := jwt.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{Raw: accessToken, Now: time.Now()})
+	var rerr *resource.Error
+	if !errors.As(err, &rerr) || rerr.HTTPStatus() != http.StatusInternalServerError || rerr.Code() != resource.ErrorServerError {
+		t.Fatalf("ResolveAccessToken(key source failing) = %v, want a 500 server_error", err)
 	}
 }
 

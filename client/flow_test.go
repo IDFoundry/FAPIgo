@@ -1323,6 +1323,29 @@ func TestHandleAuthorizationResponseRejectsUnverifiableJARM(t *testing.T) {
 	}
 }
 
+// TestHandleAuthorizationResponseRejectsMalformedJARM: a "response"
+// parameter that isn't a compact JWS at all is refused as malformed,
+// before any issuer key is looked up for it.
+func TestHandleAuthorizationResponseRejectsMalformedJARM(t *testing.T) {
+	for _, response := range []string{"not-a-jwt", "two.segments", "a.b.c.d"} {
+		t.Run(response, func(t *testing.T) {
+			c, _, _ := newTestClient(t, true)
+			ctx := context.Background()
+			session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+			if err != nil {
+				t.Fatalf("BeginAuthorization: %v", err)
+			}
+			q := url.Values{}
+			q.Set("response", response)
+			_, err = c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode(), Session: session.Handle()})
+			var cerr *client.Error
+			if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse || cerr.PublicDescription() != "malformed authorization response" {
+				t.Fatalf("HandleAuthorizationResponse(response=%s) = %v, want invalid_response: malformed authorization response", response, err)
+			}
+		})
+	}
+}
+
 func TestCompleteAuthorizationDenied(t *testing.T) {
 	c, as, _ := newTestClient(t, false)
 	ctx := context.Background()

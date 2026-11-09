@@ -147,8 +147,13 @@ func TestClientKeysFetchJWKSURI(t *testing.T) {
 func TestClientKeyRegistrationRefusals(t *testing.T) {
 	jwks := clientJWKS(t, "k")
 	uri := mustURL(t, "https://rp.example/jwks")
+	// A loopback http URL is a fapi.URL too, but not one a client's keys
+	// may be fetched from: reading the row back would refuse it.
+	httpURI, err := fapi.ParseEndpointURL("http://127.0.0.1/jwks", fapi.AllowLoopbackHTTP())
+	must(t, err)
 	for name, reg := range map[string]sqlstore.ClientKeyRegistration{
 		"both":             {JWKSURI: uri, JWKS: jwks},
+		"http jwks_uri":    {JWKSURI: httpURI},
 		"not an object":    {JWKS: json.RawMessage(`["keys"]`)},
 		"not JSON":         {JWKS: json.RawMessage(`{"keys":`)},
 		"no usable key":    {JWKS: json.RawMessage(`{"keys":[]}`)},

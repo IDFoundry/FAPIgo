@@ -35,6 +35,8 @@ func TestParseRefusesStatementsSection32Rejects(t *testing.T) {
 		"§3.1.2 authority_hints not an Entity ID":      {ec, `"authority_hints":["not a url"]`, true},
 		"§3.1.2 authority_hints empty fragment":        {ec, `"authority_hints":["https://ia.example.org#"]`, true},
 		"§3.1.3 metadata_policy_crit empty":            {ss, `"metadata_policy_crit":[]`, true},
+		"§3.1.3 metadata_policy_crit empty string":     {ss, `"metadata_policy_crit":["regexp",""]`, true},
+		"§3.1.2 authority_hints empty string":          {ec, `"authority_hints":[""]`, true},
 		"§3.1.3 metadata_policy_crit listed":           {ss, `"metadata_policy_crit":["regexp"]`, false},
 		"§5 null entity-type metadata":                 {ec, `"metadata":{"openid_relying_party":null}`, true},
 		"§5 non-object entity-type metadata":           {ec, `"metadata":{"openid_relying_party":[]}`, true},

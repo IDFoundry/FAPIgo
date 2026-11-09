@@ -59,6 +59,9 @@ type fakeCIBAAS struct {
 	// bcInterval, if non-zero, replaces the "interval" (5) in the
 	// backchannel authentication response.
 	bcInterval int64
+	// bcBody, if non-empty, is sent as the backchannel authentication
+	// response's whole JSON body instead.
+	bcBody string
 
 	// tokenResponses is a queue of canned responses handleToken pops
 	// from, in order — lets a test script a sequence of polls (e.g.
@@ -134,6 +137,13 @@ func (a *fakeCIBAAS) handleBackchannelAuth(w http.ResponseWriter, r *http.Reques
 		w.Header().Set("Content-Type", a.bcNonOAuthContentType)
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte("<html>502 Bad Gateway</html>"))
+		return
+	}
+
+	if a.bcBody != "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(a.bcBody))
 		return
 	}
 
@@ -844,5 +854,158 @@ func TestBeginBackchannelAuthenticationCapsInterval(t *testing.T) {
 		if session.Interval() != 120*time.Second {
 			t.Errorf("interval %d: Interval() = %v, want the 120s expires_in", interval, session.Interval())
 		}
+	}
+}
+
+// TestBeginBackchannelAuthenticationSendsTheGivenHint: whichever one of
+// the three hints CIBA Core §7.1 allows the request names is the one the
+// signed request object carries, and the only one.
+func TestBeginBackchannelAuthenticationSendsTheGivenHint(t *testing.T) {
+	for claim, req := range map[string]client.BeginBackchannelAuthenticationRequest{
+		"login_hint_token": {LoginHintToken: "opaque-login-hint-token"},
+		"id_token_hint":    {IDTokenHint: "previously.issued.id-token"},
+	} {
+		t.Run(claim, func(t *testing.T) {
+			c, as, _ := newTestClientWithCIBA(t)
+			req.Scope = []string{"openid"}
+			if _, err := c.BeginBackchannelAuthentication(context.Background(), req); err != nil {
+				t.Fatalf("BeginBackchannelAuthentication: %v", err)
+			}
+			obj, err := requestobject.Parse(as.lastBCForm.Get("request"))
+			if err != nil {
+				t.Fatalf("parse request object: %v", err)
+			}
+			assertStringClaims(t, obj, map[string]string{claim: req.LoginHintToken + req.IDTokenHint})
+			for _, other := range []string{"login_hint", "login_hint_token", "id_token_hint"} {
+				if _, ok := obj.Parameter(other); ok && other != claim {
+					t.Errorf("request object also carries %q", other)
+				}
+			}
+		})
+	}
+}
+
+// TestBeginBackchannelAuthenticationDefaultsTheInterval: a response
+// without "interval" (CIBA Core §7.3: OPTIONAL) polls every 5 seconds,
+// the default §7.3 names.
+func TestBeginBackchannelAuthenticationDefaultsTheInterval(t *testing.T) {
+	c, as, _ := newTestClientWithCIBA(t)
+	as.bcBody = `{"auth_req_id":"test-auth-req-id","expires_in":120}`
+	session := beginTestBackchannelSession(t, c)
+	if session.Interval() != 5*time.Second {
+		t.Errorf("Interval() = %v, want the 5s default", session.Interval())
+	}
+}
+
+// TestBeginBackchannelAuthenticationRejectsMalformedResponse: a 200
+// response that isn't a well-formed CIBA Core §7.3 acknowledgement is
+// invalid_response, and no session is returned for it.
+func TestBeginBackchannelAuthenticationRejectsMalformedResponse(t *testing.T) {
+	for name, body := range map[string]string{
+		"not JSON":            `{"auth_req_id":`,
+		"no auth_req_id":      `{"expires_in":120}`,
+		"no expires_in":       `{"auth_req_id":"test-auth-req-id"}`,
+		"a negative interval": `{"auth_req_id":"test-auth-req-id","expires_in":120,"interval":-1}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, as, _ := newTestClientWithCIBA(t)
+			as.bcBody = body
+			_, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
+				Scope: []string{"openid"}, LoginHint: "user@example.com",
+			})
+			var cerr *client.Error
+			if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
+				t.Fatalf("BeginBackchannelAuthentication(%s) = %v, want invalid_response", name, err)
+			}
+		})
+	}
+}
+
+// TestPollBackchannelAuthenticationRejectsMalformedTokenResponse: a 200
+// poll response whose body isn't a well-formed token response is
+// refused as malformed, not an approval.
+func TestPollBackchannelAuthenticationRejectsMalformedTokenResponse(t *testing.T) {
+	for name, body := range map[string]string{
+		"not JSON":            `{"access_token":`,
+		"negative expires_in": `{"access_token":"at-1","token_type":"DPoP","expires_in":-1}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, as, _ := newTestClientWithCIBA(t)
+			session := beginTestBackchannelSession(t, c)
+			as.tokenResponses = []cibaTokenResponse{{status: http.StatusOK, contentType: "application/json", raw: body}}
+			result, err := c.PollBackchannelAuthentication(context.Background(), session)
+			var cerr *client.Error
+			if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse || cerr.PublicDescription() != "malformed token response" {
+				t.Fatalf("PollBackchannelAuthentication(%s) = %#v, %v, want invalid_response: malformed token response", name, result, err)
+			}
+		})
+	}
+}
+
+// approvedCIBATokens runs a CIBA request for "openid accounts" to
+// approval and returns its tokens: an ID token for end-user-1 and the
+// refresh token rt-1.
+func approvedCIBATokens(t *testing.T, c *client.Client, as *fakeCIBAAS) client.TokenSet {
+	t.Helper()
+	session := beginTestBackchannelSession(t, c)
+	as.tokenResponses = []cibaTokenResponse{{status: http.StatusOK, body: map[string]any{
+		"access_token": "at-1", "token_type": "DPoP", "expires_in": 300, "scope": "openid accounts",
+		"id_token": newCIBAIDToken(t, as), "refresh_token": "rt-1",
+	}}}
+	result, err := c.PollBackchannelAuthentication(context.Background(), session)
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication: %v", err)
+	}
+	return result.(client.BackchannelAuthenticationApproved).Tokens
+}
+
+// TestRefreshTokensReturnsTheRefreshedIDToken: a refresh response with
+// a new ID token for the same end-user (OIDC Core §12.2) gives the
+// result that ID token and its claims, not the original's.
+func TestRefreshTokensReturnsTheRefreshedIDToken(t *testing.T) {
+	c, as, _ := newTestClientWithCIBA(t)
+	tokens := approvedCIBATokens(t, c, as)
+	refreshed, err := token.IssueIDToken(token.IDTokenParams{
+		Signer: as.idTokenKey, Algorithm: fapi.ES256, KeyID: "as-id-kid",
+		Issuer: testIssuer, Subject: "end-user-1", Audience: testClientID,
+		Now: time.Now(), Lifetime: time.Minute, ACR: "refreshed-acr",
+	})
+	if err != nil {
+		t.Fatalf("issue id token: %v", err)
+	}
+	as.tokenResponses = []cibaTokenResponse{{status: http.StatusOK, body: map[string]any{
+		"access_token": "at-2", "token_type": "DPoP", "expires_in": 300, "id_token": refreshed,
+	}}}
+	got, err := c.RefreshTokens(context.Background(), client.RefreshTokenRequest{Tokens: tokens})
+	if err != nil {
+		t.Fatalf("RefreshTokens: %v", err)
+	}
+	if !got.HasIDToken || got.IDToken.Reveal() != refreshed || got.IDTokenClaims.ACR != "refreshed-acr" {
+		t.Errorf("refreshed ID token = %q (%v), acr %q; want the refresh response's", got.IDToken.Reveal(), got.HasIDToken, got.IDTokenClaims.ACR)
+	}
+	if got.Subject != "end-user-1" || got.RefreshToken.Reveal() != "rt-1" {
+		t.Errorf("Subject %q, refresh token %q; want end-user-1 and the original rt-1", got.Subject, got.RefreshToken.Reveal())
+	}
+}
+
+// TestRefreshTokensNarrowedScopeWithoutResponseScope: a refresh asking
+// for less than the original grant, answered without "scope", has the
+// scope it asked for (RFC 6749 §5.1: omitted means as requested), not
+// the original grant's.
+func TestRefreshTokensNarrowedScopeWithoutResponseScope(t *testing.T) {
+	c, as, _ := newTestClientWithCIBA(t)
+	tokens := approvedCIBATokens(t, c, as)
+	as.tokenResponses = []cibaTokenResponse{{status: http.StatusOK, body: map[string]any{
+		"access_token": "at-2", "token_type": "DPoP", "expires_in": 300,
+	}}}
+	got, err := c.RefreshTokens(context.Background(), client.RefreshTokenRequest{Tokens: tokens, Scope: []string{"accounts"}})
+	if err != nil {
+		t.Fatalf("RefreshTokens: %v", err)
+	}
+	if as.lastPollForm.Get("scope") != "accounts" {
+		t.Errorf("refresh request scope = %q, want accounts", as.lastPollForm.Get("scope"))
+	}
+	if got.Scope != "accounts" {
+		t.Errorf("Scope = %q, want the narrowed accounts", got.Scope)
 	}
 }

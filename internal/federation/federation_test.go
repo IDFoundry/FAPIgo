@@ -163,6 +163,18 @@ func TestCreateRejectsMixedVariantClaims(t *testing.T) {
 	if _, err := Create(subordinateWithTrustMarkOwners); err == nil {
 		t.Errorf("Create(subordinate statement with trust_mark_owners) = nil error, want error")
 	}
+
+	subordinateWithTrustMarkIssuers := subordinateStatementParams(t, key, "https://superior.example.org", "https://rp.example.org", now)
+	subordinateWithTrustMarkIssuers.TrustMarkIssuers = map[string][]string{
+		"https://federation.example.org/marks/certified": {"https://issuer.example.org"},
+	}
+	if _, err := Create(subordinateWithTrustMarkIssuers); err == nil {
+		t.Errorf("Create(subordinate statement with trust_mark_issuers) = nil error, want error")
+	}
+	// Claim placement is checked even without the Parse round trip.
+	if _, err := CreateUncheckedForTesting(subordinateWithTrustMarkIssuers); err == nil {
+		t.Errorf("CreateUncheckedForTesting(subordinate statement with trust_mark_issuers) = nil error, want error")
+	}
 }
 
 func TestCreateAndParseRoundTripsTrustMarksClaim(t *testing.T) {

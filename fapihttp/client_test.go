@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -616,5 +617,118 @@ func TestPostRejectsMissingTLSState(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("Post(no TLS state) = nil error, want error")
+	}
+}
+
+// countingServer is an httptest.Server answering every request with
+// handler, and the number of requests it has had.
+func countingServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var hits atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		handler(w, r)
+	}))
+	t.Cleanup(ts.Close)
+	return ts, &hits
+}
+
+// TestFetchRejectsMissingFields: a FetchRequest without a URL or an
+// expected content type is refused before any request is made.
+func TestFetchRejectsMissingFields(t *testing.T) {
+	ts, hits := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	})
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for name, req := range map[string]fapihttp.FetchRequest{
+		"no url":                   {ExpectedContentType: "application/json"},
+		"no expected content type": {URL: mustParseURL(t, ts.URL)},
+	} {
+		if _, err := c.Fetch(context.Background(), req); err == nil || !strings.Contains(err.Error(), "required") {
+			t.Errorf("Fetch(%s) = %v, want a required-field error", name, err)
+		}
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("server had %d requests, want none", n)
+	}
+}
+
+// TestFetchRejectsRedirectWithoutLocation: a redirect with no Location
+// header is refused, not followed back to the same URL.
+func TestFetchRejectsRedirectWithoutLocation(t *testing.T) {
+	ts, hits := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusFound)
+	})
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Fetch(context.Background(), fapihttp.FetchRequest{URL: mustParseURL(t, ts.URL), ExpectedContentType: "application/json"})
+	if err == nil || errors.Is(err, fapihttp.ErrTooManyRedirects) || !strings.Contains(err.Error(), "no Location") {
+		t.Fatalf("Fetch(redirect without Location) = %v, want a missing-Location error", err)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Errorf("server had %d requests, want 1", n)
+	}
+}
+
+// TestFetchRejectsAbsentOrMalformedContentType: a response with no
+// Content-Type at all (not even the one net/http would sniff), or one
+// whose parameters don't parse — mime.ParseMediaType still returns its
+// media type then — is ErrUnexpectedContentType, for Fetch and Post,
+// saying which.
+func TestFetchRejectsAbsentOrMalformedContentType(t *testing.T) {
+	for name, tc := range map[string]struct {
+		contentType []string
+		want        string
+	}{
+		"absent":              {nil, "response has no Content-Type"},
+		"malformed parameter": {[]string{"application/json; charset"}, "mime: invalid media parameter"},
+	} {
+		contentType := tc.contentType
+		t.Run(name, func(t *testing.T) {
+			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header()["Content-Type"] = contentType
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer ts.Close()
+			c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			u := mustParseURL(t, ts.URL)
+			if _, err := c.Fetch(context.Background(), fapihttp.FetchRequest{URL: u, ExpectedContentType: "application/json"}); !errors.Is(err, fapihttp.ErrUnexpectedContentType) || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Fetch = %v, want ErrUnexpectedContentType: %s", err, tc.want)
+			}
+			if _, err := c.Post(context.Background(), fapihttp.PostRequest{URL: u, ContentType: "application/json", ExpectedContentType: "application/json"}); !errors.Is(err, fapihttp.ErrUnexpectedContentType) || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Post = %v, want ErrUnexpectedContentType: %s", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestFetchResolvesHostNames: a URL naming its host (here localhost)
+// is fetched through the system resolver's answer, each address of
+// which the loopback permission allows.
+func TestFetchResolvesHostNames(t *testing.T) {
+	ts, hits := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	})
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	u := mustParseURL(t, ts.URL)
+	u.Host = "localhost:" + u.Port()
+	if _, err := c.Fetch(context.Background(), fapihttp.FetchRequest{URL: u, ExpectedContentType: "application/json"}); err != nil {
+		t.Fatalf("Fetch(%s): %v", u, err)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Errorf("server had %d requests, want 1", n)
 	}
 }

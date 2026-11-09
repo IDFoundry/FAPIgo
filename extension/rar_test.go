@@ -140,6 +140,14 @@ func TestNewRARRegistryRejectsInvalidBounds(t *testing.T) {
 	if _, err := extension.NewRARRegistry(4096, 4, zeroObjects); err == nil {
 		t.Fatalf("NewRARRegistry(zero max objects) = nil error, want error")
 	}
+	zeroBytes := extension.RARDefinition[paymentDetail]{Type: "x", MaxObjects: 1, MaxBytesPerObject: 0}
+	if _, err := extension.NewRARRegistry(4096, 4, zeroBytes); err == nil {
+		t.Fatalf("NewRARRegistry(zero max bytes per object) = nil error, want error")
+	}
+	emptyType := extension.RARDefinition[paymentDetail]{Type: "", MaxObjects: 1, MaxBytesPerObject: 64}
+	if _, err := extension.NewRARRegistry(4096, 4, emptyType); err == nil {
+		t.Fatalf("NewRARRegistry(empty type) = nil error, want error")
+	}
 }
 
 // RFC 9396 §10's "authorization_details_types_supported" metadata field

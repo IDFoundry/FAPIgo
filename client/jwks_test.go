@@ -218,6 +218,35 @@ func TestPublicJWKSIncludesEncryptionKeyWhenConfigured(t *testing.T) {
 	}
 }
 
+// TestPublicJWKSIncludesUserInfoEncryptionKeyWhenConfigured: with
+// UserInfo encryption configured, the UserInfoDecryption key is
+// published too, for the server to encrypt UserInfo responses to.
+func TestPublicJWKSIncludesUserInfoEncryptionKeyWhenConfigured(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Algorithms.UserInfoKeyManagement = fapi.RSAOAEP256
+	cfg.Algorithms.UserInfoContentEncryption = fapi.A256GCM
+	cfg.Endpoints.UserInfo = mustParseEndpointURL(t, "https://as.example.com/userinfo")
+	deps := validDependencies(t)
+	dec := newFakePublicKeyDecrypter(t, keys.UserInfoDecryption)
+	deps.Decryption = dec
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	set, err := c.PublicJWKS(context.Background())
+	if err != nil {
+		t.Fatalf("PublicJWKS: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, k := range set.Keys {
+		seen[k.KeyID()] = true
+	}
+	if len(set.Keys) != 2 || !seen[dec.keyID(keys.UserInfoDecryption)] {
+		t.Fatalf("Keys = %v, want the signing kid and the UserInfo encryption kid", seen)
+	}
+}
+
 // TestPublicJWKSMarshalsEncryptionKeyWithUseEnc confirms the published
 // encryption key actually carries "use":"enc" (not "sig", and not
 // omitted) — the member a verifier needs to tell it apart from the

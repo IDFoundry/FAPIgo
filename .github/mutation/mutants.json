@@ -1,0 +1,658 @@
+[
+  {
+    "id": "fed-leaf-vouched-jwks",
+    "file": "federation/resolver.go",
+    "old": "belowClaims, err := r.verifyAgainstJWKS(st.belowStmt, sup.aboveStmt.ClaimedJWKS(),",
+    "new": "belowClaims, err := r.verifyAgainstJWKS(st.belowStmt, func() json.RawMessage { if hop == 0 { return st.belowStmt.ClaimedJWKS() }; return sup.aboveStmt.ClaimedJWKS() }(),",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestResolveRejectsLeafNotSignedByIntermediateVouchedKey$",
+    "why": "a leaf's Entity Configuration verifies against the keys its Intermediate vouches for, not its own"
+  },
+  {
+    "id": "fed-later-hop-vouched-jwks",
+    "file": "federation/resolver.go",
+    "old": "belowClaims, err := r.verifyAgainstJWKS(st.belowStmt, sup.aboveStmt.ClaimedJWKS(),",
+    "new": "belowClaims, err := r.verifyAgainstJWKS(st.belowStmt, func() json.RawMessage { if hop > 0 { return st.belowStmt.ClaimedJWKS() }; return sup.aboveStmt.ClaimedJWKS() }(),",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestChainExpiresWithAnIntermediateSubordinateStatement|TestResolveMaxPathLengthCountsSuperiors)$",
+    "why": "a Subordinate Statement above the leaf verifies against the keys its superior vouches for"
+  },
+  {
+    "id": "fed-superior-self-signature",
+    "file": "federation/resolver.go",
+    "old": "claims, err := r.verifySelfSigned(config, hint, now)\n\tif err != nil {",
+    "new": "claims, err := r.verifySelfSigned(config, hint, now)\n\tif err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestResolveRejectsSuperiorEntityConfigurationWithBadSelfSignature$",
+    "why": "a superior's Entity Configuration must verify against its own JWKS"
+  },
+  {
+    "id": "fed-superior-metadata-undeclared-type",
+    "file": "federation/resolver.go",
+    "old": "override, ok := superior[entityType]\n\t\tif !ok {",
+    "new": "override, ok := superior[entityType]\n\t\tif !ok && false {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestResolveIgnoresSuperiorMetadataForUndeclaredEntityType$",
+    "why": "superior metadata for an Entity Type the leaf doesn't declare is ignored"
+  },
+  {
+    "id": "fed-tls-client-auth-usable-key",
+    "file": "federation/automatic_registration.go",
+    "old": "if len(thumbprints) == 0 {\n\t\treturn nil, fmt.Errorf(\"the RP JWK Set has no usable key",
+    "new": "if false {\n\t\treturn nil, fmt.Errorf(\"the RP JWK Set has no usable key",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestRegisteredClientConfigFromMetadataRejectsTLSClientAuthWithoutUsableKey$",
+    "why": "a tls_client_auth RP must publish a signing key its certificate can carry"
+  },
+  {
+    "id": "fed-json-depth-cap",
+    "file": "internal/federation/claims_validation.go",
+    "old": "depth >= maxJSONDepth",
+    "new": "false",
+    "module": "root",
+    "packages": [
+      "./internal/federation"
+    ],
+    "run": "^TestParseRefusesStatementsSection32Rejects$",
+    "why": "entity statement JSON nesting is capped at maxJSONDepth"
+  },
+  {
+    "id": "fed-json-depth-cap-boundary",
+    "file": "internal/federation/claims_validation.go",
+    "old": "depth >= maxJSONDepth",
+    "new": "depth > maxJSONDepth",
+    "module": "root",
+    "packages": [
+      "./internal/federation"
+    ],
+    "run": "^TestParseRefusesStatementsSection32Rejects$",
+    "why": "the JSON nesting cap applies at exactly maxJSONDepth"
+  },
+  {
+    "id": "fed-json-depth-cap-below",
+    "file": "internal/federation/claims_validation.go",
+    "old": "depth >= maxJSONDepth",
+    "new": "depth >= maxJSONDepth-1",
+    "module": "root",
+    "packages": [
+      "./internal/federation"
+    ],
+    "run": "^TestParseRefusesStatementsSection32Rejects$",
+    "why": "JSON nested one level below maxJSONDepth is accepted"
+  },
+  {
+    "id": "rar-unregistered-granted-type",
+    "file": "extension/rar.go",
+    "old": "def, ok := r.byType[typ]\n\t\tif !ok {\n\t\t\treturn fmt.Errorf(\"%w: %q\", ErrRARUnregisteredType, typ)",
+    "new": "def, ok := r.byType[typ]\n\t\tif !ok && false {\n\t\t\treturn fmt.Errorf(\"%w: %q\", ErrRARUnregisteredType, typ)",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestRARRegistryValidateRefusesUnregisteredGrantedType$",
+    "why": "ValidateGrant/ValidateNarrowing refuse a granted RAR type the registry never registered"
+  },
+  {
+    "id": "extension-definition-validate",
+    "file": "extension/definition.go",
+    "old": "if err := d.Validate(v); err != nil {",
+    "new": "if err := d.Validate(v); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestRegistryParseRefusesValueValidateRejects$",
+    "why": "Registry.Parse applies the Definition's own Validate (an integrator's business limit)"
+  },
+  {
+    "id": "sqlstore-strictjson-lone-surrogate",
+    "file": "sqlstore/strictjson.go",
+    "old": "high && i > 0",
+    "new": "false",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestParseClientConfigRefusals$",
+    "why": "a high surrogate escape followed by text is refused"
+  },
+  {
+    "id": "srv-cc-scope-allowlist",
+    "file": "server/client_credentials.go",
+    "old": "if !s.clientAllowsScope(client, tok) {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRequestClientCredentialsTokenRejectsUnregisteredScope$",
+    "why": "client_credentials only issues scopes registered for the client"
+  },
+  {
+    "id": "srv-par-request-object-alg",
+    "file": "server/par.go",
+    "old": "if !s.cfg.Algorithms.RequestObject.Contains(alg) {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestPushAuthorizationRequestRejectsRequestObjectAlgorithmNotEnabledServerWide$",
+    "why": "PAR refuses a request-object algorithm the server hasn't enabled"
+  },
+  {
+    "id": "srv-ciba-request-object-alg",
+    "file": "server/backchannel_authentication.go",
+    "old": "if !s.cfg.Algorithms.BackchannelAuthenticationRequest.Contains(alg) {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBeginBackchannelAuthenticationRejectsAlgorithmNotEnabledServerWide$",
+    "why": "CIBA refuses a signed-request algorithm the server hasn't enabled"
+  },
+  {
+    "id": "srv-idtoken-enc-content-alg",
+    "file": "server/idtoken_encryption.go",
+    "old": "if !s.cfg.Algorithms.IDTokenEncryptionContentEncryption.Contains(contentEncryption) {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestExchangeAuthorizationCodeRejectsIDTokenContentEncryptionNotPermittedByServer$",
+    "why": "ID token encryption refuses an enc the server hasn't enabled"
+  },
+  {
+    "id": "srv-userinfo-enc-content-alg",
+    "file": "server/userinfo.go",
+    "old": "if !s.cfg.Algorithms.UserInfoEncryptionContentEncryption.Contains(contentEncryption) {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestSignUserInfoResponseRejectsContentEncryptionNotPermittedByServer$",
+    "why": "UserInfo encryption refuses an enc the server hasn't enabled"
+  },
+  {
+    "id": "srv-ciba-dpop-nonce",
+    "file": "server/backchannel_authentication.go",
+    "old": "if s.deps.Nonces != nil {\n\t\tif challenge := s.checkDPoPNonce(",
+    "new": "if s.deps.Nonces != nil && false {\n\t\tif challenge := s.checkDPoPNonce(",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelAuthenticationChallengesDPoPNonce$",
+    "why": "the backchannel authentication endpoint enforces DPoP nonces"
+  },
+  {
+    "id": "srv-access-token-size-cap",
+    "file": "server/accesstoken.go",
+    "old": "s.cfg.Limits.MaxAccessTokenBytes(); size > limit {",
+    "new": "s.cfg.Limits.MaxAccessTokenBytes(); false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestIssuedAccessTokenBoundedForTheResourceServer$",
+    "why": "an issued access token over Limits.MaxAccessTokenBytes is refused"
+  },
+  {
+    "id": "srv-access-token-size-cap-boundary",
+    "file": "server/accesstoken.go",
+    "old": "s.cfg.Limits.MaxAccessTokenBytes(); size > limit {",
+    "new": "s.cfg.Limits.MaxAccessTokenBytes(); size >= limit {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestIssuedAccessTokenBoundedForTheResourceServer$",
+    "why": "an access token exactly at Limits.MaxAccessTokenBytes is issued"
+  },
+  {
+    "id": "srv-interaction-expiry",
+    "file": "server/complete_authorization.go",
+    "old": "if !now.Before(completed.ExpiresAt) {",
+    "new": "if _ = now; false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCompleteAuthorizationRejectsHandleExpiredByServerClock$",
+    "why": "an interaction handle past its expiry by the server clock is refused"
+  },
+  {
+    "id": "srv-interaction-expiry-boundary",
+    "file": "server/complete_authorization.go",
+    "old": "if !now.Before(completed.ExpiresAt) {",
+    "new": "if now.After(completed.ExpiresAt) {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCompleteAuthorizationRejectsHandleExpiredByServerClock$",
+    "why": "an interaction handle is refused at exactly its expiry"
+  },
+  {
+    "id": "srv-mtls-dn-non-string",
+    "file": "server/client_auth_mtls.go",
+    "old": "if _, ok := atv.Value.(string); !ok {",
+    "new": "if _, ok := atv.Value.(string); !ok && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestMatchesRegisteredSubjectDNNonStringValueAnyToolchain$",
+    "why": "a certificate subject attribute that isn't a string isn't matched through String()"
+  },
+  {
+    "id": "srv-code-grant-revoked",
+    "file": "server/token.go",
+    "old": "if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {\n\t\treturn grantRecord{}, revErr",
+    "new": "if revErr := s.checkGrantNotRevoked(ctx, grant); false && revErr != nil {\n\t\treturn grantRecord{}, revErr",
+    "module": "root",
+    "packages": [
+      "./fapitest"
+    ],
+    "run": "^TestRevokeGrantBeforeTheCodeIsRedeemed$",
+    "why": "a code whose grant was revoked before redemption is refused"
+  },
+  {
+    "id": "srv-opaque-token-issuer",
+    "file": "server/accesstoken.go",
+    "old": "if p.Issuer == \"\" {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestServerOpaqueAccessTokensRequiresIssuer$",
+    "why": "opaque access tokens are refused without an issuer"
+  },
+  {
+    "id": "srv-signedclaims-signature",
+    "file": "internal/token/validate.go",
+    "old": "if err := t.compact.Verify(pub, algorithm); err != nil {\n\t\treturn AccessTokenClaims{}",
+    "new": "if err := t.compact.Verify(pub, algorithm); err != nil && false {\n\t\treturn AccessTokenClaims{}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokeTokenAnswersInvalidTokensWith200$",
+    "why": "AccessToken.SignedClaims checks the signature"
+  },
+  {
+    "id": "srv-client-attestation-signature",
+    "file": "internal/clientattestation/attestation.go",
+    "old": "if err := a.compact.Verify(pub, alg); err != nil {",
+    "new": "if err := a.compact.Verify(pub, alg); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestClientAttestationTriesEveryMatchingAttesterKey$",
+    "why": "a client attestation's signature is checked against the attester key"
+  },
+  {
+    "id": "srv-caller-certificate-key",
+    "file": "internal/jose/callerkey.go",
+    "old": "return checkCallerKeyMaterial(pub)\n}",
+    "new": "return nil\n}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestX5CAttesterChainRefusesUnboundedRSAKeys$",
+    "why": "ValidateCallerCertificateKey bounds caller-supplied certificate keys"
+  },
+  {
+    "id": "backchannel-outbound-hardened",
+    "file": "backchannelhttp/notifier.go",
+    "old": "OutboundHardened: n.hardened}",
+    "new": "OutboundHardened: true}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewProductionRefusesLoopbackOutboundExceptions$",
+    "why": "a notifier with a caller transport doesn't claim outbound hardening"
+  },
+  {
+    "id": "token-id-aud-trusted-only",
+    "file": "internal/token/validate.go",
+    "old": "if !sawExpectedAudience {",
+    "new": "if _ = sawExpectedAudience; false {",
+    "module": "root",
+    "packages": [
+      "./internal/token"
+    ],
+    "run": "^TestIDTokenValidateRejectsOnlyTrustedAudiences$",
+    "why": "an ID token whose aud names only trusted audiences, never the client, is refused"
+  },
+  {
+    "id": "client-jarm-verify",
+    "file": "client/authorization_response.go",
+    "old": "\tif verifyErr != nil {\n\t\treturn nil, \"\", newError(ErrorInvalidResponse, \"authorization response verification failed\", verifyErr)\n\t}",
+    "new": "\tif verifyErr != nil {\n\t\tp := map[string]json.RawMessage{}\n\t\tfor _, k := range []string{\"code\", \"state\", \"error\", \"error_description\", \"iss\"} {\n\t\t\tif v, ok := resp.Parameter(k); ok {\n\t\t\t\tp[k] = v\n\t\t\t}\n\t\t}\n\t\treturn p, responseModeJARM, nil\n\t}",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestHandleAuthorizationResponseRejectsUnverifiableJARM$",
+    "why": "a JARM response that fails verification (key, iss, aud, exp) is refused"
+  },
+  {
+    "id": "client-ciba-token-type",
+    "file": "client/backchannel.go",
+    "old": "if !strings.EqualFold(raw.TokenType, wantTokenType) {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestPollBackchannelAuthenticationRejectsBearerUnderDPoP$",
+    "why": "a CIBA token response's token_type must match the sender constraint"
+  },
+  {
+    "id": "client-key-custody-durable",
+    "file": "client/assurance.go",
+    "old": "if !asserter.KeyCustody().Durable {",
+    "new": "if _ = asserter; false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestNewProductionRequires(Client|Decryption)KeyCustody$",
+    "why": "AssuranceProduction requires Durable custody for Keys and Decryption"
+  },
+  {
+    "id": "client-idtoken-content-enc-valid",
+    "file": "client/client.go",
+    "old": "if !cfg.Algorithms.IDTokenContentEncryption.IsValid() {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestNewNamesEachEncryptionAndMessageSigningRefusal$",
+    "why": "an invalid ID token content-encryption algorithm is refused"
+  },
+  {
+    "id": "client-userinfo-key-mgmt-valid",
+    "file": "client/client.go",
+    "old": "if !cfg.Algorithms.UserInfoKeyManagement.IsValid() {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestNewNamesEachEncryptionAndMessageSigningRefusal$",
+    "why": "an invalid UserInfo key-management algorithm is refused"
+  },
+  {
+    "id": "client-jarm-alg-required",
+    "file": "client/client.go",
+    "old": "if !cfg.Algorithms.JARM.IsValid() {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestNewNamesEachEncryptionAndMessageSigningRefusal$",
+    "why": "Message Signing requires a JARM algorithm"
+  },
+  {
+    "id": "client-request-object-lifetime-max",
+    "file": "client/client.go",
+    "old": "under ProfileFAPISecurityWithMessageSigning\")\n\t}\n\tif cfg.Limits.RequestObjectLifetime > maxRequestObjectLifetime {",
+    "new": "under ProfileFAPISecurityWithMessageSigning\")\n\t}\n\tif false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestNewNamesEachEncryptionAndMessageSigningRefusal$",
+    "why": "Message Signing caps the request object lifetime at 60 minutes"
+  },
+  {
+    "id": "client-request-object-lifetime-max-boundary",
+    "file": "client/client.go",
+    "old": "under ProfileFAPISecurityWithMessageSigning\")\n\t}\n\tif cfg.Limits.RequestObjectLifetime > maxRequestObjectLifetime {",
+    "new": "under ProfileFAPISecurityWithMessageSigning\")\n\t}\n\tif cfg.Limits.RequestObjectLifetime >= maxRequestObjectLifetime {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestNewNamesEachEncryptionAndMessageSigningRefusal$",
+    "why": "a request object lifetime of exactly 60 minutes is accepted"
+  },
+  {
+    "id": "client-jarm-lifetime-positive",
+    "file": "client/client.go",
+    "old": "if cfg.Limits.MaxJARMResponseLifetime <= 0 {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestNewNamesEachEncryptionAndMessageSigningRefusal$",
+    "why": "Message Signing requires a positive MaxJARMResponseLifetime"
+  },
+  {
+    "id": "resource-pairwise-empty-subject",
+    "file": "resource/verify.go",
+    "old": "case internal == \"\":",
+    "new": "case internal == \"\" && false:",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyResolvesPairwiseSubjects$",
+    "why": "a pairwise lookup returning no subject fails closed with a 500"
+  },
+  {
+    "id": "resource-code-grant-batch-revocation",
+    "file": "resource/verify.go",
+    "old": "var keys []string\n\tfor _, c := range grantRevocationClaims {\n\t\traw, ok := claims[c.claim]\n\t\tif !ok {\n\t\t\tcontinue",
+    "new": "var keys []string\n\tfor _, c := range grantRevocationClaims {\n\t\traw, ok := claims[c.claim]\n\t\tif !ok {\n\t\t\treturn keys, true",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyChecksTheCodeGrantRevocation$",
+    "why": "a code_grant_id-only token's revoked code grant is refused on the batch path too"
+  },
+  {
+    "id": "fapihttp-no-addresses",
+    "file": "fapihttp/client.go",
+    "old": "if len(ips) == 0 {\n\t\treturn ErrSSRFBlocked",
+    "new": "if false {\n\t\treturn ErrSSRFBlocked",
+    "module": "root",
+    "packages": [
+      "./fapihttp"
+    ],
+    "run": "^TestFetchRejectsHostResolvingToNoAddresses$",
+    "why": "a host that resolves to no addresses is refused before any round trip"
+  },
+  {
+    "id": "requestobject-nbf-future",
+    "file": "internal/requestobject/verify.go",
+    "old": "if policy.Now.Before(c.NotBefore.Add(-policy.MaxClockSkew)) {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./internal/requestobject"
+    ],
+    "run": "^TestVerifyBoundsFutureNotBefore$",
+    "why": "a request object nbf more than MaxClockSkew ahead is refused"
+  },
+  {
+    "id": "requestobject-nbf-future-skew",
+    "file": "internal/requestobject/verify.go",
+    "old": "if policy.Now.Before(c.NotBefore.Add(-policy.MaxClockSkew)) {",
+    "new": "if policy.Now.Before(c.NotBefore) {",
+    "module": "root",
+    "packages": [
+      "./internal/requestobject"
+    ],
+    "run": "^TestVerifyBoundsFutureNotBefore$",
+    "why": "a request object nbf within MaxClockSkew is accepted"
+  },
+  {
+    "id": "jarm-nbf-future",
+    "file": "internal/jarm/verify.go",
+    "old": "policy.Now.Before(c.NotBefore.Add(-policy.MaxClockSkew))",
+    "new": "false",
+    "module": "root",
+    "packages": [
+      "./internal/jarm"
+    ],
+    "run": "^TestVerifyBoundsFutureNotBefore$",
+    "why": "a JARM response nbf more than MaxClockSkew ahead is refused"
+  },
+  {
+    "id": "requestobject-empty-string-claim",
+    "file": "internal/requestobject/claims.go",
+    "old": "if err := json.Unmarshal(raw, &s); err != nil || s == \"\" {\n\t\treturn \"\", false,",
+    "new": "if err := json.Unmarshal(raw, &s); err != nil {\n\t\treturn \"\", false,",
+    "module": "root",
+    "packages": [
+      "./internal/requestobject"
+    ],
+    "run": "^TestParseClaimsRejectsMalformedOptionalClaims$",
+    "why": "an empty jti or sub is malformed, so the replay check can't be skipped"
+  },
+  {
+    "id": "jwe-cbc-iv-size",
+    "file": "internal/jwe/cbchmac.go",
+    "old": "return nil, fmt.Errorf(\"jwe: a256cbc-hs512: %w\", err)\n\t}\n\tif len(iv) != block.BlockSize() {",
+    "new": "return nil, fmt.Errorf(\"jwe: a256cbc-hs512: %w\", err)\n\t}\n\tif false {",
+    "module": "root",
+    "packages": [
+      "./internal/jwe"
+    ],
+    "run": "^TestOpenCBCHMACRejectsWrongIVSizeWithValidTag$",
+    "why": "a wrong-length CBC IV is a decryption failure, not a panic"
+  },
+  {
+    "id": "sealedcookie-key-id",
+    "file": "internal/sealedcookie/sealedcookie.go",
+    "old": "if k.id != id || len(rest)",
+    "new": "if _ = id; len(rest)",
+    "module": "root",
+    "packages": [
+      "./client/sessioncookie",
+      "./server/interactioncookie"
+    ],
+    "run": "^TestKeyRotation$",
+    "why": "a sealed cookie is opened only with the key its key ID names"
+  },
+  {
+    "id": "sealedcookie-expiry",
+    "file": "internal/sealedcookie/sealedcookie.go",
+    "old": "json.Unmarshal(plaintext, &e) != nil || !now.Before(time.Unix(e.ExpiresAt, 0))",
+    "new": "json.Unmarshal(plaintext, &e) != nil",
+    "module": "root",
+    "packages": [
+      "./client/sessioncookie",
+      "./server/interactioncookie"
+    ],
+    "run": "^TestReadRefuses$",
+    "why": "an expired sealed cookie is refused"
+  },
+  {
+    "id": "sqlstore-pg-poll-for-update",
+    "file": "sqlstore/backchannel.go",
+    "old": "pollRead + \" FOR UPDATE\"",
+    "new": "pollRead",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestPostgresPollWaitsForAConcurrentPoll$",
+    "postgres": true,
+    "why": "a CIBA poll locks the row so concurrent polls can't both win"
+  },
+  {
+    "id": "sqlstore-pg-serialization-retry",
+    "file": "sqlstore/db.go",
+    "old": "serializationFailure(err)",
+    "new": "false",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestPostgresSingleStatementRaces$",
+    "postgres": true,
+    "why": "a single-statement write is rerun after a serialization failure"
+  },
+  {
+    "id": "sqlstore-pg-isolation-pin",
+    "file": "sqlstore/db.go",
+    "old": "!strings.EqualFold(level, \"read committed\")",
+    "new": "false && strings.EqualFold(level, \"\")",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestPostgresIsolationCheckFailureKeepsPin$",
+    "postgres": true,
+    "why": "a connection not at READ COMMITTED stays pinned to explicit transactions"
+  },
+  {
+    "id": "sqlstore-pg-sweep-lock",
+    "file": "sqlstore/sweep.go",
+    "old": "!locked",
+    "new": "false",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestPostgresSweepSkipsWhileAnotherSweeps$",
+    "postgres": true,
+    "why": "a sweep skips while another holds the advisory lock"
+  },
+  {
+    "id": "sqlstore-pg-migration-lock",
+    "file": "sqlstore/migrate.go",
+    "old": "d.lockMigration(ctx, q)",
+    "new": "error(nil)",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestPostgresMigrationLockIsPerSchema$",
+    "postgres": true,
+    "why": "migrations take the per-schema migration lock"
+  },
+  {
+    "id": "sqlstore-pg-read-committed",
+    "file": "sqlstore/db.go",
+    "old": "d.db.BeginTx(ctx, readCommitted)",
+    "new": "d.db.BeginTx(ctx, nil)",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestPostgresPollWaitsForAConcurrentPoll$",
+    "postgres": true,
+    "why": "storage transactions run at READ COMMITTED"
+  }
+]

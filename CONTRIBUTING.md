@@ -92,6 +92,14 @@ PostgreSQL as well as SQLite: see [sqlstore/README.md](sqlstore/README.md).
   to the root module), so a change to the library can break one. CI
   vets, tests (`-race`) and lints every one; run `go vet ./...` and
   `go test -race ./...` in each demo your change could affect.
+- [`.github/mutation/mutants.json`](.github/mutation/mutants.json)
+  lists security checks together with a mutation of each (the check
+  deleted, inverted or moved by one) and the tests that must fail
+  under it. `mutation.yml` re-applies them weekly and fails if one
+  survives. Each entry finds its check by a literal snippet of the
+  source, so a change that moves or rewrites an anchored check updates
+  its entry in the same PR. Run them locally from the repository root
+  with `go run .github/scripts/mutation-check.go [mutant-id ...]`.
 - A breaking change (`feat!:`/`fix!:`) adds its own section to
   [UPGRADING.md](UPGRADING.md), under the version it will ship in:
   who's affected, why, and what to change.

@@ -27,7 +27,14 @@ func beginInteraction(t *testing.T, h harness) server.InteractionHandle {
 // using a signed request object, for profiles that require one.
 func beginInteractionViaRequestObject(t *testing.T, h harness) server.InteractionHandle {
 	t.Helper()
-	requestObj := h.requestObject(t, standardAuthParams(t))
+	return beginInteractionViaRequestObjectWith(t, h, standardAuthParams(t))
+}
+
+// beginInteractionViaRequestObjectWith is beginInteractionViaRequestObject
+// with the request object's parameters given.
+func beginInteractionViaRequestObjectWith(t *testing.T, h harness, params map[string]json.RawMessage) server.InteractionHandle {
+	t.Helper()
+	requestObj := h.requestObject(t, params)
 	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: []server.FormParameter{
 			formParam("client_assertion", h.clientAssertion(t)),
@@ -196,6 +203,45 @@ func TestCompleteAuthorizationSuccessMessageSigningProfile(t *testing.T) {
 	}
 	if state != "opaque-state" {
 		t.Fatalf("JARM response state = %q, want %q", state, "opaque-state")
+	}
+}
+
+// TestCompleteAuthorizationMessageSigningOmitsEmptyParameters: a JARM
+// response for a request without state carries no "state" claim at all,
+// rather than an empty one.
+func TestCompleteAuthorizationMessageSigningOmitsEmptyParameters(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
+	params := standardAuthParams(t)
+	delete(params, "state")
+	handle := beginInteractionViaRequestObjectWith(t, h, params)
+
+	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+		Handle: handle, Result: authorizeResult(t),
+	})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	redirect, ok := result.(server.AuthorizationRedirect)
+	if !ok {
+		t.Fatalf("result = %T, want server.AuthorizationRedirect", result)
+	}
+	dest := redirect.Destination().URL()
+	parsed, err := jarm.Parse(dest.Query().Get("response"))
+	if err != nil {
+		t.Fatalf("jarm.Parse: %v", err)
+	}
+	verified, err := parsed.Verify(&h.serverKey.PublicKey, jarm.VerifyPolicy{
+		ExpectedIssuer: testIssuer, ExpectedAudience: testClientID.String(),
+		Algorithm: fapi.ES256, Now: h.now, MaxLifetime: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("jarm Verify: %v", err)
+	}
+	if raw, present := verified.Parameters["state"]; present {
+		t.Fatalf("JARM response state = %s, want no state claim", raw)
+	}
+	if _, present := verified.Parameters["code"]; !present {
+		t.Fatalf("JARM response missing code claim")
 	}
 }
 

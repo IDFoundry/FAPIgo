@@ -277,14 +277,20 @@ func newHarnessWithBackchannelMTLS(t *testing.T) harness {
 		t.Fatalf("ParseEndpointURL: %v", err)
 	}
 
+	mtlsBackchannelEndpoint, err := fapi.ParseEndpointURL(testMTLSBackchannelAuthenticationEndpoint)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+
 	endpoints := testEndpoints(t)
 	endpoints.BackchannelAuthentication = backchannelEndpoint
 
 	cfg := server.Config{
-		Subjects:  server.PublicSubjects(),
-		Issuer:    issuer,
-		Endpoints: endpoints,
-		Profile:   server.ProfileFAPISecurity,
+		Subjects:      server.PublicSubjects(),
+		Issuer:        issuer,
+		Endpoints:     endpoints,
+		MTLSEndpoints: server.MTLSEndpoints{BackchannelAuthentication: mtlsBackchannelEndpoint},
+		Profile:       server.ProfileFAPISecurity,
 		Algorithms: server.AlgorithmPolicy{
 			ClientAssertion:                  server.AlgorithmSet{fapi.ES256},
 			RequestObject:                    server.AlgorithmSet{fapi.ES256},
@@ -335,6 +341,39 @@ func newHarnessWithBackchannelMTLS(t *testing.T) harness {
 		t.Fatalf("server.New: %v", err)
 	}
 	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+}
+
+// testMTLSBackchannelAuthenticationEndpoint is the RFC 8705 §5 mTLS
+// alias of the backchannel authentication endpoint
+// newHarnessWithBackchannelMTLS configures.
+const testMTLSBackchannelAuthenticationEndpoint = "https://mtls.as.example/backchannel-authenticate"
+
+// TestBeginBackchannelAuthenticationAcceptsMTLSAliasAsClientAssertionAudience:
+// for a CIBA client registered SenderConstrainMTLS, the backchannel
+// endpoint's mTLS alias identifies the endpoint it is calling just as
+// the plain URL does, so CIBA Core §7.1's endpoint-URL audience extends
+// to it (see acceptableClientAssertionAudiences).
+func TestBeginBackchannelAuthenticationAcceptsMTLSAliasAsClientAssertionAudience(t *testing.T) {
+	h := newHarnessWithBackchannelMTLS(t)
+	requestObj := h.backchannelRequestObject(t, standardBackchannelParams(t))
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testMTLSBackchannelAuthenticationEndpoint,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(assertion, requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
+	}
 }
 
 const testBackchannelClientNotificationEndpoint = "https://rp.example/ciba/notify"

@@ -178,6 +178,47 @@ func TestExchangeAuthorizationCodeIssuesEncryptedIDToken(t *testing.T) {
 	}
 }
 
+// TestIDTokenEncryptionSkipsKeysForOtherAlgorithms: from a client key
+// set mixing algorithms, the ID token is encrypted to the key for the
+// registered key-management algorithm, not merely the first key listed.
+func TestIDTokenEncryptionSkipsKeysForOtherAlgorithms(t *testing.T) {
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey: %v", err)
+	}
+	encKeys := &fakeClientEncryptionKeys{keysByClient: map[fapi.ClientID][]keys.ClientEncryptionKey{
+		testClientID: {
+			{KeyID: "enc-ec", Algorithm: fapi.ECDHESA256KW, PublicKey: &generateKey(t).PublicKey},
+			{KeyID: "enc-rsa", Algorithm: fapi.RSAOAEP256, PublicKey: &rsaKey.PublicKey},
+		},
+	}}
+	h := newHarnessWithIDTokenEncryption(t,
+		server.KeyManagementAlgorithmSet{fapi.RSAOAEP256},
+		server.ContentEncryptionAlgorithmSet{fapi.A256GCM},
+		encKeys,
+	)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+
+	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	})
+	if err != nil {
+		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	}
+	decrypted, err := jwe.Decrypt(context.Background(), jwe.DecryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM,
+		RecipientKey: rsaKey,
+		Compact:      result.IDToken.Reveal(),
+	})
+	if err != nil {
+		t.Fatalf("jwe.Decrypt: %v", err)
+	}
+	if decrypted.Header.KeyID != "enc-rsa" {
+		t.Fatalf("KeyID = %q, want enc-rsa", decrypted.Header.KeyID)
+	}
+}
+
 // TestRefreshAccessTokenIssuesEncryptedIDToken confirms the refresh
 // grant's ID token issuance (server/refresh.go), a second call site
 // sharing issueIDToken with ExchangeAuthorizationCode, also encrypts —

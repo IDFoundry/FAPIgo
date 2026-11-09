@@ -65,8 +65,9 @@ func TestClientAssertionRejectsMismatchedClientID(t *testing.T) {
 
 // TestBackchannelRequestedExpiryClampedWithoutOverflow checks that a
 // requested_expiry too large to convert to a time.Duration is clamped to
-// the configured lifetime, not wrapped into a negative one; and that a
-// small one is honoured.
+// the configured lifetime, not wrapped into a negative one; that a
+// non-positive one falls back to it; and that a small one, as a number
+// or a numeric string, is honoured.
 func TestBackchannelRequestedExpiryClampedWithoutOverflow(t *testing.T) {
 	for name, tc := range map[string]struct {
 		requested json.RawMessage
@@ -75,6 +76,13 @@ func TestBackchannelRequestedExpiryClampedWithoutOverflow(t *testing.T) {
 		"overflowing": {json.RawMessage(`9223372037`), true},
 		"huge":        {json.RawMessage(`9223372036854775807`), true},
 		"small":       {json.RawMessage(`30`), false},
+		// CIBA §7.1 makes requested_expiry a positive integer; zero or a
+		// negative one falls back to the configured lifetime.
+		"zero":     {json.RawMessage(`0`), true},
+		"negative": {json.RawMessage(`-30`), true},
+		// The numeric-string form the OIDF suite also sends.
+		"string":      {json.RawMessage(`"30"`), false},
+		"zero string": {json.RawMessage(`"0"`), true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, _ := newHarnessWithBackchannel(t)

@@ -1,0 +1,54 @@
+name: Interop
+
+# Runs an independent client implementation, openid-client (Node.js),
+# through complete FAPI 2.0 flows against cmd/conformance-as: PAR + PKCE
+# + private_key_jwt + DPoP, mTLS, message signing (JAR + JARM),
+# client_credentials, and CIBA poll and ping. See interop/README.md for
+# the legs, the pinned versions and the triage rule when one fails.
+#
+# The client's version only moves when Dependabot bumps
+# interop/openid-client's lockfile, so a weekly run (Sunday 10am UTC,
+# after mutation.yml's 9am run) mostly re-checks the server side; it
+# also runs on demand, and on a pull request that changes the suite or
+# the server it drives.
+#
+# Informational only: not a required check in branch protection.
+
+on:
+  schedule:
+    - cron: '0 10 * * 0' # weekly, Sunday 10am UTC
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - interop/**
+      - .github/workflows/interop.yml
+      - cmd/conformance-as/**
+
+permissions:
+  contents: read
+
+jobs:
+  openid-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          # See ci.yml: no go.sum at the root.
+          cache-dependency-path: go.mod
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          check-latest: true
+
+      # The runner installs the harness with `npm ci` (the lockfile, never
+      # a fresh resolve) and runs every leg.
+      - name: Run the openid-client legs
+        run: ./interop/run-openid-client.sh

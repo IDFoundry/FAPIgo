@@ -208,6 +208,8 @@ rather than a convention.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design rationale and
 package layout, and [conformance/](conformance/README.md) for how each
 role is tested against the OpenID Foundation conformance suite.
+The authorization server is also interop-tested weekly against
+openid-client 6.8.9 (JavaScript) — see [interop/](interop/README.md).
 
 <details>
 <summary><strong>Full conformance and capability status</strong> (the detail behind the certification and checklist above)</summary>

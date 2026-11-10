@@ -65,3 +65,13 @@ updates:
     directory: /conformance
     schedule:
       interval: weekly
+
+  # The interop suite's Node.js harness (interop/openid-client): the
+  # openid-client release FAPIgo's authorization server is tested
+  # against, pinned exactly in package.json and package-lock.json. Test
+  # tooling only: nothing here ships. A bump is how the suite moves to a
+  # new client release, so interop.yml runs on its pull request.
+  - package-ecosystem: npm
+    directory: /interop/openid-client
+    schedule:
+      interval: weekly

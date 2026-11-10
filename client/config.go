@@ -167,6 +167,9 @@ type Algorithms struct {
 	// BackchannelAuthenticationRequest is the algorithm this client
 	// signs its CIBA backchannel authentication requests with.
 	// Required only when Endpoints.BackchannelAuthentication is set.
+	// NewFromDiscovery keeps a discovered backchannel authentication
+	// endpoint only when this or
+	// Limits.BackchannelAuthenticationRequestLifetime is set.
 	BackchannelAuthenticationRequest fapi.SignatureAlgorithm
 
 	// ClientAttestationPoP is the algorithm this client signs its

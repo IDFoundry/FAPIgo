@@ -75,8 +75,15 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 //     without the authorization and pushed authorization request
 //     endpoints when cfg.RedirectURI is empty, since a client with no
 //     redirect URI (one using only CIBA or client credentials) never
-//     uses the redirect-based flow. A client that does mutual TLS gets
-//     the server's mtls_endpoint_aliases (RFC 8705 §5) where it does,
+//     uses the redirect-based flow, and without the backchannel
+//     authentication endpoint unless cfg sets
+//     Algorithms.BackchannelAuthenticationRequest or
+//     Limits.BackchannelAuthenticationRequestLifetime, the settings only
+//     a CIBA client has a use for (New requires both once that endpoint
+//     is set, so a code-flow or client credentials client would
+//     otherwise be unbuildable against a server that also offers CIBA).
+//     A client that does mutual TLS gets the server's
+//     mtls_endpoint_aliases (RFC 8705 §5) where it does,
 //     via discovered.MTLSEndpointAliases.ApplyForConfig: every endpoint
 //     when it authenticates with its certificate or sets
 //     cfg.UseMTLSEndpointAliases, the token-bound ones when its tokens
@@ -112,14 +119,7 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 		}
 	}
 	if cfg.Endpoints.isZero() {
-		cfg.Endpoints = discovered.Endpoints
-		if cfg.RedirectURI == "" {
-			cfg.Endpoints.Authorization, cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}, fapi.URL{}
-		}
-		discovered.MTLSEndpointAliases.ApplyForConfig(&cfg)
-		if cfg.RedirectURI == "" {
-			cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}
-		}
+		cfg.Endpoints = discoveredEndpoints(discovered, cfg)
 	}
 	if cfg.Algorithms.IDToken == 0 && idTokensPossible(cfg) && len(discovered.IDTokenAlgorithms) == 1 {
 		cfg.Algorithms.IDToken = discovered.IDTokenAlgorithms[0]
@@ -138,6 +138,31 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 		c.trustChainExpiresAt = resolved.ExpiresAt
 	}
 	return c, nil
+}
+
+// discoveredEndpoints is NewFromDiscovery's step 2: discovered's
+// endpoints, less the ones cfg shows it has no use for, with the mTLS
+// aliases applied. The unused endpoints are cleared again after
+// ApplyForConfig, which would otherwise put an alias back in their place.
+func discoveredEndpoints(discovered DiscoveredMetadata, cfg Config) Endpoints {
+	cfg.Endpoints = discovered.Endpoints
+	discovered.MTLSEndpointAliases.ApplyForConfig(&cfg)
+	if cfg.RedirectURI == "" {
+		cfg.Endpoints.Authorization, cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}, fapi.URL{}
+	}
+	if !wantsCIBA(cfg) {
+		cfg.Endpoints.BackchannelAuthentication = fapi.URL{}
+	}
+	return cfg.Endpoints
+}
+
+// wantsCIBA reports whether cfg sets either of the two settings only a
+// CIBA client has a use for, both of which New requires once
+// Endpoints.BackchannelAuthentication is set. Either one is enough, so a
+// caller who set one and forgot the other gets New's error naming the
+// missing one rather than a client silently built without CIBA.
+func wantsCIBA(cfg Config) bool {
+	return cfg.Algorithms.BackchannelAuthenticationRequest != 0 || cfg.Limits.BackchannelAuthenticationRequestLifetime != 0
 }
 
 // validateConfig checks cfg as a whole. Each thematic group of checks

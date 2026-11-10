@@ -119,7 +119,9 @@ func (rc *ResourceClient) UseDPoPNonce(ctx context.Context, resource *url.URL, n
 // challenge naming use_dpop_nonce, and a DPoP-Nonce header), Do retries
 // exactly once with that nonce echoed into a fresh proof; any other
 // response — including a second nonce challenge — is returned as-is
-// for the caller to interpret. As with the token endpoint's own nonce
+// for the caller to interpret. The challenge's nonce is cached for the
+// resource server's origin and sent on later requests there, even when
+// the retry's response repeats no DPoP-Nonce header (RFC 9449 §8.2). As with the token endpoint's own nonce
 // retry, the DPoP-Nonce header alone is not sufficient grounds to
 // retry: a resource server may send it unprompted to pre-seed a
 // caller's next request, so the retry is gated on the
@@ -186,6 +188,12 @@ func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 		}
 		if isResourceDPoPNonceChallenge(res.StatusCode, res.Header) {
 			nonce := res.Header.Get(dpopNonceHeader)
+			// Cached now, not only from the retry's response: a server
+			// sends DPoP-Nonce only when the nonce changes, so a retry
+			// that succeeds usually carries none, and every later request
+			// must still use this one (RFC 9449 §8.2, applied to resource
+			// servers by §9).
+			c.recordDPoPNonce(ctx, scope, res.StatusCode, res.Header, true)
 			_ = res.Body.Close()
 			retryReq, retryErr := rebuildRequestBody(req)
 			if retryErr != nil {

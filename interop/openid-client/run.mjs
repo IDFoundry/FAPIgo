@@ -6,6 +6,7 @@
 import { test } from 'node:test'
 
 import { loadRun } from './lib/harness.mjs'
+import { workDirFromArgs } from './lib/workdir.mjs'
 import authorizationCodeDPoP from './legs/authorization-code-dpop.mjs'
 import authorizationCodeMTLS from './legs/authorization-code-mtls.mjs'
 import messageSigning from './legs/message-signing.mjs'
@@ -13,11 +14,7 @@ import clientCredentials from './legs/client-credentials.mjs'
 import cibaPoll from './legs/ciba-poll.mjs'
 import cibaPing from './legs/ciba-ping.mjs'
 
-const workDir = process.argv[2] ?? process.env.INTEROP_WORK_DIR
-if (!workDir) {
-  throw new Error('usage: node run.mjs <work-dir>')
-}
-const run = loadRun(workDir)
+const run = loadRun(workDirFromArgs('node run.mjs <work-dir>'))
 
 const legs = [
   ['1 authorization code + PAR + PKCE + private_key_jwt + DPoP, UserInfo, resource, refresh', authorizationCodeDPoP],

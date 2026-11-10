@@ -12,11 +12,9 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ports, urls, SUBJECT } from './lib/env.mjs'
+import { workDirFromArgs } from './lib/workdir.mjs'
 
-const workDir = process.argv[2]
-if (!workDir) {
-  throw new Error('usage: node setup.mjs <work-dir>')
-}
+const workDir = workDirFromArgs('node setup.mjs <work-dir>')
 
 function newSigningKey(kid) {
   const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })

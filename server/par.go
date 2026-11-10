@@ -780,19 +780,8 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 		return nil, newError(ErrorInvalidRequest, 400, "redirect_uri is not an acceptable redirect destination", err)
 	}
 
-	codeChallenge, err := jsonString(params, "code_challenge")
-	if err != nil {
-		return nil, newError(ErrorInvalidRequest, 400, "code_challenge is required", err)
-	}
-	if codeChallenge == "" {
-		return nil, newError(ErrorInvalidRequest, 400, "code_challenge must not be empty", nil)
-	}
-	codeChallengeMethod, err := jsonString(params, "code_challenge_method")
-	if err != nil {
-		return nil, newError(ErrorInvalidRequest, 400, "code_challenge_method is required", err)
-	}
-	if _, err := pkce.ParseMethod(codeChallengeMethod); err != nil {
-		return nil, newError(ErrorInvalidRequest, 400, "code_challenge_method must be S256", err)
+	if err := validatePKCEParameters(params); err != nil {
+		return nil, err
 	}
 
 	if _, _, err := requestedMaxAge(params); err != nil {
@@ -819,6 +808,27 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 	}
 
 	return params, nil
+}
+
+// validatePKCEParameters checks the request's PKCE parameters (RFC 7636
+// §4.3): a non-empty code_challenge, and code_challenge_method S256, the
+// only method FAPI 2.0 allows.
+func validatePKCEParameters(params map[string]json.RawMessage) *Error {
+	codeChallenge, err := jsonString(params, "code_challenge")
+	if err != nil {
+		return newError(ErrorInvalidRequest, 400, "code_challenge is required", err)
+	}
+	if codeChallenge == "" {
+		return newError(ErrorInvalidRequest, 400, "code_challenge must not be empty", nil)
+	}
+	codeChallengeMethod, err := jsonString(params, "code_challenge_method")
+	if err != nil {
+		return newError(ErrorInvalidRequest, 400, "code_challenge_method is required", err)
+	}
+	if _, err := pkce.ParseMethod(codeChallengeMethod); err != nil {
+		return newError(ErrorInvalidRequest, 400, "code_challenge_method must be S256", err)
+	}
+	return nil
 }
 
 // verifyOptionalDPoPProof verifies the optional DPoP proof presented

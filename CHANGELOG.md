@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.72.2](https://github.com/IDFoundry/FAPIgo/compare/v0.72.1...v0.72.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* **client:** cache a resource server's challenge DPoP nonce ([d3c8bbd](https://github.com/IDFoundry/FAPIgo/commit/d3c8bbddd9cf0ea3da15af6d0bbad11a6023886e))
+* **client:** don't give a non-CIBA client a discovered CIBA endpoint ([531f513](https://github.com/IDFoundry/FAPIgo/commit/531f513152f1275a40edd36dc2b7b93b54e7a54c))
+* **server:** check the DPoP nonce before consuming the request object ([415558a](https://github.com/IDFoundry/FAPIgo/commit/415558ac677b853d5b87f76106082df7b8849883))
+
 ## [0.72.1](https://github.com/IDFoundry/FAPIgo/compare/v0.72.0...v0.72.1) (2026-11-10)
 
 

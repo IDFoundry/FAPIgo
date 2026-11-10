@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.72.1](https://github.com/IDFoundry/FAPIgo/compare/v0.72.0...v0.72.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **jwe:** append lengthPrefixed's output instead of sizing it ([0cbef3c](https://github.com/IDFoundry/FAPIgo/commit/0cbef3ce8e196cedf8e78394daff7016f71505fb))
+* **jwe:** bound lengthPrefixed's allocation size within int ([e8ee98b](https://github.com/IDFoundry/FAPIgo/commit/e8ee98b06c713a1487c736dd27432ab74e41e137))
+
 ## [0.72.0](https://github.com/IDFoundry/FAPIgo/compare/v0.71.0...v0.72.0) (2026-11-08)
 
 

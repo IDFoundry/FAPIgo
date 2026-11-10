@@ -2,6 +2,7 @@ package jwe
 
 import (
 	"bytes"
+	"math"
 	"testing"
 )
 
@@ -93,5 +94,15 @@ func TestOtherInfoLengthPrefixing(t *testing.T) {
 func TestOtherInfoRejectsNegativeKeyDataLen(t *testing.T) {
 	if _, err := otherInfo("AB", nil, nil, -1); err == nil {
 		t.Fatalf("otherInfo(keyDataLenBits=-1) = nil error, want error")
+	}
+}
+
+func TestLengthPrefixedLenRejectsUnencodableLengths(t *testing.T) {
+	// -1 is below any length; math.MaxInt exceeds the 32-bit prefix on
+	// 64-bit platforms and overflows 4+n on 32-bit ones.
+	for _, n := range []int{-1, math.MaxInt} {
+		if _, err := lengthPrefixedLen(nil, n); err == nil {
+			t.Errorf("lengthPrefixedLen(nil, %d) = nil error, want error", n)
+		}
 	}
 }

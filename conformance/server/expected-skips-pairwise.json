@@ -1,1 +1,8 @@
-[]
+[
+  {
+    "test-name": "fapi2-security-profile-final-ensure-holder-of-key-required-at-non-alias-token-endpoint",
+    "condition": "fapi2-security-profile-final-ensure-holder-of-key-required-at-non-alias-token-endpoint",
+    "expected-result": "skip",
+    "note": "Permanent: the suite skips this module when the client presents no TLS certificate at the token endpoint (DPoP sender constraining, private_key_jwt client authentication, and a profile that doesn't require mTLS on every endpoint), which is this configuration. It runs and passes in the mTLS legs."
+  }
+]

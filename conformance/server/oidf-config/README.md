@@ -468,6 +468,18 @@ only — message-signing has none yet): `cmd/conformance-client
 -profile=baseline -mtls` — see `../client/scripts/README.md`'s own
 "Sender-constrain mTLS" section.
 
+### `ensure-holder-of-key-required-at-non-alias-token-endpoint` (added upstream 2026-11)
+
+This module sends a valid token request without a TLS client
+certificate to `token_endpoint` (the endpoint outside
+`mtls_endpoint_aliases`) and expects an error. The suite skips it by
+design when the client presents no certificate at the token endpoint at
+all: DPoP sender constraining, `private_key_jwt` client authentication,
+and a profile that doesn't require mTLS on every endpoint. That is the
+baseline, pairwise, message-signing and baseline-client-credentials
+legs, whose `expected-skips-*.json` list it as a permanent skip. It runs
+and passes in every mTLS leg.
+
 ## Pairwise subject identifiers (`pairwise.config.json`)
 
 AS pairwise runs exactly the AS baseline plan and variant

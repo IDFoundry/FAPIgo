@@ -78,8 +78,14 @@ func otherInfo(algorithmID string, apu, apv []byte, keyDataLenBits int) ([]byte,
 // by the JWE's own size — and the 32-bit bound is checked explicitly
 // rather than assumed.
 func lengthPrefixed(b []byte) ([]byte, error) {
-	n := len(b)
-	if n < 0 || uint64(n) > math.MaxUint32 {
+	return lengthPrefixedLen(b, len(b))
+}
+
+// lengthPrefixedLen is lengthPrefixed with len(b) passed as n, so the
+// bounds — n encodable in the 32-bit prefix, and 4+n within int — are
+// testable without allocating a value that large. n must be len(b).
+func lengthPrefixedLen(b []byte, n int) ([]byte, error) {
+	if n < 0 || uint64(n) > math.MaxUint32 || n > math.MaxInt-4 {
 		return nil, fmt.Errorf("jwe: value of length %d exceeds maximum encodable length", n)
 	}
 	out := make([]byte, 4+n)

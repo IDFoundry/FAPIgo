@@ -1,0 +1,13 @@
+{
+  "name": "fapigo-interop-oidc-provider",
+  "private": true,
+  "description": "Interoperability harness: oidc-provider (Node) as the FAPI 2.0 authorization server FAPIgo's client runs flows against",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "oidc-provider": "9.13.3"
+  }
+}

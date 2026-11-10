@@ -42,6 +42,11 @@ the fact.
   spec citation whose interpretation is wrong before changing FAPIgo;
   if it's the other implementation's, report it upstream generically
   and note it in `interop/README.md`.
+- `./interop/run-oidc-provider.sh` runs the other direction: FAPIgo's
+  client package (`interop/fapigo-client`) through the same kinds of
+  flows against oidc-provider (Node.js), in the same workflow, and on a
+  PR touching the client package or what it imports. The same triage
+  rule applies.
 
 ## Commit messages
 

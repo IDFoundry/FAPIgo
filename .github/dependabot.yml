@@ -85,3 +85,23 @@ updates:
     directory: /interop/huskarl
     schedule:
       interval: weekly
+
+  # The oidc-provider interop suite's Node.js server
+  # (interop/oidc-provider): the oidc-provider release FAPIgo's client is
+  # tested against, pinned exactly in package.json and
+  # package-lock.json. Test tooling only: nothing here ships. A bump is
+  # how the suite moves to a new provider release, so interop.yml runs
+  # on its pull request.
+  - package-ecosystem: npm
+    directory: /interop/oidc-provider
+    schedule:
+      interval: weekly
+
+  # The oidc-provider interop suite's Go driver (interop/fapigo-client),
+  # a module of its own building against this checkout through a
+  # replace directive. It has no other dependency today; kept watched so
+  # one added later isn't missed.
+  - package-ecosystem: gomod
+    directory: /interop/fapigo-client
+    schedule:
+      interval: weekly

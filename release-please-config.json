@@ -8,7 +8,7 @@
       "include-component-in-tag": false,
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
-      "exclude-paths": ["examples", "sqlstore"]
+      "exclude-paths": ["examples", "sqlstore", "interop/fapigo-client"]
     },
     "sqlstore": {
       "release-type": "go",

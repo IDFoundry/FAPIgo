@@ -140,4 +140,134 @@ the one at fault.
 
 ## Known disagreements
 
-None known.
+- **FAPIgo, `client.NewFromDiscovery`** (found by the oidc-provider
+  suite). With an all-zero `Config.Endpoints`, it copies every
+  discovered endpoint, `backchannel_authentication_endpoint` included
+  (`client/client.go:114`), and `New` then refuses a client without
+  `Algorithms.BackchannelAuthenticationRequest`
+  (`client/client.go:531`). So a code-flow or `client_credentials`
+  client built the documented way fails to construct against any
+  server that also offers CIBA, unless it configures a CIBA signing
+  algorithm it never uses. This is an API gap, not a reading of a
+  specification. Workaround: `fapigo-client/wiring.go` sets `Endpoints`
+  from discovery itself, without the CIBA endpoint, and calls
+  `MTLSEndpoints.ApplyForConfig`, as `NewFromDiscovery` would; remove it
+  once `NewFromDiscovery` leaves the CIBA endpoint out for a client not
+  configured for CIBA.
+- **FAPIgo, resource-server DPoP nonces** (found by the oidc-provider
+  suite). After a `use_dpop_nonce` challenge from a protected resource
+  (UserInfo here), `ResourceClient.Do` retries with the challenge's
+  nonce (`client/resource.go:187-198`) but caches only the nonce on the
+  retry's response (`client/noncecache.go:150`). oidc-provider sends
+  `DPoP-Nonce` on a successful response only when the nonce has
+  changed, so the nonce is never cached and every later UserInfo call
+  is challenged again: one extra round trip each. RFC 9449 §9 has
+  resource servers provide nonces "in the same way that authorization
+  servers do as described in Sections 8 and 8.2", and §8.2 says the
+  client "MUST use the new nonce value supplied for the next token
+  request, and for all subsequent token requests until the
+  authorization server supplies a new nonce"; FAPIgo's token endpoint
+  path already does (leg 1's refresh is not challenged). No workaround:
+  the retry succeeds.
+
+## oidc-provider: FAPIgo's client against an independent server
+
+The second suite runs the other direction. The server is
+[`oidc-provider`](https://github.com/panva/node-oidc-provider)
+(Node.js), configured as a FAPI 2.0 authorization server in
+[`oidc-provider/server.mjs`](oidc-provider/server.mjs); the client is
+FAPIgo's `client` package, driven by
+[`fapigo-client`](fapigo-client), a Go program in a module of its own
+(building against this checkout through a `replace` directive, and
+limited to FAPIgo's public API, which interop.yml checks). Only positive
+flows are run, for the same reason as above.
+
+The provider runs with oidc-provider's `fapi` profile `'2.0'`, PAR
+required, PKCE (S256), DPoP with a server nonce required on every
+request, mTLS (`self_signed_tls_client_auth` and certificate-bound
+tokens) with `mtls_endpoint_aliases` on a second listener that requires
+a client certificate, request objects and JARM, `client_credentials`,
+CIBA poll and ping, resource indicators, and ES256 signing. It sends
+`iss` on every authorization response (RFC 9207) and says so in its
+metadata. It issues a refresh token to every client registered for the
+grant, rather than only for `offline_access` with `prompt=consent`, its
+default.
+
+### Legs
+
+The driver runs each leg on its own and prints `PASS`, `FAIL` or `SKIP`
+per leg.
+
+| # | Leg | Client |
+|---|-----|--------|
+| 1 | `code-pkjwt-dpop`: authorization code + PAR + PKCE + `private_key_jwt` + DPoP-bound tokens; the ID token's `sub`; UserInfo with DPoP; the refresh-token grant with DPoP, and UserInfo again with the new access token. Every `use_dpop_nonce` challenge (PAR, token, UserInfo) is answered by FAPIgo's own retry. | `fapigo-sp-pkjwt-dpop` |
+| 2 | `code-mtls-mtls`: as leg 1 with `self_signed_tls_client_auth` and certificate-bound tokens; PAR, token, UserInfo and refresh go to the `mtls_endpoint_aliases`. | `fapigo-sp-mtls-mtls` |
+| 3 | `message-signing`: a signed request object (JAR) pushed via PAR, to a client registered with `require_signed_request_object`; a JARM response (`response_mode=jwt`) verified by FAPIgo; `private_key_jwt` + DPoP; UserInfo and refresh. | `fapigo-ms-pkjwt-dpop` |
+| 4 | `client-credentials`: `client_credentials` + `private_key_jwt` + DPoP, with a resource indicator (RFC 8707) the provider issues the `accounts` scope for. No resource is called: oidc-provider serves no protected resource besides UserInfo, which needs an end user. | `fapigo-sp-cc-pkjwt-dpop` |
+| 5 | `ciba-poll`: a signed authentication request (CIBA Core §7.1.1), `private_key_jwt`, certificate-bound tokens (FAPI-CIBA's sender constraint is mTLS) at the aliases; the first poll meets `authorization_pending`, then the request is approved and redeemed; UserInfo over mTLS. | `fapigo-ciba-poll-pkjwt` |
+| 6 | `ciba-ping`: as leg 5 in ping mode, with the driver serving the `client_notification_endpoint` over HTTPS (a certificate from the run's test CA), reading the ping with `client.ParseBackchannelNotification` and checking its bearer token against the session before redeeming the `auth_req_id`. | `fapigo-ciba-ping-pkjwt` |
+
+The user is a fixture. `server.mjs` serves oidc-provider's interaction
+routes: `GET /interaction/:uid` signs in the one test user
+(`interop-user`) and consents to whatever was requested, then hands back
+to the provider, so the driver's user agent (a cookie jar following
+redirects) reaches the redirect to the client's redirect URI, which is
+never served. `POST /harness/ciba-approve` (form parameter
+`auth_req_id`) stands in for the authentication device: it approves the
+request through `provider.backchannelResult`, which also sends a
+ping-mode client its notification. oidc-provider refuses to send
+anything to a loopback address (SSRF protection); `server.mjs` lifts
+that for the driver's notification endpoint only.
+
+The client is built the way an integrator would build one:
+`client.Discover` through a hardened `fapihttp` fetcher, the JWKS from
+the metadata, `RecommendedAlgorithms` and `RecommendedLimits` (plus a
+one-minute CIBA request lifetime), `fapihttp.NewClient`'s transport, and
+`NewFromDiscovery`, which picks the mTLS aliases and requires `iss` on
+authorization responses. It runs at `AssuranceDevelopment` because of
+the test environment, in three places `AssuranceProduction` refuses:
+the provider is on localhost (`AllowLoopbackHosts` on the transport and
+the fetcher), authorization sessions are in `memstore`, and the keys are
+the run's throwaway keys, held in memory with no declared custody.
+
+The driver isn't tied to oidc-provider: it reads the issuer, the CA, the
+test user, the CIBA approval hook's URL, the notification listener and
+each leg's client registration from a JSON file the runner writes
+(`setup.mjs` here; see `runConfig` in `fapigo-client/config.go`), and a
+leg can be marked skipped there with a reason.
+
+### Pinned versions
+
+`oidc-provider/package.json` pins `oidc-provider` exactly and
+`package-lock.json` pins the whole tree; the runner installs with
+`npm ci --ignore-scripts`. The driver has no dependency besides FAPIgo.
+Dependabot proposes updates weekly; a bump of `oidc-provider` also
+updates the table below and the version named in the top-level README.
+
+| Package | Version |
+|---------|---------|
+| `oidc-provider` | 9.13.3 (with `jose` 6.2.17 and `koa` 3.3.0) |
+
+### Running it
+
+```sh
+./interop/run-oidc-provider.sh
+```
+
+It needs Go (the version in `fapigo-client/go.mod`), Node.js 22.12 or
+later, npm, curl and openssl. The runner builds the driver, generates a
+fresh test CA, a localhost certificate and two self-signed client
+certificates in a temporary directory, has `setup.mjs` generate the
+clients' signing keys and write the provider's client registrations and
+the driver's configuration there (nothing is committed), starts the
+provider on ports 29443 (issuer) and 29444 (mTLS aliases), runs the
+legs (the driver's notification endpoint uses 29446), and always stops
+the provider and deletes the directory. Set `INTEROP_OP_PORT`,
+`INTEROP_OP_MTLS_PORT` or `INTEROP_DRIVER_PORT` to move a port, and
+`INTEROP_KEEP_WORK_DIR=1` to keep the directory (configuration, keys,
+the provider's log) after the run. `fapigo-client -leg <name>` runs one
+leg.
+
+`.github/workflows/interop.yml`'s `oidc-provider` job runs it weekly, on
+demand, and on a pull request that changes this directory, the workflow,
+or the packages FAPIgo's client builds from. It is not a required check.

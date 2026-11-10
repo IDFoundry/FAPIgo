@@ -35,6 +35,10 @@ profile.cov
 # private keys even throwaway ones).
 /conformance/server/oidf-config/*-plan.json
 
+# the interop harness's npm install (interop/run-openid-client.sh runs
+# npm ci; its keys and certificates live in a temporary directory)
+/interop/openid-client/node_modules/
+
 # Go workspace file
 go.work
 go.work.sum

@@ -1,0 +1,17 @@
+{
+  "name": "fapigo-interop-openid-client",
+  "private": true,
+  "description": "Interoperability harness: openid-client (Node) runs FAPI 2.0 flows against cmd/conformance-as",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "test": "node --test-reporter=spec run.mjs"
+  },
+  "dependencies": {
+    "openid-client": "6.8.9",
+    "undici": "7.30.2"
+  }
+}

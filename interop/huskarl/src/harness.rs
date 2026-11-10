@@ -106,14 +106,21 @@ impl Run {
     /// client then reports mTLS, so grants built from discovery use the
     /// server's `mtls_endpoint_aliases`.
     pub async fn mtls_http_client(&self, name: &str) -> Result<ReqwestClient> {
-        let key = fs::read_to_string(self.certs.join(format!("{name}.key")))?;
-        let cert = fs::read_to_string(self.certs.join(format!("{name}.crt")))?;
-        let identity: SecretString = format!("{key}{cert}").into();
+        let identity = self.client_identity(name)?;
         Ok(ReqwestClient::builder()
             .root_certificates(vec![self.ca.clone()])
             .mtls(MtlsPem::new(ProvidedSecret::new(identity)))
             .build()
             .await?)
+    }
+
+    /// The named client's private key followed by its certificate, the PEM
+    /// bundle huskarl-reqwest's `MtlsPem` takes. Read synchronously: the
+    /// files are a few hundred bytes in the run's temporary directory.
+    fn client_identity(&self, name: &str) -> Result<SecretString> {
+        let key = fs::read_to_string(self.certs.join(format!("{name}.key")))?;
+        let cert = fs::read_to_string(self.certs.join(format!("{name}.crt")))?;
+        Ok(format!("{key}{cert}").into())
     }
 
     /// `private_key_jwt` client authentication with the client's key from

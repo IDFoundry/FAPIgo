@@ -29,6 +29,9 @@ import (
 // legTimeout bounds one leg, CIBA polling included.
 const legTimeout = 60 * time.Second
 
+// cibaPingLeg is the leg that needs the notification endpoint served.
+const cibaPingLeg = "ciba-ping"
+
 type leg struct {
 	name        string
 	description string
@@ -41,7 +44,7 @@ var legs = []leg{
 	{"message-signing", "JAR via PAR + JARM + private_key_jwt + DPoP; UserInfo, refresh", messageSigning},
 	{"client-credentials", "client_credentials + private_key_jwt + DPoP + resource indicator", clientCredentials},
 	{"ciba-poll", "CIBA poll + private_key_jwt + certificate-bound tokens; UserInfo", cibaPoll},
-	{"ciba-ping", "CIBA ping + private_key_jwt + certificate-bound tokens; UserInfo", cibaPing},
+	{cibaPingLeg, "CIBA ping + private_key_jwt + certificate-bound tokens; UserInfo", cibaPing},
 }
 
 func main() {
@@ -63,10 +66,10 @@ func main() {
 
 func runLegs(cfg runConfig, only string) bool {
 	notifications := make(chan client.BackchannelNotification, 1)
-	if _, ok := cfg.Legs["ciba-ping"]; ok && (only == "" || only == "ciba-ping") {
+	if _, ok := cfg.Legs[cibaPingLeg]; ok && (only == "" || only == cibaPingLeg) {
 		stop, err := serveNotifications(cfg.Notification, notifications)
 		if err != nil {
-			log.Printf("FAIL ciba-ping: notification endpoint: %v", err)
+			log.Printf("FAIL %s: notification endpoint: %v", cibaPingLeg, err)
 			return false
 		}
 		defer stop()

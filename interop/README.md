@@ -185,7 +185,7 @@ flows are run, for the same reason as above.
 The provider runs with oidc-provider's `fapi` profile `'2.0'`, PAR
 required, PKCE (S256), DPoP with a server nonce required on every
 request, mTLS (`self_signed_tls_client_auth` and certificate-bound
-tokens) with `mtls_endpoint_aliases` on a second listener that asks for
+tokens) with `mtls_endpoint_aliases` on a second listener that requires
 a client certificate, request objects and JARM, `client_credentials`,
 CIBA poll and ping, resource indicators, and ES256 signing. It sends
 `iss` on every authorization response (RFC 9207) and says so in its

@@ -84,10 +84,12 @@ NODE_EXTRA_CA_CERTS="${certs}/ca.crt" node "${provider_dir}/server.mjs" "${work_
   >"${work_dir}/oidc-provider.log" 2>&1 &
 server_pid="$!"
 
+# The mTLS listener only accepts a connection with a client certificate.
+probe_mtls=(--cert "${certs}/client-mtls.crt" --key "${certs}/client-mtls.key")
 for port in "${INTEROP_OP_PORT}" "${INTEROP_OP_MTLS_PORT}"; do
   ready=""
   for _ in $(seq 1 50); do
-    if curl -sf --cacert "${certs}/ca.crt" -o /dev/null "https://localhost:${port}/.well-known/openid-configuration"; then
+    if curl -sf --cacert "${certs}/ca.crt" "${probe_mtls[@]}" -o /dev/null "https://localhost:${port}/.well-known/openid-configuration"; then
       ready=1
       break
     fi

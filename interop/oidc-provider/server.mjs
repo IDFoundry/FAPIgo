@@ -4,7 +4,7 @@
 //   node server.mjs <work-dir>
 //
 // Two listeners serve the same provider: the issuer's own port, and an
-// mTLS port that asks for a client certificate and is advertised as
+// mTLS port that requires a client certificate and is advertised as
 // mtls_endpoint_aliases (RFC 8705 §5). The issuer's port also serves
 // the interaction routes, which sign the one test user in and consent
 // to what was asked for without a page, and the CIBA approval hook the
@@ -36,7 +36,7 @@ const signingKey = {
 const algorithms = ['ES256', 'PS256']
 
 // The certificate the client presented on this connection, if any. Only
-// the mTLS listener asks for one.
+// the mTLS listener requires one.
 function peerCertificate(ctx) {
   const peer = ctx.socket.getPeerCertificate?.()
   if (!peer?.raw) {
@@ -224,7 +224,7 @@ function issuerListener(req, res) {
     return
   }
   route(req, res).catch((err) => {
-    console.error(`${pathname}:`, err)
+    console.error(`${route.name}:`, err)
     if (!res.headersSent) {
       res.writeHead(500)
     }
@@ -240,9 +240,12 @@ const tls = {
 createServer(tls, issuerListener).listen(ports.op, '127.0.0.1', () => {
   console.log(`oidc-provider: issuer ${urls.op}`)
 })
-// The client's certificate is requested, not verified against a CA:
+// The mTLS listener requires a client certificate and trusts exactly
+// the run's two self-signed client certificates (their own anchors).
+// The provider itself still decides what each one may do:
 // self_signed_tls_client_auth and certificate binding compare
 // thumbprints, not chains.
-createServer({ ...tls, requestCert: true, rejectUnauthorized: false }, handle).listen(ports.opMTLS, '127.0.0.1', () => {
+const clientCertificates = ['client-mtls', 'client-ciba'].map((name) => readFileSync(join(certs, `${name}.crt`)))
+createServer({ ...tls, requestCert: true, ca: clientCertificates }, handle).listen(ports.opMTLS, '127.0.0.1', () => {
   console.log(`oidc-provider: mTLS endpoint aliases at ${urls.opMTLS}`)
 })

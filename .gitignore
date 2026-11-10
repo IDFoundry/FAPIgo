@@ -39,6 +39,9 @@ profile.cov
 # npm ci; its keys and certificates live in a temporary directory)
 /interop/openid-client/node_modules/
 
+# the oidc-provider interop suite's npm install (interop/run-oidc-provider.sh)
+/interop/oidc-provider/node_modules/
+
 # Go workspace file
 go.work
 go.work.sum

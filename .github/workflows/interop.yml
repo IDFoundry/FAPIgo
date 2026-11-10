@@ -23,6 +23,17 @@ on:
       - interop/**
       - .github/workflows/interop.yml
       - cmd/conformance-as/**
+      # The oidc-provider suite's driver builds against FAPIgo's client
+      # package and everything it imports.
+      - '*.go'
+      - go.mod
+      - client/**
+      - extension/**
+      - fapihttp/**
+      - federation/**
+      - internal/**
+      - keys/**
+      - storage/**
 
 permissions:
   contents: read
@@ -90,3 +101,43 @@ jobs:
 
       - name: Run the huskarl legs
         run: ./interop/run-huskarl.sh
+
+  # The other direction: FAPIgo's client package (interop/fapigo-client)
+  # drives the same kinds of flows against oidc-provider (Node.js), an
+  # independent FAPI 2.0 authorization server. See interop/README.md.
+  oidc-provider:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: interop/fapigo-client/go.mod
+          check-latest: true
+          cache-dependency-path: interop/fapigo-client/go.mod
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          check-latest: true
+
+      # The driver's module path sits under the library's, so Go would
+      # let it import the library's internal packages, which a real
+      # integrator can't. Keep it to the public API, as ci.yml does for
+      # examples/.
+      - name: public API only
+        working-directory: interop/fapigo-client
+        run: |
+          internal=$(go list -f '{{range .Imports}}{{.}} {{end}}' ./... | tr ' ' '\n' | grep '^github.com/idfoundry/fapigo/internal' || true)
+          if [ -n "$internal" ]; then
+            echo "interop/fapigo-client must use FAPIgo's public API only; found: $internal"
+            exit 1
+          fi
+
+      # The runner installs the provider with `npm ci` (the lockfile,
+      # never a fresh resolve) and runs every leg.
+      - name: Run the FAPIgo client legs against oidc-provider
+        run: ./interop/run-oidc-provider.sh

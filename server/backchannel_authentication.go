@@ -16,7 +16,6 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
-	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/requestobject"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -170,6 +169,14 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if authErr != nil {
 		return s.backchannelBeginFail(ctx, "", authErr), nil
 	}
+	// Before the signed authentication request, which records its jti:
+	// see verifyOptionalDPoPProof. A client authenticating with its
+	// certificate calls the mTLS alias (RFC 8705 §5), and its proof names
+	// that URL, as at PAR and the token endpoint.
+	dpopThumbprint, dpopErr := s.verifyOptionalDPoPProof(ctx, dpopProof, s.cfg.Endpoints.BackchannelAuthentication, s.cfg.MTLSEndpoints.BackchannelAuthentication)
+	if dpopErr != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), dpopErr), nil
+	}
 
 	verified, resolveErr := s.resolveBackchannelAuthenticationParameters(ctx, params, client)
 	if resolveErr != nil {
@@ -186,9 +193,9 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), subjectErr), nil
 	}
 
-	dpopJKT, dpopErr := s.reconcileBackchannelDPoPBinding(ctx, dpopProof, validated.params)
-	if dpopErr != nil {
-		return s.backchannelBeginFail(ctx, client.ID(), dpopErr), nil
+	dpopJKT, bindErr := reconcileBackchannelDPoPBinding(dpopThumbprint, validated.params)
+	if bindErr != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), bindErr), nil
 	}
 
 	interaction, err := s.backchannelInteraction(client, validated.params, validated.resources)
@@ -623,38 +630,20 @@ func hasVisibleContent(msg string) bool {
 // counterpart: a DPoP proof at the backchannel authentication endpoint
 // is optional, exactly like PAR — see Open Question 1 in this feature's
 // design plan for why this mirrors PAR rather than the token endpoint's
-// always-required proof. It returns the key thumbprint the request is
-// bound to, which the token exchange then requires its DPoP proof's key
-// to match: the proof's key, or an explicit dpop_jkt parameter (RFC 9449
-// §10, applied here as at PAR) when there's no proof. A dpop_jkt that
-// doesn't match a proof sent with it is refused.
-func (s *Server) reconcileBackchannelDPoPBinding(ctx context.Context, proof string, params map[string]json.RawMessage) (string, *Error) {
+// always-required proof. thumbprint is the key thumbprint of the proof
+// verifyOptionalDPoPProof already verified, or "" when there was none.
+// It returns the key thumbprint the request is bound to, which the token
+// exchange then requires its DPoP proof's key to match: the proof's key,
+// or an explicit dpop_jkt parameter (RFC 9449 §10, applied here as at
+// PAR) when there's no proof. A dpop_jkt that doesn't match a proof sent
+// with it is refused.
+func reconcileBackchannelDPoPBinding(thumbprint string, params map[string]json.RawMessage) (string, *Error) {
 	// A dpop_jkt that isn't a non-empty string was refused with the
 	// request's other parameters (backchannelParameterTypes).
 	declared, _ := jsonString(params, "dpop_jkt")
-	if proof == "" {
+	if thumbprint == "" {
 		return declared, nil
 	}
-	// A client authenticating with its certificate calls the mTLS alias
-	// (RFC 8705 §5), and its proof names that URL, as at PAR and the
-	// token endpoint.
-	verified, err := verifyDPoPAtEitherEndpoint(ctx, dpop.VerifyRequest{
-		Proof:        proof,
-		Method:       "POST",
-		Now:          s.deps.Clock.Now(),
-		MaxProofAge:  s.cfg.Limits.MaxDPoPProofAge,
-		MaxClockSkew: s.cfg.Limits.MaxClockSkew,
-		Replay:       s.dpopReplayChecker(),
-	}, s.cfg.Endpoints.BackchannelAuthentication, s.cfg.MTLSEndpoints.BackchannelAuthentication)
-	if err != nil {
-		return "", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err)
-	}
-	if s.deps.Nonces != nil {
-		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {
-			return "", challenge
-		}
-	}
-	thumbprint := verified.Thumbprint.String()
 	if declared != "" && declared != thumbprint {
 		return "", newError(ErrorInvalidRequest, 400, "dpop_jkt does not match the DPoP proof presented to the backchannel authentication endpoint", nil)
 	}

@@ -76,10 +76,10 @@ func otherInfo(algorithmID string, apu, apv []byte, keyDataLenBits int) ([]byte,
 // uses for each OtherInfo component. b is an algorithm identifier or a
 // decoded apu/apv header value — the latter sender-chosen, but bounded
 // by the JWE's own size — and the 32-bit bound is checked explicitly
-// rather than assumed.
+// rather than assumed, as is room for the 4-byte prefix within int.
 func lengthPrefixed(b []byte) ([]byte, error) {
 	n := len(b)
-	if n < 0 || uint64(n) > math.MaxUint32 {
+	if n < 0 || uint64(n) > math.MaxUint32 || n > math.MaxInt-4 {
 		return nil, fmt.Errorf("jwe: value of length %d exceeds maximum encodable length", n)
 	}
 	out := make([]byte, 4+n)

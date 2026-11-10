@@ -98,9 +98,13 @@ func TestOtherInfoRejectsNegativeKeyDataLen(t *testing.T) {
 }
 
 func TestLengthPrefixedLenRejectsUnencodableLengths(t *testing.T) {
-	// -1 is below any length; math.MaxInt exceeds the 32-bit prefix on
-	// 64-bit platforms and overflows 4+n on 32-bit ones.
-	for _, n := range []int{-1, math.MaxInt} {
+	lengths := []int{-1}
+	// Only where int is wider than the 32-bit prefix can a length
+	// exceed it.
+	if math.MaxInt > math.MaxUint32 {
+		lengths = append(lengths, math.MaxInt)
+	}
+	for _, n := range lengths {
 		if _, err := lengthPrefixedLen(nil, n); err == nil {
 			t.Errorf("lengthPrefixedLen(nil, %d) = nil error, want error", n)
 		}

@@ -82,14 +82,13 @@ func lengthPrefixed(b []byte) ([]byte, error) {
 }
 
 // lengthPrefixedLen is lengthPrefixed with len(b) passed as n, so the
-// bounds — n encodable in the 32-bit prefix, and 4+n within int — are
-// testable without allocating a value that large. n must be len(b).
+// 32-bit bound is testable without allocating a value that large. n
+// must be len(b). The prefix and value are appended rather than copied
+// into make([]byte, 4+n), so no size is computed that could overflow.
 func lengthPrefixedLen(b []byte, n int) ([]byte, error) {
-	if n < 0 || uint64(n) > math.MaxUint32 || n > math.MaxInt-4 {
+	if n < 0 || uint64(n) > math.MaxUint32 {
 		return nil, fmt.Errorf("jwe: value of length %d exceeds maximum encodable length", n)
 	}
-	out := make([]byte, 4+n)
-	binary.BigEndian.PutUint32(out, uint32(n))
-	copy(out[4:], b)
-	return out, nil
+	out := binary.BigEndian.AppendUint32(nil, uint32(n))
+	return append(out, b...), nil
 }

@@ -324,7 +324,7 @@ run:
   at all without that listener existing.
 - **Fixed: a DPoP proof presented at the mTLS-alias URL was rejected
   outright.** Both `verifyTokenRequestDPoP` (`server/token.go`) and
-  `reconcileParDPoPBinding` (`server/par.go`) checked a proof's `htu`
+  `verifyOptionalDPoPProof` (`server/par.go`) checked a proof's `htu`
   against this server's *plain* endpoint URL only. That's fine for
   every scenario tried before this profile — `sender_constrain=mtls`
   never uses DPoP at all, and every DPoP-sender-constrained client

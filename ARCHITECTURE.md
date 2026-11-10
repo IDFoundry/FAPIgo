@@ -1180,7 +1180,7 @@ whenever `Config.MTLSEndpoints` is configured, the suite's own
 (confirmed by disassembly); (2) a DPoP proof's `htu` claim was checked
 against this server's plain endpoint URL only, in both
 `verifyTokenRequestDPoP` (`server/token.go`) and
-`reconcileParDPoPBinding` (`server/par.go`) — but a client
+`verifyOptionalDPoPProof` (`server/par.go`) — but a client
 authenticating via certificate must call the mTLS-alias URL to present
 it at all, so its DPoP proof legitimately names that alias instead;
 confirmed live via the token endpoint's `dpop: htu does not match

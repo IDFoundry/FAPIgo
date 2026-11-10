@@ -193,15 +193,15 @@
   },
   {
     "id": "srv-ciba-dpop-nonce",
-    "file": "server/backchannel_authentication.go",
+    "file": "server/par.go",
     "old": "if s.deps.Nonces != nil {\n\t\tif challenge := s.checkDPoPNonce(",
     "new": "if s.deps.Nonces != nil && false {\n\t\tif challenge := s.checkDPoPNonce(",
     "module": "root",
     "packages": [
       "./server"
     ],
-    "run": "^TestBackchannelAuthenticationChallengesDPoPNonce$",
-    "why": "the backchannel authentication endpoint enforces DPoP nonces"
+    "run": "^(TestBackchannelAuthenticationChallengesDPoPNonce|TestPushAuthorizationRequestChallengesMissingNonceWhenDPoPPresented)$",
+    "why": "the backchannel authentication and PAR endpoints enforce DPoP nonces"
   },
   {
     "id": "srv-access-token-size-cap",

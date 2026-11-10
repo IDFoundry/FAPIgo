@@ -237,6 +237,12 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	if subjectErr := s.checkClientSubjectIssuable(client); subjectErr != nil {
 		return s.parFail(ctx, client.ID(), subjectErr)
 	}
+	// Before the request object, which records its jti: see
+	// verifyOptionalDPoPProof.
+	dpopThumbprint, dpopErr := s.verifyOptionalDPoPProof(ctx, dpopProof, s.cfg.Endpoints.PushedAuthorizationRequest, s.cfg.MTLSEndpoints.PushedAuthorizationRequest)
+	if dpopErr != nil {
+		return s.parFail(ctx, client.ID(), dpopErr)
+	}
 
 	authParams, tokenClaims, requestedResources, resolveErr := s.resolveAuthorizationParameters(ctx, params, formResources, client)
 	if resolveErr != nil {
@@ -257,9 +263,9 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		return s.parFail(ctx, client.ID(), mapErr)
 	}
 
-	validated, dpopErr := s.reconcileParDPoPBinding(ctx, dpopProof, validated)
-	if dpopErr != nil {
-		return s.parFail(ctx, client.ID(), dpopErr)
+	validated, bindErr := reconcileParDPoPBinding(dpopThumbprint, validated)
+	if bindErr != nil {
+		return s.parFail(ctx, client.ID(), bindErr)
 	}
 
 	requestURI, err := par.GenerateRequestURI(s.deps.Random)
@@ -815,26 +821,26 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 	return params, nil
 }
 
-// reconcileParDPoPBinding handles an optional DPoP proof presented
-// alongside the pushed authorization request (RFC 9449 §10). A DPoP
-// proof at the PAR endpoint is not itself required, but if the client
-// sends one, this server:
-//   - verifies it (proof of possession of the key, matching htm/htu),
-//   - rejects the request outright if an explicit dpop_jkt parameter
-//     was also given and doesn't match the proof's key thumbprint, and
-//   - otherwise derives an implicit dpop_jkt from the proof's own key
-//     when the request carried none, so the resulting authorization
-//     code ends up bound to whichever key the client actually
-//     demonstrated possession of at PAR time — not just whichever key
-//     later shows up at the token endpoint.
+// verifyOptionalDPoPProof verifies the optional DPoP proof presented
+// to the PAR or backchannel authentication endpoint (RFC 9449 §10) —
+// proof of possession of the key, matching htm/htu, its own jti replay
+// record — and, when Dependencies.Nonces is set, its nonce (§8). It
+// returns the proof key's thumbprint, or "" when no proof was sent.
 //
-// The proof's htu is checked against either this endpoint's plain URL
+// Both endpoints call it straight after client authentication, before
+// the request object (or signed authentication request) is verified:
+// verifying that records its single-use jti, so a nonce challenge
+// issued after it would make the client's legitimate retry of the same
+// signed request fail as a replay (§8 asks the client only to retry with
+// the nonce, not to re-sign its request).
+//
+// The proof's htu is checked against either the endpoint's plain URL
 // or its mTLS alias (RFC 8705 §5) — see verifyDPoPAtEitherEndpoint's own
 // doc comment for why a DPoP-sender-constrained client may legitimately
 // call the alias here too.
-func (s *Server) reconcileParDPoPBinding(ctx context.Context, proof string, params map[string]json.RawMessage) (map[string]json.RawMessage, *Error) {
+func (s *Server) verifyOptionalDPoPProof(ctx context.Context, proof string, endpoint, mtlsAlias fapi.URL) (string, *Error) {
 	if proof == "" {
-		return params, nil
+		return "", nil
 	}
 	verified, err := verifyDPoPAtEitherEndpoint(ctx, dpop.VerifyRequest{
 		Proof:        proof,
@@ -843,16 +849,34 @@ func (s *Server) reconcileParDPoPBinding(ctx context.Context, proof string, para
 		MaxProofAge:  s.cfg.Limits.MaxDPoPProofAge,
 		MaxClockSkew: s.cfg.Limits.MaxClockSkew,
 		Replay:       s.dpopReplayChecker(),
-	}, s.cfg.Endpoints.PushedAuthorizationRequest, s.cfg.MTLSEndpoints.PushedAuthorizationRequest)
+	}, endpoint, mtlsAlias)
 	if err != nil {
-		return nil, newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err)
+		return "", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err)
 	}
 	if s.deps.Nonces != nil {
 		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {
-			return nil, challenge
+			return "", challenge
 		}
 	}
-	thumbprint := verified.Thumbprint.String()
+	return verified.Thumbprint.String(), nil
+}
+
+// reconcileParDPoPBinding binds the pushed authorization request to the
+// key of the optional DPoP proof presented alongside it (RFC 9449 §10),
+// already verified by verifyOptionalDPoPProof — thumbprint is that
+// proof's key thumbprint, or "" when the client sent no proof. With a
+// proof, this server:
+//   - rejects the request outright if an explicit dpop_jkt parameter
+//     was also given and doesn't match the proof's key thumbprint, and
+//   - otherwise derives an implicit dpop_jkt from the proof's own key
+//     when the request carried none, so the resulting authorization
+//     code ends up bound to whichever key the client actually
+//     demonstrated possession of at PAR time — not just whichever key
+//     later shows up at the token endpoint.
+func reconcileParDPoPBinding(thumbprint string, params map[string]json.RawMessage) (map[string]json.RawMessage, *Error) {
+	if thumbprint == "" {
+		return params, nil
+	}
 
 	if declared, jsonErr := jsonString(params, "dpop_jkt"); jsonErr == nil && declared != "" {
 		if declared != thumbprint {

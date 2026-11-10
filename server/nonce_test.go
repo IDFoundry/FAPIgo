@@ -56,19 +56,24 @@ func TestNewRejectsInvalidNonceConfig(t *testing.T) {
 // newHarnessWithNonces mirrors newHarnessWithIdentityClaims's shape
 // (identity_claims_test.go), but wires a memstore.NonceStore and
 // Limits.DPoPNonceLifetime so token/PAR nonce-challenge tests don't have
-// to duplicate every other piece of a valid harness.
-func newHarnessWithNonces(t *testing.T) (harness, *memstore.NonceStore) {
+// to duplicate every other piece of a valid harness. mutateClient, if
+// given, adjusts the registered client's configuration.
+func newHarnessWithNonces(t *testing.T, mutateClient ...func(*storage.RegisteredClientConfig)) (harness, *memstore.NonceStore) {
 	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
 	serverKey := generateKey(t)
 
-	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+	clientCfg := storage.RegisteredClientConfig{
 		ID:                       testClientID,
 		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
 		ClientAssertionAlgorithm: fapi.ES256,
 		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
-	})
+	}
+	for _, mutate := range mutateClient {
+		mutate(&clientCfg)
+	}
+	client, err := storage.NewRegisteredClient(clientCfg)
 	if err != nil {
 		t.Fatalf("NewRegisteredClient: %v", err)
 	}
@@ -516,6 +521,53 @@ func TestPushAuthorizationRequestAcceptsValidNonceAndHandsOutNext(t *testing.T) 
 	}
 	if result.NextDPoPNonce == "" {
 		t.Fatal("NextDPoPNonce is empty, want the nonce to use next")
+	}
+}
+
+// TestPushAuthorizationRequestNonceChallengeKeepsRequestObjectUsable:
+// a use_dpop_nonce challenge must not consume the request object's jti.
+// The client retries the same signed request object with a fresh proof
+// carrying the nonce (RFC 9449 §8 asks it to re-send, not re-sign), and
+// that retry succeeds; only a second successful use is a replay.
+func TestPushAuthorizationRequestNonceChallengeKeepsRequestObjectUsable(t *testing.T) {
+	h, _ := newHarnessWithNonces(t, func(cfg *storage.RegisteredClientConfig) { cfg.RequestObjectAlgorithm = fapi.ES256 })
+	dpopKey := generateKey(t)
+	parURL, err := url.Parse(testPAREndpoint)
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+	requestObj := h.requestObject(t, standardAuthParams(t))
+	push := func(nonce string) error {
+		t.Helper()
+		proof, err := dpop.CreateProof(dpop.ProofRequest{
+			Signer: dpopKey, Algorithm: fapi.ES256, Method: "POST", URL: parURL, Now: h.now, Nonce: nonce,
+		})
+		if err != nil {
+			t.Fatalf("dpop.CreateProof: %v", err)
+		}
+		_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+			HTTP: server.FormRequest{Parameters: []server.FormParameter{
+				formParam("client_assertion", h.clientAssertion(t)),
+				formParam("client_assertion_type", clientassertion.AssertionType),
+				formParam("request", requestObj),
+			}},
+			DPoPProofs: []string{proof},
+		})
+		return err
+	}
+
+	err = push("")
+	if code := serverErrorCode(t, err); code != server.ErrorUseDPoPNonce {
+		t.Fatalf("proof without a nonce: error code = %q, want %q", code, server.ErrorUseDPoPNonce)
+	}
+	issued := err.(*server.Error).Nonce()
+
+	if err := push(issued); err != nil {
+		t.Fatalf("retry of the same request object with the issued nonce: %v, want success", err)
+	}
+
+	if code := serverErrorCode(t, push(issued)); code != server.ErrorInvalidRequestObject {
+		t.Fatalf("request object used a second time: error code = %q, want %q", code, server.ErrorInvalidRequestObject)
 	}
 }
 

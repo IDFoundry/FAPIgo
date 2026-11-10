@@ -190,3 +190,56 @@ func TestBackchannelAuthenticationChallengesDPoPNonce(t *testing.T) {
 		t.Fatalf("proof with the issued nonce: action = %T, want BackchannelInteractionRequired", action)
 	}
 }
+
+// TestBackchannelAuthenticationNonceChallengeKeepsRequestUsable: a
+// use_dpop_nonce challenge must not consume the signed authentication
+// request's jti. The client retries the same signed request with a fresh
+// proof carrying the nonce, and that retry succeeds; only a second
+// successful use is a replay.
+func TestBackchannelAuthenticationNonceChallengeKeepsRequestUsable(t *testing.T) {
+	endpoint, err := url.Parse(testBackchannelAuthenticationEndpoint)
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+	h := newHarnessWithBackchannelOptions(t, memstore.NewBackchannelAuthenticationStore(),
+		func(cfg *server.Config) { cfg.Limits.DPoPNonceLifetime = time.Minute },
+		func(deps *server.Dependencies) { deps.Nonces = memstore.NewNonceStore() },
+	)
+	dpopKey := generateKey(t)
+	requestObj := h.backchannelRequestObject(t, standardBackchannelParams(t))
+	begin := func(nonce string) server.BackchannelAuthenticationAction {
+		t.Helper()
+		proof, err := dpop.CreateProof(dpop.ProofRequest{Signer: dpopKey, Algorithm: fapi.ES256, Method: "POST", URL: endpoint, Now: h.now, Nonce: nonce})
+		if err != nil {
+			t.Fatalf("CreateProof: %v", err)
+		}
+		action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+			HTTP:       server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+			DPoPProofs: []string{proof},
+		})
+		if err != nil {
+			t.Fatalf("BeginBackchannelAuthentication: %v", err)
+		}
+		return action
+	}
+
+	localErr, ok := begin("").(server.BackchannelAuthenticationLocalError)
+	if !ok || localErr.Error.Code() != server.ErrorUseDPoPNonce {
+		t.Fatalf("proof without a nonce: want a use_dpop_nonce BackchannelAuthenticationLocalError")
+	}
+	issued := localErr.Error.Nonce()
+
+	if action := begin(issued); !isBackchannelInteractionRequired(action) {
+		t.Fatalf("retry of the same signed request with the issued nonce: action = %#v, want BackchannelInteractionRequired", action)
+	}
+
+	localErr, ok = begin(issued).(server.BackchannelAuthenticationLocalError)
+	if !ok || localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("signed request used a second time: want an invalid_request BackchannelAuthenticationLocalError")
+	}
+}
+
+func isBackchannelInteractionRequired(action server.BackchannelAuthenticationAction) bool {
+	_, ok := action.(server.BackchannelInteractionRequired)
+	return ok
+}

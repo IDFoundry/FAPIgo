@@ -75,6 +75,54 @@ move a port, and `INTEROP_KEEP_WORK_DIR=1` to keep the directory
 request that changes this directory, the workflow or
 `cmd/conformance-as`. It is not a required check.
 
+## huskarl (Rust)
+
+A second client, in a second language:
+[huskarl](https://github.com/huskarl-rs/huskarl), a Rust OAuth 2.0
+client library, runs the same flows against the same server
+configuration from [`huskarl/`](huskarl), a small binary crate built
+only on huskarl's public API. The runner reuses
+`openid-client/setup.mjs` to write the server configurations and client
+keys (it needs only Node.js, no npm packages), so both suites drive
+identically configured servers with the same client IDs. Each leg
+prints `ok` or `not ok` on its own; the binary exits non-zero if any
+leg fails.
+
+| # | Leg | huskarl |
+|---|-----|---------|
+| 1 | Authorization code + PAR + PKCE + `private_key_jwt` + DPoP; UserInfo, `/accounts`, refresh | Runs. `AuthorizationCodeGrant` (PAR, PKCE and ID-token validation built in), `JwtBearer` with `Audience::Issuer`, `DPoP`; `UserInfoClient`; `/accounts` through `HttpAuthorizer`, re-sent once when `dpop_resend_advised`; `RefreshGrant` from `to_refresh_grant()`. |
+| 2 | `self_signed_tls_client_auth` + certificate-bound tokens | Runs. `NoAuth` over an mTLS `ReqwestClient` (`MtlsPem`), which makes huskarl use the `mtls_endpoint_aliases` for PAR, token, UserInfo and refresh. |
+| 3 | Message signing: JAR via PAR + JARM | Runs. The client's signing key as the grant's `jar`, `ResponseMode::Jwt` (the mode conformance-as advertises), `private_key_jwt` + DPoP. |
+| 4 | `client_credentials` + `private_key_jwt` + DPoP | Runs. `ClientCredentialsGrant`. |
+| 5 | CIBA poll | Skipped: huskarl 0.11.10 has no CIBA grant. A poll-mode grant is merged upstream but not yet released; the leg can be added when a release carries it. |
+| 6 | CIBA ping | Skipped: huskarl implements no CIBA ping (or push) mode. |
+
+The consent form is submitted the same way as in the openid-client
+suite. The harness trusts only the run's test CA
+(`ReqwestClient::builder().root_certificates`).
+
+`huskarl/Cargo.toml` pins every direct dependency to an exact version
+(`=x.y.z`) and `huskarl/Cargo.lock` pins the whole tree; the runner
+builds with `cargo build --locked`, and interop.yml pins the Rust
+toolchain. Dependabot proposes crate updates weekly; a bump of `huskarl`
+also updates this table and the version named in the top-level README.
+
+| Crate | Version |
+|-------|---------|
+| `huskarl` | 0.11.10 (with `huskarl-core` 0.10.10) |
+| `huskarl-reqwest` | 0.9.3 (`rustls-tls`) |
+| `huskarl-crypto-native` | 0.11.3 |
+| Rust toolchain (CI) | 1.99.1 |
+
+```sh
+./interop/run-huskarl.sh
+```
+
+It needs Go (the version in `go.mod`), Rust 1.92 or later (cargo),
+Node.js 22.12 or later (for `setup.mjs` only), curl and openssl, and
+otherwise behaves like `run-openid-client.sh`: the same temporary
+directory, ports 28443-28445 and environment variables.
+
 ## When a leg fails
 
 First establish, with a citation to the specification, whose

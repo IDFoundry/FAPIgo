@@ -75,3 +75,13 @@ updates:
     directory: /interop/openid-client
     schedule:
       interval: weekly
+
+  # The interop suite's Rust harness (interop/huskarl): the huskarl
+  # release FAPIgo's authorization server is tested against, pinned
+  # exactly in Cargo.toml and Cargo.lock. Test tooling only: nothing
+  # here ships. A bump is how the suite moves to a new client release,
+  # so interop.yml runs on its pull request.
+  - package-ecosystem: cargo
+    directory: /interop/huskarl
+    schedule:
+      interval: weekly

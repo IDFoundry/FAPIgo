@@ -33,9 +33,10 @@ the fact.
   CI runs the full suite (`.github/workflows/conformance.yml`) daily on
   `main`, and a maintainer can run it against a PR's branch
   (`gh workflow run conformance.yml --ref <branch>`).
-- [`interop/`](interop/README.md) runs an independent client,
-  openid-client (Node.js), through complete flows against
-  `cmd/conformance-as` (`./interop/run-openid-client.sh`; weekly in
+- [`interop/`](interop/README.md) runs independent clients,
+  openid-client (Node.js) and huskarl (Rust), through complete flows against
+  `cmd/conformance-as` (`./interop/run-openid-client.sh`,
+  `./interop/run-huskarl.sh`; weekly in
   `.github/workflows/interop.yml`, and on a PR touching `interop/` or
   `cmd/conformance-as`). When a leg fails, first establish with a
   spec citation whose interpretation is wrong before changing FAPIgo;

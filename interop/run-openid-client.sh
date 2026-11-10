@@ -79,13 +79,8 @@ echo "interop: starting conformance-as"
 "${work_dir}/conformance-as" -config "${work_dir}/as-baseline.json" \
   -mtls -ciba -client-credentials-grant >"${work_dir}/as-baseline.log" 2>&1 &
 server_pids+=("$!")
-# -dpop-nonce-challenge=false: with nonces on, the PAR request that gets
-# the use_dpop_nonce challenge has already recorded its request object's
-# jti, so openid-client's retry of the same request (RFC 9449 §8) is
-# refused as a replay. A FAPIgo issue: see interop/README.md, "Known
-# disagreements". Leg 1 covers nonce handling on the baseline instance.
 "${work_dir}/conformance-as" -config "${work_dir}/as-message-signing.json" \
-  -dpop-nonce-challenge=false >"${work_dir}/as-message-signing.log" 2>&1 &
+  >"${work_dir}/as-message-signing.log" 2>&1 &
 server_pids+=("$!")
 
 for port in "${INTEROP_AS_PORT}" "${INTEROP_AS_MTLS_PORT}" "${INTEROP_AS_MS_PORT}"; do

@@ -92,16 +92,4 @@ the one at fault.
 
 ## Known disagreements
 
-- **DPoP nonce retry of a pushed signed request object (FAPIgo).** With
-  DPoP nonces on, `server.PushAuthorizationRequest` verifies the request
-  object, recording its `jti` as used, before it checks the DPoP proof's
-  nonce. The request is then refused with `use_dpop_nonce`, and
-  openid-client retries it with the nonce, as RFC 9449 §8 expects of a
-  client, resending the same signed request object; FAPIgo refuses the
-  retry as a replay (`invalid_request_object`). A request the server
-  refused shouldn't use up its request object: RFC 9449 §8 makes the
-  retry part of the normal flow, and nothing in RFC 9101 or FAPI 2.0
-  Message Signing asks a client to re-sign it. Until FAPIgo checks the
-  nonce first (or records the `jti` only once the request succeeds), the
-  Message Signing instance runs with `-dpop-nonce-challenge=false`; leg 1
-  covers nonce handling.
+None known.

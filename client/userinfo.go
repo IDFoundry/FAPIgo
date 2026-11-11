@@ -60,7 +60,12 @@ func (u UserInfo) AsMap() map[string]any {
 // through Dependencies.Decryption under keys.UserInfoDecryption, using
 // Config.Algorithms.UserInfoKeyManagement/UserInfoContentEncryption —
 // exactly the same shape ExchangeCode already applies to an encrypted
-// ID token, reused here rather than reinvented.
+// ID token, reused here rather than reinvented. A signed (or encrypted)
+// response is refused with ErrorInvalidResponse when
+// Config.Algorithms.UserInfo is zero: a server signs UserInfo only for
+// a client registered with userinfo_signed_response_alg (OIDC Dynamic
+// Client Registration §2), and the algorithm is never taken from the
+// response's own header (RFC 8725 §3.1).
 //
 // tokens must carry a validated ID token (HasIDToken): OIDC Core §5.3.2
 // requires the UserInfo Response's sub Claim to be verified against the
@@ -209,6 +214,12 @@ func (c *Client) decryptUserInfoJWE(ctx context.Context, raw string) (string, *E
 }
 
 func (c *Client) verifyUserInfoJWS(ctx context.Context, raw string) (map[string]json.RawMessage, *Error) {
+	// Without an algorithm no issuer key can match, and the resulting
+	// "no matching issuer key" would point at the server's JWKS rather
+	// than at this client's configuration.
+	if c.cfg.Algorithms.UserInfo == 0 {
+		return nil, newError(ErrorInvalidResponse, "UserInfo response is signed, but Config.Algorithms.UserInfo is not set: set it to the userinfo_signed_response_alg this client is registered with", nil)
+	}
 	parsed, err := c.verifyIssuerJWS(ctx, raw)
 	if err != nil {
 		if cerr, ok := err.(*Error); ok {

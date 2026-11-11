@@ -197,7 +197,8 @@ func TestNewMaxIDTokenLifetimeRequirement(t *testing.T) {
 // TestOAuthOnlyClientWithoutIssuerKeysRefusesIssuerJWS: an OAuthOnly
 // client built without Dependencies.IssuerKeys has nothing to verify an
 // issuer-signed JWS with, and says so rather than failing some other
-// way.
+// way. New allows nil issuer keys only while Algorithms.UserInfo is
+// zero, so the refusal names the missing algorithm.
 func TestOAuthOnlyClientWithoutIssuerKeysRefusesIssuerJWS(t *testing.T) {
 	cfg, deps := validConfig(t), validDependencies(t)
 	oauthOnly(&cfg, &deps)
@@ -213,7 +214,7 @@ func TestOAuthOnlyClientWithoutIssuerKeysRefusesIssuerJWS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("jose.Sign: %v", err)
 	}
-	if _, err := c.VerifyIssuerJWS(context.Background(), compact); clientErrorCode(t, err) != client.ErrorInternal {
-		t.Fatalf("VerifyIssuerJWS without issuer keys = %v, want an internal error", err)
+	if _, err := c.VerifyIssuerJWS(context.Background(), compact); clientErrorCode(t, err) != client.ErrorInvalidRequest {
+		t.Fatalf("VerifyIssuerJWS without issuer keys = %v, want an invalid_request error", err)
 	}
 }

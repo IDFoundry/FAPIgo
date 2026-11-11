@@ -1,6 +1,6 @@
 module github.com/idfoundry/fapigo/examples/federated-union
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/idfoundry/fapigo v0.0.0-00010101000000-000000000000

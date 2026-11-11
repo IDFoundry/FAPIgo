@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.72.3](https://github.com/IDFoundry/FAPIgo/compare/v0.72.2...v0.72.3) (2026-11-11)
+
+
+### Bug Fixes
+
+* **client:** name the missing UserInfo algorithm when a signed response arrives ([78a3fa8](https://github.com/IDFoundry/FAPIgo/commit/78a3fa864b25b288dc35511c54d7e096a8c14581))
+
 ## [0.72.2](https://github.com/IDFoundry/FAPIgo/compare/v0.72.1...v0.72.2) (2026-11-10)
 
 

@@ -7,7 +7,8 @@
 //
 // The configuration (see runConfig) names the issuer, the CA its TLS
 // certificate chains to, and each leg's client registration; the
-// suite's runner writes it (interop/run-oidc-provider.sh). It exits
+// suite's runner writes it (interop/run-oidc-provider.sh,
+// interop/run-keycloak.sh). It exits
 // non-zero if any leg fails.
 package main
 
@@ -40,9 +41,9 @@ type leg struct {
 
 var legs = []leg{
 	{"code-pkjwt-dpop", "authorization code + PAR + PKCE + private_key_jwt + DPoP; ID token, UserInfo, refresh", codeDPoP},
-	{"code-mtls-mtls", "authorization code + PAR + PKCE + self_signed_tls_client_auth + certificate-bound tokens (mTLS aliases); UserInfo, refresh", codeMTLS},
+	{"code-mtls-mtls", "authorization code + PAR + PKCE + mutual-TLS client authentication + certificate-bound tokens (mTLS aliases); UserInfo, refresh", codeMTLS},
 	{"message-signing", "JAR via PAR + JARM + private_key_jwt + DPoP; UserInfo, refresh", messageSigning},
-	{"client-credentials", "client_credentials + private_key_jwt + DPoP + resource indicator", clientCredentials},
+	{"client-credentials", "client_credentials + private_key_jwt + DPoP (+ resource indicator where configured)", clientCredentials},
 	{"ciba-poll", "CIBA poll + private_key_jwt + certificate-bound tokens; UserInfo", cibaPoll},
 	{cibaPingLeg, "CIBA ping + private_key_jwt + certificate-bound tokens; UserInfo", cibaPing},
 }

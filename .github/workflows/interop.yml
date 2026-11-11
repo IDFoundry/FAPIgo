@@ -141,3 +141,30 @@ jobs:
       # never a fresh resolve) and runs every leg.
       - name: Run the FAPIgo client legs against oidc-provider
         run: ./interop/run-oidc-provider.sh
+
+  # FAPIgo's client package (interop/fapigo-client) against a second
+  # independent authorization server: Keycloak (Java), run with Docker
+  # from the image interop/keycloak/Dockerfile pins (tag and digest).
+  # See interop/README.md.
+  keycloak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: interop/fapigo-client/go.mod
+          check-latest: true
+          cache-dependency-path: interop/fapigo-client/go.mod
+
+      # setup.mjs and harness.mjs need Node.js only, no npm packages.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          check-latest: true
+
+      - name: Run the FAPIgo client legs against Keycloak
+        run: ./interop/run-keycloak.sh

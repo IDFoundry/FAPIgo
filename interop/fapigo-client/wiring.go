@@ -86,8 +86,15 @@ func newClient(ctx context.Context, rc runConfig, leg legConfig, shape clientSha
 		Assurance:                      client.AssuranceDevelopment,
 		AuthorizationResponseIssPolicy: client.TolerateAbsentAuthorizationResponseIss, // NewFromDiscovery raises this when the server advertises iss
 	}
+	if err := registeredAlgorithms(leg, &cfg.Algorithms); err != nil {
+		return nil, err
+	}
 	if shape.authMTLS {
-		cfg.ClientAuthMethod = storage.ClientAuthMethodSelfSignedTLSClientAuth
+		method, err := tlsClientAuthMethod(leg.TLSClientAuth)
+		if err != nil {
+			return nil, err
+		}
+		cfg.ClientAuthMethod = method
 	}
 	if shape.senderMTLS {
 		cfg.SenderConstrain = storage.SenderConstrainMTLS
@@ -114,6 +121,42 @@ func newClient(ctx context.Context, rc runConfig, leg legConfig, shape clientSha
 		return nil, fmt.Errorf("construct client: %w", err)
 	}
 	return cl, nil
+}
+
+// registeredAlgorithms sets the response signing algorithms the leg's
+// client is registered with, where the run's configuration names them.
+func registeredAlgorithms(leg legConfig, algs *client.Algorithms) error {
+	for _, registered := range []struct {
+		name  string
+		value string
+		into  *fapi.SignatureAlgorithm
+	}{
+		{"id_token_signed_response_alg", leg.IDTokenSignedResponseAlg, &algs.IDToken},
+		{"userinfo_signed_response_alg", leg.UserInfoSignedResponseAlg, &algs.UserInfo},
+	} {
+		if registered.value == "" {
+			continue
+		}
+		alg, err := fapi.ParseSignatureAlgorithm(registered.value)
+		if err != nil {
+			return fmt.Errorf("%s: %w", registered.name, err)
+		}
+		*registered.into = alg
+	}
+	return nil
+}
+
+// tlsClientAuthMethod maps a leg's tls_client_auth setting to the
+// client's mutual-TLS authentication method.
+func tlsClientAuthMethod(name string) (storage.ClientAuthMethod, error) {
+	switch name {
+	case "", "self_signed_tls_client_auth":
+		return storage.ClientAuthMethodSelfSignedTLSClientAuth, nil
+	case "tls_client_auth":
+		return storage.ClientAuthMethodTLSClientAuth, nil
+	default:
+		return 0, fmt.Errorf("unknown tls_client_auth %q", name)
+	}
 }
 
 func algorithmsFor(shape clientShape) client.Algorithms {

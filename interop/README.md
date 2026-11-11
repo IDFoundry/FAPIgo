@@ -71,9 +71,10 @@ stops the servers and deletes the directory. Set `INTEROP_AS_PORT`,
 move a port, and `INTEROP_KEEP_WORK_DIR=1` to keep the directory
 (configurations, keys, server logs) after the run.
 
-`.github/workflows/interop.yml` runs it weekly, on demand, and on a pull
-request that changes this directory, the workflow or
-`cmd/conformance-as`. It is not a required check.
+`.github/workflows/interop-openid-client.yml` runs it weekly, on
+demand, and on a pull request that changes this suite, the workflow,
+or `cmd/conformance-as` and the packages it builds from. It is not a
+required check.
 
 ## huskarl (Rust)
 
@@ -103,8 +104,10 @@ suite. The harness trusts only the run's test CA
 
 `huskarl/Cargo.toml` pins every direct dependency to an exact version
 (`=x.y.z`) and `huskarl/Cargo.lock` pins the whole tree; the runner
-builds with `cargo build --locked`, and interop.yml pins the Rust
-toolchain. Dependabot proposes crate updates weekly; a bump of `huskarl`
+builds with `cargo build --locked`, and
+`.github/workflows/interop-huskarl.yml` pins the Rust toolchain; it
+runs the suite weekly, on demand, and on a pull request that changes
+the suite or the server it drives. It is not a required check. Dependabot proposes crate updates weekly; a bump of `huskarl`
 also updates this table and the version named in the top-level README.
 
 | Crate | Version |
@@ -160,7 +163,7 @@ The second suite runs the other direction. The server is
 FAPIgo's `client` package, driven by
 [`fapigo-client`](fapigo-client), a Go program in a module of its own
 (building against this checkout through a `replace` directive, and
-limited to FAPIgo's public API, which interop.yml checks). Only positive
+limited to FAPIgo's public API, which interop-oidc-provider.yml checks). Only positive
 flows are run, for the same reason as above.
 
 The provider runs with oidc-provider's `fapi` profile `'2.0'`, PAR
@@ -249,9 +252,9 @@ the provider and deletes the directory. Set `INTEROP_OP_PORT`,
 the provider's log) after the run. `fapigo-client -leg <name>` runs one
 leg.
 
-`.github/workflows/interop.yml`'s `oidc-provider` job runs it weekly, on
-demand, and on a pull request that changes this directory, the workflow,
-or the packages FAPIgo's client builds from. It is not a required check.
+`.github/workflows/interop-oidc-provider.yml` runs it weekly, on
+demand, and on a pull request that changes this directory, the driver,
+the workflow, or the packages FAPIgo's client builds from. It is not a required check.
 
 ## Keycloak: FAPIgo's client against a second independent server
 
@@ -346,6 +349,7 @@ Desktop) on the loopback address. Set `INTEROP_KC_PORT`,
 `INTEROP_KEEP_WORK_DIR=1` to keep the directory (configuration, keys,
 Keycloak's and the harness's logs) after the run.
 
-`.github/workflows/interop.yml`'s `keycloak` job runs it weekly, on
-demand, and on the same pull requests as the `oidc-provider` job. It is
+`.github/workflows/interop-keycloak.yml` runs it weekly, on demand,
+and on a pull request that changes this directory, the driver, the
+workflow, or the packages FAPIgo's client builds from. It is
 not a required check.

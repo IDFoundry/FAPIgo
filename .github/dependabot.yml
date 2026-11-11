@@ -70,7 +70,8 @@ updates:
   # openid-client release FAPIgo's authorization server is tested
   # against, pinned exactly in package.json and package-lock.json. Test
   # tooling only: nothing here ships. A bump is how the suite moves to a
-  # new client release, so interop.yml runs on its pull request.
+  # new client release, so interop-openid-client.yml runs on its pull
+  # request.
   - package-ecosystem: npm
     directory: /interop/openid-client
     schedule:
@@ -80,7 +81,7 @@ updates:
   # release FAPIgo's authorization server is tested against, pinned
   # exactly in Cargo.toml and Cargo.lock. Test tooling only: nothing
   # here ships. A bump is how the suite moves to a new client release,
-  # so interop.yml runs on its pull request.
+  # so interop-huskarl.yml runs on its pull request.
   - package-ecosystem: cargo
     directory: /interop/huskarl
     schedule:
@@ -90,8 +91,8 @@ updates:
   # (interop/oidc-provider): the oidc-provider release FAPIgo's client is
   # tested against, pinned exactly in package.json and
   # package-lock.json. Test tooling only: nothing here ships. A bump is
-  # how the suite moves to a new provider release, so interop.yml runs
-  # on its pull request.
+  # how the suite moves to a new provider release, so
+  # interop-oidc-provider.yml runs on its pull request.
   - package-ecosystem: npm
     directory: /interop/oidc-provider
     schedule:
@@ -110,7 +111,8 @@ updates:
   # never-built Dockerfile whose FROM line interop/run-keycloak.sh reads
   # and runs, so the image is pinned (tag and digest) in that one place.
   # Test tooling only: nothing here ships. A bump is how the suite moves
-  # to a new Keycloak release, so interop.yml runs on its pull request.
+  # to a new Keycloak release, so interop-keycloak.yml runs on its pull
+  # request.
   - package-ecosystem: docker
     directory: /interop/keycloak
     schedule:

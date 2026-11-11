@@ -37,19 +37,21 @@ the fact.
   openid-client (Node.js) and huskarl (Rust), through complete flows against
   `cmd/conformance-as` (`./interop/run-openid-client.sh`,
   `./interop/run-huskarl.sh`; weekly in
-  `.github/workflows/interop.yml`, and on a PR touching `interop/` or
-  `cmd/conformance-as`). When a leg fails, first establish with a
+  `.github/workflows/interop-openid-client.yml` and
+  `interop-huskarl.yml`, and on a PR touching the suite or the server
+  it drives). When a leg fails, first establish with a
   spec citation whose interpretation is wrong before changing FAPIgo;
   if it's the other implementation's, report it upstream generically
   and note it in `interop/README.md`.
 - `./interop/run-oidc-provider.sh` runs the other direction: FAPIgo's
   client package (`interop/fapigo-client`) through the same kinds of
-  flows against oidc-provider (Node.js), in the same workflow, and on a
-  PR touching the client package or what it imports. The same triage
+  flows against oidc-provider (Node.js), weekly in
+  `interop-oidc-provider.yml`, and on a PR touching the suite, the
+  client package or what it imports. The same triage
   rule applies.
 - `./interop/run-keycloak.sh` runs FAPIgo's client package through the
-  same flows against Keycloak (Java, in Docker), in the same workflow
-  and on the same PRs. The same triage rule applies.
+  same flows against Keycloak (Java, in Docker), weekly in
+  `interop-keycloak.yml`, and on the same kinds of PRs. The same triage rule applies.
 
 ## Commit messages
 

@@ -1,0 +1,61 @@
+name: Keycloak interop
+
+# FAPIgo's client package, through the Go driver in
+# interop/fapigo-client, against a second independent authorization
+# server: Keycloak (Java), run with Docker from the image
+# interop/keycloak/Dockerfile pins (tag and digest). See
+# interop/README.md.
+#
+# Weekly (Sunday 10am UTC), on demand, and on a pull request that
+# changes the suite, the driver, or the packages FAPIgo's client builds
+# from.
+#
+# Informational only: not a required check in branch protection.
+
+on:
+  schedule:
+    - cron: '0 10 * * 0' # weekly, Sunday 10am UTC
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - interop/keycloak/**
+      - interop/fapigo-client/**
+      - interop/run-keycloak.sh
+      - .github/workflows/interop-keycloak.yml
+      # The driver builds against FAPIgo's client package and everything it imports.
+      - '*.go'
+      - go.mod
+      - client/**
+      - extension/**
+      - fapihttp/**
+      - federation/**
+      - internal/**
+      - keys/**
+      - storage/**
+
+permissions:
+  contents: read
+
+jobs:
+  keycloak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: interop/fapigo-client/go.mod
+          check-latest: true
+          cache-dependency-path: interop/fapigo-client/go.mod
+
+      # setup.mjs and harness.mjs need Node.js only, no npm packages.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          check-latest: true
+
+      - name: Run the FAPIgo client legs against Keycloak
+        run: ./interop/run-keycloak.sh

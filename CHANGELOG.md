@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.72.4](https://github.com/IDFoundry/FAPIgo/compare/v0.72.3...v0.72.4) (2026-11-11)
+
+
+### Bug Fixes
+
+* bump Go toolchain to 1.26.11 for GO-2026-6859 ([c369da5](https://github.com/IDFoundry/FAPIgo/commit/c369da5be85e54815cfcf2e64bc6eca41627d22a))
+
 ## [0.72.3](https://github.com/IDFoundry/FAPIgo/compare/v0.72.2...v0.72.3) (2026-11-11)
 
 

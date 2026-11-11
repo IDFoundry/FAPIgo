@@ -21,7 +21,9 @@ import (
 // verified payload bytes unparsed: VerifyIssuerJWS makes no claim about
 // what's inside beyond "the issuer signed exactly these bytes". A
 // caller still owns checking whatever claims that payload carries (iss,
-// aud, sub, expiry, ...) against its own policy.
+// aud, sub, expiry, ...) against its own policy. With
+// Config.Algorithms.UserInfo zero there is no algorithm to check
+// against, and VerifyIssuerJWS refuses with ErrorInvalidRequest.
 //
 // An issuer may sign several kinds of JWT with one key (ID tokens, JWT
 // access tokens, logout tokens, ...), so VerifyIssuerJWS accepts only a
@@ -38,6 +40,9 @@ import (
 func (c *Client) VerifyIssuerJWS(ctx context.Context, compactJWS string) ([]byte, error) {
 	if err := c.checkTrustChain(); err != nil {
 		return nil, err
+	}
+	if c.cfg.Algorithms.UserInfo == 0 {
+		return nil, newError(ErrorInvalidRequest, "Config.Algorithms.UserInfo is not set, so there is no algorithm to verify an issuer-signed JWS with", nil)
 	}
 	parsed, err := c.verifyIssuerJWS(ctx, compactJWS)
 	if err != nil {

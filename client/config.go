@@ -142,9 +142,13 @@ type Algorithms struct {
 	// UserInfo is the algorithm the authorization server is registered
 	// (or discovered) to sign an issuer-verified JWS with, for
 	// VerifyIssuerJWS — most commonly the inner JWS of a signed (or
-	// signed-then-encrypted) UserInfo response (OIDC Core §5.3.2).
-	// Required to call VerifyIssuerJWS or FetchUserInfo; a client that
-	// never verifies such an artifact can leave this zero.
+	// signed-then-encrypted) UserInfo response (OIDC Core §5.3.2). Set
+	// it to the userinfo_signed_response_alg this client is registered
+	// with: a server signs UserInfo only for a client registered with
+	// one (OIDC Dynamic Client Registration §2), and FetchUserInfo then
+	// refuses a signed response while this is zero. A client whose
+	// UserInfo responses are plain JSON, and that never calls
+	// VerifyIssuerJWS, leaves it zero.
 	UserInfo fapi.SignatureAlgorithm
 
 	// UserInfoKeyManagement, if set, declares that FetchUserInfo expects

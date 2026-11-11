@@ -116,6 +116,22 @@ func TestVerifyIssuerJWSRejectsNoMatchingIssuerKey(t *testing.T) {
 	}
 }
 
+func TestVerifyIssuerJWSRequiresUserInfoAlgorithm(t *testing.T) {
+	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate signing key: %v", err)
+	}
+	compact := buildTestJWS(t, signingKey, "as-userinfo-kid", []byte(`{}`))
+
+	c := issuerJWSTestClient(t, fakeUserInfoIssuerKeys{pub: &signingKey.PublicKey})
+	c.cfg.Algorithms.UserInfo = 0
+	_, err = c.VerifyIssuerJWS(context.Background(), compact)
+	var cerr *Error
+	if !errors.As(err, &cerr) || cerr.Code() != ErrorInvalidRequest {
+		t.Fatalf("VerifyIssuerJWS(no UserInfo algorithm) error = %v, want ErrorInvalidRequest", err)
+	}
+}
+
 func TestVerifyIssuerJWSRejectsSignatureVerificationFailure(t *testing.T) {
 	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

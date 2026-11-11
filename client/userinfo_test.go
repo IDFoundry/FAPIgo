@@ -418,6 +418,38 @@ func TestFetchUserInfoRejectsSignedJWTWithWrongKey(t *testing.T) {
 	}
 }
 
+// A signed response reaching a client with no Algorithms.UserInfo is a
+// configuration mismatch (the client is registered with
+// userinfo_signed_response_alg but doesn't say so), and the error names
+// that rather than the issuer's keys.
+func TestFetchUserInfoSignedResponseWithoutUserInfoAlgorithm(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		compact := signUserInfoJWS(t, userInfoKey, map[string]any{
+			"sub": userInfoTestSubject, "iss": testIssuer, "aud": testClientID,
+		})
+		w.Header().Set("Content-Type", "application/jwt")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(compact))
+	}))
+	defer ts.Close()
+
+	c := newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, func(cfg *client.Config) {
+		cfg.Algorithms.UserInfo = 0
+	}, nil)
+	_, err = c.FetchUserInfo(context.Background(), userInfoTestTokens())
+	var cerr *client.Error
+	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
+		t.Fatalf("FetchUserInfo error = %v, want ErrorInvalidResponse", err)
+	}
+	if !strings.Contains(cerr.PublicDescription(), "Config.Algorithms.UserInfo is not set") {
+		t.Errorf("PublicDescription() = %q, want it to name Config.Algorithms.UserInfo", cerr.PublicDescription())
+	}
+}
+
 func TestFetchUserInfoDecryptsSignedThenEncryptedResponse(t *testing.T) {
 	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

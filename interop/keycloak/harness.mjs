@@ -74,10 +74,10 @@ async function approve(req, res) {
   return reply(res, 204)
 }
 
-const routes = { '/channel': channel, '/approve': approve }
+const routes = new Map([['/channel', channel], ['/approve', approve]])
 
 createServer((req, res) => {
-  const route = req.method === 'POST' ? routes[(req.url ?? '').split('?')[0]] : undefined
+  const route = req.method === 'POST' ? routes.get((req.url ?? '').split('?')[0]) : undefined
   if (!route) {
     return reply(res, 404)
   }

@@ -7,16 +7,15 @@ name: openid-client interop
 # the legs, the pinned versions and the triage rule when one fails.
 #
 # The client's version only moves when Dependabot bumps
-# interop/openid-client's lockfile, so a weekly run (Sunday 10am UTC,
-# after mutation.yml's 9am run) mostly re-checks the server side; it
-# also runs on demand, and on a pull request that changes the suite or
-# the server it drives.
+# interop/openid-client's lockfile, so the daily run mostly re-checks
+# the server side; it also runs on demand, and on a pull request that
+# changes the suite or the server it drives.
 #
 # Informational only: not a required check in branch protection.
 
 on:
   schedule:
-    - cron: '0 10 * * 0' # weekly, Sunday 10am UTC
+    - cron: '0 8 * * *' # daily, 8:00 UTC, after fuzz.yml's 7am run; the four interop workflows are 15 minutes apart
   workflow_dispatch: {}
   pull_request:
     paths:

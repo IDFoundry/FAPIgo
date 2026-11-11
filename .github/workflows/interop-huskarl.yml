@@ -7,7 +7,7 @@ name: huskarl interop
 # and every other crate by interop/huskarl's Cargo.toml and Cargo.lock,
 # built with `cargo build --locked`. See interop/README.md.
 #
-# Weekly (Sunday 10am UTC), on demand, and on a pull request that
+# Daily, on demand, and on a pull request that
 # changes the suite, the setup script it shares, or the server it
 # drives.
 #
@@ -15,7 +15,7 @@ name: huskarl interop
 
 on:
   schedule:
-    - cron: '0 10 * * 0' # weekly, Sunday 10am UTC
+    - cron: '15 8 * * *' # daily, 8:15 UTC, after fuzz.yml's 7am run; the four interop workflows are 15 minutes apart
   workflow_dispatch: {}
   pull_request:
     paths:

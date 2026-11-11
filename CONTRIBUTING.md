@@ -36,7 +36,7 @@ the fact.
 - [`interop/`](interop/README.md) runs independent clients,
   openid-client (Node.js) and huskarl (Rust), through complete flows against
   `cmd/conformance-as` (`./interop/run-openid-client.sh`,
-  `./interop/run-huskarl.sh`; weekly in
+  `./interop/run-huskarl.sh`; daily in
   `.github/workflows/interop-openid-client.yml` and
   `interop-huskarl.yml`, and on a PR touching the suite or the server
   it drives). When a leg fails, first establish with a
@@ -45,12 +45,12 @@ the fact.
   and note it in `interop/README.md`.
 - `./interop/run-oidc-provider.sh` runs the other direction: FAPIgo's
   client package (`interop/fapigo-client`) through the same kinds of
-  flows against oidc-provider (Node.js), weekly in
+  flows against oidc-provider (Node.js), daily in
   `interop-oidc-provider.yml`, and on a PR touching the suite, the
   client package or what it imports. The same triage
   rule applies.
 - `./interop/run-keycloak.sh` runs FAPIgo's client package through the
-  same flows against Keycloak (Java, in Docker), weekly in
+  same flows against Keycloak (Java, in Docker), daily in
   `interop-keycloak.yml`, and on the same kinds of PRs. The same triage rule applies.
 
 ## Commit messages

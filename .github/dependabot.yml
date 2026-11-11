@@ -105,3 +105,13 @@ updates:
     directory: /interop/fapigo-client
     schedule:
       interval: weekly
+
+  # The Keycloak interop suite's server image (interop/keycloak): a
+  # never-built Dockerfile whose FROM line interop/run-keycloak.sh reads
+  # and runs, so the image is pinned (tag and digest) in that one place.
+  # Test tooling only: nothing here ships. A bump is how the suite moves
+  # to a new Keycloak release, so interop.yml runs on its pull request.
+  - package-ecosystem: docker
+    directory: /interop/keycloak
+    schedule:
+      interval: weekly

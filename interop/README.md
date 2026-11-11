@@ -252,3 +252,100 @@ leg.
 `.github/workflows/interop.yml`'s `oidc-provider` job runs it weekly, on
 demand, and on a pull request that changes this directory, the workflow,
 or the packages FAPIgo's client builds from. It is not a required check.
+
+## Keycloak: FAPIgo's client against a second independent server
+
+The third suite runs FAPIgo's client package, through the same
+[`fapigo-client`](fapigo-client) driver and its six legs, against
+[Keycloak](https://github.com/keycloak/keycloak) (Java), run with
+Docker. Only positive flows are run, for the same reason as above.
+
+Keycloak runs in development mode (`start-dev`: an in-memory database,
+no clustering) over HTTPS with the run's test CA, requesting (not
+requiring) a client certificate on its one listener, which it also
+advertises as `mtls_endpoint_aliases`; its trust store is the test CA,
+for client certificates and for the driver's CIBA notification
+endpoint. [`keycloak/setup.mjs`](keycloak/setup.mjs) configures a realm
+through the admin REST API: an ES256 signing key, a CIBA setup (poll by
+default, `login_hint` as the username), the test user, the six clients,
+and one client policy per kind of client applying Keycloak's own global
+client profiles: `fapi-2-dpop-security-profile` (legs 1 and 4),
+`fapi-2-security-profile` (leg 2), `fapi-2-dpop-message-signing`
+(leg 3), and `fapi-2-security-profile` with `fapi-ciba` (legs 5 and 6).
+Each client is saved once more after the policies are in place, so the
+profiles' executors check it and auto-configure what they own (consent
+required, full scope disabled, PKCE, the sender constraint); setup fails
+if a client isn't under a profile. Every client is registered with
+ES256 for everything it signs or receives signed, including signed
+UserInfo responses, which the profiles turn on (they fill any unset
+algorithm with PS256).
+
+### Legs
+
+| # | Leg | Keycloak |
+|---|-----|----------|
+| 1 | `code-pkjwt-dpop` | Runs. PAR required, PKCE (S256), `private_key_jwt` with the client's JWKS registered, DPoP-bound access and refresh tokens, signed UserInfo. Keycloak doesn't require DPoP nonces, so FAPIgo's nonce retry isn't exercised here. |
+| 2 | `code-mtls-mtls` | Runs, with `tls_client_auth` (RFC 8705 §2.1) instead of `self_signed_tls_client_auth`: Keycloak's X.509 client authenticator matches the certificate's subject DN against the registration and needs a chain to a CA in its trust store, and Keycloak has no self-signed method. The client certificate comes from the run's test CA; the driver's leg sets `tls_client_auth`. Certificate-bound tokens. |
+| 3 | `message-signing` | Runs. A signed request object required, pushed via PAR, and a JARM response (`response_mode=jwt`), both ES256; `private_key_jwt` + DPoP. |
+| 4 | `client-credentials` | Runs, without a resource indicator: Keycloak doesn't implement RFC 8707, so the leg asks only for the `accounts` scope (the client's one optional scope) and checks that exactly it is granted. |
+| 5 | `ciba-poll` | Runs. A signed authentication request (`fapi-ciba` requires one), `private_key_jwt`, certificate-bound tokens. |
+| 6 | `ciba-ping` | Runs. Keycloak sends the ping to the driver's endpoint as `host.docker.internal`. |
+
+The user signs in through Keycloak's own login page: the driver's
+configuration names the login form's fields (`login_form`), and its user
+agent, when the authorization request lands on a page with a form
+instead of a redirect, fills them in, keeps the form's hidden inputs and
+posts it, which also accepts the consent page the profiles require.
+
+Keycloak hands each CIBA request to an authentication channel. Its HTTP
+channel provider is pointed at
+[`keycloak/harness.mjs`](keycloak/harness.mjs), which stands in for the
+authentication device: it holds the request Keycloak posts, and when the
+driver calls its approval hook it completes that request through
+Keycloak's channel callback endpoint. Keycloak doesn't pass the
+`auth_req_id` to the channel; as the driver runs one leg at a time, the
+hook approves the oldest request waiting.
+
+Each leg's ID token and UserInfo signing algorithm comes from the
+driver's configuration (`id_token_signed_response_alg`,
+`userinfo_signed_response_alg`), as an integrator would set the
+algorithms registered for its client: Keycloak advertises many, and
+`NewFromDiscovery` takes the ID token's only when one is advertised.
+
+### Pinned versions
+
+[`keycloak/Dockerfile`](keycloak/Dockerfile) is never built: its `FROM`
+line is the image the runner pulls and runs, pinned by tag and digest,
+and Dependabot proposes updates weekly. A bump also updates the table
+below and the version named in the top-level README. `setup.mjs` and
+`harness.mjs` use Node.js's standard library only.
+
+| Image | Version |
+|-------|---------|
+| `quay.io/keycloak/keycloak` | 26.8.2 |
+
+### Running it
+
+```sh
+./interop/run-keycloak.sh
+```
+
+It needs Go (the version in `fapigo-client/go.mod`), Docker, Node.js
+22.12 or later, curl and openssl. The runner builds the driver,
+generates a fresh test CA, a server certificate (for `localhost` and
+`host.docker.internal`) and two client certificates from that CA in a
+temporary directory (nothing is committed), starts Keycloak on port
+29543, configures the realm and writes the driver's configuration,
+starts the harness on port 29547, runs the legs (the driver's
+notification endpoint uses 29546), and always removes the container,
+stops the harness and deletes the directory. On Linux, the harness and
+the notification endpoint listen on the Docker bridge's gateway address,
+which the container reaches as `host.docker.internal`; elsewhere (Docker
+Desktop) on the loopback address. Set `INTEROP_KC_PORT`,
+`INTEROP_DRIVER_PORT` or `INTEROP_HARNESS_PORT` to move a port, and
+`INTEROP_KEEP_WORK_DIR=1` to keep the directory (configuration, keys,
+Keycloak's and the harness's logs) after the run.
+
+`.github/workflows/interop.yml`'s `keycloak` job runs it weekly, on
+demand, and on the same pull requests as the `oidc-provider` job. It is
+not a required check.

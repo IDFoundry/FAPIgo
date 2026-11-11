@@ -213,6 +213,7 @@ openid-client 6.8.9 (JavaScript) and huskarl 0.11.10 (Rust) — see
 [interop/](interop/README.md).
 The client is likewise interop-tested weekly against oidc-provider
 9.13.3 (JavaScript).
+The client is also interop-tested weekly against Keycloak 26.8.2 (Java).
 
 <details>
 <summary><strong>Full conformance and capability status</strong> (the detail behind the certification and checklist above)</summary>

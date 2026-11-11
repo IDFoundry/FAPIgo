@@ -26,8 +26,9 @@ func codeDPoP(ctx context.Context, r run) error {
 }
 
 // codeMTLS is leg 2: authorization code + PAR + PKCE with
-// self_signed_tls_client_auth and certificate-bound tokens, through the
-// server's mtls_endpoint_aliases.
+// mutual-TLS client authentication (self_signed_tls_client_auth, or
+// tls_client_auth where the leg says so) and certificate-bound tokens,
+// through the server's mtls_endpoint_aliases.
 func codeMTLS(ctx context.Context, r run) error {
 	return codeFlow(ctx, r, clientShape{profile: client.ProfileFAPISecurity, authMTLS: true, senderMTLS: true}, "Bearer")
 }
@@ -92,7 +93,7 @@ func codeFlow(ctx context.Context, r run, shape clientShape, wantTokenType strin
 }
 
 // clientCredentials is leg 4: client_credentials + private_key_jwt +
-// DPoP, with a resource indicator (RFC 8707).
+// DPoP, with a resource indicator (RFC 8707) where the leg names one.
 func clientCredentials(ctx context.Context, r run) error {
 	cl, err := newClient(ctx, r.cfg, r.leg, clientShape{profile: client.ProfileFAPISecurity})
 	if err != nil {

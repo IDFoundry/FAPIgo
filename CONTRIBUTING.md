@@ -47,6 +47,9 @@ the fact.
   flows against oidc-provider (Node.js), in the same workflow, and on a
   PR touching the client package or what it imports. The same triage
   rule applies.
+- `./interop/run-keycloak.sh` runs FAPIgo's client package through the
+  same flows against Keycloak (Java, in Docker), in the same workflow
+  and on the same PRs. The same triage rule applies.
 
 ## Commit messages
 

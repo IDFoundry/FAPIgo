@@ -7,10 +7,11 @@ import (
 )
 
 // runConfig is the driver's configuration, written by the suite's
-// runner (for oidc-provider: interop/oidc-provider/setup.mjs). Nothing
-// in it is specific to one authorization server: the issuer, the CA its
-// TLS certificate chains to, the test user, the CIBA approval hook, and
-// one entry per leg with that leg's client registration.
+// runner (interop/oidc-provider/setup.mjs, interop/keycloak/setup.mjs).
+// Nothing in it is specific to one authorization server: the issuer,
+// the CA its TLS certificate chains to, the test user, the CIBA
+// approval hook, and one entry per leg with that leg's client
+// registration.
 type runConfig struct {
 	// Issuer is the authorization server's issuer identifier; the
 	// driver discovers everything else from its metadata.
@@ -30,6 +31,14 @@ type runConfig struct {
 	// user's authentication device: a POST with form parameter
 	// auth_req_id approves that request.
 	CIBAApprovalURL string `json:"ciba_approval_url"`
+
+	// LoginForm, if set, signs the test user in through the server's
+	// own HTML pages: when the authorization request lands on a page
+	// with a form instead of a redirect, the user agent fills in these
+	// fields (name to value), keeps the form's hidden inputs, and posts
+	// it (see userAgent.authorize). Unset for a server whose test
+	// fixture signs the user in without a form.
+	LoginForm map[string]string `json:"login_form,omitempty"`
 
 	// Notification is the HTTPS listener the CIBA ping leg serves its
 	// client_notification_endpoint on.
@@ -62,8 +71,24 @@ type legConfig struct {
 	SigningKeyID string `json:"signing_key_id,omitempty"`
 
 	// TLSClient is the client certificate this client presents, for
-	// self_signed_tls_client_auth or certificate-bound tokens.
+	// mutual-TLS client authentication or certificate-bound tokens.
 	TLSClient *tlsFiles `json:"tls_client,omitempty"`
+
+	// TLSClientAuth is the mutual-TLS client authentication method of a
+	// leg that authenticates with its certificate (RFC 8705 §2):
+	// "self_signed_tls_client_auth" (the default) or "tls_client_auth".
+	TLSClientAuth string `json:"tls_client_auth,omitempty"`
+
+	// IDTokenSignedResponseAlg is the ID token signing algorithm
+	// registered for this client. Needed only for a server that
+	// advertises more than one: NewFromDiscovery takes a single
+	// advertised algorithm on its own.
+	IDTokenSignedResponseAlg string `json:"id_token_signed_response_alg,omitempty"`
+
+	// UserInfoSignedResponseAlg, if set, is the algorithm this client
+	// is registered to receive signed UserInfo responses with (OIDC
+	// Core §5.3.2); unset, UserInfo responses are plain JSON.
+	UserInfoSignedResponseAlg string `json:"userinfo_signed_response_alg,omitempty"`
 
 	Scope    []string `json:"scope"`
 	Resource []string `json:"resource,omitempty"`

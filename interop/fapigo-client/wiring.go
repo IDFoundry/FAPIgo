@@ -99,18 +99,6 @@ func newClient(ctx context.Context, rc runConfig, leg legConfig, shape clientSha
 		}
 	}
 
-	if !shape.ciba {
-		// NewFromDiscovery would keep the server's CIBA endpoint, and New
-		// then requires a CIBA signing algorithm of a client that never
-		// uses CIBA: see "Known disagreements" in interop/README.md.
-		cfg.Endpoints = discovered.Endpoints
-		if leg.RedirectURI == "" {
-			cfg.Endpoints.Authorization, cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}, fapi.URL{}
-		}
-		discovered.MTLSEndpointAliases.ApplyForConfig(&cfg)
-		cfg.Endpoints.BackchannelAuthentication = fapi.URL{}
-	}
-
 	deps := client.Dependencies{
 		Keys:       keyManager,
 		IssuerKeys: issuerKeys,

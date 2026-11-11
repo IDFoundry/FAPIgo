@@ -52,7 +52,7 @@ the top-level README.
 | Package | Version |
 |---------|---------|
 | `openid-client` | 6.8.9 (with `oauth4webapi` 3.8.8 and `jose` 6.2.17) |
-| `undici` | 7.30.2 (TLS options for the client's `customFetch`) |
+| `undici` | 8.12.4 (TLS options for the client's `customFetch`) |
 
 ## Running it
 
@@ -140,35 +140,16 @@ the one at fault.
 
 ## Known disagreements
 
-- **FAPIgo, `client.NewFromDiscovery`** (found by the oidc-provider
-  suite). With an all-zero `Config.Endpoints`, it copies every
-  discovered endpoint, `backchannel_authentication_endpoint` included
-  (`client/client.go:114`), and `New` then refuses a client without
-  `Algorithms.BackchannelAuthenticationRequest`
-  (`client/client.go:531`). So a code-flow or `client_credentials`
-  client built the documented way fails to construct against any
-  server that also offers CIBA, unless it configures a CIBA signing
-  algorithm it never uses. This is an API gap, not a reading of a
-  specification. Workaround: `fapigo-client/wiring.go` sets `Endpoints`
-  from discovery itself, without the CIBA endpoint, and calls
-  `MTLSEndpoints.ApplyForConfig`, as `NewFromDiscovery` would; remove it
-  once `NewFromDiscovery` leaves the CIBA endpoint out for a client not
-  configured for CIBA.
-- **FAPIgo, resource-server DPoP nonces** (found by the oidc-provider
-  suite). After a `use_dpop_nonce` challenge from a protected resource
-  (UserInfo here), `ResourceClient.Do` retries with the challenge's
-  nonce (`client/resource.go:187-198`) but caches only the nonce on the
-  retry's response (`client/noncecache.go:150`). oidc-provider sends
-  `DPoP-Nonce` on a successful response only when the nonce has
-  changed, so the nonce is never cached and every later UserInfo call
-  is challenged again: one extra round trip each. RFC 9449 §9 has
-  resource servers provide nonces "in the same way that authorization
-  servers do as described in Sections 8 and 8.2", and §8.2 says the
-  client "MUST use the new nonce value supplied for the next token
-  request, and for all subsequent token requests until the
-  authorization server supplies a new nonce"; FAPIgo's token endpoint
-  path already does (leg 1's refresh is not challenged). No workaround:
-  the retry succeeds.
+None open.
+
+The oidc-provider suite found two in FAPIgo's client, both fixed in
+v0.72.2: `NewFromDiscovery` kept a discovered CIBA endpoint for a
+client not configured for CIBA, so `New` refused it; and
+`ResourceClient.Do` didn't cache a protected resource's challenge DPoP
+nonce, so every later request was challenged again (RFC 9449 §9 and
+§8.2). The openid-client suite found one in the server, also fixed in
+v0.72.2: a DPoP nonce challenge at PAR or the CIBA endpoint consumed
+the signed request the client then resent with the nonce.
 
 ## oidc-provider: FAPIgo's client against an independent server
 

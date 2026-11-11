@@ -236,9 +236,7 @@ const clients = [
   }),
 ]
 
-for (const client of clients) {
-  await admin('POST', `/${REALM}/clients`, client)
-}
+await Promise.all(clients.map((client) => admin('POST', `/${REALM}/clients`, client)))
 
 // The client policies, one per kind of client, each applying Keycloak's
 // own global FAPI 2.0 client profiles to the clients whose
@@ -267,7 +265,7 @@ await admin('PUT', `/${REALM}/client-policies/policies`, {
   ],
 })
 
-for (const { clientId } of clients) {
+async function saveUnderPolicy({ clientId }) {
   const [registered] = await admin('GET', `/${REALM}/clients?clientId=${clientId}`)
   await admin('PUT', `/${REALM}/clients/${registered.id}`, registered)
   const [updated] = await admin('GET', `/${REALM}/clients?clientId=${clientId}`)
@@ -277,6 +275,7 @@ for (const { clientId } of clients) {
     throw new Error(`${clientId}: no FAPI 2.0 client policy applied`)
   }
 }
+await Promise.all(clients.map(saveUnderPolicy))
 
 // The test user's sub is the ID Keycloak gave it.
 const [user] = await admin('GET', `/${REALM}/users?exact=true&username=${USERNAME}`)

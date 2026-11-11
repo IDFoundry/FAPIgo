@@ -77,7 +77,7 @@ async function approve(req, res) {
 const routes = { '/channel': channel, '/approve': approve }
 
 createServer((req, res) => {
-  const route = req.method === 'POST' ? routes[new URL(req.url, 'http://harness').pathname] : undefined
+  const route = req.method === 'POST' ? routes[(req.url ?? '').split('?')[0]] : undefined
   if (!route) {
     return reply(res, 404)
   }

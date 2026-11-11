@@ -1,4 +1,18 @@
 version: 2
+
+# Docker Hub rate-limits and intermittently refuses anonymous pulls,
+# which failed the postgres docker update. A read-only token
+# (Dependabot secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN) makes
+# those lookups authenticated; replaces-base points images without a
+# registry host at it, leaving gcr.io and quay.io images as they are.
+registries:
+  dockerhub:
+    type: docker-registry
+    url: registry.hub.docker.com
+    username: ${{ secrets.DOCKERHUB_USERNAME }}
+    password: ${{ secrets.DOCKERHUB_TOKEN }}
+    replaces-base: true
+
 updates:
   # This module has zero third-party Go dependencies today (see
   # go.mod) — nothing for this ecosystem to actually find right now.
@@ -41,6 +55,8 @@ updates:
     directories:
       - /conformance/server
       - /cmd/conformance-federation-trust-anchor
+    registries:
+      - dockerhub
     schedule:
       interval: weekly
 
@@ -52,6 +68,8 @@ updates:
   # stores are tested against is a decision, not a routine update.
   - package-ecosystem: docker
     directory: /.github/postgres
+    registries:
+      - dockerhub
     schedule:
       interval: weekly
     ignore:

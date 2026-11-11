@@ -269,7 +269,7 @@ requiring) a client certificate on its one listener, which it also
 advertises as `mtls_endpoint_aliases`; its trust store is the test CA,
 for client certificates and for the driver's CIBA notification
 endpoint. [`keycloak/setup.mjs`](keycloak/setup.mjs) configures a realm
-through the admin REST API: an ES256 signing key, a CIBA setup (poll by
+through the admin REST API: a CIBA setup (poll by
 default, `login_hint` as the username), the test user, the six clients,
 and one client policy per kind of client applying Keycloak's own global
 client profiles: `fapi-2-dpop-security-profile` (legs 1 and 4),
@@ -278,10 +278,15 @@ client profiles: `fapi-2-dpop-security-profile` (legs 1 and 4),
 Each client is saved once more after the policies are in place, so the
 profiles' executors check it and auto-configure what they own (consent
 required, full scope disabled, PKCE, the sender constraint); setup fails
-if a client isn't under a profile. Every client is registered with
-ES256 for everything it signs or receives signed, including signed
-UserInfo responses, which the profiles turn on (they fill any unset
-algorithm with PS256).
+if a client isn't under a profile. What each client signs (client
+assertions, request objects, CIBA requests) is ES256. What Keycloak
+signs is left to the profiles, whose `secure-signature-algorithm`
+executor fills in PS256 for ID tokens, access tokens and UserInfo
+responses (which it also turns signed), using the realm's RSA key: the
+configuration a FAPI 2.0 deployment of Keycloak gets by default. JARM
+responses are the exception: the profiles don't set their algorithm and
+Keycloak would otherwise use the realm's default RS256, which FAPI 2.0
+doesn't allow, so the Message Signing client registers PS256 for them.
 
 ### Legs
 
@@ -289,7 +294,7 @@ algorithm with PS256).
 |---|-----|----------|
 | 1 | `code-pkjwt-dpop` | Runs. PAR required, PKCE (S256), `private_key_jwt` with the client's JWKS registered, DPoP-bound access and refresh tokens, signed UserInfo. Keycloak doesn't require DPoP nonces, so FAPIgo's nonce retry isn't exercised here. |
 | 2 | `code-mtls-mtls` | Runs, with `tls_client_auth` (RFC 8705 §2.1) instead of `self_signed_tls_client_auth`: Keycloak's X.509 client authenticator matches the certificate's subject DN against the registration and needs a chain to a CA in its trust store, and Keycloak has no self-signed method. The client certificate comes from the run's test CA; the driver's leg sets `tls_client_auth`. Certificate-bound tokens. |
-| 3 | `message-signing` | Runs. A signed request object required, pushed via PAR, and a JARM response (`response_mode=jwt`), both ES256; `private_key_jwt` + DPoP. |
+| 3 | `message-signing` | Runs. A signed request object required, pushed via PAR, and a JARM response (`response_mode=jwt`): the request object ES256, the response PS256; `private_key_jwt` + DPoP. |
 | 4 | `client-credentials` | Runs, without a resource indicator: Keycloak doesn't implement RFC 8707, so the leg asks only for the `accounts` scope (the client's one optional scope) and checks that exactly it is granted. |
 | 5 | `ciba-poll` | Runs. A signed authentication request (`fapi-ciba` requires one), `private_key_jwt`, certificate-bound tokens. |
 | 6 | `ciba-ping` | Runs. Keycloak sends the ping to the driver's endpoint as `host.docker.internal`. |
@@ -309,11 +314,13 @@ Keycloak's channel callback endpoint. Keycloak doesn't pass the
 `auth_req_id` to the channel; as the driver runs one leg at a time, the
 hook approves the oldest request waiting.
 
-Each leg's ID token and UserInfo signing algorithm comes from the
+Each leg's ID token, UserInfo and JARM signing algorithm comes from the
 driver's configuration (`id_token_signed_response_alg`,
-`userinfo_signed_response_alg`), as an integrator would set the
-algorithms registered for its client: Keycloak advertises many, and
-`NewFromDiscovery` takes the ID token's only when one is advertised.
+`userinfo_signed_response_alg`, `authorization_signed_response_alg`),
+which setup copies from each client's registration once the profiles
+have filled it in, as an integrator would set the algorithms registered
+for its client: Keycloak advertises many, and `NewFromDiscovery` takes
+the ID token's only when one is advertised.
 
 ### Pinned versions
 

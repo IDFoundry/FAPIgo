@@ -133,6 +133,7 @@ func registeredAlgorithms(leg legConfig, algs *client.Algorithms) error {
 	}{
 		{"id_token_signed_response_alg", leg.IDTokenSignedResponseAlg, &algs.IDToken},
 		{"userinfo_signed_response_alg", leg.UserInfoSignedResponseAlg, &algs.UserInfo},
+		{"authorization_signed_response_alg", leg.AuthorizationSignedResponseAlg, &algs.JARM},
 	} {
 		if registered.value == "" {
 			continue

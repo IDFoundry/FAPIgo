@@ -74,14 +74,27 @@ async function approve(req, res) {
   return reply(res, 204)
 }
 
-const routes = new Map([['/channel', channel], ['/approve', approve]])
+// route picks the handler for a request: only the two POST routes.
+function route(req) {
+  if (req.method !== 'POST') {
+    return undefined
+  }
+  switch ((req.url ?? '').split('?')[0]) {
+    case '/channel':
+      return channel
+    case '/approve':
+      return approve
+    default:
+      return undefined
+  }
+}
 
 createServer((req, res) => {
-  const route = req.method === 'POST' ? routes.get((req.url ?? '').split('?')[0]) : undefined
-  if (!route) {
+  const handler = route(req)
+  if (!handler) {
     return reply(res, 404)
   }
-  route(req, res).catch((err) => reply(res, 500, String(err)))
+  handler(req, res).catch((err) => reply(res, 500, String(err)))
 }).listen(ports.harness, hostAddr, () => {
   console.log(`harness: listening on ${hostAddr}:${ports.harness}`)
 })

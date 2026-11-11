@@ -71,7 +71,7 @@ stops the servers and deletes the directory. Set `INTEROP_AS_PORT`,
 move a port, and `INTEROP_KEEP_WORK_DIR=1` to keep the directory
 (configurations, keys, server logs) after the run.
 
-`.github/workflows/interop-openid-client.yml` runs it weekly, on
+`.github/workflows/interop-openid-client.yml` runs it daily, on
 demand, and on a pull request that changes this suite, the workflow,
 or `cmd/conformance-as` and the packages it builds from. It is not a
 required check.
@@ -106,7 +106,7 @@ suite. The harness trusts only the run's test CA
 (`=x.y.z`) and `huskarl/Cargo.lock` pins the whole tree; the runner
 builds with `cargo build --locked`, and
 `.github/workflows/interop-huskarl.yml` pins the Rust toolchain; it
-runs the suite weekly, on demand, and on a pull request that changes
+runs the suite daily, on demand, and on a pull request that changes
 the suite or the server it drives. It is not a required check. Dependabot proposes crate updates weekly; a bump of `huskarl`
 also updates this table and the version named in the top-level README.
 
@@ -252,7 +252,7 @@ the provider and deletes the directory. Set `INTEROP_OP_PORT`,
 the provider's log) after the run. `fapigo-client -leg <name>` runs one
 leg.
 
-`.github/workflows/interop-oidc-provider.yml` runs it weekly, on
+`.github/workflows/interop-oidc-provider.yml` runs it daily, on
 demand, and on a pull request that changes this directory, the driver,
 the workflow, or the packages FAPIgo's client builds from. It is not a required check.
 
@@ -349,7 +349,7 @@ Desktop) on the loopback address. Set `INTEROP_KC_PORT`,
 `INTEROP_KEEP_WORK_DIR=1` to keep the directory (configuration, keys,
 Keycloak's and the harness's logs) after the run.
 
-`.github/workflows/interop-keycloak.yml` runs it weekly, on demand,
+`.github/workflows/interop-keycloak.yml` runs it daily, on demand,
 and on a pull request that changes this directory, the driver, the
 workflow, or the packages FAPIgo's client builds from. It is
 not a required check.

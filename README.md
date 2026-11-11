@@ -1,6 +1,6 @@
 # FAPIgo
 
-[![Release](https://img.shields.io/github/v/release/IDFoundry/FAPIgo)](https://github.com/IDFoundry/FAPIgo/releases/latest)
+[![Release](https://img.shields.io/github/v/release/IDFoundry/FAPIgo?filter=v*)](https://github.com/IDFoundry/FAPIgo/releases?q=tag%3Av0)
 [![CI](https://github.com/IDFoundry/FAPIgo/actions/workflows/ci.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/ci.yml)
 [![FAPI Conformance](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml)
 [![openid-client interop](https://github.com/IDFoundry/FAPIgo/actions/workflows/interop-openid-client.yml/badge.svg?branch=main)](https://github.com/IDFoundry/FAPIgo/actions/workflows/interop-openid-client.yml)

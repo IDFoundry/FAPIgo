@@ -79,10 +79,6 @@ const provider = new Provider(urls.op, {
     requestObjectSigningAlgValues: algorithms,
     userinfoSigningAlgValues: algorithms,
   },
-  // A refresh token for every client registered for the grant, rather
-  // than oidc-provider's default of only for offline_access requested
-  // with prompt=consent (its reading of OIDC Core §11).
-  issueRefreshToken: async (_ctx, client) => client.grantTypeAllowed('refresh_token'),
   discovery: {
     mtls_endpoint_aliases: {
       token_endpoint: `${urls.opMTLS}/token`,

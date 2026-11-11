@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.8.0...sqlstore/v0.8.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* bump Go toolchain to 1.26.11 for GO-2026-6859 ([c369da5](https://github.com/IDFoundry/FAPIgo/commit/c369da5be85e54815cfcf2e64bc6eca41627d22a))
+
 ## [0.8.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.7.0...sqlstore/v0.8.0) (2026-11-08)
 
 

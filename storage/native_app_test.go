@@ -30,7 +30,11 @@ func TestNativeRedirectURIsAtRegistration(t *testing.T) {
 		"http://127.0.0.1:99999/callback":             false,
 		"http://127.0.0.1:65535/callback":             true,
 		"http://wallet.example/callback":              false,
-		"com.example.app://host/callback":             false,
+		"com.example.app://host/callback":             true,
+		"eu.europa.ec.euidi://authorization":          true,
+		"com.example.app://host:8080/callback":        false,
+		"com.example.app://127.0.0.1/callback":        false,
+		"com.example.app:///callback":                 false,
 	} {
 		if _, err := nativeClient(t, uri); (err == nil) != want {
 			t.Errorf("native client with %q: %v, want accepted %v", uri, err, want)

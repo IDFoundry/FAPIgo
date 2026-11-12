@@ -29,15 +29,37 @@ func completeWith(t *testing.T, h harness, redirectURI, wantDestination string) 
 	return assertRedirectsTo(t, result, wantDestination)
 }
 
+// testPrivateUseAuthorityRedirectURI is a private-use redirect URI with
+// an authority, a form some deployed wallets register.
+const testPrivateUseAuthorityRedirectURI = "eu.europa.ec.euidi://authorization"
+
 // TestNativeClientPrivateUseRedirectUnderProduction covers RFC 8252
 // §7.1 for a native client, in production: the authorization response
-// goes to the app's private-use URI with code, state and iss.
+// goes to the app's private-use URI, in either form, with code, state
+// and iss.
 func TestNativeClientPrivateUseRedirectUnderProduction(t *testing.T) {
-	h := newHarnessWithApplicationType(t, server.ProfileFAPISecurity, true, testPrivateUseRedirectURI, server.AssuranceProduction, storage.ApplicationTypeNative)
-	q := completeWith(t, h, testPrivateUseRedirectURI, testPrivateUseRedirectURI)
-	for _, name := range []string{"code", "state", "iss"} {
-		if len(q[name]) != 1 || q[name][0] == "" {
-			t.Errorf("response query = %v, want %s", q, name)
+	for _, uri := range []string{testPrivateUseRedirectURI, testPrivateUseAuthorityRedirectURI} {
+		t.Run(uri, func(t *testing.T) {
+			h := newHarnessWithApplicationType(t, server.ProfileFAPISecurity, true, uri, server.AssuranceProduction, storage.ApplicationTypeNative)
+			q := completeWith(t, h, uri, uri)
+			for _, name := range []string{"code", "state", "iss"} {
+				if len(q[name]) != 1 || q[name][0] == "" {
+					t.Errorf("response query = %v, want %s", q, name)
+				}
+			}
+		})
+	}
+}
+
+// TestNativeClientPrivateUseAuthorityMatchedExactly covers the
+// authority form's matching: a request naming the authority in another
+// case, with a path or with a trailing slash isn't the registered URI.
+func TestNativeClientPrivateUseAuthorityMatchedExactly(t *testing.T) {
+	h := newHarnessWithApplicationType(t, server.ProfileFAPISecurity, true, testPrivateUseAuthorityRedirectURI, server.AssuranceProduction, storage.ApplicationTypeNative)
+	for _, requested := range []string{"eu.europa.ec.euidi://Authorization", "eu.europa.ec.euidi://authorization/", "eu.europa.ec.euidi://authorization/cb", "eu.europa.ec.euidi:/authorization"} {
+		_, err := pushWithRedirectURI(t, h, requested)
+		if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+			t.Errorf("PushAuthorizationRequest(%q) error code = %q, want %q", requested, code, server.ErrorInvalidRequest)
 		}
 	}
 }
@@ -77,6 +99,7 @@ func TestNativeClientLoopbackAnyPortUnderProduction(t *testing.T) {
 func TestWebClientRefusedNativeRedirects(t *testing.T) {
 	for name, tc := range map[string]struct{ registered, requested string }{
 		"private-use scheme":      {testPrivateUseRedirectURI, testPrivateUseRedirectURI},
+		"private-use authority":   {testPrivateUseAuthorityRedirectURI, testPrivateUseAuthorityRedirectURI},
 		"loopback, any port":      {"http://127.0.0.1/callback", "http://127.0.0.1:51004/callback"},
 		"loopback, as registered": {"http://127.0.0.1/callback", "http://127.0.0.1/callback"},
 	} {

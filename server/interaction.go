@@ -227,7 +227,10 @@ type InteractionRequest struct {
 	// loopback redirect, on whichever port it chose). The client chose
 	// it, and any client can register a page of its own, so show its
 	// host on the consent screen alongside ClientDisplay, so the user
-	// can see where they'll be sent. An application that decides which
+	// can see where they'll be sent. For a native app's private-use URI
+	// show its scheme instead, which names the app: an authority there
+	// ("com.attacker.app://bank.example") is any text the client
+	// registered, never a destination. An application that decides which
 	// destinations it trusts (RFC 9700 §4.11.2: the server "SHOULD only
 	// automatically redirect the user agent if it trusts the
 	// redirection URI") checks it here, and ends an interaction it

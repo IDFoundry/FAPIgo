@@ -44,12 +44,18 @@ func AllowLoopbackHTTP() URLOption {
 }
 
 // AllowPrivateUseScheme permits, for ParseRedirectURL only, a native
-// app's private-use URI scheme redirect (RFC 8252 §7.1), such as
-// "com.example.app:/oauth2redirect": a scheme that is a domain name in
-// reverse order, so it contains a ".", then a single slash and the path,
-// as RFC 8252 §7.1 writes it — not "com.example.app://oauth2redirect",
-// whose "oauth2redirect" would be an authority. Enable it only for a client
-// registered as a native app.
+// app's private-use URI scheme redirect (RFC 8252 §7.1): a scheme that
+// is a domain name in reverse order, so it contains a ".", then either a
+// single slash and the path, "com.example.app:/oauth2redirect", the form
+// RFC 8252 §7.1 writes and prefers, or an authority,
+// "com.example.app://oauth2redirect", which some deployed wallets
+// register. The authority, which the operating system ignores when it
+// dispatches the redirect to the app, must be a name of ASCII letters,
+// digits, "-", ".", "_" and "~": no userinfo, port or IP address. The
+// scheme alone identifies the app, so show it, not the authority, where
+// a user is told where they'll be sent. Either form is matched against
+// the registered string exactly. Enable it only for a client registered
+// as a native app.
 func AllowPrivateUseScheme() URLOption {
 	return func(o *urlOptions) { o.allowPrivateUseScheme = true }
 }
@@ -85,14 +91,28 @@ func parsePrivateUseURL(raw string, parsed *url.URL) (URL, error) {
 	if !isReverseDomainScheme(parsed.Scheme) {
 		return URL{}, fmt.Errorf("private-use scheme %q must be a reverse-order domain name, such as com.example.app", parsed.Scheme)
 	}
-	// RFC 8252 §7.1: "only a single slash ("/") appears after the scheme
-	// component" — com.example.app:/callback, not
-	// com.example.app://callback, where "callback" would be an authority.
-	if parsed.Opaque != "" || parsed.Host != "" || parsed.User != nil || !strings.HasPrefix(parsed.Path, "/") || strings.HasPrefix(parsed.Path, "//") || strings.HasPrefix(parsed.String(), parsed.Scheme+"://") {
-		return URL{}, fmt.Errorf("private-use redirect URI must be %s:/path, with a single slash after the scheme (RFC 8252 §7.1), not %s://…", parsed.Scheme, parsed.Scheme)
+	if parsed.Host != "" {
+		// RFC 8252 §7.1 writes a single slash after the scheme, "as there
+		// is no naming authority for private-use URI scheme redirects",
+		// but that's its description, not a requirement: an authority
+		// adds nothing another app claiming the scheme (§8.6) could use,
+		// and the registered string is still matched exactly.
+		if parsed.User != nil || !isPrivateUseAuthority(parsed.Host) {
+			return URL{}, fmt.Errorf("private-use redirect URI's authority must be a name of letters, digits, \"-\", \".\", \"_\" and \"~\", with no userinfo, port or IP address (%s:/path is RFC 8252 §7.1's preferred form)", parsed.Scheme)
+		}
+	} else if parsed.Opaque != "" || parsed.User != nil || !strings.HasPrefix(parsed.Path, "/") || strings.HasPrefix(parsed.String(), parsed.Scheme+"://") {
+		// com.example.app:/callback; not com.example.app:callback, with no
+		// path, or com.example.app:///callback, an empty authority.
+		return URL{}, fmt.Errorf("private-use redirect URI must be %s:/path, with a single slash after the scheme (RFC 8252 §7.1), or %s://name/path", parsed.Scheme, parsed.Scheme)
 	}
 	if hasFragment(raw) {
 		return URL{}, fmt.Errorf("URL must not contain a fragment")
+	}
+	// The redirect goes to the URL's string form, and it has to be the
+	// registered string: refuse an authority form net/url would rewrite,
+	// such as a space it escapes, beyond lowercasing the scheme.
+	if parsed.Host != "" && parsed.String()[len(parsed.Scheme):] != raw[len(parsed.Scheme):] {
+		return URL{}, fmt.Errorf("private-use redirect URI must be written as net/url gives it back, with any character RFC 3986 doesn't allow percent-encoded")
 	}
 	return URL{value: *parsed}, nil
 }
@@ -124,6 +144,23 @@ func isReverseDomainScheme(scheme string) bool {
 			if !isLabelRune(r) {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+// isPrivateUseAuthority reports whether host, a private-use redirect
+// URI's authority, is a non-empty name of ASCII letters, digits, "-",
+// ".", "_" and "~" (RFC 3986 §2.3's unreserved characters) that isn't an
+// IP address: one net/url gives back as written, with no port, and that
+// can't be mistaken for a loopback or other network destination.
+func isPrivateUseAuthority(host string) bool {
+	if host == "" || net.ParseIP(host) != nil {
+		return false
+	}
+	for _, r := range host {
+		if !isLabelRune(r) && r != '.' && r != '_' && r != '~' {
+			return false
 		}
 	}
 	return true

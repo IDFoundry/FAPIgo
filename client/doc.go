@@ -110,8 +110,9 @@
 //
 //   - Registration. The authorization server registers the client as a
 //     native app (storage.ApplicationTypeNative), so it may use a
-//     private-use scheme redirect, written with a single slash
-//     (com.example.wallet:/callback), or loopback http to 127.0.0.1 or
+//     private-use scheme redirect, preferably written with a single
+//     slash (com.example.wallet:/callback) but also with an authority
+//     (com.example.wallet://callback), or loopback http to 127.0.0.1 or
 //     [::1]. For loopback on a port the operating system picks per flow,
 //     set Config.RedirectURI without a port and pass the port as
 //     BeginAuthorizationRequest.RedirectPort. The app still

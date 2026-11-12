@@ -53,8 +53,11 @@ const (
 	// RFC 8252's native-app redirect URIs, in production as well:
 	//
 	//   - a private-use URI scheme (RFC 8252 §7.1), a domain name in
-	//     reverse order, then a single slash: com.example.app:/callback,
-	//     not com.example.app://callback;
+	//     reverse order, then a single slash, com.example.app:/callback,
+	//     the form RFC 8252 prefers, or an authority,
+	//     com.example.app://callback, which some deployed wallets
+	//     register (see fapi.AllowPrivateUseScheme for the authority's
+	//     form);
 	//   - loopback http (§7.3) to the IP literal 127.0.0.1 or [::1], never
 	//     "localhost" (§8.3), matched on any port at request time;
 	//   - a claimed https URI (§7.2), as for a web application.

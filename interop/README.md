@@ -21,7 +21,7 @@ Each leg is a separate `node:test` case and passes or fails on its own.
 |---|-----|-----------------|
 | 1 | Authorization code + PAR + PKCE (S256) + `private_key_jwt` + DPoP-bound tokens; ID token validated by openid-client; UserInfo and the `/accounts` resource with DPoP; refresh-token grant with DPoP. Every `use_dpop_nonce` challenge is answered by openid-client's own retry. | FAPI 2.0 Security Profile |
 | 2 | Authorization code + PAR + PKCE with `self_signed_tls_client_auth` and certificate-bound tokens (RFC 8705), using `mtls_endpoint_aliases` for PAR, token, UserInfo and refresh; `/accounts` over mTLS. | FAPI 2.0 Security Profile, `-mtls` |
-| 3 | Message signing: a signed request object (JAR) pushed via PAR, a JARM response (`response_mode=jwt`) verified by openid-client, `private_key_jwt` + DPoP; UserInfo and `/accounts`. | FAPI 2.0 Message Signing |
+| 3 | Message signing: a signed request object (JAR) pushed via PAR, a JARM response (`response_mode=jwt`) verified by openid-client, `private_key_jwt` + DPoP; UserInfo and `/accounts`. The client signs with PS256 (an RSA key): its client assertion, request object and DPoP proofs. | FAPI 2.0 Message Signing |
 | 4 | `client_credentials` + `private_key_jwt` + DPoP; `/accounts`. | FAPI 2.0 Security Profile, `-client-credentials-grant` |
 | 5 | CIBA poll: signed authentication request, `private_key_jwt`, certificate-bound tokens (FAPI-CIBA's sender constraint is mTLS); polling meets `authorization_pending` before approval via `POST /backchannel-approve`; UserInfo and `/accounts` over mTLS. | FAPI 2.0 Security Profile, `-mtls -ciba` |
 | 6 | CIBA ping: as leg 5, with the harness serving the `client_notification_endpoint` over HTTPS (a certificate from the run's test CA), checking the ping's bearer token and body, then redeeming the `auth_req_id`. | FAPI 2.0 Security Profile, `-mtls -ciba` |
@@ -36,6 +36,10 @@ the authentication request (CIBA Core §7.1.1) with its JAR signer,
 `buildAuthorizationUrlWithJAR`, which produces the claims §7.1.1 needs
 (`iss`, `aud`, `exp`, `iat`, `nbf`, `jti`) and adds `client_id` and
 `response_type=code`, which the server ignores.
+
+Every client signs with ES256 (P-256 keys) except leg 3's, which
+signs with PS256 (a 2048-bit RSA key), so the server is exercised with
+both FAPI 2.0 signing algorithms clients commonly use.
 
 Client IDs follow the `fapigo-{family}-{axis1}-{axis2}` convention in
 [AGENTS.md](../AGENTS.md); leg 3's `fapigo-ms-pkjwt-dpop` uses `ms` for
@@ -93,7 +97,7 @@ leg fails.
 |---|-----|---------|
 | 1 | Authorization code + PAR + PKCE + `private_key_jwt` + DPoP; UserInfo, `/accounts`, refresh | Runs. `AuthorizationCodeGrant` (PAR, PKCE and ID-token validation built in), `JwtBearer` with `Audience::Issuer`, `DPoP`; `UserInfoClient`; `/accounts` through `HttpAuthorizer`, re-sent once when `dpop_resend_advised`; `RefreshGrant` from `to_refresh_grant()`. |
 | 2 | `self_signed_tls_client_auth` + certificate-bound tokens | Runs. `NoAuth` over an mTLS `ReqwestClient` (`MtlsPem`), which makes huskarl use the `mtls_endpoint_aliases` for PAR, token, UserInfo and refresh. |
-| 3 | Message signing: JAR via PAR + JARM | Runs. The client's signing key as the grant's `jar`, `ResponseMode::Jwt` (the mode conformance-as advertises), `private_key_jwt` + DPoP. |
+| 3 | Message signing: JAR via PAR + JARM | Runs. The client's PS256 signing key as the grant's `jar` and for `private_key_jwt`, `ResponseMode::Jwt` (the mode conformance-as advertises), DPoP with a PS256 key setup.mjs generated (an RSA key generated in huskarl's unoptimized build would be slow). |
 | 4 | `client_credentials` + `private_key_jwt` + DPoP | Runs. `ClientCredentialsGrant`. |
 | 5 | CIBA poll | Skipped: huskarl 0.11.10 has no CIBA grant. A poll-mode grant is merged upstream but not yet released; the leg can be added when a release carries it. |
 | 6 | CIBA ping | Skipped: huskarl implements no CIBA ping (or push) mode. |

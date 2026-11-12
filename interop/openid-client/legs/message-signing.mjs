@@ -1,7 +1,9 @@
 // Leg 3: FAPI 2.0 Message Signing — a signed request object (JAR,
 // RFC 9101) pushed via PAR, and a JARM response (response_mode=jwt)
 // that openid-client verifies, with private_key_jwt and DPoP-bound
-// tokens, against the message-signing instance.
+// tokens, against the message-signing instance. This client signs
+// with PS256 throughout (client assertion, request object and DPoP
+// proofs), the other legs with ES256.
 import assert from 'node:assert/strict'
 import * as client from 'openid-client'
 
@@ -13,7 +15,7 @@ export default async function messageSigning(run) {
   const key = await signingKey(run, CLIENT_ID)
   const config = await discover(urls.asMessageSigning, CLIENT_ID, undefined, client.PrivateKeyJwt(key), run.fetch)
   client.useJwtResponseMode(config)
-  const DPoP = client.getDPoPHandle(config, await client.randomDPoPKeyPair('ES256'))
+  const DPoP = client.getDPoPHandle(config, await client.randomDPoPKeyPair('PS256'))
 
   const codeVerifier = client.randomPKCECodeVerifier()
   const state = client.randomState()

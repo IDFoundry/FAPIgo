@@ -33,7 +33,8 @@ wallet, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
 ```
 
 A native client may use a private-use scheme in reverse-domain form,
-written with a single slash (`com.example.wallet:/callback`), loopback
+preferably written with a single slash (`com.example.wallet:/callback`)
+but also with an authority (`com.example.wallet://callback`), loopback
 `http` to `127.0.0.1` or `[::1]` (never `localhost`, RFC 8252 §8.3),
 matched on any port, or a claimed `https` URI, in production as well;
 `NewRegisteredClient` refuses any other form. The attestation is the

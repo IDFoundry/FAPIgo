@@ -429,10 +429,13 @@ A mobile or desktop app — a wallet, say — registers with
 redirect URIs RFC 8252 gives native apps, in production too: a
 private-use scheme in reverse-domain form
 (`com.example.wallet:/callback`), or loopback http to `127.0.0.1` or
-`[::1]`, which matches on whatever port the app listens on. Write the
-private-use form with a single slash, as RFC 8252 §7.1 does:
-`com.example.wallet:/callback`, not `com.example.wallet://callback`,
-which is refused. In
+`[::1]`, which matches on whatever port the app listens on. Prefer the
+private-use form with a single slash, as RFC 8252 §7.1 writes it:
+`com.example.wallet:/callback`. The form with an authority,
+`com.example.wallet://callback`, which some deployed wallets register,
+is accepted too, with an authority of letters, digits, `-`, `.`, `_`
+and `~` (no port, userinfo or IP address), and is matched exactly like
+any other. In
 production a web client can use neither; under development assurance
 it may use loopback http, matched exactly. On the relying-party side, a desktop app
 that listens on a port the operating system picks for each flow sets
@@ -792,7 +795,9 @@ case server.InteractionRequired:
 	// a.Interaction.UILocales, ClaimsLocales and Display are the
 	// client's presentation preferences: render the page in the first
 	// UILocales language you have. a.Interaction.RedirectURI is where
-	// the browser goes afterwards: show its host on the consent page.
+	// the browser goes afterwards: show its host on the consent page
+	// (for a native app's private-use URI, its scheme, which names the
+	// app: an authority there is any text the client registered).
 	// a.Handle must come back to CompleteAuthorization once the user
 	// is done.
 case server.RedirectResponse:

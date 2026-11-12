@@ -156,7 +156,8 @@ func TestNewValidatesRedirectURI(t *testing.T) {
 		"http to a non-loopback host": {"http://rp.example.com/cb", false, false},
 		"fragment":                    {"https://rp.example.com/cb#x", false, false},
 		"credentials":                 {"http://user@127.0.0.1/cb", false, false},
-		"private-use with //":         {"com.example.wallet://cb", false, false},
+		"private-use with authority":  {"com.example.wallet://cb", true, true},
+		"private-use with a port":     {"com.example.wallet://cb:80", false, false},
 		"not absolute":                {"/cb", false, false},
 	} {
 		t.Run(name, func(t *testing.T) {

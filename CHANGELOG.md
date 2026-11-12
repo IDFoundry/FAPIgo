@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.73.0](https://github.com/IDFoundry/FAPIgo/compare/v0.72.4...v0.73.0) (2026-11-12)
+
+
+### Features
+
+* accept a private-use redirect URI with an authority ([b9f8f81](https://github.com/IDFoundry/FAPIgo/commit/b9f8f8163acd9d1e0dfb7f3f7bea1ca6162aa189))
+* **client:** add BeginAuthorizationRequest.Prompt ([12b8a68](https://github.com/IDFoundry/FAPIgo/commit/12b8a6862d2bea11b44564bb8f44bf7be25f4190))
+
+
+### Bug Fixes
+
+* **server:** say why a client assertion's aud was refused ([2c07693](https://github.com/IDFoundry/FAPIgo/commit/2c07693ddf7cee304d9587cda41b3dba628dc027))
+
 ## [0.72.4](https://github.com/IDFoundry/FAPIgo/compare/v0.72.3...v0.72.4) (2026-11-11)
 
 

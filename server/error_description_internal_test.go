@@ -48,6 +48,8 @@ var reviewedDescriptions = map[string]bool{
 	`fmt.Sprintf("at most %d resource indicators may be requested", resourceindicator.MaxPerRequest)`: true,
 	// sizes.
 	`fmt.Sprintf("ID token claims total %d bytes, over limits.max_id_token_claims_bytes (%d)", size, s.cfg.Limits.MaxIDTokenClaimsBytes)`: true,
+	// clientAssertionFailureDescription's fixed texts.
+	"clientAssertionFailureDescription(err, audiences)": true,
 	// the application's own claim name, a server_error.
 	`fmt.Sprintf("userinfo claims must not set reserved claim %q", name)`: true,
 }

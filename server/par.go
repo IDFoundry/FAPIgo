@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -472,9 +473,10 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 			newError(ErrorInvalidClient, 401, "no matching client key", err)
 	}
 
+	audiences := s.acceptableClientAssertionAudiences(client, endpoints, mtlsEndpoints)
 	policy := clientassertion.VerifyPolicy{
 		ExpectedClientID:  client.ID().String(),
-		ExpectedAudiences: s.acceptableClientAssertionAudiences(client, endpoints, mtlsEndpoints),
+		ExpectedAudiences: audiences,
 		Algorithm:         alg,
 		Now:               s.deps.Clock.Now(),
 		MaxLifetime:       s.cfg.Limits.MaxClientAssertionLifetime,
@@ -486,10 +488,31 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidClient, 401, "client assertion verification failed", err)
+			newError(ErrorInvalidClient, 401, clientAssertionFailureDescription(err, audiences), err)
 	}
 
 	return client, verified, nil
+}
+
+// clientAssertionFailureDescription returns the invalid_client
+// error_description for a client assertion that failed verification.
+// An aud mismatch gets its own: client libraries commonly default aud
+// to the token endpoint URL, as RFC 7523 §3 allowed, which FAPI 2.0
+// Security Profile Final §5.3.2.1 no longer accepts, and the generic
+// description gives such a client no hint why it was refused. Naming
+// the accepted audience reveals only the issuer identifier (and, for a
+// CIBA client, this server's own endpoint URLs), all of which discovery
+// already publishes; and Verify checks aud only after the signature, so
+// only a holder of the client's key ever sees it. Every other failure
+// stays generic.
+func clientAssertionFailureDescription(err error, audiences []string) string {
+	if !errors.Is(err, clientassertion.ErrAudienceMismatch) {
+		return "client assertion verification failed"
+	}
+	if len(audiences) == 1 {
+		return "client assertion aud must be the authorization server's issuer identifier"
+	}
+	return "client assertion aud must be the authorization server's issuer identifier or this endpoint's URL"
 }
 
 // acceptableClientAssertionAudiences returns the "aud" values this

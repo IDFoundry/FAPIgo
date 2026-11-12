@@ -1794,6 +1794,39 @@ func TestExchangeBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAsserti
 	}
 }
 
+// TestExchangeBackchannelAuthenticationDescribesClientAssertionAudienceMismatch:
+// a CIBA client's aud mismatch names the endpoint URL as well as the
+// issuer, since both are accepted there (CIBA Core 1.0 §7.1).
+func TestExchangeBackchannelAuthenticationDescribesClientAssertionAudienceMismatch(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	required := beginBackchannel(t, h, standardBackchannelParams(t))
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: "https://other.example",
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+
+	_, err = h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", assertion),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("grant_type", server.CIBAGrantType),
+			formParam("auth_req_id", required.AuthReqID.String()),
+		}},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+	const wantDescription = "client assertion aud must be the authorization server's issuer identifier or this endpoint's URL"
+	if got := serverErrorDescription(t, err); got != wantDescription {
+		t.Fatalf("error_description = %q, want %q", got, wantDescription)
+	}
+}
+
 // TestExchangeAuthorizationCodeKeepsCIBAClientIssuerOnly: CIBA's widened
 // audiences are for the CIBA grant (and refresh). The authorization code
 // grant is FAPI 2.0's, so a CIBA-registered client's assertion there

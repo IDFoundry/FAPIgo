@@ -879,6 +879,35 @@ func TestPushAuthorizationRequestRejectsTokenEndpointURLAsClientAssertionAudienc
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
 	}
+	const wantDescription = "client assertion aud must be the authorization server's issuer identifier"
+	if got := serverErrorDescription(t, err); got != wantDescription {
+		t.Fatalf("error_description = %q, want %q", got, wantDescription)
+	}
+}
+
+// TestPushAuthorizationRequestKeepsAssertionSignatureFailureGeneric: only
+// an aud mismatch gets its own error_description; a bad signature keeps
+// the generic one.
+func TestPushAuthorizationRequestKeepsAssertionSignatureFailureGeneric(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: generateKey(t), Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testIssuer,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+	const wantDescription = "client assertion verification failed"
+	if got := serverErrorDescription(t, err); got != wantDescription {
+		t.Fatalf("error_description = %q, want %q", got, wantDescription)
+	}
 }
 
 func TestPushAuthorizationRequestRejectsPAREndpointURLAsClientAssertionAudience(t *testing.T) {
@@ -1084,6 +1113,15 @@ func serverErrorCode(t *testing.T, err error) server.ErrorCode {
 		t.Fatalf("error %v is not a *server.Error", err)
 	}
 	return srvErr.Code()
+}
+
+func serverErrorDescription(t *testing.T, err error) string {
+	t.Helper()
+	var srvErr *server.Error
+	if !errors.As(err, &srvErr) {
+		t.Fatalf("error %v is not a *server.Error", err)
+	}
+	return srvErr.PublicDescription()
 }
 
 // --- tests -------------------------------------------------------------

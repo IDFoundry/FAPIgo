@@ -173,9 +173,10 @@ tokens) with `mtls_endpoint_aliases` on a second listener that requires
 a client certificate, request objects and JARM, `client_credentials`,
 CIBA poll and ping, resource indicators, and ES256 signing. It sends
 `iss` on every authorization response (RFC 9207) and says so in its
-metadata. It issues a refresh token to every client registered for the
-grant, rather than only for `offline_access` with `prompt=consent`, its
-default.
+metadata. It keeps oidc-provider's default for refresh tokens, its
+reading of OIDC Core §11: one only for `offline_access` requested with
+`prompt=consent`, so the authorization code legs send
+`BeginAuthorizationRequest.Prompt` as an integrator would.
 
 ### Legs
 

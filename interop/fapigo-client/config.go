@@ -97,6 +97,11 @@ type legConfig struct {
 
 	Scope    []string `json:"scope"`
 	Resource []string `json:"resource,omitempty"`
+
+	// Prompt, if set, is sent as the authorization request's prompt
+	// (OIDC Core §3.1.2.1): "consent" for a server that, following OIDC
+	// Core §11, issues a refresh token for offline_access only with it.
+	Prompt []string `json:"prompt,omitempty"`
 }
 
 type tlsFiles struct {

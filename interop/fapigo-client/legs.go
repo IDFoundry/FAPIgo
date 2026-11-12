@@ -49,7 +49,7 @@ func codeFlow(ctx context.Context, r run, shape clientShape, wantTokenType strin
 		return err
 	}
 
-	session, err := cl.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: r.leg.Scope, Resource: r.leg.Resource})
+	session, err := cl.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: r.leg.Scope, Resource: r.leg.Resource, Prompt: r.leg.Prompt})
 	if err != nil {
 		return fmt.Errorf("begin authorization: %w", err)
 	}

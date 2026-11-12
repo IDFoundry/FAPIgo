@@ -62,6 +62,21 @@ type BeginAuthorizationRequest struct {
 	MaxAge    time.Duration
 	HasMaxAge bool
 
+	// Prompt, when not empty, is sent as the space-separated "prompt"
+	// parameter (OIDC Core §3.1.2.1): PromptLogin, PromptConsent,
+	// PromptSelectAccount or PromptNone, or a value another
+	// specification defines, such as "create". "none" can't be combined
+	// with another value, and no value may repeat or be empty or contain
+	// whitespace or control characters: BeginAuthorization refuses these
+	// before anything is sent. A server may refuse to issue a refresh
+	// token for "offline_access" in Scope unless Prompt includes
+	// PromptConsent, as OIDC Core §11 lets it: whether to send it is the
+	// caller's choice, since such a server then asks the user for
+	// consent every time. Prompt doesn't make ExchangeCode check
+	// anything: to have it verify a fresh authentication, also set
+	// HasMaxAge with a zero MaxAge.
+	Prompt []string
+
 	// EssentialACRValues, when not empty, requires the user to
 	// authenticate at one of these Authentication Context Class
 	// References: it's sent as an essential "acr" claim in the "claims"
@@ -527,11 +542,14 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 }
 
 // setRequestedParameters adds the optional authorization parameters req
-// asks for (acr_values, max_age, claims and resource) to params — split
+// asks for (acr_values, prompt, max_age, claims and resource) to params — split
 // out of BeginAuthorization to keep its cognitive complexity manageable.
 func setRequestedParameters(params map[string]string, req BeginAuthorizationRequest) *Error {
 	if len(req.ACRValues) > 0 {
 		params["acr_values"] = strings.Join(req.ACRValues, " ")
+	}
+	if len(req.Prompt) > 0 {
+		params[promptParameter] = strings.Join(req.Prompt, " ")
 	}
 	if req.HasMaxAge {
 		seconds, err := maxAgeSeconds(req.MaxAge)
@@ -748,6 +766,9 @@ func (c *Client) checkBeginRequest(req BeginAuthorizationRequest) (string, *Erro
 	}
 	if len(req.EssentialACRValues) > 0 && !slices.Contains(req.Scope, "openid") {
 		return "", newError(ErrorInvalidRequest, `EssentialACRValues requires "openid" in Scope: only an ID token's acr can meet it`, nil)
+	}
+	if promptErr := checkPrompt(req.Prompt, req.Extensions); promptErr != nil {
+		return "", promptErr
 	}
 	if resourceErr := checkResources(req.Resource); resourceErr != nil {
 		return "", resourceErr

@@ -151,12 +151,14 @@ const driver = {
       signing_key_file: codeDpopKey.file,
       signing_key_id: codeDpopKey.kid,
       scope: ['openid', 'offline_access'],
+      prompt: ['consent'],
     },
     'code-mtls-mtls': {
       client_id: spMtlsMtls,
       redirect_uri: redirectURI,
       tls_client: tls('client-mtls'),
       scope: ['openid', 'offline_access'],
+      prompt: ['consent'],
     },
     'message-signing': {
       client_id: msPkjwtDpop,
@@ -164,6 +166,7 @@ const driver = {
       signing_key_file: msKey.file,
       signing_key_id: msKey.kid,
       scope: ['openid', 'offline_access'],
+      prompt: ['consent'],
     },
     'client-credentials': {
       client_id: spCcPkjwtDpop,

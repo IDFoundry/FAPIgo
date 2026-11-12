@@ -90,6 +90,11 @@ type legConfig struct {
 	// Core §5.3.2); unset, UserInfo responses are plain JSON.
 	UserInfoSignedResponseAlg string `json:"userinfo_signed_response_alg,omitempty"`
 
+	// AuthorizationSignedResponseAlg, if set, is the algorithm this
+	// client's JARM responses are registered to be signed with (JARM
+	// §3); unset, a Message Signing leg expects ES256.
+	AuthorizationSignedResponseAlg string `json:"authorization_signed_response_alg,omitempty"`
+
 	Scope    []string `json:"scope"`
 	Resource []string `json:"resource,omitempty"`
 }

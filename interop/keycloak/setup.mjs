@@ -10,10 +10,11 @@
 // test CA.
 //
 // The realm is built in the order an administrator would: realm settings
-// and the test user, an ES256 signing key, the clients, and the client
-// policies that put each client under Keycloak's own FAPI 2.0 client
-// profiles, whose executors then check (and, where they auto-configure,
-// adjust) every client. Every
+// and the test user, the clients, and the client policies that put each
+// client under Keycloak's own FAPI 2.0 client profiles, whose executors
+// then check (and, where they auto-configure, adjust) every client. What
+// Keycloak signs is left to those profiles, which choose PS256 with the
+// realm's RSA key, as a FAPI 2.0 deployment of Keycloak would. Every
 // private_key_jwt client gets a fresh ES256 key pair, generated here:
 // the public half is registered with Keycloak, the private half goes to
 // the driver as a PKCS #8 PEM file. Nothing written here is committed:
@@ -81,7 +82,6 @@ async function admin(method, path, body) {
 await admin('POST', '', {
   realm: REALM,
   enabled: true,
-  defaultSignatureAlgorithm: 'ES256',
   // CIBA: poll by default (a ping client says so itself), login_hint is
   // the username, a one-minute request lifetime (the driver's limit) and
   // a one-second polling interval to keep the run short.
@@ -100,15 +100,6 @@ await admin('POST', '', {
     lastName: 'User',
     credentials: [{ type: 'password', value: password, temporary: false }],
   }],
-})
-
-// ES256 for ID tokens, access tokens and JARM responses, preferred over
-// the realm's default RSA key.
-await admin('POST', `/${REALM}/components`, {
-  name: 'interop-es256',
-  providerId: 'ecdsa-generated',
-  providerType: 'org.keycloak.keys.KeyProvider',
-  config: { priority: ['200'], ecdsaEllipticCurveKey: ['P-256'] },
 })
 
 // The scope the client_credentials client asks for.
@@ -153,12 +144,10 @@ const base = (clientId, profile) => ({
   serviceAccountsEnabled: false,
   attributes: {
     [profileAttribute]: profile,
-    // ES256 throughout. The FAPI 2.0 profiles' secure-signature-algorithm
-    // executor fills in any of these left unset with PS256, and makes
-    // UserInfo responses signed.
-    'id.token.signed.response.alg': 'ES256',
-    'access.token.signed.response.alg': 'ES256',
-    'user.info.response.signature.alg': 'ES256',
+    // What the client signs is ES256. What Keycloak signs (ID tokens,
+    // access tokens, UserInfo responses) is left unset: the FAPI 2.0
+    // profiles' secure-signature-algorithm executor fills it in with
+    // PS256, and turns signed UserInfo responses on.
     'request.object.signature.alg': 'ES256',
   },
 })
@@ -217,9 +206,11 @@ const clients = [
   }),
   merge(base(msPkjwtDpop, 'fapi2-ms-dpop'), privateKeyJWT(msKey), codeFlow, dpopBound, {
     attributes: {
-      'request.object.signature.alg': 'ES256',
       'request.object.required': 'request or request_uri',
-      'authorization.signed.response.alg': 'ES256',
+      // The one response algorithm the profiles leave alone: unset,
+      // Keycloak signs JARM responses with the realm's default (RS256),
+      // which FAPI 2.0 doesn't allow. PS256, matching the rest.
+      'authorization.signed.response.alg': 'PS256',
     },
   }),
   merge(base(spCcPkjwtDpop, 'fapi2-dpop'), privateKeyJWT(ccKey), dpopBound, {
@@ -274,8 +265,30 @@ async function saveUnderPolicy({ clientId }) {
   if (updated.fullScopeAllowed !== false) {
     throw new Error(`${clientId}: no FAPI 2.0 client policy applied`)
   }
+  return updated
 }
-await Promise.all(clients.map(saveUnderPolicy))
+const registrations = Object.fromEntries(
+  (await Promise.all(clients.map(saveUnderPolicy))).map((client) => [client.clientId, client]))
+
+// responseAlgs reads the algorithms Keycloak signs this client's
+// responses with from its registration, as an integrator would copy
+// them into its client's configuration: the profiles filled in all but
+// JARM's.
+function responseAlgs(clientId, { jarm = false } = {}) {
+  const { attributes } = registrations[clientId]
+  const read = (name) => {
+    const alg = attributes[name]
+    if (!alg) {
+      throw new Error(`${clientId}: ${name} not set`)
+    }
+    return alg
+  }
+  return {
+    id_token_signed_response_alg: read('id.token.signed.response.alg'),
+    userinfo_signed_response_alg: read('user.info.response.signature.alg'),
+    ...(jarm ? { authorization_signed_response_alg: read('authorization.signed.response.alg') } : {}),
+  }
+}
 
 // The test user's sub is the ID Keycloak gave it.
 const [user] = await admin('GET', `/${REALM}/users?exact=true&username=${USERNAME}`)
@@ -305,8 +318,7 @@ const driver = {
       redirect_uri: redirectURI,
       signing_key_file: codeDpopKey.file,
       signing_key_id: codeDpopKey.kid,
-      id_token_signed_response_alg: 'ES256',
-      userinfo_signed_response_alg: 'ES256',
+      ...responseAlgs(spPkjwtDpop),
       scope: ['openid'],
     },
     'code-mtls-mtls': {
@@ -314,8 +326,7 @@ const driver = {
       redirect_uri: redirectURI,
       tls_client: tls('client-mtls'),
       tls_client_auth: 'tls_client_auth',
-      id_token_signed_response_alg: 'ES256',
-      userinfo_signed_response_alg: 'ES256',
+      ...responseAlgs(spMtlsMtls),
       scope: ['openid'],
     },
     'message-signing': {
@@ -323,8 +334,7 @@ const driver = {
       redirect_uri: redirectURI,
       signing_key_file: msKey.file,
       signing_key_id: msKey.kid,
-      id_token_signed_response_alg: 'ES256',
-      userinfo_signed_response_alg: 'ES256',
+      ...responseAlgs(msPkjwtDpop, { jarm: true }),
       scope: ['openid'],
     },
     'client-credentials': {
@@ -338,8 +348,7 @@ const driver = {
       signing_key_file: cibaPollKey.file,
       signing_key_id: cibaPollKey.kid,
       tls_client: tls('client-ciba'),
-      id_token_signed_response_alg: 'ES256',
-      userinfo_signed_response_alg: 'ES256',
+      ...responseAlgs(cibaPollPkjwt),
       scope: ['openid'],
     },
     'ciba-ping': {
@@ -347,8 +356,7 @@ const driver = {
       signing_key_file: cibaPingKey.file,
       signing_key_id: cibaPingKey.kid,
       tls_client: tls('client-ciba'),
-      id_token_signed_response_alg: 'ES256',
-      userinfo_signed_response_alg: 'ES256',
+      ...responseAlgs(cibaPingPkjwt),
       scope: ['openid'],
     },
   },

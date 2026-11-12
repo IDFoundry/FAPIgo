@@ -24,14 +24,24 @@ const workDir = workDirFromArgs('node server.mjs <work-dir>')
 const certs = join(workDir, 'certs')
 const clients = JSON.parse(readFileSync(join(workDir, 'op-clients.json'), 'utf8'))
 
-// The provider's own signing key: ES256 for ID tokens, JARM responses
-// and everything else it signs.
-const signingKey = {
-  ...generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'jwk' }),
-  kid: 'op-es256',
-  alg: 'ES256',
-  use: 'sig',
-}
+// The provider's own signing keys: ES256 and PS256, the algorithms it
+// advertises for everything it signs. Each client's registration picks
+// one for its ID tokens (id_token_signed_response_alg), as it would at
+// a real provider advertising several.
+const signingKeys = [
+  {
+    ...generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'jwk' }),
+    kid: 'op-es256',
+    alg: 'ES256',
+    use: 'sig',
+  },
+  {
+    ...generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ format: 'jwk' }),
+    kid: 'op-ps256',
+    alg: 'PS256',
+    use: 'sig',
+  },
+]
 
 const algorithms = ['ES256', 'PS256']
 
@@ -47,7 +57,7 @@ function peerCertificate(ctx) {
 
 const provider = new Provider(urls.op, {
   clients,
-  jwks: { keys: [signingKey] },
+  jwks: { keys: signingKeys },
   cookies: { keys: [randomBytes(32).toString('base64url')] },
   scopes: ['openid', 'offline_access', ACCOUNTS_SCOPE],
   claims: { openid: ['sub'] },
@@ -75,7 +85,7 @@ const provider = new Provider(urls.op, {
     authorizationSigningAlgValues: algorithms,
     clientAuthSigningAlgValues: algorithms,
     dPoPSigningAlgValues: algorithms,
-    idTokenSigningAlgValues: ['ES256'],
+    idTokenSigningAlgValues: algorithms,
     requestObjectSigningAlgValues: algorithms,
     userinfoSigningAlgValues: algorithms,
   },

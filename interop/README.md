@@ -171,7 +171,12 @@ required, PKCE (S256), DPoP with a server nonce required on every
 request, mTLS (`self_signed_tls_client_auth` and certificate-bound
 tokens) with `mtls_endpoint_aliases` on a second listener that requires
 a client certificate, request objects and JARM, `client_credentials`,
-CIBA poll and ping, resource indicators, and ES256 signing. It sends
+CIBA poll and ping, resource indicators, and ES256 and PS256 signing,
+both advertised for ID tokens, so `NewFromDiscovery` doesn't pick the
+ID token algorithm on its own: each client registers one
+(`id_token_signed_response_alg`), PS256 for `code-mtls-mtls` and
+`ciba-ping` and ES256 for the others, and the driver is told it, as an
+integrator sets `Algorithms.IDToken` from their registration. It sends
 `iss` on every authorization response (RFC 9207) and says so in its
 metadata. It keeps oidc-provider's default for refresh tokens, its
 reading of OIDC Core §11: one only for `offline_access` requested with

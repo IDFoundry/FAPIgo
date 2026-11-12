@@ -55,6 +55,19 @@ function certificateJWKS(certFile) {
   return { keys: [jwk] }
 }
 
+// The ID token signing algorithm each client registers
+// (id_token_signed_response_alg). The provider advertises ES256 and
+// PS256, so NewFromDiscovery can't pick one on its own: the driver is
+// told the registered one, as an integrator configures it from their
+// registration. One authorization code leg and one CIBA leg take PS256.
+const idTokenAlg = {
+  [spPkjwtDpop]: 'ES256',
+  [spMtlsMtls]: 'PS256',
+  [msPkjwtDpop]: 'ES256',
+  [cibaPollPkjwt]: 'ES256',
+  [cibaPingPkjwt]: 'PS256',
+}
+
 const tls = (name) => ({ cert_file: join(certs, `${name}.crt`), key_file: join(certs, `${name}.key`) })
 
 const codeDpopKey = signingKey(spPkjwtDpop)
@@ -74,6 +87,7 @@ const providerClients = [
   {
     ...codeClient,
     client_id: spPkjwtDpop,
+    id_token_signed_response_alg: idTokenAlg[spPkjwtDpop],
     token_endpoint_auth_method: 'private_key_jwt',
     token_endpoint_auth_signing_alg: 'ES256',
     dpop_bound_access_tokens: true,
@@ -82,6 +96,7 @@ const providerClients = [
   {
     ...codeClient,
     client_id: spMtlsMtls,
+    id_token_signed_response_alg: idTokenAlg[spMtlsMtls],
     token_endpoint_auth_method: 'self_signed_tls_client_auth',
     tls_client_certificate_bound_access_tokens: true,
     jwks: certificateJWKS(join(certs, 'client-mtls.crt')),
@@ -89,6 +104,7 @@ const providerClients = [
   {
     ...codeClient,
     client_id: msPkjwtDpop,
+    id_token_signed_response_alg: idTokenAlg[msPkjwtDpop],
     token_endpoint_auth_method: 'private_key_jwt',
     token_endpoint_auth_signing_alg: 'ES256',
     dpop_bound_access_tokens: true,
@@ -116,6 +132,7 @@ const providerClients = [
     }],
   ].map(([clientId, key, delivery]) => ({
     client_id: clientId,
+    id_token_signed_response_alg: idTokenAlg[clientId],
     grant_types: [cibaGrant],
     response_types: [],
     redirect_uris: [],
@@ -147,6 +164,7 @@ const driver = {
   legs: {
     'code-pkjwt-dpop': {
       client_id: spPkjwtDpop,
+      id_token_signed_response_alg: idTokenAlg[spPkjwtDpop],
       redirect_uri: redirectURI,
       signing_key_file: codeDpopKey.file,
       signing_key_id: codeDpopKey.kid,
@@ -155,6 +173,7 @@ const driver = {
     },
     'code-mtls-mtls': {
       client_id: spMtlsMtls,
+      id_token_signed_response_alg: idTokenAlg[spMtlsMtls],
       redirect_uri: redirectURI,
       tls_client: tls('client-mtls'),
       scope: ['openid', 'offline_access'],
@@ -162,6 +181,7 @@ const driver = {
     },
     'message-signing': {
       client_id: msPkjwtDpop,
+      id_token_signed_response_alg: idTokenAlg[msPkjwtDpop],
       redirect_uri: redirectURI,
       signing_key_file: msKey.file,
       signing_key_id: msKey.kid,
@@ -177,6 +197,7 @@ const driver = {
     },
     'ciba-poll': {
       client_id: cibaPollPkjwt,
+      id_token_signed_response_alg: idTokenAlg[cibaPollPkjwt],
       signing_key_file: cibaPollKey.file,
       signing_key_id: cibaPollKey.kid,
       tls_client: tls('client-ciba'),
@@ -184,6 +205,7 @@ const driver = {
     },
     'ciba-ping': {
       client_id: cibaPingPkjwt,
+      id_token_signed_response_alg: idTokenAlg[cibaPingPkjwt],
       signing_key_file: cibaPingKey.file,
       signing_key_id: cibaPingKey.kid,
       tls_client: tls('client-ciba'),

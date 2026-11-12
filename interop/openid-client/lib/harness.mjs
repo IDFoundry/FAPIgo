@@ -34,9 +34,14 @@ function tlsFetch(connect) {
   return (url, options) => undiciFetch(url, { ...options, dispatcher })
 }
 
+// signingKey is the client's private key from clients.json, for its
+// JWK's alg: ES256 (P-256) or PS256 (RSA-PSS with SHA-256).
 export async function signingKey(run, clientId) {
   const jwk = run.registry.clients[clientId].privateJwk
-  const key = await webcrypto.subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign'])
+  const algorithm = jwk.alg === 'PS256'
+    ? { name: 'RSA-PSS', hash: 'SHA-256' }
+    : { name: 'ECDSA', namedCurve: 'P-256' }
+  const key = await webcrypto.subtle.importKey('jwk', jwk, algorithm, false, ['sign'])
   return { key, kid: jwk.kid }
 }
 

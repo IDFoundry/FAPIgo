@@ -134,9 +134,21 @@ impl Run {
     }
 
     pub fn signing_key(&self, client_id: &str) -> Result<PrivateKey> {
-        let jwk = &self.registry["clients"][client_id]["privateJwk"];
+        self.private_key(client_id, "privateJwk")
+    }
+
+    /// The client's DPoP key from clients.json, for a client setup.mjs
+    /// gave one (the Message Signing client's PS256 key).
+    pub fn dpop_key(&self, client_id: &str) -> Result<PrivateKey> {
+        self.private_key(client_id, "dpopPrivateJwk")
+    }
+
+    /// The private JWK `field` of the client's clients.json entry, as a
+    /// signing key for the algorithm its `alg` names.
+    fn private_key(&self, client_id: &str, field: &str) -> Result<PrivateKey> {
+        let jwk = &self.registry["clients"][client_id][field];
         if jwk.is_null() {
-            return Err(format!("clients.json has no key for {client_id}").into());
+            return Err(format!("clients.json has no {field} for {client_id}").into());
         }
         let jwk: Jwk = serde_json::from_value(jwk.clone())?;
         let private = jwk

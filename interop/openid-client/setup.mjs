@@ -3,8 +3,10 @@
 //
 //   node setup.mjs <work-dir>
 //
-// Every private_key_jwt client gets a fresh ES256 key pair, generated
-// here; the mTLS clients' certificates come from the runner's openssl
+// Every private_key_jwt client gets a fresh key pair, generated here:
+// ES256, except the Message Signing client's RSA PS256 key, so PS256
+// client authentication, request objects and DPoP proofs are exercised
+// too. The mTLS clients' certificates come from the runner's openssl
 // step (<work-dir>/certs). Nothing written here is committed: the work
 // directory is a mktemp directory the runner deletes on exit.
 import { generateKeyPairSync, X509Certificate, createHash } from 'node:crypto'
@@ -16,10 +18,14 @@ import { workDirFromArgs } from './lib/workdir.mjs'
 
 const workDir = workDirFromArgs('node setup.mjs <work-dir>')
 
-function newSigningKey(kid) {
-  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })
-  const pub = { ...publicKey.export({ format: 'jwk' }), kid, alg: 'ES256', use: 'sig' }
-  const priv = { ...privateKey.export({ format: 'jwk' }), kid, alg: 'ES256' }
+// newSigningKey generates a P-256 key for ES256, or a 2048-bit RSA key,
+// the shortest FAPI 2.0 Security Profile allows, for PS256.
+function newSigningKey(kid, alg = 'ES256') {
+  const { publicKey, privateKey } = alg === 'PS256'
+    ? generateKeyPairSync('rsa', { modulusLength: 2048 })
+    : generateKeyPairSync('ec', { namedCurve: 'P-256' })
+  const pub = { ...publicKey.export({ format: 'jwk' }), kid, alg, use: 'sig' }
+  const priv = { ...privateKey.export({ format: 'jwk' }), kid, alg }
   return { pub, priv }
 }
 
@@ -35,8 +41,8 @@ const scopes = ['openid', 'offline_access', 'accounts']
 
 // Aliases follow AGENTS.md's fapigo-{family}-{axis1}-{axis2} convention.
 const clients = {}
-const keyed = (id) => {
-  const key = newSigningKey(`${id}-key1`)
+const keyed = (id, alg = 'ES256') => {
+  const key = newSigningKey(`${id}-key1`, alg)
   clients[id] = { id, privateJwk: key.priv }
   return { keys: [key.pub] }
 }
@@ -112,13 +118,17 @@ const messageSigning = {
     {
       id: msPkjwtDpop,
       redirect_uris: [redirectURI],
-      client_assertion_algorithm: 'ES256',
-      request_object_algorithm: 'ES256',
+      client_assertion_algorithm: 'PS256',
+      request_object_algorithm: 'PS256',
       allowed_scopes: scopes,
-      jwks: keyed(msPkjwtDpop),
+      jwks: keyed(msPkjwtDpop, 'PS256'),
     },
   ],
 }
+// The Message Signing client's DPoP key, also PS256. openid-client
+// generates its own (randomDPoPKeyPair); huskarl loads this one rather
+// than generating an RSA key in its unoptimized build.
+clients[msPkjwtDpop].dpopPrivateJwk = newSigningKey(`${msPkjwtDpop}-dpop`, 'PS256').priv
 
 writeFileSync(join(workDir, 'as-baseline.json'), JSON.stringify(baseline, null, 2))
 writeFileSync(join(workDir, 'as-message-signing.json'), JSON.stringify(messageSigning, null, 2))

@@ -34,6 +34,11 @@ fn dpop() -> Result<DPoP> {
         .build())
 }
 
+/// DPoP with the client's own key from clients.json.
+fn dpop_with(signer: PrivateKey) -> DPoP {
+    DPoP::builder().signer(signer).build()
+}
+
 /// One authorization-code flow: `start` (PAR, PKCE, and with `jar` a
 /// signed request object), the user's consent at conformance-as, then
 /// `complete` (state, `iss`, JARM if requested, code exchange and ID-token
@@ -254,7 +259,9 @@ pub async fn authorization_code_mtls(run: &Run) -> Result<()> {
 
 /// Leg 3: FAPI 2.0 Message Signing: a signed request object (JAR, RFC 9101)
 /// pushed via PAR, and a JARM response (`response_mode=jwt`) that huskarl
-/// verifies, with `private_key_jwt` and DPoP-bound tokens.
+/// verifies, with `private_key_jwt` and DPoP-bound tokens. This client
+/// signs with PS256 throughout (client assertion, request object and DPoP
+/// proofs), the other legs with ES256.
 pub async fn message_signing(run: &Run) -> Result<()> {
     const CLIENT_ID: &str = "fapigo-ms-pkjwt-dpop";
     let issuer = &run.urls.message_signing;
@@ -266,7 +273,7 @@ pub async fn message_signing(run: &Run) -> Result<()> {
         CLIENT_ID,
         FlowSetup {
             client_auth: run.private_key_jwt(CLIENT_ID)?,
-            dpop: dpop()?,
+            dpop: dpop_with(run.dpop_key(CLIENT_ID)?),
             jar: run.signing_key(CLIENT_ID)?,
             response_mode: Some(ResponseMode::Jwt),
         },

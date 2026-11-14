@@ -616,6 +616,9 @@ func (c *Client) validateSignedIDToken(ctx context.Context, raw, accessToken, no
 		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "malformed ID token", err)
 	}
 
+	if algErr := checkSignedWith("ID token", parsed.Algorithm(), c.cfg.Algorithms.IDToken, "IDToken", "id_token_signed_response_alg"); algErr != nil {
+		return token.ValidatedIDToken{}, algErr
+	}
 	candidates, idErr := c.resolveIssuerKeyCandidates(ctx, keys.IDTokenVerification, c.cfg.Algorithms.IDToken, parsed.KeyID())
 	if idErr != nil {
 		return token.ValidatedIDToken{}, idErr
@@ -641,6 +644,21 @@ func (c *Client) validateSignedIDToken(ctx context.Context, raw, accessToken, no
 		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "ID token verification failed", verifyErr)
 	}
 	return validated, nil
+}
+
+// checkSignedWith refuses, before any issuer key is looked up, a JWS
+// whose header names an algorithm other than configured, the one this
+// client verifies it with (Config.Algorithms.<field>): no key could
+// verify it, and the "no matching issuer key" that would follow points
+// at the server's JWKS rather than at this client's configuration. The
+// header's alg is never trusted, only named: parsing has already refused
+// any algorithm this module doesn't implement, so it's one of a few
+// fixed names.
+func checkSignedWith(what string, signed, configured fapi.SignatureAlgorithm, field, registration string) *Error {
+	if signed == configured {
+		return nil
+	}
+	return newError(ErrorInvalidResponse, fmt.Sprintf("%s is signed with %s, but Config.Algorithms.%s is %s: set it to the %s this client is registered with", what, signed, field, configured, registration), nil)
 }
 
 // resolveIssuerKeyCandidates resolves the authorization server's

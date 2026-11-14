@@ -311,6 +311,9 @@ func (c *Client) parseCallbackParams(ctx context.Context, cb AuthorizationCallba
 		return nil, "", newError(ErrorInvalidResponse, "malformed authorization response", err)
 	}
 
+	if algErr := checkSignedWith("authorization response", resp.Algorithm(), c.cfg.Algorithms.JARM, "JARM", "authorization_signed_response_alg"); algErr != nil {
+		return nil, "", algErr
+	}
 	candidates, err := c.deps.IssuerKeys.ResolveIssuerKeys(ctx, keys.IssuerKeyRequest{
 		Issuer: c.cfg.Issuer.String(), Purpose: keys.JARMVerification,
 		Algorithm: c.cfg.Algorithms.JARM, KeyID: resp.KeyID(),

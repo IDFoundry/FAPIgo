@@ -65,6 +65,9 @@ func (c *Client) verifyIssuerJWS(ctx context.Context, compactJWS string) (jose.C
 		return jose.Compact{}, newError(ErrorInvalidResponse, "malformed JWS", err)
 	}
 
+	if algErr := checkSignedWith("JWS", parsed.Header.Algorithm, c.cfg.Algorithms.UserInfo, "UserInfo", "userinfo_signed_response_alg"); algErr != nil {
+		return jose.Compact{}, algErr
+	}
 	candidates, idErr := c.resolveIssuerKeyCandidates(ctx, keys.UserInfoVerification, c.cfg.Algorithms.UserInfo, parsed.Header.KeyID)
 	if idErr != nil {
 		return jose.Compact{}, idErr

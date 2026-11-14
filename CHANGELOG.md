@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.1](https://github.com/IDFoundry/FAPIgo/compare/v0.73.0...v0.73.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **client:** say when a signed response's alg isn't the configured one ([2d465a6](https://github.com/IDFoundry/FAPIgo/commit/2d465a618387468c09d6cb3128cf1072c378fc1d))
+
 ## [0.73.0](https://github.com/IDFoundry/FAPIgo/compare/v0.72.4...v0.73.0) (2026-11-12)
 
 

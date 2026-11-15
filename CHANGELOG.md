@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.75.0](https://github.com/IDFoundry/FAPIgo/compare/v0.74.0...v0.75.0) (2026-11-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* a redirect URI with a query RFC 3986 doesn't allow, a dot path segment, an empty or impossible port, or an uppercase private-use authority is refused by NewRegisteredClient, fapi.ParseRedirectURL and client.New, and a stored client with one no longer resolves. Register it encoded, resolved, with a real port or none, and lowercase; see UPGRADING.md.
+
+### Features
+
+* **sqlstore:** grant registry, CIBA inbox and pairwise erasure ([57be0c6](https://github.com/IDFoundry/FAPIgo/commit/57be0c62506f8157cf44af9b793e84e85d739b8b))
+
+
+### Bug Fixes
+
+* hold a redirect URI's query, path and port to its sent form too ([d321cdc](https://github.com/IDFoundry/FAPIgo/commit/d321cdc225df90c55bad548f6e93c89e8ff1b217))
+* **server:** don't issue a refresh token whose grant was revoked mid-issue ([168bd48](https://github.com/IDFoundry/FAPIgo/commit/168bd48f8c279e87518376aa7f60adf6e1618c62))
+* **server:** keep account closure going past one bad grant or request ([74e068b](https://github.com/IDFoundry/FAPIgo/commit/74e068b54babf685147e35af207fc9b7466fdd95))
+
 ## [0.74.0](https://github.com/IDFoundry/FAPIgo/compare/v0.73.1...v0.74.0) (2026-11-15)
 
 

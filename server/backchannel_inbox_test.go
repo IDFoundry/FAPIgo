@@ -389,3 +389,35 @@ func TestDenyBackchannelInteractionsReportsFailures(t *testing.T) {
 		}
 	})
 }
+
+// corruptOnSecondLookup returns a record that won't decode from its
+// second lookup on: the listing reads the request, and the denial then
+// finds it unreadable.
+type corruptOnSecondLookup struct {
+	storage.BackchannelAuthenticationStore
+	lookups int
+}
+
+func (s *corruptOnSecondLookup) LookupBackchannelAuthentication(ctx context.Context, handleHash [32]byte) (storage.LookedUpBackchannelAuthentication, error) {
+	s.lookups++
+	found, err := s.BackchannelAuthenticationStore.LookupBackchannelAuthentication(ctx, handleHash)
+	if s.lookups > 1 && err == nil {
+		found.Request = json.RawMessage(`{`)
+	}
+	return found, err
+}
+
+// TestDenyBackchannelInteractionsStopsAtAFailure: a denial that fails
+// for anything but the request having been decided or expired stops
+// it, with the error.
+func TestDenyBackchannelInteractionsStopsAtAFailure(t *testing.T) {
+	store := &corruptOnSecondLookup{BackchannelAuthenticationStore: memstore.NewBackchannelAuthenticationStore()}
+	h := newHarnessWithBackchannelOptions(t, store, nil, func(d *server.Dependencies) {
+		d.BackchannelSubjects = hintSubjects{known: map[string]bool{"user-1": true}}
+		d.BackchannelInbox = memstore.NewBackchannelInbox()
+	})
+	beginFiled(t, h, "user-1")
+	if n, err := h.server.DenyBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1"), "closed"); err == nil || n != 0 {
+		t.Fatalf("DenyBackchannelInteractions(unreadable record) = %d, %v, want 0 and an error", n, err)
+	}
+}

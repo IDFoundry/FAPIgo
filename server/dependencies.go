@@ -24,6 +24,18 @@ type Dependencies struct {
 	// interaction state.
 	Transactions storage.TransactionStore
 
+	// InteractionLookup, if set, reads an in-progress interaction back
+	// from Transactions' storage without consuming it, for
+	// LookupInteraction: give the lookup built on the same storage
+	// (memstore.NewInteractionLookup for a memstore TransactionStore).
+	// Nil leaves LookupInteraction unavailable, and the login UI carries
+	// the InteractionRequest itself, as server/interactioncookie does by
+	// default. Under
+	// AssuranceProduction it must declare storage.StoreAssurance like
+	// Transactions (Durable, and CrossInstanceConsistent with
+	// DeploymentHorizontallyScaled).
+	InteractionLookup storage.InteractionLookup
+
 	// Grants persists issued authorization codes and refresh tokens.
 	Grants storage.GrantStore
 

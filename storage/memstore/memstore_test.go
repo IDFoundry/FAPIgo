@@ -17,6 +17,13 @@ func TestTransactionStoreContract(t *testing.T) {
 	})
 }
 
+func TestInteractionLookupContract(t *testing.T) {
+	storage.TestInteractionLookupContract(t, func() (storage.TransactionStore, storage.InteractionLookup) {
+		store := NewTransactionStore()
+		return store, NewInteractionLookup(store)
+	})
+}
+
 func TestGrantStoreContract(t *testing.T) {
 	storage.TestGrantStoreContract(t, func() storage.GrantStore {
 		return NewGrantStore()

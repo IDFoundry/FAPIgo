@@ -944,8 +944,33 @@ gets `ErrNoInteraction` and the user starts again. It's AES-GCM under
 keys every instance shares (the first seals, all open, so keys rotate),
 with the `__Host-` prefix. An interaction too large for a cookie —
 large authorization details, say — gets `ErrTooLarge`: keep that one in
-a server-side session instead. It's no CSRF defence: the form still
-needs one. The demos under `examples/` use it.
+a server-side session instead, or read it back from the server, below.
+It's no CSRF defence: the form still needs one. The demos under
+`examples/` use it.
+
+**Or keep only the handle in the browser.** The cookie then holds none
+of the request's personal data (its login hint, authorization details,
+the claims asked for), and no interaction is too large for it. Set
+`Dependencies.InteractionLookup` to the lookup built on your
+`Transactions` storage, and give the cookie the server's
+`LookupInteraction`:
+
+```go
+transactions := memstore.NewTransactionStore()
+deps.Transactions = transactions
+deps.InteractionLookup = memstore.NewInteractionLookup(transactions)
+// ...srv, err := server.New(cfg, deps)
+
+cookie, err := interactioncookie.New(cookieKeys, interactioncookie.Options{Lookup: srv.LookupInteraction})
+```
+
+`Set` then seals only the handle, and `Read` returns the
+`InteractionRequest` the server's store holds for it: `ErrNoInteraction`
+once the interaction has completed or expired, and any other error, such
+as a store outage, for you to answer as a server error. Every instance
+needs the store; under `AssuranceProduction` the lookup must declare
+`storage.StoreAssurance`, as `Transactions` does. The payment-consent,
+identity-check and federated-union demos work this way.
 
 Keeping the interaction somewhere else — a server-side session — means
 doing yourself the two things the package does:

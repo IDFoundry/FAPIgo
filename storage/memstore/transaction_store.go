@@ -94,3 +94,35 @@ func (s *TransactionStore) CompleteAuthorization(_ context.Context, txn storage.
 	interaction.Request = cloneRawMessage(interaction.Request)
 	return interaction, nil
 }
+
+// NewInteractionLookup returns the storage.InteractionLookup reading
+// store's interactions: server.Dependencies.InteractionLookup, for a
+// server whose Dependencies.Transactions is store. It's a function, not
+// a method of TransactionStore, so a wrapper embedding a TransactionStore
+// doesn't inherit a lookup that would read past its overrides.
+func NewInteractionLookup(store *TransactionStore) storage.InteractionLookup {
+	return interactionLookup{store}
+}
+
+type interactionLookup struct{ s *TransactionStore }
+
+// LookupAuthorization implements storage.InteractionLookup.
+func (l interactionLookup) LookupAuthorization(_ context.Context, txn storage.LookupAuthorizationTransaction) (storage.PendingInteraction, error) {
+	s := l.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending, ok := s.byHandle[txn.Handle]
+	if !ok || s.handleConsumed[txn.Handle] {
+		return storage.PendingInteraction{}, fmt.Errorf("memstore: no such interaction handle")
+	}
+	if s.referenceCompleted[pending.reference] {
+		return storage.PendingInteraction{}, fmt.Errorf("memstore: request_uri already consumed")
+	}
+	if !txn.Now.Before(pending.interaction.ExpiresAt) {
+		return storage.PendingInteraction{}, fmt.Errorf("memstore: interaction handle has expired")
+	}
+	return storage.PendingInteraction{
+		ClientID: pending.interaction.ClientID, Request: cloneRawMessage(pending.interaction.Request),
+		ExpiresAt: pending.interaction.ExpiresAt,
+	}, nil
+}

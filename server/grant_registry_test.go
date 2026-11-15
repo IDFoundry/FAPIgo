@@ -400,3 +400,23 @@ func TestRevokeSubjectGrants(t *testing.T) {
 		t.Errorf("ListGrants(holder-1) = %d grants, want its one left alone", len(others))
 	}
 }
+
+// TestRevokeSubjectGrantsReportsFailures: a registry it can't read fails
+// at once, and a revocation failing part way reports how many it
+// revoked, leaving the rest listed for a retry.
+func TestRevokeSubjectGrantsReportsFailures(t *testing.T) {
+	t.Run("list", func(t *testing.T) {
+		h := stubRegistryHarness(t, &stubRegistry{listErr: errors.New("registry down")})
+		if n, err := h.server.RevokeSubjectGrants(context.Background(), mustSubjectID(t, "user-1")); err == nil || n != 0 {
+			t.Fatalf("RevokeSubjectGrants = %d, %v, want 0 and an error", n, err)
+		}
+	})
+	t.Run("part way", func(t *testing.T) {
+		registry := &stubRegistry{deleteErr: errors.New("registry down")}
+		h := stubRegistryHarness(t, registry)
+		registry.entries = []storage.GrantEntry{registryEntry(t, h, "k", testIssuer, "user-1", h.now, nil)}
+		if n, err := h.server.RevokeSubjectGrants(context.Background(), mustSubjectID(t, "user-1")); err == nil || n != 0 {
+			t.Fatalf("RevokeSubjectGrants = %d, %v, want 0 and an error", n, err)
+		}
+	})
+}

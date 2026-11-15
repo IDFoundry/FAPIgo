@@ -982,9 +982,9 @@ the claims asked for), and no interaction is too large for it. Set
 `LookupInteraction`:
 
 ```go
-transactions := memstore.NewTransactionStore()
+transactions := memstore.NewTransactionStore() // or db.Transactions() with sqlstore
 deps.Transactions = transactions
-deps.InteractionLookup = memstore.NewInteractionLookup(transactions)
+deps.InteractionLookup = memstore.NewInteractionLookup(transactions) // or db.InteractionLookup()
 // ...srv, err := server.New(cfg, deps)
 
 cookie, err := interactioncookie.New(cookieKeys, interactioncookie.Options{Lookup: srv.LookupInteraction})
@@ -996,7 +996,7 @@ once the interaction has completed or expired, and any other error, such
 as a store outage, for you to answer as a server error. Every instance
 needs the store; under `AssuranceProduction` the lookup must declare
 `storage.StoreAssurance`, as `Transactions` does. The payment-consent,
-identity-check and federated-union demos work this way.
+identity-check, federated-union and linked-accounts demos work this way.
 
 Keeping the interaction somewhere else — a server-side session — means
 doing yourself the two things the package does:

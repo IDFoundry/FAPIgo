@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"github.com/idfoundry/fapigo/server/interactioncookie"
 	"net/http"
 	"slices"
@@ -127,10 +128,6 @@ func (w *World) newBank(ctx context.Context, apps apps) (*bank, error) {
 	if _, err := rand.Read(cookieKey); err != nil {
 		return nil, err
 	}
-	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{})
-	if err != nil {
-		return nil, err
-	}
 
 	limits := server.RecommendedLimits()
 	// The customer approves once for 90 days: the refresh token lasts
@@ -138,7 +135,7 @@ func (w *World) newBank(ctx context.Context, apps apps) (*bank, error) {
 	// does.
 	limits.RefreshTokenLifetime = consentLifetime
 
-	b := &bank{w: w, interaction: interaction, connections: map[string]*connection{}}
+	b := &bank{w: w, connections: map[string]*connection{}}
 	b.cfg = server.Config{
 		Subjects: server.PublicSubjects(),
 		Issuer:   issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
@@ -148,6 +145,11 @@ func (w *World) newBank(ctx context.Context, apps apps) (*bank, error) {
 	b.deps = server.Dependencies{
 		Clients:      store.Clients(),
 		Transactions: store.Transactions(),
+		// The consent page reads the request back from the database
+		// (Server.LookupInteraction), so the browser's cookie carries
+		// only the interaction handle, and any instance sharing the
+		// database can show it.
+		InteractionLookup: store.InteractionLookup(),
 		// Authorization codes and the 90-day refresh tokens.
 		Grants:       store.BatchingGrants(),
 		Replay:       store.Replay(),
@@ -173,6 +175,9 @@ func (w *World) newBank(ctx context.Context, apps apps) (*bank, error) {
 		AuthorizationCodeRARPolicy: server.AllowRequestedAuthorizationDetails{},
 	}
 	if b.srv, err = server.New(b.cfg, b.deps); err != nil {
+		return nil, err
+	}
+	if b.interaction, err = interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{Lookup: b.srv.LookupInteraction}); err != nil {
 		return nil, err
 	}
 	// A registration naming a detail type the bank doesn't register (a
@@ -323,8 +328,13 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	tag := r.PostForm.Get(interactioncookie.FormField)
 	handle, in, err := b.interaction.Read(r, b.w.clock.Now(), tag)
-	if err != nil {
+	if errors.Is(err, interactioncookie.ErrNoInteraction) {
 		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
+		return
+	}
+	if err != nil {
+		// The database couldn't answer: not the customer's session.
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, tryAgain))
 		return
 	}
 	c, signedIn := signIn(r)

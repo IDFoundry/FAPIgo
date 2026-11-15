@@ -38,12 +38,33 @@ type PairwiseSubjectKey struct {
 //
 // A store that couldn't answer at all wraps ErrStoreUnavailable, which
 // callers treat as a server error, never as "not found". Records are
-// never deleted: a user's identifier for a sector must stay the same
-// for as long as relying parties may hold it. Run
+// never deleted, except by a PairwiseSubjectEraser forgetting a user
+// whose account has closed: a user's identifier for a sector must stay
+// the same for as long as relying parties may hold it. Run
 // TestPairwiseSubjectStoreContract against an implementation.
 type PairwiseSubjectStore interface {
 	GetOrCreate(ctx context.Context, key PairwiseSubjectKey, candidate string) (string, error)
 	Lookup(ctx context.Context, issuer, sector, body string) (string, error)
+}
+
+// PairwiseSubjectEraser is a PairwiseSubjectStore that can forget an end
+// user: for closing their account, when the identifiers relying
+// parties hold for them must stop resolving to anyone. It's optional,
+// and called by the application on the store itself, not by the server.
+//
+// ForgetSubject removes every mapping of subject under issuer, in every
+// sector, and returns how many it removed (0 when there were none).
+// After it, Lookup finds no subject for those bodies, and a later
+// GetOrCreate for subject in a sector stores a new body, as for a user
+// never seen. Each removed body stays retired, never stored again for
+// anyone in its issuer and sector: GetOrCreate refuses it as a
+// candidate with ErrPairwiseSubjectCollision, so an identifier a
+// relying party held for the forgotten user can never come to name
+// another. Mappings under other issuers are untouched. Run
+// TestPairwiseSubjectEraserContract against an implementation.
+type PairwiseSubjectEraser interface {
+	PairwiseSubjectStore
+	ForgetSubject(ctx context.Context, issuer, subject string) (int, error)
 }
 
 // ErrPairwiseSubjectNotFound is the error PairwiseSubjectStore.Lookup

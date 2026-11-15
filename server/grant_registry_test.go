@@ -369,3 +369,34 @@ func TestRevokeTokenReportsARegistryFailure(t *testing.T) {
 		t.Fatalf("RevokeToken with the registry down = %v, want server_error", err)
 	}
 }
+
+// TestRevokeSubjectGrants revokes every grant of one subject, and none
+// of another's.
+func TestRevokeSubjectGrants(t *testing.T) {
+	h, owner := registryHarness(t, memstore.NewGrantRegistry())
+	first := owner.issueRefreshToken()
+	second := owner.issueRefreshToken()
+	attested, binding := embedderTokenRequest(t, owner)
+	if _, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
+		GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+		Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"},
+	}); err != nil {
+		t.Fatalf("IssueRefreshToken: %v", err)
+	}
+
+	n, err := h.server.RevokeSubjectGrants(context.Background(), mustSubjectID(t, "user-1"))
+	if err != nil || n != 2 {
+		t.Fatalf("RevokeSubjectGrants(user-1) = %d, %v, want 2", n, err)
+	}
+	for _, token := range []string{first, second} {
+		if _, err := owner.refresh(token); err == nil {
+			t.Error("a revoked grant's refresh token still refreshes")
+		}
+	}
+	if left := listGrants(t, h, "user-1"); len(left) != 0 {
+		t.Errorf("ListGrants(user-1) after = %+v, want none", left)
+	}
+	if others := listGrants(t, h, "holder-1"); len(others) != 1 {
+		t.Errorf("ListGrants(holder-1) = %d grants, want its one left alone", len(others))
+	}
+}

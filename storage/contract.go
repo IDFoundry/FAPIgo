@@ -1898,3 +1898,112 @@ func testGrantStoreRedeemAuthorizationCodeDoesNotReturnRefreshToken(t *testing.T
 		t.Fatalf("RedeemRefreshToken after the refused RedeemAuthorizationCode: %v", err)
 	}
 }
+
+// TestInteractionLookupContract exercises factory()'s InteractionLookup
+// against the guarantees its documentation promises, together with the
+// TransactionStore it reads: a lookup returns the interaction as
+// BeginAuthorization stored it and consumes nothing, and an unknown,
+// completed or expired interaction isn't returned. factory must return a
+// fresh, empty TransactionStore each call, with the InteractionLookup
+// built on the same storage.
+func TestInteractionLookupContract(t *testing.T, factory func() (TransactionStore, InteractionLookup)) {
+	t.Helper()
+
+	t.Run("LookupReturnsStoredInteraction", func(t *testing.T) { testInteractionLookupReturnsStoredInteraction(t, factory) })
+	t.Run("LookupConsumesNothing", func(t *testing.T) { testInteractionLookupConsumesNothing(t, factory) })
+	t.Run("LookupUnknownHandleFails", func(t *testing.T) { testInteractionLookupUnknownHandleFails(t, factory) })
+	t.Run("LookupFailsAfterCompletion", func(t *testing.T) { testInteractionLookupFailsAfterCompletion(t, factory) })
+	t.Run("LookupFailsOnceExpired", func(t *testing.T) { testInteractionLookupFailsOnceExpired(t, factory) })
+}
+
+// beginForLookup pushes reference for client-1 and begins each of
+// handles for it, expiring at handleExpiresAt.
+func beginForLookup(t *testing.T, store TransactionStore, reference string, handleExpiresAt time.Time, handles ...string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := store.CreatePAR(ctx, NewPARRecord{
+		Reference: reference, ClientID: "client-1", Request: contractPayload, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("CreatePAR: %v", err)
+	}
+	for _, handle := range handles {
+		if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
+			Reference: reference, Handle: handle, HandleExpiresAt: handleExpiresAt, Now: time.Now(),
+		}); err != nil {
+			t.Fatalf("BeginAuthorization(%q): %v", handle, err)
+		}
+	}
+}
+
+func testInteractionLookupReturnsStoredInteraction(t *testing.T, factory func() (TransactionStore, InteractionLookup)) {
+	store, lookup := factory()
+	expires := time.Now().Add(time.Minute).Truncate(time.Millisecond)
+	beginForLookup(t, store, "ref-l1", expires, "handle-l1")
+	got, err := lookup.LookupAuthorization(context.Background(), LookupAuthorizationTransaction{Handle: "handle-l1", Now: time.Now()})
+	if err != nil {
+		t.Fatalf("LookupAuthorization: %v", err)
+	}
+	if got.ClientID != "client-1" {
+		t.Errorf("ClientID = %q, want client-1", got.ClientID)
+	}
+	if !jsonEquivalent(got.Request, contractPayload) {
+		t.Errorf("Request = %s, want %s", got.Request, contractPayload)
+	}
+	if !got.ExpiresAt.Equal(expires) {
+		t.Errorf("ExpiresAt = %v, want %v", got.ExpiresAt, expires)
+	}
+}
+
+func testInteractionLookupConsumesNothing(t *testing.T, factory func() (TransactionStore, InteractionLookup)) {
+	store, lookup := factory()
+	ctx := context.Background()
+	beginForLookup(t, store, "ref-l2", time.Now().Add(time.Minute), "handle-l2")
+	for i := range 2 {
+		if _, err := lookup.LookupAuthorization(ctx, LookupAuthorizationTransaction{Handle: "handle-l2", Now: time.Now()}); err != nil {
+			t.Fatalf("LookupAuthorization #%d: %v", i+1, err)
+		}
+	}
+	if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
+		Reference: "ref-l2", Handle: "handle-l2b", HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
+	}); err != nil {
+		t.Fatalf("BeginAuthorization after lookups: %v, want the reference still unconsumed", err)
+	}
+	if _, err := store.CompleteAuthorization(ctx, CompleteAuthorizationTransaction{Handle: "handle-l2"}); err != nil {
+		t.Fatalf("CompleteAuthorization after lookups: %v, want the handle still unconsumed", err)
+	}
+}
+
+func testInteractionLookupUnknownHandleFails(t *testing.T, factory func() (TransactionStore, InteractionLookup)) {
+	_, lookup := factory()
+	if _, err := lookup.LookupAuthorization(context.Background(), LookupAuthorizationTransaction{Handle: "never-began", Now: time.Now()}); err == nil {
+		t.Fatal("LookupAuthorization(unknown handle) = nil error, want error")
+	}
+}
+
+// testInteractionLookupFailsAfterCompletion: once one interaction for a
+// reference completes, neither its handle nor another minted from the
+// same reference is returned, since neither can complete any more.
+func testInteractionLookupFailsAfterCompletion(t *testing.T, factory func() (TransactionStore, InteractionLookup)) {
+	store, lookup := factory()
+	ctx := context.Background()
+	beginForLookup(t, store, "ref-l3", time.Now().Add(time.Minute), "handle-l3a", "handle-l3b")
+	if _, err := store.CompleteAuthorization(ctx, CompleteAuthorizationTransaction{Handle: "handle-l3a"}); err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	for _, handle := range []string{"handle-l3a", "handle-l3b"} {
+		if _, err := lookup.LookupAuthorization(ctx, LookupAuthorizationTransaction{Handle: handle, Now: time.Now()}); err == nil {
+			t.Errorf("LookupAuthorization(%q) after completion = nil error, want error", handle)
+		}
+	}
+}
+
+func testInteractionLookupFailsOnceExpired(t *testing.T, factory func() (TransactionStore, InteractionLookup)) {
+	store, lookup := factory()
+	expires := time.Now().Add(time.Minute)
+	beginForLookup(t, store, "ref-l4", expires, "handle-l4")
+	for _, now := range []time.Time{expires, expires.Add(time.Second)} {
+		if _, err := lookup.LookupAuthorization(context.Background(), LookupAuthorizationTransaction{Handle: "handle-l4", Now: now}); err == nil {
+			t.Errorf("LookupAuthorization at %v, handle expiring %v = nil error, want error", now, expires)
+		}
+	}
+}

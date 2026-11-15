@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/idfoundry/fapigo/server/interactioncookie"
 	"log"
@@ -148,20 +149,22 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 	if _, err := rand.Read(cookieKey); err != nil {
 		return nil, err
 	}
-	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{})
-	if err != nil {
-		return nil, err
-	}
-	idp := &identityProvider{country: c, fedKey: fedKey, w: w, interaction: interaction}
+	idp := &identityProvider{country: c, fedKey: fedKey, w: w}
+	transactions := memstore.NewTransactionStore()
 	deps := server.Dependencies{
 		Clients:      memstore.NewClientRepository(nil),
-		Transactions: memstore.NewTransactionStore(),
-		Grants:       memstore.NewGrantStore(),
-		Replay:       memstore.NewReplayStore(),
-		ClientKeys:   clientKeys,
-		Keys:         manager,
-		AccessTokens: accessTokens,
-		Revocation:   memstore.NewRevocationStore(),
+		Transactions: transactions,
+		// The consent page reads the request back from this identity
+		// provider's own store (Server.LookupInteraction), so the
+		// browser's cookie carries only the interaction handle, not the
+		// claims a service asked for.
+		InteractionLookup: memstore.NewInteractionLookup(transactions),
+		Grants:            memstore.NewGrantStore(),
+		Replay:            memstore.NewReplayStore(),
+		ClientKeys:        clientKeys,
+		Keys:              manager,
+		AccessTokens:      accessTokens,
+		Revocation:        memstore.NewRevocationStore(),
 		// DPoP server nonces (RFC 9449 §8): a service's DPoP proof at
 		// PAR or the token endpoint must carry a nonce this identity
 		// provider handed out, so a proof made ahead of time, or
@@ -182,6 +185,9 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 	idp.srv, err = server.New(cfg, deps)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", host, err)
+	}
+	if idp.interaction, err = interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{Lookup: idp.srv.LookupInteraction}); err != nil {
+		return nil, err
 	}
 	idp.forgedBy, err = federation.NewTrustMarkIssuer(federation.TrustMarkIssueConfig{EntityID: id},
 		federation.TrustMarkIssueDependencies{Signer: fedKey.signer, Algorithm: fapi.ES256, KeyID: fedKey.kid, Clock: federation.SystemClock{}})
@@ -391,8 +397,13 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	tag := r.PostForm.Get(interactioncookie.FormField)
 	handle, interaction, err := p.interaction.Read(r, time.Now(), tag)
-	if err != nil {
+	if errors.Is(err, interactioncookie.ErrNoInteraction) {
 		p.w.renderError(w, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
+		return
+	}
+	if err != nil {
+		// The store couldn't answer: not the citizen's session.
+		p.w.renderError(w, http.StatusInternalServerError, signInFailed, publicMessage(err, tryAgain))
 		return
 	}
 

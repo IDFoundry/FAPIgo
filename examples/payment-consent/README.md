@@ -121,7 +121,7 @@ Everything here uses FAPIgo's public API only.
 
 | Piece | FAPIgo |
 |---|---|
-| Alder Bank | `server.Server` with `ProfileFAPISecurityWithMessageSigning` and `Config.RAR`; DPoP server nonces (`Dependencies.Nonces`, `Limits.DPoPNonceLifetime`); the shop registered with `AuthorizationDetailsTypes` for payments only, and `Dependencies.AuthorizationCodeRARPolicy` set to `server.AllowRequestedAuthorizationDetails`; the consent page's state in an encrypted cookie (`server/interactioncookie`) |
+| Alder Bank | `server.Server` with `ProfileFAPISecurityWithMessageSigning` and `Config.RAR`; DPoP server nonces (`Dependencies.Nonces`, `Limits.DPoPNonceLifetime`); the shop registered with `AuthorizationDetailsTypes` for payments only, and `Dependencies.AuthorizationCodeRARPolicy` set to `server.AllowRequestedAuthorizationDetails`; the consent page's interaction handle in an encrypted cookie (`server/interactioncookie` with `Options.Lookup`), the payment read back from the bank's own store with `Server.LookupInteraction` (`Dependencies.InteractionLookup`), so the browser never holds it |
 | The payments API | `serverresource.NewVerifier`, built from the bank's own server configuration, with its own nonce store (`Options.Nonces`); the granted details from the access token's `authorization_details` claim (`extension.ParseGrantedRAR`, `RARGet`); `resource.NewInsufficientScopeError` for anything else |
 | Northgate Outfitters | `client.Discover`, `client.NewFromDiscovery` with `ProfileFAPISecurityWithMessageSigning`; `BeginAuthorization` with `AuthorizationDetails`; `HandleAuthorizationResponse` and `ExchangeCode`; `ProtectedResource` for the DPoP-bound API call |
 

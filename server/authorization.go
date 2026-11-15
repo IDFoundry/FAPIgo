@@ -175,15 +175,10 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return s.beginFail(ctx, req.ClientID, recordFailure(err, newError(ErrorInvalidRequestURI, 400, "request_uri is invalid, expired, or already used", nil), "pushed authorization request")), nil
 	}
 
-	extensions, err := s.interactionExtensions(request.Parameters, coreAuthorizationParameters, request.ExtensionSource)
+	interaction, err := s.authorizationInteraction(client, request)
 	if err != nil {
 		return s.beginFail(ctx, req.ClientID, newError(ErrorServerError, 500, "stored extension parameters no longer validate", err)), nil
 	}
-	interaction := s.interactionRequestFrom(req.ClientID, request.Parameters)
-	interaction.RequiredSubject = request.requiredSubjectForApplication()
-	interaction.ClientDisplay = client.Display()
-	interaction.Extensions = extensions
-	interaction.Resources = slices.Clone(request.Resources)
 
 	action := InteractionRequired{
 		Handle:      InteractionHandle{value: handle},
@@ -192,6 +187,22 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	}
 	s.audit(ctx, AuditEventBeginAuthorization, req.ClientID, AuditOutcomeSuccess, "")
 	return action, nil
+}
+
+// authorizationInteraction is the InteractionRequest for request, a
+// pushed request from client, as BeginAuthorization and
+// LookupInteraction return it.
+func (s *Server) authorizationInteraction(client storage.RegisteredClient, request requestRecord) (InteractionRequest, error) {
+	extensions, err := s.interactionExtensions(request.Parameters, coreAuthorizationParameters, request.ExtensionSource)
+	if err != nil {
+		return InteractionRequest{}, err
+	}
+	interaction := s.interactionRequestFrom(client.ID(), request.Parameters)
+	interaction.RequiredSubject = request.requiredSubjectForApplication()
+	interaction.ClientDisplay = client.Display()
+	interaction.Extensions = extensions
+	interaction.Resources = slices.Clone(request.Resources)
+	return interaction, nil
 }
 
 func (s *Server) interactionRequestFrom(clientID fapi.ClientID, params map[string]json.RawMessage) InteractionRequest {

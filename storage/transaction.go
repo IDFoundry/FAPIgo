@@ -123,3 +123,51 @@ type TransactionStore interface {
 	// (BeginAuthorizationTransaction.HandleExpiresAt) has passed.
 	CompleteAuthorization(ctx context.Context, txn CompleteAuthorizationTransaction) (CompletedInteraction, error)
 }
+
+// LookupAuthorizationTransaction is the input to
+// InteractionLookup.LookupAuthorization.
+type LookupAuthorizationTransaction struct {
+	// Handle is the key BeginAuthorizationTransaction.Handle was minted
+	// under, as the server derives it from the interaction handle
+	// presented.
+	Handle string
+
+	// Now is the server's current time (server.Dependencies.Clock): an
+	// interaction whose HandleExpiresAt isn't after it is not returned.
+	Now time.Time
+}
+
+// PendingInteraction is what LookupAuthorization reads for one
+// in-progress interaction: what CompleteAuthorization would return for
+// it, left in place.
+type PendingInteraction struct {
+	ClientID  fapi.ClientID
+	Request   json.RawMessage
+	ExpiresAt time.Time
+}
+
+// InteractionLookup reads an in-progress authorization interaction
+// without consuming it: server.Dependencies.InteractionLookup, which
+// server.Server.LookupInteraction uses so a login or consent page can
+// carry only the interaction handle and read the request back from the
+// server's store. It's optional, and separate from TransactionStore so
+// adding it changes no existing store: give the one built on the same
+// storage as Dependencies.Transactions, such as
+// memstore.NewInteractionLookup for a memstore TransactionStore. A
+// TransactionStore wrapper that changes how handles are keyed needs a
+// lookup that keys them the same way, or every lookup misses.
+type InteractionLookup interface {
+	// LookupAuthorization returns the interaction Handle identifies,
+	// with the Request, ClientID and expiry BeginAuthorization stored for
+	// it, unmodified, and consumes nothing: a later
+	// TransactionStore.CompleteAuthorization for Handle succeeds as if
+	// the lookup hadn't happened. It returns an error if Handle is
+	// unknown, if its Reference has been consumed by a completed
+	// interaction (through Handle or any other Handle minted from it), or
+	// if its own expiry (BeginAuthorizationTransaction.HandleExpiresAt)
+	// isn't after txn.Now. An error the store couldn't answer for (a
+	// backend unreachable, a timeout) should wrap ErrStoreUnavailable,
+	// which the server answers with 500 server_error rather than as an
+	// unknown handle.
+	LookupAuthorization(ctx context.Context, txn LookupAuthorizationTransaction) (PendingInteraction, error)
+}

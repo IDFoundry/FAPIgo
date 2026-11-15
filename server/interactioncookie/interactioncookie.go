@@ -7,6 +7,13 @@
 // instance that shares the keys can finish an interaction another
 // began.
 //
+// With Options.Lookup set (server.Server.LookupInteraction), the cookie
+// carries only the handle, and Read gets the InteractionRequest back
+// from the server's store: the browser holds none of the request's
+// personal data, and no interaction is too large for a cookie, but
+// every instance needs the store, through
+// server.Dependencies.InteractionLookup.
+//
 // The cookie is sealed with AES-256-GCM: an InteractionRequest can carry
 // personal data (the login hint, authorization details), so it is
 // encrypted, not just signed. Every key opens a cookie and the first
@@ -29,10 +36,12 @@
 package interactioncookie
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -57,13 +66,15 @@ const FormField = "interaction"
 var (
 	// ErrTooLarge is Set's answer for an interaction too large for a
 	// cookie, such as one with large authorization details: keep that one
-	// in a server-side session instead.
+	// in a server-side session instead, or set Options.Lookup.
 	ErrTooLarge = errors.New("interactioncookie: the interaction is too large for a cookie")
 
 	// ErrNoInteraction is Read's answer when the request carries no
 	// cookie, or one that doesn't open with any key, has expired, is
-	// malformed, or is for another interaction than the form's tag names:
-	// this browser has no interaction in progress here for that form.
+	// malformed, or is for another interaction than the form's tag names,
+	// or, with Options.Lookup, one whose interaction the server no longer
+	// holds (completed, expired or unknown): this browser has no
+	// interaction in progress here for that form.
 	ErrNoInteraction = errors.New("interactioncookie: no interaction in progress")
 )
 
@@ -77,11 +88,20 @@ type Options struct {
 	// Path is the cookie's path: "/" if empty. New refuses another path
 	// for a __Host- name, which the prefix forbids.
 	Path string
+
+	// Lookup, if set, is how Read gets an interaction's
+	// InteractionRequest back from its handle: pass the server's
+	// LookupInteraction, with server.Dependencies.InteractionLookup set.
+	// Set then seals only the handle and the form's tag, and Read calls
+	// Lookup with the request's context. Nil seals the request into the
+	// cookie with the handle.
+	Lookup func(context.Context, server.InteractionHandle) (server.InteractionRequest, error)
 }
 
 // Cookie seals interactions into a cookie, and opens them again.
 type Cookie struct {
-	jar *sealedcookie.Jar
+	jar    *sealedcookie.Jar
+	lookup func(context.Context, server.InteractionHandle) (server.InteractionRequest, error)
 }
 
 // New returns a Cookie sealing with keys[0] and opening with any of keys,
@@ -107,7 +127,7 @@ func New(keys [][]byte, opts Options) (*Cookie, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Cookie{jar: jar}, nil
+	return &Cookie{jar: jar, lookup: opts.Lookup}, nil
 }
 
 // sealed is what a cookie carries.
@@ -123,16 +143,20 @@ type sealed struct {
 // grants nothing without the cookie. The cookie expires with a's handle
 // (a.ExpiresAt), so now must be by the server's own clock
 // (Dependencies.Clock). Set returns ErrTooLarge, setting nothing, when
-// the interaction doesn't fit.
+// the interaction doesn't fit. With Options.Lookup, it seals only the
+// handle, and a.Interaction isn't kept.
 func (c *Cookie) Set(w http.ResponseWriter, a server.InteractionRequired, now time.Time) (string, error) {
-	encoded, err := a.Interaction.MarshalText()
-	if err != nil {
-		return "", err
+	var encoded []byte
+	if c.lookup == nil {
+		var err error
+		if encoded, err = a.Interaction.MarshalText(); err != nil {
+			return "", err
+		}
 	}
 	random := make([]byte, 16)
 	_, _ = rand.Read(random) // never fails: it crashes the program instead (Go 1.24+)
 	tag := base64.RawURLEncoding.EncodeToString(random)
-	err = c.jar.Set(w, sealed{Tag: tag, Handle: a.Handle.String(), Request: string(encoded)}, a.ExpiresAt, now)
+	err := c.jar.Set(w, sealed{Tag: tag, Handle: a.Handle.String(), Request: string(encoded)}, a.ExpiresAt, now)
 	if errors.Is(err, sealedcookie.ErrTooLarge) {
 		return "", ErrTooLarge
 	}
@@ -145,7 +169,11 @@ func (c *Cookie) Set(w http.ResponseWriter, a server.InteractionRequired, now ti
 // Read opens the cookie r carries, as of now, for the form that sent tag
 // back (Set's result, from the page it rendered). Any failure — no
 // cookie, a key that doesn't open it, a tampered or expired value, or a
-// cookie for another interaction than tag's — is ErrNoInteraction.
+// cookie for another interaction than tag's — is ErrNoInteraction. With
+// Options.Lookup, so is an interaction Lookup reports the server doesn't
+// hold (a *server.Error below 500); any other Lookup error, such as a
+// store outage, is returned wrapped, for the caller to answer as a
+// server error.
 func (c *Cookie) Read(r *http.Request, now time.Time, tag string) (server.InteractionHandle, server.InteractionRequest, error) {
 	var s sealed
 	if !c.jar.Open(r, now, &s) || tag == "" || subtle.ConstantTimeCompare([]byte(s.Tag), []byte(tag)) != 1 {
@@ -154,6 +182,17 @@ func (c *Cookie) Read(r *http.Request, now time.Time, tag string) (server.Intera
 	handle, err := server.ParseInteractionHandle(s.Handle)
 	if err != nil {
 		return server.InteractionHandle{}, server.InteractionRequest{}, ErrNoInteraction
+	}
+	if c.lookup != nil {
+		in, err := c.lookup(r.Context(), handle)
+		var serverErr *server.Error
+		switch {
+		case errors.As(err, &serverErr) && serverErr.HTTPStatus() < http.StatusInternalServerError:
+			return server.InteractionHandle{}, server.InteractionRequest{}, ErrNoInteraction
+		case err != nil:
+			return server.InteractionHandle{}, server.InteractionRequest{}, fmt.Errorf("interactioncookie: look up the interaction: %w", err)
+		}
+		return handle, in, nil
 	}
 	in, err := server.ParseInteractionRequest(s.Request)
 	if err != nil {

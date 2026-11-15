@@ -2,6 +2,7 @@ package interactioncookie_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -296,4 +297,101 @@ func showsInClear(value, secret string) bool {
 		}
 	}
 	return false
+}
+
+// lookupFrom is an Options.Lookup answering for handle-1 with in, or
+// with err when set.
+func lookupFrom(in server.InteractionRequest, err error) func(context.Context, server.InteractionHandle) (server.InteractionRequest, error) {
+	return func(_ context.Context, h server.InteractionHandle) (server.InteractionRequest, error) {
+		if err != nil {
+			return server.InteractionRequest{}, err
+		}
+		if h.String() != "handle-1" {
+			return server.InteractionRequest{}, server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, "unknown handle")
+		}
+		return in, nil
+	}
+}
+
+// TestLookupCarriesOnlyTheHandle: with Options.Lookup, the cookie
+// carries the handle and tag alone, and Read returns what Lookup gives
+// for the handle.
+func TestLookupCarriesOnlyTheHandle(t *testing.T) {
+	now := time.Now()
+	key := newKey(t)
+	_, in := interaction(t)
+	looked := server.InteractionRequest{ClientID: "from-store", Scope: []string{"openid"}}
+	c := newCookie(t, [][]byte{key}, interactioncookie.Options{Lookup: lookupFrom(looked, nil)})
+	ck, tag := set(t, c, now)
+
+	full, _ := set(t, newCookie(t, [][]byte{key}, interactioncookie.Options{}), now)
+	if len(ck.Value) >= len(full.Value) {
+		t.Errorf("cookie with Lookup is %d bytes, without %d: want it to leave the request out", len(ck.Value), len(full.Value))
+	}
+	h, got, err := c.Read(requestWith(ck), now.Add(time.Minute), tag)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if h.String() != "handle-1" || got.ClientID != "from-store" || got.Hints.LoginHint != "" {
+		t.Errorf("Read = %q, %+v, want handle-1 and Lookup's request, not %+v", h.String(), got, in)
+	}
+
+	// With Lookup, no interaction is too large for the cookie.
+	big := in
+	big.Scope = []string{strings.Repeat("s", interactioncookie.MaxValueBytes)}
+	h1, _ := interaction(t)
+	if _, err := c.Set(httptest.NewRecorder(), required(h1, big, now), now); err != nil {
+		t.Errorf("Set(large, Lookup) = %v, want nil", err)
+	}
+}
+
+// TestLookupErrors: an interaction the server no longer holds reads as
+// ErrNoInteraction, like an expired cookie, but a store outage doesn't:
+// it isn't the user's session that's gone.
+func TestLookupErrors(t *testing.T) {
+	now := time.Now()
+	key := newKey(t)
+	outage := server.NewError(server.ErrorServerError, http.StatusInternalServerError, "failed to look up the interaction")
+	for name, tc := range map[string]struct {
+		err           error
+		noInteraction bool
+	}{
+		"gone":        {server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, "interaction handle is invalid, expired, or already used"), true},
+		"client gone": {server.NewError(server.ErrorUnauthorizedClient, http.StatusBadRequest, "client is no longer registered"), true},
+		"outage":      {outage, false},
+		"other error": {errors.New("boom"), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := newCookie(t, [][]byte{key}, interactioncookie.Options{Lookup: lookupFrom(server.InteractionRequest{}, tc.err)})
+			ck, tag := set(t, c, now)
+			_, _, err := c.Read(requestWith(ck), now, tag)
+			if got := errors.Is(err, interactioncookie.ErrNoInteraction); got != tc.noInteraction || err == nil {
+				t.Fatalf("Read = %v, want ErrNoInteraction %v", err, tc.noInteraction)
+			}
+			if !tc.noInteraction && !errors.Is(err, tc.err) {
+				t.Errorf("Read = %v, want it to wrap %v", err, tc.err)
+			}
+		})
+	}
+}
+
+// TestLookupReadsACookieSealedWithTheRequest: a Cookie with Lookup
+// reads one sealed without it, as during a rolling deploy turning it
+// on, taking the request from Lookup; one without Lookup refuses a
+// cookie that carries only the handle.
+func TestLookupReadsACookieSealedWithTheRequest(t *testing.T) {
+	now := time.Now()
+	key := newKey(t)
+	looked := server.InteractionRequest{ClientID: "from-store"}
+	plain := newCookie(t, [][]byte{key}, interactioncookie.Options{})
+	withLookup := newCookie(t, [][]byte{key}, interactioncookie.Options{Lookup: lookupFrom(looked, nil)})
+
+	ck, tag := set(t, plain, now)
+	if _, got, err := withLookup.Read(requestWith(ck), now, tag); err != nil || got.ClientID != "from-store" {
+		t.Errorf("Read(sealed without Lookup) = %+v, %v, want Lookup's request", got, err)
+	}
+	ck, tag = set(t, withLookup, now)
+	if _, _, err := plain.Read(requestWith(ck), now, tag); !errors.Is(err, interactioncookie.ErrNoInteraction) {
+		t.Errorf("Read(handle only, no Lookup) = %v, want ErrNoInteraction", err)
+	}
 }

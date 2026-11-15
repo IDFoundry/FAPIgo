@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"github.com/idfoundry/fapigo/server/interactioncookie"
 	"net/http"
 	"time"
@@ -105,12 +106,9 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 	if _, err := rand.Read(cookieKey); err != nil {
 		return nil, err
 	}
-	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{})
-	if err != nil {
-		return nil, err
-	}
+	transactions := memstore.NewTransactionStore()
 
-	b := &bank{w: w, interaction: interaction}
+	b := &bank{w: w}
 	b.cfg = server.Config{
 		Subjects: server.PublicSubjects(),
 		Issuer:   issuer, Endpoints: endpoints,
@@ -122,13 +120,17 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 	}
 	b.deps = server.Dependencies{
 		Clients:      memstore.NewClientRepository([]storage.RegisteredClient{shopClient}),
-		Transactions: memstore.NewTransactionStore(),
-		Grants:       memstore.NewGrantStore(),
-		Replay:       memstore.NewReplayStore(),
-		ClientKeys:   clientKeySource,
-		Keys:         manager,
-		AccessTokens: accessTokens,
-		Revocation:   memstore.NewRevocationStore(),
+		Transactions: transactions,
+		// The consent page reads the payment back from the bank's own
+		// store (Server.LookupInteraction), so the browser's cookie
+		// carries only the interaction handle, not the payment.
+		InteractionLookup: memstore.NewInteractionLookup(transactions),
+		Grants:            memstore.NewGrantStore(),
+		Replay:            memstore.NewReplayStore(),
+		ClientKeys:        clientKeySource,
+		Keys:              manager,
+		AccessTokens:      accessTokens,
+		Revocation:        memstore.NewRevocationStore(),
 		// DPoP server nonces (RFC 9449 §8): a DPoP proof at PAR or the
 		// token endpoint must carry a nonce the bank handed out, so a
 		// proof made ahead of time, or captured, is refused. The shop's
@@ -145,6 +147,9 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 		AuthorizationCodeRARPolicy: server.AllowRequestedAuthorizationDetails{},
 	}
 	if b.srv, err = server.New(b.cfg, b.deps); err != nil {
+		return nil, err
+	}
+	if b.interaction, err = interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{Lookup: b.srv.LookupInteraction}); err != nil {
 		return nil, err
 	}
 	// A registration naming a detail type the bank doesn't register (a
@@ -279,8 +284,13 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	tag := r.PostForm.Get(interactioncookie.FormField)
 	handle, in, err := b.interaction.Read(r, time.Now(), tag)
-	if err != nil {
+	if errors.Is(err, interactioncookie.ErrNoInteraction) {
 		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", "This browser has no payment approval in progress.")
+		return
+	}
+	if err != nil {
+		// The bank's store couldn't answer: not the customer's session.
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, tryAgain))
 		return
 	}
 	c, signedIn := customerByName(r.PostForm.Get("username"))

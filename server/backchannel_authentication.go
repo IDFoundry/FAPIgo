@@ -768,27 +768,44 @@ func (s *Server) backchannelInteraction(client storage.RegisteredClient, params 
 // decided or has expired (BackchannelAuthenticationStore's lookup doesn't
 // say); CompleteBackchannelAuthentication is what enforces both, so a
 // stale lookup can at most show a request that can no longer be
-// completed. An unknown handle is an ErrorInvalidRequest *Error.
+// completed. An unknown handle is an ErrorInvalidRequest *Error, and a
+// request whose client is no longer registered ErrorUnauthorizedClient;
+// a store or client repository that couldn't answer is
+// ErrorServerError.
 func (s *Server) LookupBackchannelInteraction(ctx context.Context, handle BackchannelAuthenticationHandle) (BackchannelInteractionRequest, error) {
 	if s.deps.Backchannel == nil {
 		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "backchannel authentication is not configured", nil)
 	}
+	interaction, _, err := s.lookupBackchannelInteraction(ctx, handle)
+	return interaction, err
+}
+
+// lookupBackchannelInteraction is LookupBackchannelInteraction, also
+// returning the subject Dependencies.BackchannelSubjects bound the
+// request to ("" without one).
+func (s *Server) lookupBackchannelInteraction(ctx context.Context, handle BackchannelAuthenticationHandle) (BackchannelInteractionRequest, string, error) {
 	pending, err := s.deps.Backchannel.LookupBackchannelAuthentication(ctx, backchannelHandleHash(handle))
 	if err != nil {
-		return BackchannelInteractionRequest{}, newError(ErrorInvalidRequest, 400, "backchannel authentication handle is unknown", err)
+		if clientStoreUnavailable(ctx, err) {
+			return BackchannelInteractionRequest{}, "", newError(ErrorServerError, 500, "failed to look up the backchannel authentication request", err)
+		}
+		return BackchannelInteractionRequest{}, "", newError(ErrorInvalidRequest, 400, "backchannel authentication handle is unknown", err)
 	}
 	request, err := s.decodeOwnRequestRecord(pending.Request)
 	if err != nil {
-		return BackchannelInteractionRequest{}, recordFailure(err, newError(ErrorInvalidRequest, 400, "backchannel authentication handle is unknown", nil), "backchannel authentication request")
+		return BackchannelInteractionRequest{}, "", recordFailure(err, newError(ErrorInvalidRequest, 400, "backchannel authentication handle is unknown", nil), "backchannel authentication request")
 	}
 	client, err := s.deps.Clients.ResolveClient(ctx, pending.ClientID)
 	if err != nil {
-		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "the request's client could not be resolved", err)
+		if clientStoreUnavailable(ctx, err) {
+			return BackchannelInteractionRequest{}, "", newError(ErrorServerError, 500, "the request's client could not be resolved", err)
+		}
+		return BackchannelInteractionRequest{}, "", newError(ErrorUnauthorizedClient, 400, "client is no longer registered", err)
 	}
 	interaction, err := s.backchannelInteraction(client, request.Parameters, request.Resources)
 	if err != nil {
-		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "the request's extension parameters could not be read back", err)
+		return BackchannelInteractionRequest{}, "", newError(ErrorServerError, 500, "the request's extension parameters could not be read back", err)
 	}
 	interaction.RequiredSubject = request.requiredSubjectForApplication()
-	return interaction, nil
+	return interaction, request.ResolvedSubject, nil
 }

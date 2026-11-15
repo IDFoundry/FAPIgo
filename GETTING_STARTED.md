@@ -899,7 +899,11 @@ request.
 **Closing an account.** `srv.RevokeSubjectGrants(ctx, subject)` revokes
 every grant the registry lists for the user, and, with a CIBA inbox,
 `srv.DenyBackchannelInteractions(ctx, subject, reason)` denies the
-requests still awaiting them. If you map pairwise subs
+requests still awaiting them. Neither sees a grant still in flight, an
+authorization code not yet exchanged or a CIBA approval not yet polled:
+refuse the subject at sign-in from then on, and call
+`RevokeSubjectGrants` again once `Limits.AuthorizationCodeLifetime` and
+`Limits.BackchannelAuthenticationRequestLifetime` have passed. If you map pairwise subs
 (`pairwise.NewMapping`), also call the store's `ForgetSubject(ctx, issuer,
 subject)` (`storage.PairwiseSubjectEraser`, which `memstore` and
 `sqlstore` implement): the subs relying parties hold for the user stop resolving,

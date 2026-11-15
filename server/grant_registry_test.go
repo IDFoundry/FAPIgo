@@ -2,9 +2,11 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -202,5 +204,129 @@ func TestProductionChecksGrantRegistry(t *testing.T) {
 				t.Fatalf("New(production, %s registry) = %v, want %q", name, err, tc.want)
 			}
 		})
+	}
+}
+
+// stubRegistry lists entries for any subject, and fails DeleteGrant with
+// deleteErr; listErr fails ListGrants.
+type stubRegistry struct {
+	entries   []storage.GrantEntry
+	listErr   error
+	deleteErr error
+	deleted   []string
+}
+
+func (r *stubRegistry) RecordGrant(context.Context, storage.NewGrantEntry) error { return nil }
+func (r *stubRegistry) ListGrants(context.Context, storage.GrantListing) ([]storage.GrantEntry, error) {
+	return r.entries, r.listErr
+}
+func (r *stubRegistry) DeleteGrant(_ context.Context, key string) error {
+	r.deleted = append(r.deleted, key)
+	return r.deleteErr
+}
+
+// registryEntry is a GrantEntry holding record fields as the server
+// writes them, for subject, issued at issuedAt.
+func registryEntry(t *testing.T, h harness, key, issuer, subject string, issuedAt time.Time, extra map[string]any) storage.GrantEntry {
+	t.Helper()
+	record := map[string]any{"v": 1, "iss": issuer, "rth": make([]byte, 32), "sub": subject, "issued_at": issuedAt}
+	for k, v := range extra {
+		record[k] = v
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return storage.GrantEntry{Key: key, ClientID: testClientID, Record: raw, ExpiresAt: h.now.Add(time.Hour)}
+}
+
+func stubRegistryHarness(t *testing.T, registry *stubRegistry) harness {
+	t.Helper()
+	h, _ := registryHarness(t, registry)
+	return h
+}
+
+// TestListGrantsReadsEntries: entries are listed oldest first, with
+// their authorization details, and one written by another issuer, for
+// another subject or past its expiry is left out.
+func TestListGrantsReadsEntries(t *testing.T) {
+	registry := &stubRegistry{}
+	h := stubRegistryHarness(t, registry)
+	expired := registryEntry(t, h, "expired", testIssuer, "user-1", h.now, nil)
+	expired.ExpiresAt = h.now
+	registry.entries = []storage.GrantEntry{
+		registryEntry(t, h, "newer", testIssuer, "user-1", h.now, nil),
+		registryEntry(t, h, "older", testIssuer, "user-1", h.now.Add(-time.Hour), map[string]any{
+			"authorization_details": []map[string]any{{"type": "payment", "amount": "SGD 5"}},
+		}),
+		registryEntry(t, h, "foreign", "https://other-as.example", "user-1", h.now, nil),
+		registryEntry(t, h, "another subject", testIssuer, "user-2", h.now, nil),
+		expired,
+	}
+	grants := listGrants(t, h, "user-1")
+	if len(grants) != 2 || grants[0].ID != "older" || grants[1].ID != "newer" {
+		t.Fatalf("ListGrants = %+v, want older then newer", grants)
+	}
+	if len(grants[0].AuthorizationDetails) != 1 || !strings.Contains(string(grants[0].AuthorizationDetails[0]), `"payment"`) {
+		t.Errorf("AuthorizationDetails = %s, want the payment", grants[0].AuthorizationDetails)
+	}
+}
+
+// TestListGrantsRefusesUnreadableEntries: an entry the server can't
+// decode, or whose store can't answer, fails the listing rather than
+// hiding a grant.
+func TestListGrantsRefusesUnreadableEntries(t *testing.T) {
+	for name, registry := range map[string]*stubRegistry{
+		"undecodable":        {entries: []storage.GrantEntry{{Key: "k", Record: json.RawMessage(`{`)}}},
+		"bad details":        {},
+		"store can't answer": {listErr: errors.New("registry down")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := stubRegistryHarness(t, registry)
+			if name == "bad details" {
+				registry.entries = []storage.GrantEntry{registryEntry(t, h, "k", testIssuer, "user-1", h.now, map[string]any{"authorization_details": "not a list"})}
+			}
+			if _, err := h.server.ListGrants(context.Background(), mustSubjectID(t, "user-1")); err == nil {
+				t.Fatal("ListGrants = nil error, want error")
+			}
+			if err := h.server.RevokeListedGrant(context.Background(), mustSubjectID(t, "user-1"), "k"); err == nil || errors.Is(err, server.ErrGrantNotListed) {
+				t.Fatal("revoking = nil error, want error")
+			}
+		})
+	}
+}
+
+func TestListGrantsRefusesAnEmptySubject(t *testing.T) {
+	h := stubRegistryHarness(t, &stubRegistry{})
+	if _, err := h.server.ListGrants(context.Background(), server.SubjectID{}); err == nil {
+		t.Fatal("ListGrants(zero SubjectID) = nil error, want error")
+	}
+}
+
+// TestRevokeListedGrantKeepsAnEntryItCouldntFinish: a grant whose
+// registry entry couldn't be deleted is reported, for a retry.
+func TestRevokeListedGrantKeepsAnEntryItCouldntFinish(t *testing.T) {
+	registry := &stubRegistry{deleteErr: errors.New("registry down")}
+	h := stubRegistryHarness(t, registry)
+	registry.entries = []storage.GrantEntry{registryEntry(t, h, "k", testIssuer, "user-1", h.now, nil)}
+	if err := h.server.RevokeListedGrant(context.Background(), mustSubjectID(t, "user-1"), "k"); err == nil {
+		t.Fatal("RevokeListedGrant with the registry down = nil error, want error")
+	}
+	if len(registry.deleted) != 1 {
+		t.Errorf("DeleteGrant called %d times, want once", len(registry.deleted))
+	}
+}
+
+// TestRevokeListedGrantRefusesAnEntryWithoutItsToken: an entry whose
+// refresh token hash is missing can't be revoked as listed.
+func TestRevokeListedGrantRefusesAnEntryWithoutItsToken(t *testing.T) {
+	registry := &stubRegistry{}
+	h := stubRegistryHarness(t, registry)
+	registry.entries = []storage.GrantEntry{registryEntry(t, h, "k", testIssuer, "user-1", h.now, map[string]any{"rth": []byte{1, 2}})}
+	if err := h.server.RevokeListedGrant(context.Background(), mustSubjectID(t, "user-1"), "k"); err == nil || errors.Is(err, server.ErrGrantNotListed) {
+		t.Fatalf("RevokeListedGrant(no refresh token hash) = %v, want an error naming it", err)
+	}
+	if len(registry.deleted) != 0 {
+		t.Error("the entry was deleted though its refresh token wasn't revoked")
 	}
 }

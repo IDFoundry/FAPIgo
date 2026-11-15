@@ -192,9 +192,11 @@ type Dependencies struct {
 	// shows, from any instance. It needs BackchannelSubjects. A request
 	// is filed before it's stored, so a filing failure fails the
 	// request. Its entries hold the requests' backchannel authentication
-	// handles, so give it storage that encrypts at rest; the subject
+	// handles, so give it storage that encrypts at rest. The subject
 	// binding means a handle read from it can still only be approved by
-	// the user it was filed for. Under AssuranceProduction it must
+	// the user it was filed for; it can still end the request, though, as
+	// any handle can: CompleteBackchannelAuthentication records a Deny,
+	// or an approval by someone else, for whoever presents the handle. Under AssuranceProduction it must
 	// declare storage.StoreAssurance (Durable, and
 	// CrossInstanceConsistent with DeploymentHorizontallyScaled).
 	// Ignored unless Config.Endpoints.BackchannelAuthentication is set.

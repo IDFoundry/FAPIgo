@@ -168,9 +168,12 @@ type listedGrant struct {
 // ListGrants doesn't check who is asking: the application must make sure
 // the user is subject.
 func (s *Server) ListGrants(ctx context.Context, subject SubjectID) ([]ListedGrant, error) {
-	grants, err := s.listGrants(ctx, subject)
+	grants, unreadable, err := s.listGrants(ctx, subject)
 	if err != nil {
 		return nil, err
+	}
+	if unreadable != nil {
+		return nil, unreadable
 	}
 	out := make([]ListedGrant, len(grants))
 	for i, g := range grants {
@@ -179,31 +182,37 @@ func (s *Server) ListGrants(ctx context.Context, subject SubjectID) ([]ListedGra
 	return out, nil
 }
 
-func (s *Server) listGrants(ctx context.Context, subject SubjectID) ([]listedGrant, error) {
+// listGrants returns subject's live grants, and, separately, the
+// entries it couldn't read (an undecodable record, or a revocation check
+// that failed) joined into unreadable: one bad entry doesn't hide the
+// others from a caller revoking them. err is for a listing that failed
+// as a whole.
+func (s *Server) listGrants(ctx context.Context, subject SubjectID) (grants []listedGrant, unreadable, err error) {
 	if s.deps.GrantRegistry == nil {
-		return nil, errors.New("server: list grants: Dependencies.GrantRegistry isn't set")
+		return nil, nil, errors.New("server: list grants: Dependencies.GrantRegistry isn't set")
 	}
 	if subject.String() == "" {
-		return nil, errors.New("server: list grants: subject is empty")
+		return nil, nil, errors.New("server: list grants: subject is empty")
 	}
 	entries, err := s.deps.GrantRegistry.ListGrants(ctx, storage.GrantListing{SubjectKey: s.grantSubjectKey(subject.String()), Now: s.deps.Clock.Now()})
 	if err != nil {
-		return nil, fmt.Errorf("server: list grants: %w", err)
+		return nil, nil, fmt.Errorf("server: list grants: %w", err)
 	}
-	var out []listedGrant
+	var bad []error
 	for _, entry := range entries {
 		g, ok, err := s.listedGrantFrom(ctx, subject, entry)
 		if err != nil {
-			return nil, fmt.Errorf("server: list grants: %w", err)
+			bad = append(bad, fmt.Errorf("server: list grants: entry %s: %w", entry.Key, err))
+			continue
 		}
 		if ok {
-			out = append(out, g)
+			grants = append(grants, g)
 		}
 	}
-	slices.SortFunc(out, func(a, b listedGrant) int {
+	slices.SortFunc(grants, func(a, b listedGrant) int {
 		return cmp.Or(a.listed.IssuedAt.Compare(b.listed.IssuedAt), cmp.Compare(a.listed.ID, b.listed.ID))
 	})
-	return out, nil
+	return grants, errors.Join(bad...), nil
 }
 
 // listedGrantFrom decodes entry, reporting false for one that isn't a
@@ -215,6 +224,13 @@ func (s *Server) listedGrantFrom(ctx context.Context, subject SubjectID, entry s
 		return listedGrant{}, false, fmt.Errorf("stored grant registry entry: %w", err)
 	}
 	if !s.ownsRecord(record.Issuer) || record.Subject != subject.String() || !s.deps.Clock.Now().Before(entry.ExpiresAt) {
+		return listedGrant{}, false, nil
+	}
+	// The entry's key is derived from the refresh token it revokes: an
+	// entry naming another token's hash than its own key's, as an
+	// unsealed record a database writer forged could, isn't the grant
+	// it's listed as.
+	if hash, ok := refreshTokenHashOf(record.RefreshTokenHash); !ok || grantEntryKey(hash) != entry.Key {
 		return listedGrant{}, false, nil
 	}
 	if revokedErr := s.checkGrantNotRevoked(ctx, grantRecord{GrantID: record.GrantID, CodeGrantID: record.CodeGrantID}); revokedErr != nil {
@@ -252,12 +268,16 @@ func (s *Server) listedGrantFrom(ctx context.Context, subject SubjectID, entry s
 // grant of the subject the application has authenticated: the
 // application must still make sure the user is subject.
 func (s *Server) RevokeListedGrant(ctx context.Context, subject SubjectID, id string) error {
-	grants, err := s.listGrants(ctx, subject)
+	grants, unreadable, err := s.listGrants(ctx, subject)
 	if err != nil {
 		return fmt.Errorf("server: revoke listed grant: %w", err)
 	}
 	i := slices.IndexFunc(grants, func(g listedGrant) bool { return g.listed.ID == id })
 	if i < 0 {
+		if unreadable != nil {
+			// It may be one of the entries that couldn't be read.
+			return fmt.Errorf("server: revoke listed grant: %w", unreadable)
+		}
 		return ErrGrantNotListed
 	}
 	return s.revokeListed(ctx, grants[i])
@@ -310,9 +330,19 @@ func (s *Server) forgetRevokedRefreshToken(ctx context.Context, refreshTokenHash
 // RevokeSubjectGrants revokes every grant ListGrants lists for subject,
 // as RevokeListedGrant revokes one, and returns how many it revoked: for
 // ending a user's access when their account closes, or after it's
-// compromised. It stops at the first failure, returning how many it had
-// revoked and the error; the rest are still listed, so calling it again
-// finishes the job.
+// compromised. A grant it fails to revoke, or an entry it can't read,
+// doesn't stop it: it revokes every other grant, then returns how many
+// it revoked with every failure joined. What failed is still listed, so
+// calling it again finishes the job.
+//
+// A grant whose refresh token isn't issued yet isn't listed: an
+// authorization code not yet exchanged, or an approved CIBA request not
+// yet polled, can still be redeemed for one within
+// Limits.AuthorizationCodeLifetime or
+// Limits.BackchannelAuthenticationRequestLifetime. To be sure nothing
+// outlives an account, refuse its subject at authentication from then
+// on, and call RevokeSubjectGrants again once the longer of those has
+// passed.
 //
 // Closing an account also means denying the CIBA requests awaiting the
 // user, with a BackchannelInbox (DenyBackchannelInteractions), and
@@ -326,14 +356,21 @@ func (s *Server) forgetRevokedRefreshToken(ctx context.Context, refreshTokenHash
 // RevokeSubjectGrants doesn't check who is asking: the application must
 // make sure the request is subject's own, or an administrator's.
 func (s *Server) RevokeSubjectGrants(ctx context.Context, subject SubjectID) (int, error) {
-	grants, err := s.listGrants(ctx, subject)
+	grants, unreadable, err := s.listGrants(ctx, subject)
 	if err != nil {
 		return 0, fmt.Errorf("server: revoke subject grants: %w", err)
 	}
-	for i, g := range grants {
+	revoked := 0
+	failures := []error{unreadable}
+	for _, g := range grants {
 		if err := s.revokeListed(ctx, g); err != nil {
-			return i, err
+			failures = append(failures, err)
+			continue
 		}
+		revoked++
 	}
-	return len(grants), nil
+	if err := errors.Join(failures...); err != nil {
+		return revoked, fmt.Errorf("server: revoke subject grants: %w", err)
+	}
+	return revoked, nil
 }

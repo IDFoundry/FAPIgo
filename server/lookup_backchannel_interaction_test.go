@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -70,18 +71,34 @@ func TestLookupBackchannelInteractionServerErrors(t *testing.T) {
 	store := memstore.NewBackchannelAuthenticationStore()
 	required := beginBackchannel(t, newHarnessWithBackchannelStore(t, store), standardBackchannelParams(t))
 
-	for name, h := range map[string]harness{
-		"client no longer resolvable": newHarnessWithBackchannelOptions(t, store, nil, func(d *server.Dependencies) {
+	for name, tc := range map[string]struct {
+		h    harness
+		want server.ErrorCode
+	}{
+		"client no longer registered": {newHarnessWithBackchannelOptions(t, store, nil, func(d *server.Dependencies) {
 			d.Clients = &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{}}
-		}),
-		"stored request unreadable": newHarnessWithBackchannelStore(t, corruptLookupStore{store}),
+		}), server.ErrorUnauthorizedClient},
+		"client store unavailable": {newHarnessWithBackchannelOptions(t, store, nil, func(d *server.Dependencies) {
+			d.Clients = &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{}, err: fmt.Errorf("db: %w", storage.ErrStoreUnavailable)}
+		}), server.ErrorServerError},
+		"stored request unreadable":     {newHarnessWithBackchannelStore(t, corruptLookupStore{store}), server.ErrorServerError},
+		"backchannel store unavailable": {newHarnessWithBackchannelStore(t, unavailableLookupStore{store}), server.ErrorServerError},
 	} {
-		_, err := h.server.LookupBackchannelInteraction(context.Background(), required.Handle)
+		_, err := tc.h.server.LookupBackchannelInteraction(context.Background(), required.Handle)
 		var serverErr *server.Error
-		if !errors.As(err, &serverErr) || serverErr.Code() != server.ErrorServerError {
-			t.Errorf("%s: LookupBackchannelInteraction = %v, want server_error", name, err)
+		if !errors.As(err, &serverErr) || serverErr.Code() != tc.want {
+			t.Errorf("%s: LookupBackchannelInteraction = %v, want %s", name, err, tc.want)
 		}
 	}
+}
+
+// unavailableLookupStore's lookups fail as an outage.
+type unavailableLookupStore struct {
+	*memstore.BackchannelAuthenticationStore
+}
+
+func (unavailableLookupStore) LookupBackchannelAuthentication(context.Context, [32]byte) (storage.LookedUpBackchannelAuthentication, error) {
+	return storage.LookedUpBackchannelAuthentication{}, fmt.Errorf("db: %w", storage.ErrStoreUnavailable)
 }
 
 // fixedRecordStore returns record as every looked-up request.

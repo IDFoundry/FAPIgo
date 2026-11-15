@@ -455,3 +455,97 @@ func TestBackchannelSubjectsMustAgreeWithTheIDTokenHint(t *testing.T) {
 		t.Fatalf("begin with a resolver disagreeing with the id_token_hint = %+v, want server_error", action)
 	}
 }
+
+// TestBackchannelInboxSkipsADeregisteredClient: a request from a client
+// no longer registered leaves the listing, rather than failing it for
+// every request the user has.
+func TestBackchannelInboxSkipsADeregisteredClient(t *testing.T) {
+	h := inboxHarness(t, memstore.NewBackchannelInbox())
+	beginFiled(t, h, "user-1")
+	delete(h.clients.clients, testClientID)
+	if pending := inboxOf(t, h, "user-1"); len(pending) != 0 {
+		t.Errorf("inbox with the client deregistered = %d requests, want none", len(pending))
+	}
+	if n, err := h.server.DenyBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1"), "closed"); err != nil || n != 0 {
+		t.Errorf("DenyBackchannelInteractions = %d, %v, want 0, nil", n, err)
+	}
+}
+
+// outageBackchannelStore fails lookups as an outage while down is set.
+type outageBackchannelStore struct {
+	storage.BackchannelAuthenticationStore
+	down *bool
+}
+
+func (s outageBackchannelStore) LookupBackchannelAuthentication(ctx context.Context, handleHash [32]byte) (storage.LookedUpBackchannelAuthentication, error) {
+	if *s.down {
+		return storage.LookedUpBackchannelAuthentication{}, fmt.Errorf("db: %w", storage.ErrStoreUnavailable)
+	}
+	return s.BackchannelAuthenticationStore.LookupBackchannelAuthentication(ctx, handleHash)
+}
+
+// TestBackchannelInboxReportsAStoreOutage: a backchannel store that
+// can't answer fails the listing and the bulk denial, rather than
+// showing an empty inbox an account closure would take as done.
+func TestBackchannelInboxReportsAStoreOutage(t *testing.T) {
+	down := false
+	h := newHarnessWithBackchannelOptions(t, outageBackchannelStore{memstore.NewBackchannelAuthenticationStore(), &down}, nil, func(d *server.Dependencies) {
+		d.BackchannelSubjects = hintSubjects{known: map[string]bool{"user-1": true}}
+		d.BackchannelInbox = memstore.NewBackchannelInbox()
+	})
+	beginFiled(t, h, "user-1")
+	down = true
+	if _, err := h.server.ListBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1")); err == nil {
+		t.Error("ListBackchannelInteractions with the store down = nil error, want the outage")
+	}
+	if n, err := h.server.DenyBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1"), "closed"); err == nil || n != 0 {
+		t.Errorf("DenyBackchannelInteractions with the store down = %d, %v, want 0 and the outage", n, err)
+	}
+}
+
+// flakyRemoveInbox fails its first RemoveBackchannelRequest.
+type flakyRemoveInbox struct {
+	*memstore.BackchannelInbox
+	failed *bool
+}
+
+func (b flakyRemoveInbox) RemoveBackchannelRequest(ctx context.Context, handleHash [32]byte) error {
+	if !*b.failed {
+		*b.failed = true
+		return errors.New("inbox down")
+	}
+	return b.BackchannelInbox.RemoveBackchannelRequest(ctx, handleHash)
+}
+
+// TestDenyBackchannelInteractionsClearsStaleEntries: an entry left
+// listed after its request was decided (its removal failed) is removed
+// when a bulk denial finds the request already decided.
+func TestDenyBackchannelInteractionsClearsStaleEntries(t *testing.T) {
+	failed := false
+	h := inboxHarness(t, flakyRemoveInbox{memstore.NewBackchannelInbox(), &failed})
+	required := beginFiled(t, h, "user-1")
+	approveAs(t, h, required.Handle, required.Interaction.Scope, "user-1")
+	if len(inboxOf(t, h, "user-1")) != 1 {
+		t.Fatal("the decided request isn't still listed, so the removal failure wasn't exercised")
+	}
+	if n, err := h.server.DenyBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1"), "closed"); err != nil || n != 0 {
+		t.Fatalf("DenyBackchannelInteractions = %d, %v, want 0, nil", n, err)
+	}
+	if left := inboxOf(t, h, "user-1"); len(left) != 0 {
+		t.Errorf("inbox after the denial = %d requests, want the stale entry cleared", len(left))
+	}
+}
+
+// TestBackchannelInboxSkipsAnEntryFiledUnderSomeoneElse: an entry whose
+// request is bound to another user than the one it's filed under, as an
+// entry a database writer moved would be, isn't listed for them.
+func TestBackchannelInboxSkipsAnEntryFiledUnderSomeoneElse(t *testing.T) {
+	inbox := &stubInbox{BackchannelInbox: memstore.NewBackchannelInbox()}
+	h := inboxHarness(t, inbox)
+	required := beginFiled(t, h, "user-1")
+	handle := required.Handle.String()
+	inbox.extra = []storage.BackchannelInboxEntry{inboxEntry(t, h, testIssuer, "user-2", handle, sha256.Sum256([]byte(handle)))}
+	if pending := inboxOf(t, h, "user-2"); len(pending) != 0 {
+		t.Errorf("inbox of user-2 = %d requests, want user-1's request left out", len(pending))
+	}
+}

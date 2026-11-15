@@ -147,38 +147,57 @@ func (s *Server) fileBackchannelRequest(ctx context.Context, clientID fapi.Clien
 // application must make sure the user is subject, as it does before
 // approving.
 func (s *Server) ListBackchannelInteractions(ctx context.Context, subject SubjectID) ([]PendingBackchannelInteraction, error) {
+	pending, unreadable, err := s.listBackchannelInteractions(ctx, subject)
+	if err != nil {
+		return nil, err
+	}
+	if unreadable != nil {
+		return nil, unreadable
+	}
+	return pending, nil
+}
+
+// listBackchannelInteractions returns the requests awaiting subject,
+// and, separately, the entries it couldn't read (an undecodable record,
+// or a request the backchannel store couldn't answer for) joined into
+// unreadable, so one bad entry doesn't hide the others from
+// DenyBackchannelInteractions. err is for a listing that failed as a
+// whole.
+func (s *Server) listBackchannelInteractions(ctx context.Context, subject SubjectID) (pending []PendingBackchannelInteraction, unreadable, err error) {
 	if s.deps.BackchannelInbox == nil {
-		return nil, errors.New("server: list backchannel interactions: Dependencies.BackchannelInbox isn't set")
+		return nil, nil, errors.New("server: list backchannel interactions: Dependencies.BackchannelInbox isn't set")
 	}
 	if subject.String() == "" {
-		return nil, errors.New("server: list backchannel interactions: subject is empty")
+		return nil, nil, errors.New("server: list backchannel interactions: subject is empty")
 	}
 	entries, err := s.deps.BackchannelInbox.ListBackchannelRequests(ctx, storage.BackchannelInboxListing{
 		SubjectKey: s.backchannelInboxSubjectKey(subject.String()), Now: s.deps.Clock.Now(),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("server: list backchannel interactions: %w", err)
+		return nil, nil, fmt.Errorf("server: list backchannel interactions: %w", err)
 	}
-	var out []PendingBackchannelInteraction
+	var bad []error
 	for _, entry := range entries {
-		pending, ok, err := s.pendingBackchannelInteraction(ctx, subject, entry)
+		p, ok, err := s.pendingBackchannelInteraction(ctx, subject, entry)
 		if err != nil {
-			return nil, fmt.Errorf("server: list backchannel interactions: %w", err)
+			bad = append(bad, fmt.Errorf("server: list backchannel interactions: %w", err))
+			continue
 		}
 		if ok {
-			out = append(out, pending)
+			pending = append(pending, p)
 		}
 	}
-	slices.SortFunc(out, func(a, b PendingBackchannelInteraction) int {
+	slices.SortFunc(pending, func(a, b PendingBackchannelInteraction) int {
 		return cmp.Or(a.ExpiresAt.Compare(b.ExpiresAt), cmp.Compare(a.ID, b.ID))
 	})
-	return out, nil
+	return pending, errors.Join(bad...), nil
 }
 
 // pendingBackchannelInteraction rebuilds entry's request, reporting
 // false for one that isn't a live request of subject's at this server:
-// written by another issuer, expired, or gone from the backchannel
-// store.
+// written by another issuer, expired, gone from the backchannel store,
+// from a client no longer registered, or bound to another subject than
+// the one it's filed under.
 func (s *Server) pendingBackchannelInteraction(ctx context.Context, subject SubjectID, entry storage.BackchannelInboxEntry) (PendingBackchannelInteraction, bool, error) {
 	var record backchannelInboxRecord
 	if err := decodeRecord(entry.Record, &record.Version, &record); err != nil {
@@ -191,13 +210,18 @@ func (s *Server) pendingBackchannelInteraction(ctx context.Context, subject Subj
 	if err != nil || sha256.Sum256([]byte(record.Handle)) != entry.HandleHash {
 		return PendingBackchannelInteraction{}, false, nil
 	}
-	interaction, err := s.LookupBackchannelInteraction(ctx, handle)
+	interaction, resolved, err := s.lookupBackchannelInteraction(ctx, handle)
 	if err != nil {
 		var serverErr *Error
-		if errors.As(err, &serverErr) && serverErr.Code() == ErrorInvalidRequest {
+		if errors.As(err, &serverErr) && (serverErr.Code() == ErrorInvalidRequest || serverErr.Code() == ErrorUnauthorizedClient) {
 			return PendingBackchannelInteraction{}, false, nil
 		}
 		return PendingBackchannelInteraction{}, false, err
+	}
+	// The request itself names who may approve it: an entry filed under
+	// someone else, as one a database writer moved could be, isn't theirs.
+	if resolved != subject.String() {
+		return PendingBackchannelInteraction{}, false, nil
 	}
 	return PendingBackchannelInteraction{ID: backchannelInboxID(entry.HandleHash), Handle: handle, Interaction: interaction, ExpiresAt: entry.ExpiresAt}, true, nil
 }
@@ -224,19 +248,21 @@ func (s *Server) unfileBackchannelRequest(ctx context.Context, handleHash [32]by
 // call or instance, or expired — or not recorded because the store
 // failed, which CompleteBackchannelAuthentication reports the same way,
 // so check ListBackchannelInteractions when every request must be gone.
-// It stops at any other failure, returning how many it had denied and
-// the error; the rest are still listed, so calling it again finishes
-// the job.
+// Any other failure, or an entry it can't read, doesn't stop it: it
+// denies every other request, then returns how many it denied with every
+// failure joined. What failed is still listed, so calling it again
+// finishes the job.
 //
 // DenyBackchannelInteractions doesn't check who is asking: the
 // application must make sure the request is subject's own, or an
 // administrator's.
 func (s *Server) DenyBackchannelInteractions(ctx context.Context, subject SubjectID, reason string) (int, error) {
-	pending, err := s.ListBackchannelInteractions(ctx, subject)
+	pending, unreadable, err := s.listBackchannelInteractions(ctx, subject)
 	if err != nil {
 		return 0, fmt.Errorf("server: deny backchannel interactions: %w", err)
 	}
 	denied := 0
+	failures := []error{unreadable}
 	for _, p := range pending {
 		err := s.CompleteBackchannelAuthentication(ctx, CompleteBackchannelAuthenticationRequest{Handle: p.Handle, Result: Deny(reason)})
 		var serverErr *Error
@@ -244,10 +270,14 @@ func (s *Server) DenyBackchannelInteractions(ctx context.Context, subject Subjec
 		case err == nil:
 			denied++
 		case errors.As(err, &serverErr) && (serverErr.Code() == ErrorInvalidRequest || serverErr.Code() == ErrorExpiredToken):
-			// Decided or expired since it was listed.
+			// Decided or expired since it was listed: its entry is stale.
+			s.unfileBackchannelRequest(ctx, backchannelHandleHash(p.Handle))
 		default:
-			return denied, fmt.Errorf("server: deny backchannel interactions: %w", err)
+			failures = append(failures, err)
 		}
+	}
+	if err := errors.Join(failures...); err != nil {
+		return denied, fmt.Errorf("server: deny backchannel interactions: %w", err)
 	}
 	return denied, nil
 }

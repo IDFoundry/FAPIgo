@@ -473,7 +473,9 @@ func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, prese
 		_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenKey, s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew)))
 	}
 	if alreadyRedeemed.IssuedRefreshTokenHash != nil {
-		_ = s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)
+		if s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash) == nil {
+			_ = s.forgetRevokedRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)
+		}
 	}
 	if _, ok := s.grantRevocationReader(); ok {
 		until := s.deps.Clock.Now().Add(s.grantRevocationHorizon())

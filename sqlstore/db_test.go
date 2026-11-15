@@ -706,3 +706,22 @@ func TestNewStoresRefuseUnreadableRows(t *testing.T) {
 		}
 	})
 }
+
+// A Sealer that can't seal fails the new stores' writes as an outage,
+// storing nothing unsealed.
+func TestNewStoresWritesFailWithTheSealer(t *testing.T) {
+	ctx := context.Background()
+	d := newPlace(t, sqlstore.SQLite).migratedWith(sqlstore.Options{Sealer: failingSealer{}})
+	later := time.Now().Add(time.Hour)
+	for name, err := range map[string]error{
+		"RecordGrant":           d.GrantRegistry().RecordGrant(ctx, storage.NewGrantEntry{Key: "k", SubjectKey: "s", ClientID: "c", Record: []byte(`{}`), ExpiresAt: later}),
+		"AddBackchannelRequest": d.BackchannelInbox().AddBackchannelRequest(ctx, storage.NewBackchannelInboxEntry{SubjectKey: "s", ClientID: "c", Record: []byte(`{}`), ExpiresAt: later}),
+	} {
+		if !errors.Is(err, storage.ErrStoreUnavailable) {
+			t.Errorf("%s with a failing Sealer = %v, want ErrStoreUnavailable", name, err)
+		}
+	}
+	if got, err := d.GrantRegistry().ListGrants(ctx, storage.GrantListing{SubjectKey: "s", Now: time.Now()}); err != nil || len(got) != 0 {
+		t.Errorf("ListGrants after the failed write = %d entries, %v, want none stored", len(got), err)
+	}
+}

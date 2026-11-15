@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.74.0](https://github.com/IDFoundry/FAPIgo/compare/v0.73.1...v0.74.0) (2026-11-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* a redirect URI with an uppercase scheme or host, or a character RFC 3986 doesn't allow left unencoded, is refused by NewRegisteredClient, fapi.ParseRedirectURL and client.New, and a stored client with one no longer resolves. Re-register it in the normalized form the error gives; see UPGRADING.md.
+
+### Features
+
+* **server:** deny every CIBA request awaiting a user ([b17a718](https://github.com/IDFoundry/FAPIgo/commit/b17a7187c5ab2a5c9d46ec94c691050bd83b2c76))
+* **server:** list and revoke a user's grants ([013878b](https://github.com/IDFoundry/FAPIgo/commit/013878b8d529e8f07739659bb55ca3dd3541caa6))
+* **server:** list the CIBA requests awaiting a user ([3c10e43](https://github.com/IDFoundry/FAPIgo/commit/3c10e43caffb30653271b6668d9eebb918161d8d))
+* **server:** look up an in-progress interaction by its handle ([df7f708](https://github.com/IDFoundry/FAPIgo/commit/df7f7080e8a2ff118cd2c06053a5457a26d7c750))
+* **server:** revoke a user's grants and forget their pairwise subs ([cd3bdfc](https://github.com/IDFoundry/FAPIgo/commit/cd3bdfce513c21c5a02895f1f3540946b04b81b1))
+
+
+### Bug Fixes
+
+* refuse redirect URIs not written as they're sent ([31c2522](https://github.com/IDFoundry/FAPIgo/commit/31c25226146e1549dc1197fd38565765884f10f4))
+
 ## [0.73.1](https://github.com/IDFoundry/FAPIgo/compare/v0.73.0...v0.73.1) (2026-11-14)
 
 

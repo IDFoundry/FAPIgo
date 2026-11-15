@@ -2,6 +2,7 @@ package storage
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -123,6 +124,46 @@ func TestNewRegisteredClientRefusesRedirectFragment(t *testing.T) {
 			}
 			if c, err := NewRegisteredClient(cfg); err == nil {
 				t.Fatalf("NewRegisteredClient(%q) accepted it; HasRedirectURI = %v", tc.uri, c.HasRedirectURI(tc.uri))
+			}
+		})
+	}
+}
+
+// A redirect goes to a redirect URI's normalized form, so
+// NewRegisteredClient refuses, for a web or a native client, one not
+// written that way: it would be matched as registered but sent
+// somewhere spelled differently.
+func TestNewRegisteredClientRefusesRedirectURINotWrittenAsSent(t *testing.T) {
+	for _, tc := range []struct {
+		uri    string
+		native bool
+		want   bool
+	}{
+		{"https://rp.example/c b", false, false},
+		{"https://rp.example/café", false, false},
+		{"https://RP.example/cb", false, false},
+		{"HTTPS://rp.example/cb", false, false},
+		{"http://127.0.0.1:8080/c b", false, false},
+		{"com.example.app:/c b", true, false},
+		{"Com.Example.App:/cb", true, false},
+		{"https://rp.example/c%20b?x=a%20b", false, true},
+		{"https://rp.example:8443/cb", false, true},
+		{"com.example.app:/cb", true, true},
+	} {
+		t.Run(tc.uri, func(t *testing.T) {
+			cfg := RegisteredClientConfig{
+				ID: "c", RedirectURIs: []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(tc.uri)},
+				ClientAssertionAlgorithm: fapi.ES256, AllowedScopes: []string{"openid"},
+			}
+			if tc.native {
+				cfg.ApplicationType = ApplicationTypeNative
+			}
+			_, err := NewRegisteredClient(cfg)
+			if (err == nil) != tc.want {
+				t.Fatalf("NewRegisteredClient(%q) = %v, want accepted %v", tc.uri, err, tc.want)
+			}
+			if !tc.want && !strings.Contains(err.Error(), "written exactly as it is sent") {
+				t.Errorf("NewRegisteredClient(%q) = %v, want it to say how to write the URI", tc.uri, err)
 			}
 		})
 	}

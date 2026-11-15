@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/canonical"
 	"github.com/idfoundry/fapigo/internal/querystring"
 	"github.com/idfoundry/fapigo/internal/resourceindicator"
 )
@@ -254,7 +255,10 @@ type RegisteredClientConfig struct {
 	// added after it (RFC 6749 §3.1.2), so a query naming one of them —
 	// code, state, iss, error, error_description, error_uri or
 	// response — is refused, as is a URI with a fragment, even an empty
-	// "#" (RFC 6749 §3.1.2).
+	// "#" (RFC 6749 §3.1.2). A URI must be written exactly as a redirect
+	// to it is sent, its normalized form: scheme and host in lowercase,
+	// and any character RFC 3986 doesn't allow in it percent-encoded
+	// ("/c%20b", not "/c b").
 	RedirectURIs []fapi.RegisteredRedirectURI
 
 	// ApplicationType is ApplicationTypeWeb (the zero value) or
@@ -977,6 +981,29 @@ func checkRedirectURIQueries(cfg RegisteredClientConfig) error {
 		}
 		if name, found := querystring.FirstReserved(u.RawQuery, authorizationResponseParameters...); found {
 			return fmt.Errorf("storage: client %q: redirect URI %q: its query names %q, which the authorization response adds (RFC 6749 §3.1.2)", cfg.ID, uri, name)
+		}
+	}
+	return nil
+}
+
+// checkRedirectURIsWrittenAsSent refuses a redirect URI that isn't in
+// the normalized form a redirect to it would be sent to: net/url's
+// string form, with the host's ASCII letters lowercased, as
+// fapi.ParseRedirectURL requires. A registered URI is matched exactly,
+// so "https://rp.example/c b", sent as "https://rp.example/c%20b", or
+// "https://RP.example/cb", sent as "https://rp.example/cb", would
+// redirect somewhere other than the string registered. Checked here for
+// every client, so a web client's is refused at registration, not first
+// at a pushed authorization request.
+func checkRedirectURIsWrittenAsSent(cfg RegisteredClientConfig) error {
+	for _, uri := range cfg.RedirectURIs {
+		u, err := url.Parse(string(uri))
+		if err != nil {
+			continue // refused for what it is where it's parsed as a redirect URI
+		}
+		u.Host = canonical.LowerASCII(u.Host)
+		if sent := u.String(); sent != string(uri) {
+			return fmt.Errorf("storage: client %q: redirect URI %q must be written exactly as it is sent, %q: percent-encode any character RFC 3986 doesn't allow, and write the scheme and host in lowercase", cfg.ID, uri, sent)
 		}
 	}
 	return nil

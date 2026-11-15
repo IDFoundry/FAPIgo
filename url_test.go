@@ -277,11 +277,15 @@ func TestParseURLRefusesEmptyFragment(t *testing.T) {
 	}
 }
 
-// TestParseURLLowercasesASCIIHost: a mixed-case ASCII host or scheme is
-// lowercased, and an internationalized name in its A-label form is
-// accepted.
+// TestParseURLLowercasesASCIIHost: an issuer or endpoint's mixed-case
+// ASCII host or scheme is lowercased, and an internationalized name in
+// its A-label form is accepted. ParseRedirectURL refuses such a URI
+// instead (TestParseRedirectURL): it has to be written as it's sent.
 func TestParseURLLowercasesASCIIHost(t *testing.T) {
 	for name, parse := range parsers {
+		if name == "ParseRedirectURL" {
+			continue
+		}
 		for raw, want := range map[string]string{
 			"HtTpS://IBank.EXAMPLE/cb":         "https://ibank.example/cb",
 			"https://XN--IBANK-7FD.example/cb": "https://xn--ibank-7fd.example/cb",

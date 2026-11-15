@@ -63,24 +63,33 @@ func AllowPrivateUseScheme() URLOption {
 // ParseRedirectURL parses and validates raw as an OAuth redirect URI:
 // https, like ParseEndpointURL, unless an option admits loopback http
 // (AllowLoopbackHTTP) or a native app's private-use scheme
-// (AllowPrivateUseScheme).
+// (AllowPrivateUseScheme). Unlike an issuer or endpoint, raw must
+// already be in the URL's normalized string form, the one String gives
+// back: a redirect goes to that string, and a registered redirect URI is
+// matched exactly, so a spelling that would be rewritten, such as
+// "HTTPS://RP.example/c b" for "https://rp.example/c%20b", is refused
+// rather than sent somewhere other than the string registered.
 func ParseRedirectURL(raw string, opts ...URLOption) (URL, error) {
 	var o urlOptions
 	for _, opt := range opts {
 		opt(&o)
 	}
-	if o.allowPrivateUseScheme {
-		if parsed, err := url.Parse(raw); err == nil && parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "" {
-			u, err := parsePrivateUseURL(raw, parsed)
-			if err != nil {
-				return URL{}, fmt.Errorf("fapi: parse redirect URL: %w", err)
-			}
-			return u, nil
-		}
+	var u URL
+	var err error
+	if parsed, perr := url.Parse(raw); o.allowPrivateUseScheme && perr == nil && parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "" {
+		u, err = parsePrivateUseURL(raw, parsed)
+	} else {
+		u, err = parseSecureURL(raw, opts)
 	}
-	u, err := parseSecureURL(raw, opts)
 	if err != nil {
 		return URL{}, fmt.Errorf("fapi: parse redirect URL: %w", err)
+	}
+	// The redirect goes to u's string form, and the registered string is
+	// what the client asked for: refuse one that differs, such as a
+	// space net/url percent-encodes or an uppercase scheme or host it,
+	// or parseSecureURL, lowercases.
+	if sent := u.String(); sent != raw {
+		return URL{}, fmt.Errorf("fapi: parse redirect URL: redirect URI must be written exactly as it is sent, %q: percent-encode any character RFC 3986 doesn't allow, and write the scheme and host in lowercase", sent)
 	}
 	return u, nil
 }
@@ -107,12 +116,6 @@ func parsePrivateUseURL(raw string, parsed *url.URL) (URL, error) {
 	}
 	if hasFragment(raw) {
 		return URL{}, fmt.Errorf("URL must not contain a fragment")
-	}
-	// The redirect goes to the URL's string form, and it has to be the
-	// registered string: refuse an authority form net/url would rewrite,
-	// such as a space it escapes, beyond lowercasing the scheme.
-	if parsed.Host != "" && parsed.String()[len(parsed.Scheme):] != raw[len(parsed.Scheme):] {
-		return URL{}, fmt.Errorf("private-use redirect URI must be written as net/url gives it back, with any character RFC 3986 doesn't allow percent-encoded")
 	}
 	return URL{value: *parsed}, nil
 }

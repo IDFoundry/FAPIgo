@@ -168,3 +168,14 @@ func TestNewRegisteredClientRefusesRedirectURINotWrittenAsSent(t *testing.T) {
 		})
 	}
 }
+
+// A redirect URI url.Parse refuses is left to where it's parsed as a
+// redirect URI, a native client's at registration and a web client's at
+// its pushed authorization request, rather than reported as one not
+// written as it's sent.
+func TestRedirectURINotWrittenAsSentSkipsUnparsable(t *testing.T) {
+	cfg := RegisteredClientConfig{ID: "c", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/%zz"}}
+	if err := checkRedirectURIsWrittenAsSent(cfg); err != nil {
+		t.Errorf("checkRedirectURIsWrittenAsSent(unparsable) = %v, want it left to the redirect URI parse", err)
+	}
+}

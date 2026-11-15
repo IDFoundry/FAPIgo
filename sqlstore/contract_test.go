@@ -78,6 +78,24 @@ func TestInteractionLookupContract(t *testing.T) {
 	})
 }
 
+func TestGrantRegistryContract(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		storage.TestGrantRegistryContract(t, func() storage.GrantRegistry { return freshDB(t, dialect).GrantRegistry() })
+	})
+}
+
+func TestBackchannelInboxContract(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		storage.TestBackchannelInboxContract(t, func() storage.BackchannelInbox { return freshDB(t, dialect).BackchannelInbox() })
+	})
+}
+
+func TestPairwiseSubjectEraserContract(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		storage.TestPairwiseSubjectEraserContract(t, func() storage.PairwiseSubjectEraser { return freshDB(t, dialect).PairwiseSubjects() })
+	})
+}
+
 func TestSessionStoreContract(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
 		storage.TestSessionStoreContract(t, func() storage.SessionStore { return freshDB(t, dialect).Sessions() })
@@ -91,6 +109,12 @@ func TestSealedStoreContracts(t *testing.T) {
 		sealed := func() *sqlstore.DB { return newPlace(t, dialect).migratedWith(sqlstore.Options{Sealer: testSealer(t)}) }
 		t.Run("Transactions", func(t *testing.T) {
 			storage.TestTransactionStoreContract(t, func() storage.TransactionStore { return sealed().Transactions() })
+		})
+		t.Run("GrantRegistry", func(t *testing.T) {
+			storage.TestGrantRegistryContract(t, func() storage.GrantRegistry { return sealed().GrantRegistry() })
+		})
+		t.Run("BackchannelInbox", func(t *testing.T) {
+			storage.TestBackchannelInboxContract(t, func() storage.BackchannelInbox { return sealed().BackchannelInbox() })
 		})
 		t.Run("InteractionLookup", func(t *testing.T) {
 			storage.TestInteractionLookupContract(t, func() (storage.TransactionStore, storage.InteractionLookup) {

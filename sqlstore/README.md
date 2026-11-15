@@ -44,6 +44,8 @@ deps := server.Dependencies{
 deps.AccessTokens = server.OpaqueAccessTokens{Store: db.AccessTokens()} // opaque access tokens (JWTs need none)
 deps.Backchannel = db.Backchannel()                                    // CIBA
 deps.InteractionLookup = db.InteractionLookup()                        // Server.LookupInteraction: the login UI keeps only the handle
+deps.GrantRegistry = db.GrantRegistry()                                // Server.ListGrants: a "connected apps" page
+deps.BackchannelInbox = db.BackchannelInbox()                          // Server.ListBackchannelInteractions (seal it: entries hold handles)
 deps.PairwiseSubjects, err = pairwise.NewMapping(db.PairwiseSubjects()) // random, mapped pairwise subs
 
 // A relying party (package client):

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -34,8 +35,9 @@ func (d *DB) PairwiseSubjects() *PairwiseSubjectStore { return &PairwiseSubjectS
 // issuer and sector — of concurrent calls for one key, on any
 // instance, exactly one inserts — then the key's body is read back. No
 // body means the insert conflicted on the body alone: a collision, with
-// nothing stored. A row, once stored, is never changed or deleted, so a
-// body the first SELECT finds is the one the INSERT would have kept.
+// nothing stored. A row, once stored, is never deleted, and only
+// ForgetSubject changes it, so a body the first SELECT finds is the one
+// the INSERT would have kept.
 func (s *PairwiseSubjectStore) GetOrCreate(ctx context.Context, key storage.PairwiseSubjectKey, candidate string) (string, error) {
 	for _, v := range []string{key.Issuer, key.Sector, key.Subject, candidate} {
 		if !validTextKey(v) {
@@ -92,12 +94,46 @@ func (s *PairwiseSubjectStore) Lookup(ctx context.Context, issuer, sector, body 
 	err := s.d.queryRow(ctx, "SELECT subject FROM {pairwise_subjects} WHERE issuer = ? AND sector = ? AND body = ?",
 		issuer, sector, body).Scan(&subject)
 	switch {
-	case errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, sql.ErrNoRows), err == nil && strings.HasPrefix(subject, forgottenSubjectPrefix):
 		return "", errPairwiseSubjectNotFound
 	case err != nil:
 		return "", unavailable("look up pairwise subject", err)
 	}
 	return subject, nil
+}
+
+// forgottenSubjectPrefix starts the subject column of a forgotten
+// mapping (ForgetSubject): the forgotten body follows it, keeping the
+// primary key unique per row. A control character, so no subject
+// identifier the server issues (printable ASCII, server.SubjectID) can
+// be one, and one valid in a Postgres TEXT, unlike NUL.
+const forgottenSubjectPrefix = "\x01forgotten\x01"
+
+// ForgetSubject implements storage.PairwiseSubjectEraser: one UPDATE
+// moves each of subject's rows under issuer to a forgotten subject of
+// its own (forgottenSubjectPrefix and the body). The row, and with it
+// the UNIQUE (issuer, sector, body) constraint, stays, so the body is
+// never stored again for anyone, while the subject, its primary key
+// freed, gets a new body at its next GetOrCreate. Lookup finds no one
+// for a forgotten body.
+func (s *PairwiseSubjectStore) ForgetSubject(ctx context.Context, issuer, subject string) (int, error) {
+	if !validTextKey(issuer) || !validTextKey(subject) || strings.HasPrefix(subject, forgottenSubjectPrefix) {
+		return 0, nil
+	}
+	var n int64
+	err := s.d.writeOne(ctx, func(q querier) error {
+		res, err := q.ExecContext(ctx, s.d.q("UPDATE {pairwise_subjects} SET subject = ? || body WHERE issuer = ? AND subject = ?"),
+			forgottenSubjectPrefix, issuer, subject)
+		if err != nil {
+			return err
+		}
+		n, err = res.RowsAffected()
+		return err
+	})
+	if err != nil {
+		return 0, unavailable("forget pairwise subject", err)
+	}
+	return int(n), nil
 }
 
 // Capabilities implements storage.StoreAssurance — see the package

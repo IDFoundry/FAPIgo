@@ -174,7 +174,8 @@ device has to find the requests awaiting its user, on whichever
 instance it reaches. Set `Dependencies.BackchannelSubjects` to a
 `server.BackchannelSubjectResolver` that maps a request's hint to the
 user it names, and `Dependencies.BackchannelInbox` (`memstore.NewBackchannelInbox()`
-to start). Each request is then filed under its user before it's
+to start, sqlstore's `db.BackchannelInbox()` in production, with a
+Sealer). Each request is then filed under its user before it's
 stored, and `srv.ListBackchannelInteractions(ctx, subject)` lists what
 awaits them: each entry's `Interaction` to show, a page-safe `ID` to
 link to, and the `Handle` to complete it with, which stays on your

@@ -23,6 +23,8 @@ var sweptTables = []string{
 	"access_tokens",               // NewAccessToken.ExpiresAt
 	"backchannel_authentications", // NewBackchannelAuthentication.ExpiresAt + BackchannelExpiredRetention
 	sessionsTable,                 // NewSession.ExpiresAt
+	grantRegistryTable,            // NewGrantEntry.ExpiresAt
+	backchannelInboxTable,         // NewBackchannelInboxEntry.ExpiresAt
 }
 
 // Sweep deletes every row that expired before now, from every table

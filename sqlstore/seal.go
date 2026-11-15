@@ -291,10 +291,12 @@ func decodeRecord(plain []byte, v any, version *int, want int) error {
 
 // The tables and columns of the record blobs a Sealer seals.
 const (
-	backchannelTable = "backchannel_authentications"
-	recordColumn     = "record"
-	requestColumn    = "request"
-	decisionColumn   = "decision"
+	backchannelTable      = "backchannel_authentications"
+	grantRegistryTable    = "grant_registry"
+	backchannelInboxTable = "backchannel_inbox"
+	recordColumn          = "record"
+	requestColumn         = "request"
+	decisionColumn        = "decision"
 )
 
 // interactionRef names the request column of the interaction handle,
@@ -341,6 +343,8 @@ var sealedColumns = []sealedColumn{
 	{backchannelTable, "auth_req_id_hash", recordColumn, "client_id", false, backchannelBoundColumns},
 	{backchannelTable, "auth_req_id_hash", decisionColumn, "client_id", false, backchannelBoundColumns},
 	{sessionsTable, "state", recordColumn, "''", true, nil},
+	{grantRegistryTable, "entry_key", recordColumn, "client_id", true, nil},
+	{backchannelInboxTable, "handle_hash", recordColumn, "client_id", false, nil},
 }
 
 // sealStallLimit is how many passes over a table in a row SealRecords

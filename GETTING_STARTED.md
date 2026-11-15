@@ -883,7 +883,8 @@ case server.AuthorizationLocalError:
 ```
 
 **A "connected apps" page.** Set `Dependencies.GrantRegistry`
-(`memstore.NewGrantRegistry()` in development) and the server records
+(`memstore.NewGrantRegistry()` in development, sqlstore's
+`db.GrantRegistry()` in production) and the server records
 each grant it issues a refresh token for, by the user who authorized
 it. `srv.ListGrants(ctx, subject)` then lists that user's grants, with
 the client, scope, authorization details and expiry, and
@@ -900,8 +901,8 @@ every grant the registry lists for the user, and, with a CIBA inbox,
 `srv.DenyBackchannelInteractions(ctx, subject, reason)` denies the
 requests still awaiting them. If you map pairwise subs
 (`pairwise.NewMapping`), also call the store's `ForgetSubject(ctx, issuer,
-subject)` (`storage.PairwiseSubjectEraser`, which `memstore`
-implements): the subs relying parties hold for the user stop resolving,
+subject)` (`storage.PairwiseSubjectEraser`, which `memstore` and
+`sqlstore` implement): the subs relying parties hold for the user stop resolving,
 and are retired, so they can never come to name someone else. Keyed
 derivers (`pairwise.NewHMAC`, `pairwise.NewReversible`) store nothing to
 forget; retire the subject ID itself, never reusing it for a new user.

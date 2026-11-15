@@ -896,7 +896,9 @@ pass the subject your login session authenticated, never one from the
 request.
 
 **Closing an account.** `srv.RevokeSubjectGrants(ctx, subject)` revokes
-every grant the registry lists for the user. If you map pairwise subs
+every grant the registry lists for the user, and, with a CIBA inbox,
+`srv.DenyBackchannelInteractions(ctx, subject, reason)` denies the
+requests still awaiting them. If you map pairwise subs
 (`pairwise.NewMapping`), also call the store's `ForgetSubject(ctx, issuer,
 subject)` (`storage.PairwiseSubjectEraser`, which `memstore`
 implements): the subs relying parties hold for the user stop resolving,

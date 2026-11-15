@@ -275,9 +275,11 @@ func (s *Server) forgetRevokedRefreshToken(ctx context.Context, refreshTokenHash
 // revoked and the error; the rest are still listed, so calling it again
 // finishes the job.
 //
-// Closing an account also means forgetting the user's pairwise subject
-// identifiers, if the server maps them (pairwise.NewMapping): call the
-// store's ForgetSubject (storage.PairwiseSubjectEraser) as well. Tokens
+// Closing an account also means denying the CIBA requests awaiting the
+// user, with a BackchannelInbox (DenyBackchannelInteractions), and
+// forgetting their pairwise subject identifiers, if the server maps
+// them (pairwise.NewMapping): call the store's ForgetSubject
+// (storage.PairwiseSubjectEraser) as well. Tokens
 // already issued from a revoked grant stop working at every check that
 // reads the revocation store; an access token whose resource server
 // doesn't, and an ID token, expire on their own.

@@ -888,6 +888,9 @@ func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, 
 	}); err != nil {
 		return "", err
 	}
+	if err := s.confirmGrantRecorded(ctx, grant.Subject, hash); err != nil {
+		return "", err
+	}
 	return raw, nil
 }
 

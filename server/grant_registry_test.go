@@ -361,7 +361,7 @@ func TestRevokeListedGrantReportsEachFailure(t *testing.T) {
 // revocation endpoint whose registry entry couldn't be removed is a
 // server error, so the client retries.
 func TestRevokeTokenReportsARegistryFailure(t *testing.T) {
-	_, owner := registryHarness(t, &stubRegistry{deleteErr: errors.New("registry down")})
+	_, owner := registryHarness(t, undeletableRegistry{memstore.NewGrantRegistry()})
 	refreshToken := owner.issueRefreshToken()
 	err := owner.revoke(formParam("token", refreshToken))
 	var serverErr *server.Error
@@ -419,4 +419,78 @@ func TestRevokeSubjectGrantsReportsFailures(t *testing.T) {
 			t.Fatalf("RevokeSubjectGrants = %d, %v, want 0 and an error", n, err)
 		}
 	})
+}
+
+// undeletableRegistry records and lists grants, but fails every
+// DeleteGrant.
+type undeletableRegistry struct{ *memstore.GrantRegistry }
+
+func (undeletableRegistry) DeleteGrant(context.Context, string) error {
+	return errors.New("registry down")
+}
+
+// racingRegistry deletes each grant's entry as it's recorded, as a
+// revocation running between recordGrant and CreateRefreshToken does.
+type racingRegistry struct{ *memstore.GrantRegistry }
+
+func (r racingRegistry) RecordGrant(ctx context.Context, entry storage.NewGrantEntry) error {
+	if err := r.GrantRegistry.RecordGrant(ctx, entry); err != nil {
+		return err
+	}
+	return r.DeleteGrant(ctx, entry.Key)
+}
+
+// listFailsAfterRecord lists nothing it can answer for.
+type listFailsAfterRecord struct{ *memstore.GrantRegistry }
+
+func (listFailsAfterRecord) ListGrants(context.Context, storage.GrantListing) ([]storage.GrantEntry, error) {
+	return nil, errors.New("registry down")
+}
+
+// TestGrantRevokedWhileIssuedIssuesNoToken: a grant whose registry entry
+// is gone by the time its refresh token is stored, revoked in between,
+// gets no refresh token: the token is withdrawn rather than issued
+// unlisted, where RevokeSubjectGrants couldn't find it.
+func TestGrantRevokedWhileIssuedIssuesNoToken(t *testing.T) {
+	for name, registry := range map[string]storage.GrantRegistry{
+		"entry gone":         racingRegistry{memstore.NewGrantRegistry()},
+		"registry can't say": listFailsAfterRecord{memstore.NewGrantRegistry()},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, owner := registryHarness(t, registry)
+			attested, binding := embedderTokenRequest(t, owner)
+			before := len(h.grants.refreshTokens)
+			if _, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
+				GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+				Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"},
+			}); err == nil {
+				t.Fatal("IssueRefreshToken = nil error, want the issuance refused")
+			}
+			h.grants.mu.Lock()
+			defer h.grants.mu.Unlock()
+			for _, tok := range h.grants.refreshTokens[before:] {
+				if !h.grants.refreshRevoked[tok.TokenHash] {
+					t.Error("the refresh token created for the revoked grant is still live")
+				}
+			}
+			if len(h.grants.refreshTokens) == before {
+				t.Error("no refresh token was created, so the race wasn't exercised")
+			}
+		})
+	}
+}
+
+// TestGrantRevokedWhileIssuedWithdrawalFails: a refresh token that can't
+// be withdrawn still isn't issued: both failures are reported.
+func TestGrantRevokedWhileIssuedWithdrawalFails(t *testing.T) {
+	h, owner := registryHarness(t, racingRegistry{memstore.NewGrantRegistry()})
+	h.grants.failRevokeRefresh = errors.New("grants down")
+	attested, binding := embedderTokenRequest(t, owner)
+	_, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
+		GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+		Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "grants down") {
+		t.Fatalf("IssueRefreshToken = %v, want the withdrawal failure reported", err)
+	}
 }

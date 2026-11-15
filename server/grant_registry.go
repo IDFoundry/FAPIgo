@@ -91,7 +91,8 @@ func (s *Server) grantSubjectKey(subject string) string {
 // recordGrant adds grant, issued to clientID with the refresh token
 // stored under refreshTokenHash, to Dependencies.GrantRegistry, when one
 // is set. It runs before the refresh token is stored, so no refresh
-// token exists that the registry doesn't list.
+// token is issued that the registry doesn't list; confirmGrantRecorded,
+// after the token is stored, covers a revocation that ran in between.
 func (s *Server) recordGrant(ctx context.Context, clientID fapi.ClientID, grant grantRecord, refreshTokenHash [32]byte, issuedAt, expiresAt time.Time) error {
 	if s.deps.GrantRegistry == nil {
 		return nil
@@ -108,6 +109,44 @@ func (s *Server) recordGrant(ctx context.Context, clientID fapi.ClientID, grant 
 		Key: grantEntryKey(refreshTokenHash), SubjectKey: s.grantSubjectKey(grant.Subject),
 		ClientID: clientID, Record: record, ExpiresAt: expiresAt,
 	})
+}
+
+// errGrantRevokedWhileIssued is issueRefreshToken's failure when the
+// grant was revoked while its refresh token was being issued.
+var errGrantRevokedWhileIssued = errors.New("the grant was revoked while its refresh token was being issued")
+
+// confirmGrantRecorded checks, after the refresh token stored under
+// refreshTokenHash was created, that its grant is still in
+// Dependencies.GrantRegistry, when one is set. A revocation listing the
+// grant between recordGrant and the token's creation found no token to
+// delete, then removed the entry: the token would be live, but unlisted
+// and so unrevocable by RevokeSubjectGrants. Then this revokes the
+// token itself and fails the issuance. A revocation from here on finds
+// the token, so revokes it.
+func (s *Server) confirmGrantRecorded(ctx context.Context, subject string, refreshTokenHash [32]byte) error {
+	if s.deps.GrantRegistry == nil {
+		return nil
+	}
+	entries, err := s.deps.GrantRegistry.ListGrants(ctx, storage.GrantListing{SubjectKey: s.grantSubjectKey(subject), Now: s.deps.Clock.Now()})
+	if err != nil {
+		return s.withdrawRefreshToken(ctx, refreshTokenHash, fmt.Errorf("confirm the grant is recorded: %w", err))
+	}
+	key := grantEntryKey(refreshTokenHash)
+	if slices.ContainsFunc(entries, func(e storage.GrantEntry) bool { return e.Key == key }) {
+		return nil
+	}
+	return s.withdrawRefreshToken(ctx, refreshTokenHash, errGrantRevokedWhileIssued)
+}
+
+// withdrawRefreshToken revokes the refresh token just stored under
+// refreshTokenHash, which won't be issued, and returns cause: a failure
+// to revoke it is joined to cause, so the token is never issued
+// unlisted either way.
+func (s *Server) withdrawRefreshToken(ctx context.Context, refreshTokenHash [32]byte, cause error) error {
+	if err := s.deps.Grants.RevokeRefreshToken(ctx, refreshTokenHash); err != nil {
+		return errors.Join(cause, fmt.Errorf("withdraw the refresh token: %w", err))
+	}
+	return cause
 }
 
 // listedGrant pairs a ListedGrant with its decoded record.

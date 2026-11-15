@@ -437,7 +437,7 @@ func (r racingRegistry) RecordGrant(ctx context.Context, entry storage.NewGrantE
 	if err := r.GrantRegistry.RecordGrant(ctx, entry); err != nil {
 		return err
 	}
-	return r.GrantRegistry.DeleteGrant(ctx, entry.Key)
+	return r.DeleteGrant(ctx, entry.Key)
 }
 
 // listFailsAfterRecord lists nothing it can answer for.

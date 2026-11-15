@@ -2007,3 +2007,116 @@ func testInteractionLookupFailsOnceExpired(t *testing.T, factory func() (Transac
 		}
 	}
 }
+
+// TestGrantRegistryContract exercises factory()'s behavior against the
+// guarantees GrantRegistry's documentation promises: entries round-trip
+// unmodified, are listed only for their own subject and only until they
+// expire, are replaced by key, and are deleted by key. factory must
+// return a fresh, empty GrantRegistry each call.
+func TestGrantRegistryContract(t *testing.T, factory func() GrantRegistry) {
+	t.Helper()
+
+	t.Run("RecordAndList", func(t *testing.T) { testGrantRegistryRecordAndList(t, factory) })
+	t.Run("ListOnlyTheSubjects", func(t *testing.T) { testGrantRegistryListOnlyTheSubjects(t, factory) })
+	t.Run("ListOnlyUnexpired", func(t *testing.T) { testGrantRegistryListOnlyUnexpired(t, factory) })
+	t.Run("RecordReplacesByKey", func(t *testing.T) { testGrantRegistryRecordReplacesByKey(t, factory) })
+	t.Run("Delete", func(t *testing.T) { testGrantRegistryDelete(t, factory) })
+}
+
+func recordGrantEntry(t *testing.T, registry GrantRegistry, entry NewGrantEntry) {
+	t.Helper()
+	if err := registry.RecordGrant(context.Background(), entry); err != nil {
+		t.Fatalf("RecordGrant(%q): %v", entry.Key, err)
+	}
+}
+
+func listGrantKeys(t *testing.T, registry GrantRegistry, subjectKey string, now time.Time) []string {
+	t.Helper()
+	entries, err := registry.ListGrants(context.Background(), GrantListing{SubjectKey: subjectKey, Now: now})
+	if err != nil {
+		t.Fatalf("ListGrants(%q): %v", subjectKey, err)
+	}
+	keys := make([]string, 0, len(entries))
+	for _, e := range entries {
+		keys = append(keys, e.Key)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func testGrantRegistryRecordAndList(t *testing.T, factory func() GrantRegistry) {
+	registry := factory()
+	expires := time.Now().Add(time.Hour).Truncate(time.Millisecond)
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g1", SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	entries, err := registry.ListGrants(context.Background(), GrantListing{SubjectKey: "s1", Now: time.Now()})
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("ListGrants = %d entries, want 1", len(entries))
+	}
+	got := entries[0]
+	if got.Key != "g1" || got.ClientID != "client-1" || !got.ExpiresAt.Equal(expires) {
+		t.Errorf("entry = %q %q %v, want g1 client-1 %v", got.Key, got.ClientID, got.ExpiresAt, expires)
+	}
+	if !jsonEquivalent(got.Record, contractPayload) {
+		t.Errorf("Record = %s, want %s", got.Record, contractPayload)
+	}
+}
+
+func testGrantRegistryListOnlyTheSubjects(t *testing.T, factory func() GrantRegistry) {
+	registry := factory()
+	expires := time.Now().Add(time.Hour)
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g1", SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g2", SubjectKey: "s1", ClientID: "client-2", Record: contractPayload, ExpiresAt: expires})
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g3", SubjectKey: "s2", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	if got := listGrantKeys(t, registry, "s1", time.Now()); !slices.Equal(got, []string{"g1", "g2"}) {
+		t.Errorf("ListGrants(s1) = %v, want [g1 g2]", got)
+	}
+	if got := listGrantKeys(t, registry, "s3", time.Now()); len(got) != 0 {
+		t.Errorf("ListGrants(unknown subject) = %v, want none", got)
+	}
+}
+
+func testGrantRegistryListOnlyUnexpired(t *testing.T, factory func() GrantRegistry) {
+	registry := factory()
+	expires := time.Now().Add(time.Hour)
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g1", SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	for _, now := range []time.Time{expires, expires.Add(time.Second)} {
+		if got := listGrantKeys(t, registry, "s1", now); len(got) != 0 {
+			t.Errorf("ListGrants at %v, entry expiring %v = %v, want none", now, expires, got)
+		}
+	}
+}
+
+func testGrantRegistryRecordReplacesByKey(t *testing.T, factory func() GrantRegistry) {
+	registry := factory()
+	expires := time.Now().Add(time.Hour)
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g1", SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	replacement := json.RawMessage(`{"v":2}`)
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g1", SubjectKey: "s1", ClientID: "client-1", Record: replacement, ExpiresAt: expires})
+	entries, err := registry.ListGrants(context.Background(), GrantListing{SubjectKey: "s1", Now: time.Now()})
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	if len(entries) != 1 || !jsonEquivalent(entries[0].Record, replacement) {
+		t.Fatalf("ListGrants after replacing g1 = %d entries, want the one replacement", len(entries))
+	}
+}
+
+func testGrantRegistryDelete(t *testing.T, factory func() GrantRegistry) {
+	registry := factory()
+	ctx := context.Background()
+	expires := time.Now().Add(time.Hour)
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g1", SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g2", SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	if err := registry.DeleteGrant(ctx, "g1"); err != nil {
+		t.Fatalf("DeleteGrant(g1): %v", err)
+	}
+	if got := listGrantKeys(t, registry, "s1", time.Now()); !slices.Equal(got, []string{"g2"}) {
+		t.Errorf("ListGrants after deleting g1 = %v, want [g2]", got)
+	}
+	if err := registry.DeleteGrant(ctx, "g1"); err != nil {
+		t.Errorf("DeleteGrant(already deleted) = %v, want nil", err)
+	}
+}

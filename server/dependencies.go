@@ -39,6 +39,17 @@ type Dependencies struct {
 	// Grants persists issued authorization codes and refresh tokens.
 	Grants storage.GrantStore
 
+	// GrantRegistry, if set, records each grant the server issues a
+	// refresh token for, by the end user who granted it, for ListGrants
+	// and RevokeListedGrant: a "connected apps" page, or revoking a
+	// user's grants when their account closes. Nil leaves both
+	// unavailable. A grant is recorded before its refresh token is
+	// stored, so a recording failure fails the token request. Under
+	// AssuranceProduction it must declare storage.StoreAssurance
+	// (Durable, and CrossInstanceConsistent with
+	// DeploymentHorizontallyScaled).
+	GrantRegistry storage.GrantRegistry
+
 	// Replay detects reuse of a client assertion's, request object's,
 	// signed backchannel authentication request's, Client Attestation
 	// PoP's or DPoP proof's jti.

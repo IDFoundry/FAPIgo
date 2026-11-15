@@ -858,8 +858,10 @@ result := server.Authorize(subject, authCtx, server.GrantedAuthorization{
 	// release. Nil releases none.
 	ApprovedIdentityClaims: whicheverRequestedClaimsTheUserApproved,
 	// Optional: your own ID for this grant, to withdraw it later with
-	// srv.RevokeGrant — for a "connected apps" page, say. It refuses
-	// the grant's refresh token and every access token issued from it.
+	// srv.RevokeGrant. It refuses the grant's refresh token and every
+	// access token issued from it. (For a "connected apps" page, set
+	// Dependencies.GrantRegistry instead: srv.ListGrants lists a user's
+	// grants and srv.RevokeListedGrant withdraws one, GrantID or not.)
 	GrantID: yourOwnIDForThisGrant,
 })
 // or, once the user has authenticated: server.Deny("user declined"),
@@ -879,6 +881,20 @@ case server.AuthorizationLocalError:
 	res.Error.WriteText(w) // render locally: code and public description only
 }
 ```
+
+**A "connected apps" page.** Set `Dependencies.GrantRegistry`
+(`memstore.NewGrantRegistry()` in development) and the server records
+each grant it issues a refresh token for, by the user who authorized
+it. `srv.ListGrants(ctx, subject)` then lists that user's grants, with
+the client, scope, authorization details and expiry, and
+`srv.RevokeListedGrant(ctx, subject, grant.ID)` withdraws one: its
+refresh token, and, through its `GrantID` or the authorization code it
+came from, every access token issued from it. Revoking each one listed
+is also how to end a user's access when their account closes. A grant
+with no refresh token isn't listed; its access token expires within
+`Limits.AccessTokenLifetime`. Neither call checks who is asking, so
+pass the subject your login session authenticated, never one from the
+request.
 
 **Redirect only after the user has authenticated.** `Deny` and
 `AuthenticationFailed` send the browser back to the client with

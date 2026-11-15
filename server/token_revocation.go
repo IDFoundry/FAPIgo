@@ -267,8 +267,12 @@ func (s *Server) revokeRefreshToken(ctx context.Context, clientID fapi.ClientID,
 	if revokeErr := s.revokeCodeGrant(ctx, grant.CodeGrantID); revokeErr != nil {
 		return TokenRevocationResult{}, revokeErr
 	}
-	if err := s.deps.Grants.RevokeRefreshToken(ctx, sha256.Sum256([]byte(rawToken))); err != nil {
+	hash := sha256.Sum256([]byte(rawToken))
+	if err := s.deps.Grants.RevokeRefreshToken(ctx, hash); err != nil {
 		return TokenRevocationResult{}, newError(ErrorServerError, 500, "failed to revoke the refresh token", err)
+	}
+	if err := s.forgetRevokedRefreshToken(ctx, hash); err != nil {
+		return TokenRevocationResult{}, newError(ErrorServerError, 500, "failed to remove the refresh token's grant from the grant registry", err)
 	}
 	return TokenRevocationResult{Revoked: true, GrantID: grant.GrantID}, nil
 }

@@ -875,11 +875,16 @@ func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, 
 	if err != nil {
 		return "", err
 	}
+	hash := sha256.Sum256([]byte(raw))
+	expiresAt := now.Add(s.cfg.Limits.RefreshTokenLifetime)
+	if err := s.recordGrant(ctx, clientID, grant, hash, now, expiresAt); err != nil {
+		return "", fmt.Errorf("record the grant: %w", err)
+	}
 	if err := s.deps.Grants.CreateRefreshToken(ctx, storage.NewRefreshToken{
-		TokenHash: sha256.Sum256([]byte(raw)),
+		TokenHash: hash,
 		ClientID:  clientID,
 		Grant:     encoded,
-		ExpiresAt: now.Add(s.cfg.Limits.RefreshTokenLifetime),
+		ExpiresAt: expiresAt,
 	}); err != nil {
 		return "", err
 	}

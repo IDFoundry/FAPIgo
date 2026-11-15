@@ -69,6 +69,15 @@ func TestPairwiseSubjectStoreContract(t *testing.T) {
 	})
 }
 
+func TestInteractionLookupContract(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		storage.TestInteractionLookupContract(t, func() (storage.TransactionStore, storage.InteractionLookup) {
+			db := freshDB(t, dialect)
+			return db.Transactions(), db.InteractionLookup()
+		})
+	})
+}
+
 func TestSessionStoreContract(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
 		storage.TestSessionStoreContract(t, func() storage.SessionStore { return freshDB(t, dialect).Sessions() })
@@ -82,6 +91,12 @@ func TestSealedStoreContracts(t *testing.T) {
 		sealed := func() *sqlstore.DB { return newPlace(t, dialect).migratedWith(sqlstore.Options{Sealer: testSealer(t)}) }
 		t.Run("Transactions", func(t *testing.T) {
 			storage.TestTransactionStoreContract(t, func() storage.TransactionStore { return sealed().Transactions() })
+		})
+		t.Run("InteractionLookup", func(t *testing.T) {
+			storage.TestInteractionLookupContract(t, func() (storage.TransactionStore, storage.InteractionLookup) {
+				db := sealed()
+				return db.Transactions(), db.InteractionLookup()
+			})
 		})
 		t.Run("Grants", func(t *testing.T) {
 			storage.TestGrantStoreContract(t, func() storage.GrantStore { return sealed().Grants() })

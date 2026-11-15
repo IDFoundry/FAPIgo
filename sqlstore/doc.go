@@ -36,6 +36,7 @@
 //
 //	deps.AccessTokens = server.OpaqueAccessTokens{Store: db.AccessTokens()} // opaque access tokens; JWTs need none
 //	deps.Backchannel = db.Backchannel()                                    // CIBA
+//	deps.InteractionLookup = db.InteractionLookup()                        // Server.LookupInteraction
 //	deps.PairwiseSubjects, err = pairwise.NewMapping(db.PairwiseSubjects()) // pairwise subs (Config.Subjects), random and mapped
 //
 // A relying party (package client) takes its session store from a DB

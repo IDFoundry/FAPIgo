@@ -32,6 +32,10 @@ type BackchannelSubjectResolver interface {
 	ResolveBackchannelSubject(ctx context.Context, clientID fapi.ClientID, hints BackchannelAuthenticationHints) (SubjectID, error)
 }
 
+// hintUncheckedDescription is the public description of a CIBA request
+// refused because its hint couldn't be checked or resolved.
+const hintUncheckedDescription = "the hint could not be checked"
+
 // backchannelHintError is the *Error refusing a CIBA request for err, a
 // BackchannelHints or BackchannelSubjects failure. The public
 // descriptions are fixed: the dependency's own error text stays out of
@@ -43,7 +47,7 @@ func backchannelHintError(err error) *Error {
 	case errors.Is(err, ErrExpiredLoginHintToken):
 		return newError(ErrorExpiredLoginHintToken, 400, "the login_hint_token has expired", err)
 	default:
-		return newError(ErrorServerError, 500, "the hint could not be checked", err)
+		return newError(ErrorServerError, 500, hintUncheckedDescription, err)
 	}
 }
 
@@ -61,10 +65,10 @@ func (s *Server) resolveBackchannelSubject(ctx context.Context, clientID fapi.Cl
 		return "", backchannelHintError(err)
 	}
 	if subject.String() == "" {
-		return "", newError(ErrorServerError, 500, "the hint could not be checked", errors.New("BackchannelSubjects resolved the hint to no subject"))
+		return "", newError(ErrorServerError, 500, hintUncheckedDescription, errors.New("BackchannelSubjects resolved the hint to no subject"))
 	}
 	if requiredInternal != "" && subject.String() != requiredInternal {
-		return "", newError(ErrorServerError, 500, "the hint could not be checked", errors.New("BackchannelSubjects resolved the id_token_hint to another subject than the one it names"))
+		return "", newError(ErrorServerError, 500, hintUncheckedDescription, errors.New("BackchannelSubjects resolved the id_token_hint to another subject than the one it names"))
 	}
 	return subject.String(), nil
 }

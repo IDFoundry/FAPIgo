@@ -421,3 +421,37 @@ func TestDenyBackchannelInteractionsStopsAtAFailure(t *testing.T) {
 		t.Fatalf("DenyBackchannelInteractions(unreadable record) = %d, %v, want 0 and an error", n, err)
 	}
 }
+
+// fixedSubjects resolves every hint to subject.
+type fixedSubjects struct{ subject string }
+
+func (r fixedSubjects) ResolveBackchannelSubject(context.Context, fapi.ClientID, server.BackchannelAuthenticationHints) (server.SubjectID, error) {
+	return server.NewSubjectID(r.subject)
+}
+
+// TestBackchannelSubjectsMustAgreeWithTheIDTokenHint: when the server
+// can map an id_token_hint back to the user it names, a resolver naming
+// someone else is a misconfiguration, refused rather than letting the
+// resolver's user approve.
+func TestBackchannelSubjectsMustAgreeWithTheIDTokenHint(t *testing.T) {
+	h := cibaWithPairwise(t, newMappingDeriver())
+	params := standardBackchannelParams(t)
+	delete(params, "login_hint")
+	params["id_token_hint"] = jsonRaw(t, serverHint(t, h, func(c map[string]any) { c["sub"] = clientSubjectOf(t, h, "user-1") }))
+	h.deps.BackchannelSubjects = fixedSubjects{subject: "user-2"}
+	srv, err := server.New(h.cfg, h.deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h.server = srv
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, params))},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	local, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok || local.Error.Code() != server.ErrorServerError {
+		t.Fatalf("begin with a resolver disagreeing with the id_token_hint = %+v, want server_error", action)
+	}
+}

@@ -32,6 +32,10 @@ func TestBackchannelInboxContract(t *testing.T) {
 	storage.TestBackchannelInboxContract(t, func() storage.BackchannelInbox { return NewBackchannelInbox() })
 }
 
+func TestPairwiseSubjectEraserContract(t *testing.T) {
+	storage.TestPairwiseSubjectEraserContract(t, func() storage.PairwiseSubjectEraser { return NewPairwiseSubjectStore() })
+}
+
 func TestGrantStoreContract(t *testing.T) {
 	storage.TestGrantStoreContract(t, func() storage.GrantStore {
 		return NewGrantStore()

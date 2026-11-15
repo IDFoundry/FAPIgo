@@ -267,3 +267,32 @@ func (s *Server) forgetRevokedRefreshToken(ctx context.Context, refreshTokenHash
 	}
 	return s.deps.GrantRegistry.DeleteGrant(ctx, grantEntryKey(refreshTokenHash))
 }
+
+// RevokeSubjectGrants revokes every grant ListGrants lists for subject,
+// as RevokeListedGrant revokes one, and returns how many it revoked: for
+// ending a user's access when their account closes, or after it's
+// compromised. It stops at the first failure, returning how many it had
+// revoked and the error; the rest are still listed, so calling it again
+// finishes the job.
+//
+// Closing an account also means forgetting the user's pairwise subject
+// identifiers, if the server maps them (pairwise.NewMapping): call the
+// store's ForgetSubject (storage.PairwiseSubjectEraser) as well. Tokens
+// already issued from a revoked grant stop working at every check that
+// reads the revocation store; an access token whose resource server
+// doesn't, and an ID token, expire on their own.
+//
+// RevokeSubjectGrants doesn't check who is asking: the application must
+// make sure the request is subject's own, or an administrator's.
+func (s *Server) RevokeSubjectGrants(ctx context.Context, subject SubjectID) (int, error) {
+	grants, err := s.listGrants(ctx, subject)
+	if err != nil {
+		return 0, fmt.Errorf("server: revoke subject grants: %w", err)
+	}
+	for i, g := range grants {
+		if err := s.revokeListed(ctx, g); err != nil {
+			return i, err
+		}
+	}
+	return len(grants), nil
+}

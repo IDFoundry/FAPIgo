@@ -2245,3 +2245,77 @@ func testBackchannelInboxRemove(t *testing.T, factory func() BackchannelInbox) {
 		t.Errorf("RemoveBackchannelRequest(already removed) = %v, want nil", err)
 	}
 }
+
+// TestPairwiseSubjectEraserContract exercises factory()'s ForgetSubject
+// against the guarantees PairwiseSubjectEraser's documentation promises:
+// a forgotten user's bodies stop resolving in every sector, stay retired
+// for everyone, and a later GetOrCreate for them stores a new body,
+// while other users and issuers keep theirs. factory must return a
+// fresh, empty store each call.
+func TestPairwiseSubjectEraserContract(t *testing.T, factory func() PairwiseSubjectEraser) {
+	t.Helper()
+	t.Run("ForgetSubjectStopsEveryBodyResolving", func(t *testing.T) { testPairwiseEraserForgets(t, factory) })
+	t.Run("ForgottenBodiesStayRetired", func(t *testing.T) { testPairwiseEraserRetires(t, factory) })
+	t.Run("ForgetSubjectLeavesOthers", func(t *testing.T) { testPairwiseEraserLeavesOthers(t, factory) })
+}
+
+const contractOtherPairwiseIssuer = "https://other-as.example"
+
+// eraserGetOrCreate checks GetOrCreate(issuer, sector, subject, body)
+// returns want, or an error wrapping wantErr when it's set.
+func eraserGetOrCreate(t *testing.T, store PairwiseSubjectEraser, issuer, sector, subject, body, want string, wantErr error) {
+	t.Helper()
+	got, err := store.GetOrCreate(context.Background(), PairwiseSubjectKey{Issuer: issuer, Sector: sector, Subject: subject}, body)
+	if (wantErr == nil && (err != nil || got != want)) || (wantErr != nil && !errors.Is(err, wantErr)) {
+		t.Fatalf("GetOrCreate(%s, %s, %s, %s) = %q, %v, want %q, %v", issuer, sector, subject, body, got, err, want, wantErr)
+	}
+}
+
+// eraserLookup checks Lookup(issuer, sector, body) finds want, or none
+// when want is empty.
+func eraserLookup(t *testing.T, store PairwiseSubjectEraser, issuer, sector, body, want string) {
+	t.Helper()
+	got, err := store.Lookup(context.Background(), issuer, sector, body)
+	if (want == "" && !errors.Is(err, ErrPairwiseSubjectNotFound)) || (want != "" && (err != nil || got != want)) {
+		t.Fatalf("Lookup(%s, %s, %s) = %q, %v, want %q", issuer, sector, body, got, err, want)
+	}
+}
+
+// eraserForget checks ForgetSubject(issuer, subject) forgets want
+// mappings.
+func eraserForget(t *testing.T, store PairwiseSubjectEraser, issuer, subject string, want int) {
+	t.Helper()
+	if n, err := store.ForgetSubject(context.Background(), issuer, subject); err != nil || n != want {
+		t.Fatalf("ForgetSubject(%s, %s) = %d, %v, want %d", issuer, subject, n, err, want)
+	}
+}
+
+func testPairwiseEraserForgets(t *testing.T, factory func() PairwiseSubjectEraser) {
+	store := factory()
+	eraserGetOrCreate(t, store, contractPairwiseIssuer, "sector-a", "user-1", "body-a", "body-a", nil)
+	eraserGetOrCreate(t, store, contractPairwiseIssuer, "sector-b", "user-1", "body-b", "body-b", nil)
+	eraserForget(t, store, contractPairwiseIssuer, "user-1", 2)
+	eraserLookup(t, store, contractPairwiseIssuer, "sector-a", "body-a", "")
+	eraserLookup(t, store, contractPairwiseIssuer, "sector-b", "body-b", "")
+	// The user seen again gets a new identifier, as one never seen would.
+	eraserGetOrCreate(t, store, contractPairwiseIssuer, "sector-a", "user-1", "body-a2", "body-a2", nil)
+	eraserForget(t, store, contractPairwiseIssuer, "nobody", 0)
+}
+
+func testPairwiseEraserRetires(t *testing.T, factory func() PairwiseSubjectEraser) {
+	store := factory()
+	eraserGetOrCreate(t, store, contractPairwiseIssuer, "sector-a", "user-1", "body-a", "body-a", nil)
+	eraserForget(t, store, contractPairwiseIssuer, "user-1", 1)
+	eraserGetOrCreate(t, store, contractPairwiseIssuer, "sector-a", "user-2", "body-a", "", ErrPairwiseSubjectCollision)
+	eraserGetOrCreate(t, store, contractPairwiseIssuer, "sector-a", "user-1", "body-a", "", ErrPairwiseSubjectCollision)
+}
+
+func testPairwiseEraserLeavesOthers(t *testing.T, factory func() PairwiseSubjectEraser) {
+	store := factory()
+	eraserGetOrCreate(t, store, contractPairwiseIssuer, "sector-a", "user-1", "body-1", "body-1", nil)
+	eraserGetOrCreate(t, store, contractPairwiseIssuer, "sector-a", "user-2", "body-2", "body-2", nil)
+	eraserGetOrCreate(t, store, contractOtherPairwiseIssuer, "sector-a", "user-1", "body-1", "body-1", nil)
+	eraserForget(t, store, contractPairwiseIssuer, "user-1", 1)
+	eraserLookup(t, store, contractPairwiseIssuer, "sector-a", "body-2", "user-2")
+	eraserLookup(t, store, contractOtherPairwiseIssuer, "sector-a", "body-1", "user-1")
+}

@@ -53,8 +53,25 @@ func (s *PairwiseSubjectStore) Lookup(_ context.Context, issuer, sector, body st
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	subject, ok := s.subjects[pairwiseBody{issuer, sector, body}]
-	if !ok {
+	if !ok || subject == "" {
 		return "", fmt.Errorf("memstore: %w", storage.ErrPairwiseSubjectNotFound)
 	}
 	return subject, nil
+}
+
+// ForgetSubject implements storage.PairwiseSubjectEraser. A forgotten
+// body stays in the index with no subject, so it's never stored again.
+func (s *PairwiseSubjectStore) ForgetSubject(_ context.Context, issuer, subject string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	forgotten := 0
+	for key, body := range s.bodies {
+		if key.Issuer != issuer || key.Subject != subject {
+			continue
+		}
+		delete(s.bodies, key)
+		s.subjects[pairwiseBody{key.Issuer, key.Sector, body}] = ""
+		forgotten++
+	}
+	return forgotten, nil
 }

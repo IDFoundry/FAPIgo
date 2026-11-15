@@ -889,12 +889,20 @@ it. `srv.ListGrants(ctx, subject)` then lists that user's grants, with
 the client, scope, authorization details and expiry, and
 `srv.RevokeListedGrant(ctx, subject, grant.ID)` withdraws one: its
 refresh token, and, through its `GrantID` or the authorization code it
-came from, every access token issued from it. Revoking each one listed
-is also how to end a user's access when their account closes. A grant
+came from, every access token issued from it. A grant
 with no refresh token isn't listed; its access token expires within
 `Limits.AccessTokenLifetime`. Neither call checks who is asking, so
 pass the subject your login session authenticated, never one from the
 request.
+
+**Closing an account.** `srv.RevokeSubjectGrants(ctx, subject)` revokes
+every grant the registry lists for the user. If you map pairwise subs
+(`pairwise.NewMapping`), also call the store's `ForgetSubject(ctx, issuer,
+subject)` (`storage.PairwiseSubjectEraser`, which `memstore`
+implements): the subs relying parties hold for the user stop resolving,
+and are retired, so they can never come to name someone else. Keyed
+derivers (`pairwise.NewHMAC`, `pairwise.NewReversible`) store nothing to
+forget; retire the subject ID itself, never reusing it for a new user.
 
 **Redirect only after the user has authenticated.** `Deny` and
 `AuthenticationFailed` send the browser back to the client with

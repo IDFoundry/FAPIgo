@@ -235,3 +235,11 @@ func TestConsentExpires(t *testing.T) {
 	page = d.post("pocketwise.localhost", "/sync", nil)
 	mustContain(t, "the sync after the sweep", page, "invalid_grant: refresh_token is invalid, expired, or already used")
 }
+
+// A consent form sent with no interaction in progress, or a revocation
+// naming a grant that isn't the customer's, is refused, not acted on.
+func TestStaleFormsAreRefused(t *testing.T) {
+	d := start(t)
+	mustContain(t, "a consent form with no interaction", d.post("bank.localhost", "/authorize", url.Values{"decision": {"approve"}}), "Session expired")
+	mustContain(t, "revoking a grant that isn't listed", d.post("bank.localhost", "/connected-apps", url.Values{"grant": {"not-a-grant"}}), "No such connection")
+}

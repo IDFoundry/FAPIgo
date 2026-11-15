@@ -37,9 +37,9 @@ type phoneHomePage struct {
 
 type approvalPage struct {
 	Page
-	AuthReqID, ClientName, BindingMessage, Expires string
-	Payments                                       []paymentView
-	Access                                         []accessView
+	ID, ClientName, BindingMessage, Expires string
+	Payments                                []paymentView
+	Access                                  []accessView
 }
 
 type tillOrderPage struct {
@@ -126,13 +126,13 @@ var pageTemplates = map[string]string{
 
 	"phone-home": `{{template "top" .}}
 <p class="muted">{{.Owner}}'s phone. This screen checks for new requests every two seconds.</p>
-{{range .Notifications}}<a href="/request?id={{.AuthReqID}}" style="text-decoration:none;color:inherit"><div class="card">
-<strong>{{.ClientName}}</strong> <span class="muted">· {{.Age}} ago</span><br>{{.Summary}}<br><span class="button" style="margin-top:8px">Review</span></div></a>
+{{range .Notifications}}<a href="/request?id={{.ID}}" style="text-decoration:none;color:inherit"><div class="card">
+<strong>{{.ClientName}}</strong> <span class="muted">· expires in {{.Expires}}</span><br>{{.Summary}}<br><span class="button" style="margin-top:8px">Review</span></div></a>
 {{else}}<div class="card muted">No requests waiting.</div>{{end}}
 {{template "bottom" .}}`,
 
 	"phone-approve": `{{template "top" .}}
-<form method="post" action="/decide"><input type="hidden" name="id" value="{{.AuthReqID}}">
+<form method="post" action="/decide"><input type="hidden" name="id" value="{{.ID}}">
 <p><strong>{{.ClientName}}</strong> is asking you to approve:</p>
 {{range .Payments}}<div class="card verified">
 <p class="muted">Payment — checked by Alder Bank</p>

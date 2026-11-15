@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sort"
-	"sync"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -42,23 +40,6 @@ type bank struct {
 	// (serverresource.NewVerifier).
 	cfg  server.Config
 	deps server.Dependencies
-
-	// inbox is which requests await which customer's decision: what a
-	// real bank keeps alongside the push notifications it sends to
-	// phones. The requests themselves stay with the server, which any
-	// instance sharing its store can look up.
-	mu    sync.Mutex
-	inbox map[string]*pendingRequest // by auth_req_id
-}
-
-// pendingRequest is a request waiting for the customer on their phone:
-// its handle, and whose phone it's for.
-type pendingRequest struct {
-	authReqID string
-	handle    server.BackchannelAuthenticationHandle
-	customer  customer
-	received  time.Time
-	expires   time.Time
 }
 
 func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
@@ -122,7 +103,7 @@ func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
 	algorithms := server.RecommendedAlgorithms()
 	algorithms.BackchannelAuthenticationRequest = server.RecommendedAlgorithmSet()
 
-	b := &bank{w: w, inbox: map[string]*pendingRequest{}}
+	b := &bank{w: w}
 	b.cfg = server.Config{
 		Subjects: server.PublicSubjects(),
 		Issuer:   issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
@@ -153,9 +134,14 @@ func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
 		Random:                 rand.Reader,
 		Backchannel:            memstore.NewBackchannelAuthenticationStore(),
 		BackchannelNotifier:    demoNotifier{client: w.net.Client(bankHost)},
-		// A request naming no customer is refused with unknown_user_id
-		// before it's stored.
-		BackchannelHints: customerDirectory{},
+		// Each request is for the customer its login hint names: one
+		// naming nobody is refused with unknown_user_id before it's
+		// stored, and only that customer may approve it.
+		BackchannelSubjects: customerDirectory{},
+		// Which requests await which customer's decision, kept with the
+		// server's own state, so any instance can show a customer's
+		// phone what's waiting (Server.ListBackchannelInteractions).
+		BackchannelInbox: memstore.NewBackchannelInbox(),
 		// Each client's types are its registration's; no further rule.
 		CIBARARPolicy: server.AllowRequestedAuthorizationDetails{},
 	}
@@ -253,20 +239,8 @@ func (b *bank) backchannelAuthentication(w http.ResponseWriter, r *http.Request)
 		a.Error.WriteJSON(w)
 	case server.BackchannelInteractionRequired:
 		// The login hint is only a hint: it says whose phone to ask, and
-		// the customer's approval there is what authenticates them.
-		// customerDirectory already refused hints naming nobody.
-		c, ok := customerByHint(string(a.Interaction.Hints.LoginHint))
-		if !ok {
-			server.NewError(server.ErrorServerError, http.StatusInternalServerError, "customer not found").WriteJSON(w)
-			return
-		}
-		now := time.Now()
-		b.mu.Lock()
-		b.inbox[a.AuthReqID.String()] = &pendingRequest{
-			authReqID: a.AuthReqID.String(), handle: a.Handle,
-			customer: c, received: now, expires: now.Add(a.ExpiresIn),
-		}
-		b.mu.Unlock()
+		// the customer's approval there is what authenticates them. The
+		// server has filed the request in that customer's inbox.
 		a.WriteJSON(w)
 	}
 }
@@ -289,58 +263,36 @@ func (b *bank) token(w http.ResponseWriter, r *http.Request) {
 	result.WriteJSON(w)
 }
 
-// pendingFor is c's requests awaiting a decision, oldest first.
-func (b *bank) pendingFor(c customer) []*pendingRequest {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	now := time.Now()
-	var out []*pendingRequest
-	for id, p := range b.inbox {
-		if now.After(p.expires) {
-			delete(b.inbox, id)
-			continue
+// pendingFor is c's requests awaiting a decision, soonest to expire
+// first.
+func (b *bank) pendingFor(ctx context.Context, c customer) ([]server.PendingBackchannelInteraction, error) {
+	subject, err := server.NewSubjectID(c.loginHint)
+	if err != nil {
+		return nil, err
+	}
+	return b.srv.ListBackchannelInteractions(ctx, subject)
+}
+
+// lookup is c's pending request id (PendingBackchannelInteraction.ID).
+func (b *bank) lookup(ctx context.Context, c customer, id string) (server.PendingBackchannelInteraction, bool, error) {
+	pending, err := b.pendingFor(ctx, c)
+	if err != nil {
+		return server.PendingBackchannelInteraction{}, false, err
+	}
+	for _, p := range pending {
+		if p.ID == id {
+			return p, true, nil
 		}
-		if p.customer.loginHint == c.loginHint {
-			out = append(out, p)
-		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].received.Before(out[j].received) })
-	return out
-}
-
-// take removes and returns the pending request authReqID, if c owns it.
-func (b *bank) take(c customer, authReqID string) (*pendingRequest, bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	p, ok := b.inbox[authReqID]
-	if !ok || p.customer.loginHint != c.loginHint || time.Now().After(p.expires) {
-		return nil, false
-	}
-	delete(b.inbox, authReqID)
-	return p, true
-}
-
-func (b *bank) lookup(c customer, authReqID string) (*pendingRequest, bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	p, ok := b.inbox[authReqID]
-	if !ok || p.customer.loginHint != c.loginHint {
-		return nil, false
-	}
-	return p, true
-}
-
-// interaction is p's request, as the server stored it.
-func (b *bank) interaction(ctx context.Context, p *pendingRequest) (server.BackchannelInteractionRequest, error) {
-	return b.srv.LookupBackchannelInteraction(ctx, p.handle)
+	return server.PendingBackchannelInteraction{}, false, nil
 }
 
 // decide records the customer's decision on p, which asked for scope:
 // approve with granted, or deny.
-func (b *bank) decide(ctx context.Context, p *pendingRequest, scope []string, approve bool, granted []json.RawMessage) error {
+func (b *bank) decide(ctx context.Context, c customer, p server.PendingBackchannelInteraction, approve bool, granted []json.RawMessage) error {
 	result := server.Deny("the customer declined")
 	if approve {
-		subjectID, err := server.NewSubjectID(p.customer.loginHint)
+		subjectID, err := server.NewSubjectID(c.loginHint)
 		if err != nil {
 			return err
 		}
@@ -354,21 +306,22 @@ func (b *bank) decide(ctx context.Context, p *pendingRequest, scope []string, ap
 			return err
 		}
 		result = server.Authorize(subject, auth, server.GrantedAuthorization{
-			Scope: scope, AuthorizationDetails: granted,
+			Scope: p.Interaction.Scope, AuthorizationDetails: granted,
 		})
 	}
-	return b.srv.CompleteBackchannelAuthentication(ctx, server.CompleteBackchannelAuthenticationRequest{Handle: p.handle, Result: result})
+	return b.srv.CompleteBackchannelAuthentication(ctx, server.CompleteBackchannelAuthenticationRequest{Handle: p.Handle, Result: result})
 }
 
-// customerDirectory is Alder Bank's server.BackchannelHintChecker: a
+// customerDirectory is Alder Bank's server.BackchannelSubjectResolver: a
 // backchannel request must name one of its customers by login hint.
 type customerDirectory struct{}
 
-func (customerDirectory) CheckBackchannelHints(_ context.Context, _ fapi.ClientID, hints server.BackchannelAuthenticationHints) error {
-	if _, ok := customerByHint(string(hints.LoginHint)); !ok {
-		return server.ErrUnknownUserID
+func (customerDirectory) ResolveBackchannelSubject(_ context.Context, _ fapi.ClientID, hints server.BackchannelAuthenticationHints) (server.SubjectID, error) {
+	c, ok := customerByHint(string(hints.LoginHint))
+	if !ok {
+		return server.SubjectID{}, server.ErrUnknownUserID
 	}
-	return nil
+	return server.NewSubjectID(c.loginHint)
 }
 
 // demoNotifier sends CIBA ping notifications (§10.2) through the demo

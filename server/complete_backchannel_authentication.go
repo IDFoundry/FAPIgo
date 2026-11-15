@@ -115,6 +115,7 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 	// (mirrors the existing _ = s.deps.Revocation.Revoke(...) precedent
 	// in server/token.go).
 	s.notifyBackchannelPing(ctx, decided)
+	s.unfileBackchannelRequest(ctx, handleHash)
 
 	s.audit(ctx, AuditEventCompleteBackchannelAuthentication, decided.ClientID, AuditOutcomeSuccess, "")
 	return nil
@@ -161,6 +162,13 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 	if !meetsRequiredSubject(request.RequiredSubject, clientSub) {
 		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
 		decision.Reason = "the authenticated user isn't the one the request named"
+		return nil
+	}
+	// Dependencies.BackchannelSubjects bound the request to the user its
+	// hint names: anyone else is a failed authentication too.
+	if request.ResolvedSubject != "" && result.subject.id.value != request.ResolvedSubject {
+		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
+		decision.Reason = "the authenticated user isn't the one the request's hint named"
 		return nil
 	}
 

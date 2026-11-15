@@ -40,15 +40,8 @@ func (s *Server) checkBackchannelHints(ctx context.Context, clientID fapi.Client
 	if s.deps.BackchannelHints == nil {
 		return nil
 	}
-	err := s.deps.BackchannelHints.CheckBackchannelHints(ctx, clientID, hints)
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, ErrUnknownUserID):
-		return newError(ErrorUnknownUserID, 400, "the hint does not identify an end user this server can authenticate", err)
-	case errors.Is(err, ErrExpiredLoginHintToken):
-		return newError(ErrorExpiredLoginHintToken, 400, "the login_hint_token has expired", err)
-	default:
-		return newError(ErrorServerError, 500, "the hint could not be checked", err)
+	if err := s.deps.BackchannelHints.CheckBackchannelHints(ctx, clientID, hints); err != nil {
+		return backchannelHintError(err)
 	}
+	return nil
 }

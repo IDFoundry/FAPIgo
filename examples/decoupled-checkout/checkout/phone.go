@@ -31,20 +31,21 @@ func (w *World) newPhone() *phone {
 
 // notificationView is one pending request on the phone's home screen.
 type notificationView struct {
-	AuthReqID, ClientName, Summary string
-	Age                            string
+	ID, ClientName, Summary string
+	Expires                 string
 }
 
 func (p *phone) home(w http.ResponseWriter, r *http.Request) {
+	pending, err := p.w.bank.pendingFor(r.Context(), p.owner)
+	if err != nil {
+		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't be reached", publicMessage(err, tryAgain))
+		return
+	}
 	var views []notificationView
-	for _, req := range p.w.bank.pendingFor(p.owner) {
-		interaction, err := p.w.bank.interaction(r.Context(), req)
-		if err != nil {
-			continue // answered or expired since
-		}
+	for _, req := range pending {
 		views = append(views, notificationView{
-			AuthReqID: req.authReqID, ClientName: clientName(interaction), Summary: summary(interaction.AuthorizationDetails),
-			Age: time.Since(req.received).Round(time.Second).String(),
+			ID: req.ID, ClientName: clientName(req.Interaction), Summary: summary(req.Interaction.AuthorizationDetails),
+			Expires: time.Until(req.ExpiresAt).Round(time.Second).String(),
 		})
 	}
 	page := phoneHomePage{Page: p.w.page("Alder Bank", phoneHost), Owner: p.owner.name, Notifications: views}
@@ -97,19 +98,19 @@ var actionLabels = map[string]string{
 }
 
 func (p *phone) request(w http.ResponseWriter, r *http.Request) {
-	req, ok := p.w.bank.lookup(p.owner, r.URL.Query().Get("id"))
-	var interaction server.BackchannelInteractionRequest
-	var err error
-	if ok {
-		interaction, err = p.w.bank.interaction(r.Context(), req)
+	req, ok, err := p.w.bank.lookup(r.Context(), p.owner, r.URL.Query().Get("id"))
+	if err != nil {
+		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't be reached", publicMessage(err, tryAgain))
+		return
 	}
-	if !ok || err != nil {
+	if !ok {
 		p.nothingToApprove(w)
 		return
 	}
+	interaction := req.Interaction
 	page := approvalPage{
-		Page: p.w.page("Alder Bank", phoneHost), AuthReqID: req.authReqID, ClientName: clientName(interaction),
-		BindingMessage: interaction.BindingMessage, Expires: time.Until(req.expires).Round(time.Second).String(),
+		Page: p.w.page("Alder Bank", phoneHost), ID: req.ID, ClientName: clientName(interaction),
+		BindingMessage: interaction.BindingMessage, Expires: time.Until(req.ExpiresAt).Round(time.Second).String(),
 	}
 	for _, pay := range paymentsOf(interaction.AuthorizationDetails) {
 		payee, verified := payees[pay.CreditorAccount.IBAN]
@@ -157,31 +158,24 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 		p.w.renderError(w, phoneHost, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
-	id := r.PostForm.Get("id")
-	req, ok := p.w.bank.lookup(p.owner, id)
-	var interaction server.BackchannelInteractionRequest
-	var err error
-	if ok {
-		interaction, err = p.w.bank.interaction(r.Context(), req)
+	req, ok, err := p.w.bank.lookup(r.Context(), p.owner, r.PostForm.Get("id"))
+	if err != nil {
+		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't be reached", publicMessage(err, tryAgain))
+		return
 	}
-	if !ok || err != nil {
+	if !ok { // answered or expired meanwhile
 		p.nothingToApprove(w)
 		return
 	}
 	approve := r.PostForm.Get("decision") == "approve"
 	var granted []json.RawMessage
 	if approve {
-		var err error
-		if granted, err = grantFromForm(interaction, r.PostForm["account"], r.PostForm["action"]); err != nil {
+		if granted, err = grantFromForm(req.Interaction, r.PostForm["account"], r.PostForm["action"]); err != nil {
 			p.w.renderError(w, phoneHost, http.StatusBadRequest, "Nothing approved", publicMessage(err, tryAgain))
 			return
 		}
 	}
-	if req, ok = p.w.bank.take(p.owner, id); !ok { // answered meanwhile
-		p.nothingToApprove(w)
-		return
-	}
-	if err := p.w.bank.decide(r.Context(), req, interaction.Scope, approve, granted); err != nil {
+	if err := p.w.bank.decide(r.Context(), p.owner, req, approve, granted); err != nil {
 		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't record that", publicMessage(err, tryAgain))
 		return
 	}

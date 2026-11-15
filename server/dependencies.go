@@ -174,6 +174,29 @@ type Dependencies struct {
 	// Config.Endpoints.BackchannelAuthentication is set.
 	BackchannelHints BackchannelHintChecker
 
+	// BackchannelSubjects, if set, resolves each CIBA request's hint to
+	// the end user it names, after BackchannelHints, and binds the
+	// request to them: only that user may approve it, and anyone else's
+	// Authorize is a failed authentication. It's what
+	// BackchannelInbox files a request under. Its errors refuse the
+	// request as BackchannelHints' do. Ignored unless
+	// Config.Endpoints.BackchannelAuthentication is set.
+	BackchannelSubjects BackchannelSubjectResolver
+
+	// BackchannelInbox, if set, keeps each pending CIBA request under the
+	// end user BackchannelSubjects resolved it to, for
+	// ListBackchannelInteractions: what the user's authentication device
+	// shows, from any instance. It needs BackchannelSubjects. A request
+	// is filed before it's stored, so a filing failure fails the
+	// request. Its entries hold the requests' backchannel authentication
+	// handles, so give it storage that encrypts at rest; the subject
+	// binding means a handle read from it can still only be approved by
+	// the user it was filed for. Under AssuranceProduction it must
+	// declare storage.StoreAssurance (Durable, and
+	// CrossInstanceConsistent with DeploymentHorizontallyScaled).
+	// Ignored unless Config.Endpoints.BackchannelAuthentication is set.
+	BackchannelInbox storage.BackchannelInbox
+
 	// ClientCredentialsRARPolicy decides which Rich Authorization
 	// Requests (RFC 9396) detail objects a client_credentials token
 	// request is entitled to receive — see RARPolicy's own doc comment.

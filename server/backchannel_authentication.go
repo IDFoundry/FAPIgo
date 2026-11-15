@@ -206,6 +206,10 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if hintErr := s.checkBackchannelHints(ctx, client.ID(), interaction.Hints); hintErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), hintErr), nil
 	}
+	resolvedSubject, resolveSubjectErr := s.resolveBackchannelSubject(ctx, client.ID(), interaction.Hints, requiredInternal)
+	if resolveSubjectErr != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), resolveSubjectErr), nil
+	}
 
 	authReqIDRaw, err := generateAuthReqID(s.deps.Random)
 	if err != nil {
@@ -241,9 +245,12 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	}
 
 	essentialACR, _ := essentialACRValues(validated.params)
-	request, err := s.encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, Resources: validated.resources, ClientInstanceKey: authn.InstanceKey})
+	request, err := s.encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, ResolvedSubject: resolvedSubject, Resources: validated.resources, ClientInstanceKey: authn.InstanceKey})
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode backchannel authentication request", err)), nil
+	}
+	if err := s.fileBackchannelRequest(ctx, client.ID(), handleRaw, resolvedSubject, expiresAt); err != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to file the backchannel authentication request in the end user's inbox", err)), nil
 	}
 	if err := s.deps.Backchannel.CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
 		AuthReqIDHash:           backchannelAuthReqIDHash(authReqIDRaw, authn.InstanceKey, dpopJKT),

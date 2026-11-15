@@ -176,10 +176,6 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	if _, err := rand.Read(cookieKey); err != nil {
 		return nil, err
 	}
-	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{})
-	if err != nil {
-		return nil, err
-	}
 	pairwiseSubjects, err := newPairwiseSubjects()
 	if err != nil {
 		return nil, err
@@ -196,7 +192,8 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	algs.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.ECDHESA256KW}
 	algs.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
 
-	b := &bank{w: w, clients: memstore.NewClientRepository(registered), interaction: interaction}
+	b := &bank{w: w, clients: memstore.NewClientRepository(registered)}
+	transactions := memstore.NewTransactionStore()
 	cfg := server.Config{
 		// Every client gets its own sub for each customer (OIDC Core §8):
 		// a pairwise sub, derived from the customer's username and the
@@ -209,9 +206,14 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	}
 	deps := server.Dependencies{
 		Clients:      b.clients,
-		Transactions: memstore.NewTransactionStore(),
-		Grants:       memstore.NewGrantStore(),
-		Replay:       memstore.NewReplayStore(),
+		Transactions: transactions,
+		// The consent page reads the request back from the bank's own
+		// store (Server.LookupInteraction), so the browser's cookie
+		// carries only the interaction handle, not the login hint or the
+		// claims asked for.
+		InteractionLookup: memstore.NewInteractionLookup(transactions),
+		Grants:            memstore.NewGrantStore(),
+		Replay:            memstore.NewReplayStore(),
 		// Each client's registered JWK Set: the keys that verify its
 		// client assertions, and the keys to encrypt its ID tokens and
 		// UserInfo responses to.
@@ -242,6 +244,9 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 		PairwiseSubjects: pairwiseSubjects,
 	}
 	if b.srv, err = server.New(cfg, deps); err != nil {
+		return nil, err
+	}
+	if b.interaction, err = interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{Lookup: b.srv.LookupInteraction}); err != nil {
 		return nil, err
 	}
 	if b.verifier, err = w.userinfoVerifier(cfg, deps); err != nil {
@@ -503,8 +508,13 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	tag := r.PostForm.Get(interactioncookie.FormField)
 	handle, in, err := b.interaction.Read(r, time.Now(), tag)
-	if err != nil {
+	if errors.Is(err, interactioncookie.ErrNoInteraction) {
 		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
+		return
+	}
+	if err != nil {
+		// The bank's store couldn't answer: not the customer's session.
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, tryAgain))
 		return
 	}
 	c, signedIn := customerByName(r.PostForm.Get("username"))

@@ -42,8 +42,8 @@ func TestClientSectorDerivation(t *testing.T) {
 		want   string
 	}{
 		"single https host": {func(*RegisteredClientConfig) {}, "rp.example"},
-		"same host, several URIs, case-insensitive": {func(cfg *RegisteredClientConfig) {
-			cfg.RedirectURIs = []fapi.RegisteredRedirectURI{"https://rp.example/cb", "https://RP.example:8443/other"}
+		"same host, several URIs": {func(cfg *RegisteredClientConfig) {
+			cfg.RedirectURIs = []fapi.RegisteredRedirectURI{"https://rp.example/cb", "https://rp.example:8443/other"}
 		}, "rp.example"},
 		"several hosts": {func(cfg *RegisteredClientConfig) {
 			cfg.RedirectURIs = []fapi.RegisteredRedirectURI{"https://rp.example/cb", "https://app.rp.example/cb"}

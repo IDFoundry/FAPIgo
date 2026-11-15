@@ -15,6 +15,40 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.74.0
+
+### Redirect URIs must be written as they're sent (fapi, storage, client)
+
+**Affects:** a client registered with a redirect URI that isn't in its
+normalized form: an uppercase letter in the scheme or host
+(`https://RP.example/cb`, `Com.Example.App:/cb`), or a character RFC 3986
+doesn't allow left unencoded, such as a space, a non-ASCII letter, `|`
+or `"` (`https://rp.example/c b`). A `client.Config.RedirectURI` written
+that way is affected too. URIs already in normalized form, which covers
+nearly all of them, are unaffected.
+
+**Why:** a registered redirect URI is matched against the request's
+exactly, but the redirect was sent to its normalized form, so
+`https://rp.example/c b` sent the user to `https://rp.example/c%20b`.
+The URI a client registered and the one it was redirected to could
+differ.
+
+**What fails:**
+
+- `storage.NewRegisteredClient` refuses the client, saying the URI must
+  be written exactly as it is sent and giving the normalized form.
+- A client stored before the upgrade, in sqlstore or a repository of
+  your own that rebuilds clients with `NewRegisteredClient`, fails to
+  resolve: sqlstore's `ResolveClient` returns an error wrapping
+  `storage.ErrStoreUnavailable` and `sqlstore.ErrClientConfig`.
+- `fapi.ParseRedirectURL` refuses such a URI, so `client.New` refuses a
+  `Config.RedirectURI` written that way.
+
+**What to change:** re-register the client with the URI in the form the
+error gives, and update the client's own configuration to match, so its
+`redirect_uri` is still the registered string. The redirect goes to the
+same place as before.
+
 ## sqlstore v0.8.0
 
 ### The batching adapters move from the stores to `DB` (sqlstore)

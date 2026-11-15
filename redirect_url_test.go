@@ -29,6 +29,19 @@ func TestParseRedirectURL(t *testing.T) {
 		"com.example.app://ho%41st/cb":                false,
 		"com.example.app://host/cb#frag":              false,
 		"com.example.app://host/c b":                  false, // net/url would send "c%20b"
+		"com.example.app:/c b":                        false,
+		"com.example.app:/c%20b":                      true,
+		"Com.Example.App:/cb":                         false, // sent with the scheme lowercased
+		"https://rp.example/c b":                      false,
+		"https://rp.example/caf\u00e9":                false, // sent as "caf%C3%A9"
+		"https://rp.example/a|b":                      false,
+		"https://RP.example/cb":                       false, // sent with the host lowercased
+		"HTTPS://rp.example/cb":                       false,
+		"http://127.0.0.1:51004/c b":                  false,
+		"https://rp.example/a%7eb?x=a%20b&y=1;z":      true,
+		"https://rp.example:8443/":                    true,
+		"https://rp.example":                          true,
+		"https://rp.example/cb?":                      true,
 		"com.example.app:////evil.example/cb":         false,
 		"com..app:/cb":                                false,
 		"com.-example.app:/cb":                        false,
@@ -61,18 +74,15 @@ func TestParseRedirectURL(t *testing.T) {
 }
 
 // FuzzParseRedirectURL covers ParseRedirectURL on any input: it never
-// panics, with no options accepts https alone, and gives back a
-// private-use URI with an authority as written but for the scheme's
-// case.
+// panics, with no options accepts https alone, and gives back any URI it
+// accepts exactly as written.
 func FuzzParseRedirectURL(f *testing.F) {
-	for _, s := range []string{"https://rp.example/cb", "com.example.app:/cb", "http://[::1]:1/cb", "a.b:/", "a.b://x", "a.b://x/cb?y=1", "a.b:///x", "a.b://127.0.0.1/"} {
+	for _, s := range []string{"https://rp.example/cb", "com.example.app:/cb", "http://[::1]:1/cb", "a.b:/", "a.b://x", "a.b://x/cb?y=1", "a.b:///x", "a.b://127.0.0.1/", "A.0:/ ", "https://RP.example/c b"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, raw string) {
-		if u, err := fapi.ParseRedirectURL(raw, fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme()); err == nil {
-			if v := u.URL(); v.Scheme != "http" && v.Scheme != "https" && v.Host != "" && u.String()[len(v.Scheme):] != raw[len(v.Scheme):] {
-				t.Fatalf("ParseRedirectURL(%q) = %q, not as written", raw, u.String())
-			}
+		if u, err := fapi.ParseRedirectURL(raw, fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme()); err == nil && u.String() != raw {
+			t.Fatalf("ParseRedirectURL(%q) = %q, not as written", raw, u.String())
 		}
 		if u, err := fapi.ParseRedirectURL(raw); err == nil {
 			if v := u.URL(); v.Scheme != "https" {
@@ -82,9 +92,9 @@ func FuzzParseRedirectURL(f *testing.F) {
 	})
 }
 
-// TestParseRedirectURLSaysWhatToChange covers the two refusals an
-// integrator meets: an authority with a port, and a private-use URI
-// passed without the option.
+// TestParseRedirectURLSaysWhatToChange covers the refusals an
+// integrator meets: an authority with a port, a private-use URI passed
+// without the option, and a URI not written as it's sent.
 func TestParseRedirectURLSaysWhatToChange(t *testing.T) {
 	_, err := fapi.ParseRedirectURL("com.example.app://callback:8080", fapi.AllowPrivateUseScheme())
 	if err == nil || !strings.Contains(err.Error(), "com.example.app:/path") {
@@ -93,5 +103,9 @@ func TestParseRedirectURLSaysWhatToChange(t *testing.T) {
 	_, err = fapi.ParseRedirectURL("com.example.app:/callback")
 	if err == nil || strings.Contains(err.Error(), "must be absolute") {
 		t.Errorf("ParseRedirectURL(no host, no option) = %v, want it to say the host is missing, not that it isn't absolute", err)
+	}
+	_, err = fapi.ParseRedirectURL("https://RP.example/c b")
+	if err == nil || !strings.Contains(err.Error(), `"https://rp.example/c%20b"`) {
+		t.Errorf("ParseRedirectURL(rewritten URI) = %v, want it to show the form it would be sent as", err)
 	}
 }

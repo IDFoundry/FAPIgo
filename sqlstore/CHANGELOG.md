@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.8.1...sqlstore/v0.9.0) (2026-11-15)
+
+
+### Features
+
+* **sqlstore:** grant registry, CIBA inbox and pairwise erasure ([57be0c6](https://github.com/IDFoundry/FAPIgo/commit/57be0c62506f8157cf44af9b793e84e85d739b8b))
+* **sqlstore:** look up an in-progress interaction ([bfd3d36](https://github.com/IDFoundry/FAPIgo/commit/bfd3d36b6d3b4b2fca9ef226a70f8a383af09ec2))
+
 ## [0.8.1](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.8.0...sqlstore/v0.8.1) (2026-11-11)
 
 

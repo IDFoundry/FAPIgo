@@ -169,6 +169,24 @@ is what authenticates them. The binding message is free text the client
 wrote, so show it as such, beside what you describe from the request
 itself.
 
+**The user's device: what's waiting for them.** The authentication
+device has to find the requests awaiting its user, on whichever
+instance it reaches. Set `Dependencies.BackchannelSubjects` to a
+`server.BackchannelSubjectResolver` that maps a request's hint to the
+user it names, and `Dependencies.BackchannelInbox` (`memstore.NewBackchannelInbox()`
+to start). Each request is then filed under its user before it's
+stored, and `srv.ListBackchannelInteractions(ctx, subject)` lists what
+awaits them: each entry's `Interaction` to show, a page-safe `ID` to
+link to, and the `Handle` to complete it with, which stays on your
+server. A request leaves the inbox once decided, or when it expires.
+
+The resolver also binds the request to that user: an `Authorize` for
+anyone else is a failed authentication (`access_denied`). That matters
+because the inbox holds handles: give it storage that encrypts at rest,
+and the binding means a handle read from it still can't be approved by
+another account. The resolver refuses a hint as `BackchannelHints`
+does (`server.ErrUnknownUserID`), so it can stand in for it.
+
 FAPI-CIBA §5.2.2 makes one more thing yours: the user must be able to
 tell which request they're approving. Either each request carries a
 unique authorization context you show them (a payment's amount and

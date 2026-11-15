@@ -91,6 +91,11 @@ type requestRecord struct {
 	// RequiredSubject is already what the application gets.
 	RequiredInternalSubject string `json:"required_internal_subject,omitempty"`
 
+	// ResolvedSubject is the internal subject Dependencies.BackchannelSubjects
+	// resolved a CIBA request's hint to: only that end user may approve it
+	// (approveBackchannelAuthentication). Empty without a resolver.
+	ResolvedSubject string `json:"resolved_subject,omitempty"`
+
 	// Resources are the RFC 8707 resource indicators the request named,
 	// already validated (checkRequestedResources), which the grant
 	// carries into Grant.Resources. Empty when it named none.

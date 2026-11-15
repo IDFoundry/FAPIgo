@@ -723,6 +723,9 @@ func validateConditionalDependencies(cfg Config, deps Dependencies) error {
 	if cibaEnabled && deps.BackchannelNotifier == nil {
 		return fmt.Errorf("server: dependencies: backchannel notifier is required when endpoints.backchannel_authentication is set")
 	}
+	if deps.BackchannelInbox != nil && deps.BackchannelSubjects == nil {
+		return fmt.Errorf("server: dependencies: backchannel inbox needs backchannel subjects, to know whose inbox a request goes to")
+	}
 	if cfg.AttestationBasedClientAuthentication {
 		if err := validateAttestationDependencies(deps); err != nil {
 			return err
@@ -878,6 +881,9 @@ func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) []e
 		errs = append(errs,
 			checkStoreAssurance("backchannel", deps.Backchannel, true, scaled),
 			checkNotifierAssurance(deps.BackchannelNotifier))
+		if deps.BackchannelInbox != nil {
+			errs = append(errs, checkStoreAssurance("backchannel_inbox", deps.BackchannelInbox, false, scaled))
+		}
 	}
 	switch {
 	case deps.Nonces == nil:

@@ -28,6 +28,10 @@ func TestGrantRegistryContract(t *testing.T) {
 	storage.TestGrantRegistryContract(t, func() storage.GrantRegistry { return NewGrantRegistry() })
 }
 
+func TestBackchannelInboxContract(t *testing.T) {
+	storage.TestBackchannelInboxContract(t, func() storage.BackchannelInbox { return NewBackchannelInbox() })
+}
+
 func TestGrantStoreContract(t *testing.T) {
 	storage.TestGrantStoreContract(t, func() storage.GrantStore {
 		return NewGrantStore()

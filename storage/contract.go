@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -2118,5 +2119,129 @@ func testGrantRegistryDelete(t *testing.T, factory func() GrantRegistry) {
 	}
 	if err := registry.DeleteGrant(ctx, "g1"); err != nil {
 		t.Errorf("DeleteGrant(already deleted) = %v, want nil", err)
+	}
+}
+
+// TestBackchannelInboxContract exercises factory()'s behavior against
+// the guarantees BackchannelInbox's documentation promises: entries
+// round-trip unmodified, are listed only for their own subject and only
+// until they expire, are replaced by handle hash, and are removed by it.
+// factory must return a fresh, empty BackchannelInbox each call.
+func TestBackchannelInboxContract(t *testing.T, factory func() BackchannelInbox) {
+	t.Helper()
+
+	t.Run("AddAndList", func(t *testing.T) { testBackchannelInboxAddAndList(t, factory) })
+	t.Run("ListOnlyTheSubjects", func(t *testing.T) { testBackchannelInboxListOnlyTheSubjects(t, factory) })
+	t.Run("ListOnlyUnexpired", func(t *testing.T) { testBackchannelInboxListOnlyUnexpired(t, factory) })
+	t.Run("AddReplacesByHandle", func(t *testing.T) { testBackchannelInboxAddReplacesByHandle(t, factory) })
+	t.Run("Remove", func(t *testing.T) { testBackchannelInboxRemove(t, factory) })
+}
+
+func inboxHash(name string) [32]byte { return sha256.Sum256([]byte(name)) }
+
+func addInboxEntry(t *testing.T, inbox BackchannelInbox, entry NewBackchannelInboxEntry) {
+	t.Helper()
+	if err := inbox.AddBackchannelRequest(context.Background(), entry); err != nil {
+		t.Fatalf("AddBackchannelRequest: %v", err)
+	}
+}
+
+func listInboxHashes(t *testing.T, inbox BackchannelInbox, subjectKey string, now time.Time) [][32]byte {
+	t.Helper()
+	entries, err := inbox.ListBackchannelRequests(context.Background(), BackchannelInboxListing{SubjectKey: subjectKey, Now: now})
+	if err != nil {
+		t.Fatalf("ListBackchannelRequests(%q): %v", subjectKey, err)
+	}
+	hashes := make([][32]byte, 0, len(entries))
+	for _, e := range entries {
+		hashes = append(hashes, e.HandleHash)
+	}
+	slices.SortFunc(hashes, func(a, b [32]byte) int { return bytes.Compare(a[:], b[:]) })
+	return hashes
+}
+
+func sortedHashes(names ...string) [][32]byte {
+	hashes := make([][32]byte, 0, len(names))
+	for _, n := range names {
+		hashes = append(hashes, inboxHash(n))
+	}
+	slices.SortFunc(hashes, func(a, b [32]byte) int { return bytes.Compare(a[:], b[:]) })
+	return hashes
+}
+
+func testBackchannelInboxAddAndList(t *testing.T, factory func() BackchannelInbox) {
+	inbox := factory()
+	expires := time.Now().Add(time.Hour).Truncate(time.Millisecond)
+	addInboxEntry(t, inbox, NewBackchannelInboxEntry{HandleHash: inboxHash("h1"), SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	entries, err := inbox.ListBackchannelRequests(context.Background(), BackchannelInboxListing{SubjectKey: "s1", Now: time.Now()})
+	if err != nil {
+		t.Fatalf("ListBackchannelRequests: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("ListBackchannelRequests = %d entries, want 1", len(entries))
+	}
+	got := entries[0]
+	if got.HandleHash != inboxHash("h1") || got.ClientID != "client-1" || !got.ExpiresAt.Equal(expires) {
+		t.Errorf("entry = %x %q %v, want h1 client-1 %v", got.HandleHash, got.ClientID, got.ExpiresAt, expires)
+	}
+	if !jsonEquivalent(got.Record, contractPayload) {
+		t.Errorf("Record = %s, want %s", got.Record, contractPayload)
+	}
+}
+
+func testBackchannelInboxListOnlyTheSubjects(t *testing.T, factory func() BackchannelInbox) {
+	inbox := factory()
+	expires := time.Now().Add(time.Hour)
+	addInboxEntry(t, inbox, NewBackchannelInboxEntry{HandleHash: inboxHash("h1"), SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	addInboxEntry(t, inbox, NewBackchannelInboxEntry{HandleHash: inboxHash("h2"), SubjectKey: "s1", ClientID: "client-2", Record: contractPayload, ExpiresAt: expires})
+	addInboxEntry(t, inbox, NewBackchannelInboxEntry{HandleHash: inboxHash("h3"), SubjectKey: "s2", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	if got, want := listInboxHashes(t, inbox, "s1", time.Now()), sortedHashes("h1", "h2"); !slices.Equal(got, want) {
+		t.Errorf("ListBackchannelRequests(s1) = %x, want h1 and h2", got)
+	}
+	if got := listInboxHashes(t, inbox, "s3", time.Now()); len(got) != 0 {
+		t.Errorf("ListBackchannelRequests(unknown subject) = %x, want none", got)
+	}
+}
+
+func testBackchannelInboxListOnlyUnexpired(t *testing.T, factory func() BackchannelInbox) {
+	inbox := factory()
+	expires := time.Now().Add(time.Hour)
+	addInboxEntry(t, inbox, NewBackchannelInboxEntry{HandleHash: inboxHash("h1"), SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	for _, now := range []time.Time{expires, expires.Add(time.Second)} {
+		if got := listInboxHashes(t, inbox, "s1", now); len(got) != 0 {
+			t.Errorf("ListBackchannelRequests at %v, entry expiring %v = %x, want none", now, expires, got)
+		}
+	}
+}
+
+func testBackchannelInboxAddReplacesByHandle(t *testing.T, factory func() BackchannelInbox) {
+	inbox := factory()
+	expires := time.Now().Add(time.Hour)
+	addInboxEntry(t, inbox, NewBackchannelInboxEntry{HandleHash: inboxHash("h1"), SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	replacement := json.RawMessage(`{"v":2}`)
+	addInboxEntry(t, inbox, NewBackchannelInboxEntry{HandleHash: inboxHash("h1"), SubjectKey: "s1", ClientID: "client-1", Record: replacement, ExpiresAt: expires})
+	entries, err := inbox.ListBackchannelRequests(context.Background(), BackchannelInboxListing{SubjectKey: "s1", Now: time.Now()})
+	if err != nil {
+		t.Fatalf("ListBackchannelRequests: %v", err)
+	}
+	if len(entries) != 1 || !jsonEquivalent(entries[0].Record, replacement) {
+		t.Fatalf("ListBackchannelRequests after replacing h1 = %d entries, want the one replacement", len(entries))
+	}
+}
+
+func testBackchannelInboxRemove(t *testing.T, factory func() BackchannelInbox) {
+	inbox := factory()
+	ctx := context.Background()
+	expires := time.Now().Add(time.Hour)
+	addInboxEntry(t, inbox, NewBackchannelInboxEntry{HandleHash: inboxHash("h1"), SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	addInboxEntry(t, inbox, NewBackchannelInboxEntry{HandleHash: inboxHash("h2"), SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	if err := inbox.RemoveBackchannelRequest(ctx, inboxHash("h1")); err != nil {
+		t.Fatalf("RemoveBackchannelRequest(h1): %v", err)
+	}
+	if got, want := listInboxHashes(t, inbox, "s1", time.Now()), sortedHashes("h2"); !slices.Equal(got, want) {
+		t.Errorf("ListBackchannelRequests after removing h1 = %x, want h2", got)
+	}
+	if err := inbox.RemoveBackchannelRequest(ctx, inboxHash("h1")); err != nil {
+		t.Errorf("RemoveBackchannelRequest(already removed) = %v, want nil", err)
 	}
 }

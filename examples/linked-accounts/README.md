@@ -112,8 +112,9 @@ The console's **Start here** panel walks through all of this in order.
 
 **1. Link your accounts.** On Pocketwise, press **Link Alder Bank
 accounts**, sign in, choose accounts, and approve. The bank records the
-approval under a **grant ID** (`server.GrantedAuthorization.GrantID`)
-and lists it on Connected apps. Pocketwise gets a refresh token valid
+approval under a **grant ID** (`server.GrantedAuthorization.GrantID`),
+and the server records the grant in its registry, which Connected apps
+lists (`server.Server.ListGrants`). Pocketwise gets a refresh token valid
 for 90 days, and a short-lived access token.
 
 **2. Sync without you.** Press **Sync now**: the refresh token buys a
@@ -132,10 +133,12 @@ to the new key. Fast-forward a day between syncs if you like.
 | Use the access token with another app's DPoP key | The access token is bound to Pocketwise's DPoP key (`invalid_token`) |
 
 **4. Withdraw Pocketwise's access.** On Connected apps, revoke Pocketwise
-(`server.Server.RevokeGrant`), then sync in Pocketwise. The refresh is
-refused (`invalid_grant`), and so is the access token Pocketwise still
-holds: every token from the grant carries its `grant_id`, and the API
-checks it (`invalid_token`).
+(`server.Server.RevokeListedGrant`, which takes Sam as well as the
+grant, so the form can only revoke one of hers), then sync in
+Pocketwise. Its refresh token is gone (`invalid_grant`), and the access
+token it still holds is refused too: every token from the grant carries
+its `grant_id`, and the API checks it (`invalid_token`). Pocketwise
+leaves the list.
 
 **5. Let the consent run out.** Link again, fast-forward 91 days on the
 console, and sync. The refresh token expired 90 days after it was issued
@@ -147,7 +150,7 @@ Everything here uses FAPIgo's public API only.
 
 | Piece | FAPIgo |
 |---|---|
-| Alder Bank | `server.Server` with `Config.RAR`, both apps registered with `AuthorizationDetailsTypes` for `account_access`, and `Dependencies.AuthorizationCodeRARPolicy` set to `server.AllowRequestedAuthorizationDetails`; `Limits.RefreshTokenLifetime` of 90 days; the token endpoint serving `ExchangeAuthorizationCode` and `RefreshAccessToken`; the consent page answering with `GrantedAuthorization.AuthorizationDetails` (the chosen accounts) and `GrantID`; Connected apps calling `Server.RevokeGrant`; `Dependencies` from `sqlstore` on SQLite, `Clients().Put` registering both apps, `BatchingRevocation()` the API reads too, and `InteractionLookup()` so the consent page reads its request back from the database (`Server.LookupInteraction`) and the interaction cookie (`server/interactioncookie` with `Options.Lookup`) carries only the handle |
+| Alder Bank | `server.Server` with `Config.RAR`, both apps registered with `AuthorizationDetailsTypes` for `account_access`, and `Dependencies.AuthorizationCodeRARPolicy` set to `server.AllowRequestedAuthorizationDetails`; `Limits.RefreshTokenLifetime` of 90 days; the token endpoint serving `ExchangeAuthorizationCode` and `RefreshAccessToken`; the consent page answering with `GrantedAuthorization.AuthorizationDetails` (the chosen accounts) and `GrantID`; Connected apps calling `Server.RevokeGrant`; `Dependencies` from `sqlstore` on SQLite, `Clients().Put` registering both apps, `BatchingRevocation()` the API reads too, `GrantRegistry()` for Connected apps, and `InteractionLookup()` so the consent page reads its request back from the database (`Server.LookupInteraction`) and the interaction cookie (`server/interactioncookie` with `Options.Lookup`) carries only the handle |
 | The account information API | `serverresource.NewVerifier`, which also refuses an access token whose grant was revoked, with DPoP nonces from its own `sqlstore` tables (`Options.Nonces`); the shared accounts from the token's `authorization_details` claim (`extension.ParseGrantedRAR`, `RARGet`) |
 | Pocketwise | `client.NewFromDiscovery`, with `Dependencies.Sessions` from `sqlstore`; `BeginAuthorization` with `offline_access` and `AuthorizationDetails`; `CompleteAuthorization`; `RefreshTokens` for every sync; the tokens kept between syncs sealed for the customer with `client.TokenSetSealer`, as they'd sit in a database; `ProtectedResource` for the API |
 | The demo clock | one `Now()` behind `server.Dependencies.Clock` and `client.Dependencies.Clock` |

@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
-	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
@@ -39,19 +37,6 @@ type bank struct {
 	// interaction carries the consent page's state in an encrypted
 	// cookie: every instance would share its key.
 	interaction *interactioncookie.Cookie
-
-	mu sync.Mutex
-	// connections is the bank's own record of each grant a customer
-	// approved, by grant ID: what its Connected apps page lists.
-	connections map[string]*connection
-}
-
-// connection is one app a customer connected to their accounts.
-type connection struct {
-	GrantID, Customer, App string
-	Accounts               []string
-	ApprovedAt             time.Time
-	RevokedAt              time.Time
 }
 
 func (w *World) newBank(ctx context.Context, apps apps) (*bank, error) {
@@ -135,7 +120,7 @@ func (w *World) newBank(ctx context.Context, apps apps) (*bank, error) {
 	// does.
 	limits.RefreshTokenLifetime = consentLifetime
 
-	b := &bank{w: w, connections: map[string]*connection{}}
+	b := &bank{w: w}
 	b.cfg = server.Config{
 		Subjects: server.PublicSubjects(),
 		Issuer:   issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
@@ -151,11 +136,15 @@ func (w *World) newBank(ctx context.Context, apps apps) (*bank, error) {
 		// database can show it.
 		InteractionLookup: store.InteractionLookup(),
 		// Authorization codes and the 90-day refresh tokens.
-		Grants:       store.BatchingGrants(),
-		Replay:       store.Replay(),
-		ClientKeys:   clientKeys,
-		Keys:         manager,
-		AccessTokens: accessTokens,
+		Grants: store.BatchingGrants(),
+		// Each grant a customer approved, by customer, in the database:
+		// what Connected apps lists (Server.ListGrants) and revokes
+		// (Server.RevokeListedGrant), on any instance.
+		GrantRegistry: store.GrantRegistry(),
+		Replay:        store.Replay(),
+		ClientKeys:    clientKeys,
+		Keys:          manager,
+		AccessTokens:  accessTokens,
 		// The revocation store the bank and its API share: RevokeGrant
 		// writes to it, and both read it.
 		Revocation: store.BatchingRevocation(),
@@ -416,54 +405,72 @@ func (b *bank) approve(c customer, in server.InteractionRequest, chosen []string
 	if err != nil {
 		return nil, err
 	}
-	grantID := randomCode(16)
-	name := in.ClientDisplay.Name
-	b.mu.Lock()
-	b.connections[grantID] = &connection{GrantID: grantID, Customer: c.username, App: name, Accounts: chosen, ApprovedAt: b.w.clock.Now()}
-	b.mu.Unlock()
 	return server.Authorize(subject, auth, server.GrantedAuthorization{
-		Scope: in.Scope, AuthorizationDetails: []json.RawMessage{detail}, GrantID: grantID,
+		Scope: in.Scope, AuthorizationDetails: []json.RawMessage{detail}, GrantID: randomCode(16),
 	}), nil
 }
 
+// signedInCustomer is who the Connected apps page is for: the demo has
+// one customer, signed in already.
+func signedInCustomer() (customer, server.SubjectID, error) {
+	c, _ := customerByName("sam")
+	subject, err := server.NewSubjectID(c.username)
+	return c, subject, err
+}
+
 // connectedApps is the customer's list of apps with access to their
-// accounts.
-func (b *bank) connectedApps(w http.ResponseWriter, _ *http.Request) {
+// accounts: the grants the server lists for them, each still holding a
+// refresh token. One revoked, or past its 90 days, is gone from it.
+func (b *bank) connectedApps(w http.ResponseWriter, r *http.Request) {
+	c, subject, err := signedInCustomer()
+	if err != nil {
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, "Connected apps unavailable", publicMessage(err, tryAgain))
+		return
+	}
+	grants, err := b.srv.ListGrants(r.Context(), subject)
+	if err != nil {
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, "Connected apps unavailable", publicMessage(err, tryAgain))
+		return
+	}
 	page := connectedAppsPage{Page: b.w.page("Alder Bank: Connected apps", bankHost)}
-	b.mu.Lock()
-	for _, c := range b.connections {
-		view := connectionView{GrantID: c.GrantID, App: c.App, ApprovedAt: c.ApprovedAt.Format("2 Jan 2006 15:04"),
-			Until: c.ApprovedAt.Add(consentLifetime).Format("2 Jan 2006"), Revoked: !c.RevokedAt.IsZero()}
-		for _, iban := range c.Accounts {
-			sam, _ := customerByName(c.Customer)
-			a, _ := sam.account(iban)
-			view.Accounts = append(view.Accounts, a.Name+" ····"+iban[len(iban)-4:])
+	for _, g := range grants {
+		view := connectionView{ID: g.ID, GrantID: g.GrantID, App: string(g.ClientID),
+			ApprovedAt: g.IssuedAt.Format("2 Jan 2006 15:04"), Until: g.ExpiresAt.Format("2 Jan 2006")}
+		if client, err := b.deps.Clients.ResolveClient(r.Context(), g.ClientID); err == nil && client.Display().Name != "" {
+			view.App = client.Display().Name
 		}
-		view.Expired = !view.Revoked && b.w.clock.Now().After(c.ApprovedAt.Add(consentLifetime))
+		for _, raw := range g.AuthorizationDetails {
+			var access accountAccess
+			if json.Unmarshal(raw, &access) != nil {
+				continue
+			}
+			for _, iban := range access.Accounts {
+				a, _ := c.account(iban)
+				view.Accounts = append(view.Accounts, a.Name+" ····"+iban[len(iban)-4:])
+			}
+		}
 		page.Connections = append(page.Connections, view)
 	}
-	b.mu.Unlock()
-	slices.SortFunc(page.Connections, func(x, y connectionView) int { return strings.Compare(y.ApprovedAt, x.ApprovedAt) })
+	slices.Reverse(page.Connections) // newest first
 	b.w.render(w, "connected-apps", page)
 }
 
-// revoke withdraws a connected app's access: server.RevokeGrant stops
-// its refresh token and every access token issued from the grant.
+// revoke withdraws a connected app's access: server.RevokeListedGrant
+// stops its refresh token and every access token issued from the grant.
+// It takes the customer as well as the grant, so a grant from the form
+// can only be one of theirs.
 func (b *bank) revoke(w http.ResponseWriter, r *http.Request) {
-	grantID := r.FormValue("grant_id")
-	b.mu.Lock()
-	c, ok := b.connections[grantID]
-	b.mu.Unlock()
-	if !ok {
+	_, subject, err := signedInCustomer()
+	if err == nil {
+		err = b.srv.RevokeListedGrant(r.Context(), subject, r.FormValue("grant"))
+	}
+	switch {
+	case errors.Is(err, server.ErrGrantNotListed):
 		b.w.renderError(w, bankHost, http.StatusNotFound, "No such connection", "This app isn't connected.")
 		return
-	}
-	if err := b.srv.RevokeGrant(r.Context(), grantID); err != nil {
+	case err != nil:
 		b.w.renderError(w, bankHost, http.StatusInternalServerError, "Revoking failed", publicMessage(err, tryAgain))
 		return
 	}
-	b.mu.Lock()
-	c.RevokedAt = b.w.clock.Now()
-	b.mu.Unlock()
 	http.Redirect(w, r, connectedAppsPath, http.StatusSeeOther)
 }

@@ -31,9 +31,9 @@ type consentPage struct {
 }
 
 type connectionView struct {
-	GrantID, App, ApprovedAt, Until string
-	Accounts                        []string
-	Revoked, Expired                bool
+	ID, GrantID, App, ApprovedAt, Until string
+	Accounts                            []string
+	Revoked, Expired                    bool
 }
 
 type connectedAppsPage struct {
@@ -154,10 +154,10 @@ var pageTemplates = map[string]string{
 
 	"connected-apps": `{{template "top" .}}
 <p class="muted">Signed in as Sam Rivera. These apps can read your accounts without asking you again.</p>
-{{range .Connections}}<div class="card"><p><strong>{{.App}}</strong> {{if .Revoked}}<span class="pill bad">revoked</span>{{else if .Expired}}<span class="pill bad">expired</span>{{else}}<span class="pill ok">active</span>{{end}}</p>
+{{range .Connections}}<div class="card"><p><strong>{{.App}}</strong> <span class="pill ok">active</span></p>
 <p class="muted">Approved {{.ApprovedAt}}, until {{.Until}} · grant ID <code>{{.GrantID}}</code></p>
 <p>{{range .Accounts}}{{.}}<br>{{end}}</p>
-{{if not (or .Revoked .Expired)}}<form method="post" action="/connected-apps"><input type="hidden" name="grant_id" value="{{.GrantID}}"><button class="attack">Revoke access</button></form>{{end}}</div>
+<form method="post" action="/connected-apps"><input type="hidden" name="grant" value="{{.ID}}"><button class="attack">Revoke access</button></form></div>
 {{else}}<div class="card"><p class="muted">No apps connected yet.</p></div>{{end}}
 {{template "bottom" .}}`,
 

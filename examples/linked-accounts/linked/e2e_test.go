@@ -201,16 +201,18 @@ func TestRevokeFromConnectedApps(t *testing.T) {
 	d.linkAccounts(everyday)
 	apps := d.get("bank.localhost", "/connected-apps")
 	mustContain(t, "Connected apps", apps, "Pocketwise", `pill ok">active`, "Everyday ····7890")
-	grantID := regexp.MustCompile(`name="grant_id" value="([A-Za-z0-9]+)"`).FindStringSubmatch(apps)
+	grantID := regexp.MustCompile(`name="grant" value="([A-Za-z0-9_-]+)"`).FindStringSubmatch(apps)
 	if grantID == nil {
 		t.Fatalf("no grant to revoke:\n%s", apps)
 	}
-	apps = d.post("bank.localhost", "/connected-apps", url.Values{"grant_id": {grantID[1]}})
-	mustContain(t, "Connected apps after revoking", apps, `pill bad">revoked`)
+	apps = d.post("bank.localhost", "/connected-apps", url.Values{"grant": {grantID[1]}})
+	mustContain(t, "Connected apps after revoking", apps, "No apps connected yet.")
 
 	page := d.post("pocketwise.localhost", "/sync", nil)
 	log := page[strings.Index(page, "<h2>Sync log</h2>"):]
-	mustContain(t, "the sync after revocation", log, "invalid_grant", "the grant has been revoked", "Sync: the last access token", "invalid_token")
+	// RevokeListedGrant deletes the refresh token outright, and revokes
+	// the grant the access token Pocketwise still holds carries.
+	mustContain(t, "the sync after revocation", log, "invalid_grant", "refresh_token is invalid, expired, or already used", "access token&#39;s grant has been revoked", "Sync: the last access token", "invalid_token")
 	// Newest first: the sync's two entries come before the first sync's.
 	if strings.Count(log[:strings.Index(log, "First sync")], `pill ok">ok`) != 0 {
 		t.Errorf("a sync step succeeded after revocation:\n%s", log)
@@ -223,7 +225,7 @@ func TestConsentExpires(t *testing.T) {
 	d.post("console.localhost", "/clock", url.Values{"days": {"91"}})
 	page := d.post("pocketwise.localhost", "/sync", nil)
 	mustContain(t, "the sync after 91 days", page, "invalid_grant")
-	mustContain(t, "Connected apps after 91 days", d.get("bank.localhost", "/connected-apps"), `pill bad">expired`)
+	mustContain(t, "Connected apps after 91 days", d.get("bank.localhost", "/connected-apps"), "No apps connected yet.")
 
 	// The expired refresh token is swept from the bank's tables: a sync
 	// is still refused, now as a refresh token the bank doesn't know.

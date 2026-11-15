@@ -15,6 +15,48 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.75.0
+
+### Redirect URIs: query text, dot segments, ports and private-use authorities (fapi, storage, client)
+
+**Affects:** a client registered with, or a `client.Config.RedirectURI`
+of, a redirect URI that:
+
+- has a query with a character RFC 3986 doesn't allow, or a malformed
+  `%`-encoding (`?a=<x>`, `?a b`, `?a=%zz`);
+- has a `.` or `..` path segment, written or percent-encoded
+  (`/a/../cb`, `/%2e/cb`);
+- has an empty or impossible port (`https://rp.example:/cb`, `:0`,
+  `:99999`);
+- is a private-use redirect with an uppercase authority
+  (`com.example.app://Wallet/cb`).
+
+Every other redirect URI is unaffected.
+
+**Why:** v0.74.0 required a redirect URI to be written as it's sent, but
+Go's `net/url` gives a query back byte for byte, so a query was never
+checked. A browser resolves dot segments away before requesting the
+path. An uppercase private-use authority passed `fapi.ParseRedirectURL`,
+and so `client.New`, but `storage.NewRegisteredClient` refused it, so no
+server could register what the client was configured with.
+
+**What fails:**
+
+- `storage.NewRegisteredClient` refuses the client.
+- A client stored before the upgrade, which sqlstore and similar
+  repositories rebuild with `NewRegisteredClient`, fails to resolve, as
+  in v0.74.0.
+- `fapi.ParseRedirectURL` refuses the URI, so `client.New` refuses such a
+  `Config.RedirectURI`.
+
+The new `fapi.CheckRedirectURIForm` is the form check registration
+applies.
+
+**What to change:** register the URI percent-encoded (`?a=%3Cx%3E`), with
+its path resolved (`/cb`), with no `:` or with a real port, and with a
+lowercase authority (`com.example.app://wallet/cb`). Update the client's
+configuration to match.
+
 ## v0.74.0
 
 ### Redirect URIs must be written as they're sent (fapi, storage, client)

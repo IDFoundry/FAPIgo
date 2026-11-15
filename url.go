@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/idfoundry/fapigo/internal/canonical"
@@ -51,7 +52,8 @@ func AllowLoopbackHTTP() URLOption {
 // "com.example.app://oauth2redirect", which some deployed wallets
 // register. The authority, which the operating system ignores when it
 // dispatches the redirect to the app, must be a name of ASCII letters,
-// digits, "-", ".", "_" and "~": no userinfo, port or IP address. The
+// digits, "-", ".", "_" and "~", the letters lowercase, as a host is
+// written: no userinfo, port or IP address. The
 // scheme alone identifies the app, so show it, not the authority, where
 // a user is told where they'll be sent. Either form is matched against
 // the registered string exactly. Enable it only for a client registered
@@ -91,7 +93,86 @@ func ParseRedirectURL(raw string, opts ...URLOption) (URL, error) {
 	if sent := u.String(); sent != raw {
 		return URL{}, fmt.Errorf("fapi: parse redirect URL: redirect URI must be written exactly as it is sent, %q: percent-encode any character RFC 3986 doesn't allow, and write the scheme and host in lowercase", sent)
 	}
+	if err := checkRedirectComponents(u.value); err != nil {
+		return URL{}, fmt.Errorf("fapi: parse redirect URL: %w", err)
+	}
 	return u, nil
+}
+
+// CheckRedirectURIForm checks raw's form as a redirect URI, whatever its
+// scheme, without deciding whether any client may use it: that it's
+// written exactly as a redirect to it is sent (its normalized string
+// form, scheme and host in lowercase), with RFC 3986 query text, no "."
+// or ".." path segment and no empty or impossible port. It's what
+// ParseRedirectURL also requires of every URI it accepts, and what
+// storage.NewRegisteredClient holds each registered redirect URI to. A
+// raw that doesn't parse as a URL at all passes, left for
+// ParseRedirectURL to refuse where it's used.
+func CheckRedirectURIForm(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return nil
+	}
+	parsed.Host = canonical.LowerASCII(parsed.Host)
+	if sent := parsed.String(); sent != raw {
+		return fmt.Errorf("fapi: redirect URI must be written exactly as it is sent, %q: percent-encode any character RFC 3986 doesn't allow, and write the scheme and host in lowercase", sent)
+	}
+	if err := checkRedirectComponents(*parsed); err != nil {
+		return fmt.Errorf("fapi: %w", err)
+	}
+	return nil
+}
+
+// checkRedirectComponents refuses what the string-form comparison in
+// ParseRedirectURL lets through but a browser would still send
+// differently, or not at all: a query with a character RFC 3986 §3.4
+// doesn't allow, or a malformed percent-encoding (net/url gives a query
+// back byte for byte, unchecked); a "." or ".." path segment, which a
+// browser resolves away (RFC 3986 §5.2.4) before requesting the path;
+// and a port that is empty or outside 1 to 65535.
+func checkRedirectComponents(u url.URL) error {
+	if !isQueryText(u.RawQuery) {
+		return fmt.Errorf("redirect URI's query must be RFC 3986 query text: percent-encode any other character, and every %% as %%25")
+	}
+	for _, segment := range strings.Split(u.EscapedPath(), "/") {
+		if s := strings.ToLower(segment); s == "." || s == ".." || s == "%2e" || s == "%2e%2e" || s == ".%2e" || s == "%2e." {
+			return fmt.Errorf("redirect URI's path must not have a \".\" or \"..\" segment, which a browser resolves away")
+		}
+	}
+	if u.Host != "" && strings.HasSuffix(u.Host, ":") {
+		return fmt.Errorf("redirect URI's port must not be empty: leave out the \":\" for the default port")
+	}
+	if port := u.Port(); port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("redirect URI's port must be 1 to 65535")
+		}
+	}
+	return nil
+}
+
+// isQueryText reports whether q is RFC 3986 §3.4 query text: unreserved
+// characters, sub-delims, ":", "@", "/", "?", and %-encodings of two
+// hex digits.
+func isQueryText(q string) bool {
+	for i := 0; i < len(q); i++ {
+		c := q[i]
+		switch {
+		case c == '%':
+			if i+2 >= len(q) || !isHex(q[i+1]) || !isHex(q[i+2]) {
+				return false
+			}
+			i += 2
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
+		case strings.IndexByte("-._~!$&'()*+,;=:@/?", c) >= 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isHex(c byte) bool {
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
 }
 
 // parsePrivateUseURL validates parsed, raw's parse, as a private-use
@@ -107,7 +188,7 @@ func parsePrivateUseURL(raw string, parsed *url.URL) (URL, error) {
 		// adds nothing another app claiming the scheme (§8.6) could use,
 		// and the registered string is still matched exactly.
 		if parsed.User != nil || !isPrivateUseAuthority(parsed.Host) {
-			return URL{}, fmt.Errorf("private-use redirect URI's authority must be a name of letters, digits, \"-\", \".\", \"_\" and \"~\", with no userinfo, port or IP address (%s:/path is RFC 8252 §7.1's preferred form)", parsed.Scheme)
+			return URL{}, fmt.Errorf("private-use redirect URI's authority must be a name of lowercase letters, digits, \"-\", \".\", \"_\" and \"~\", with no userinfo, port or IP address (%s:/path is RFC 8252 §7.1's preferred form)", parsed.Scheme)
 		}
 	} else if parsed.Opaque != "" || parsed.User != nil || !strings.HasPrefix(parsed.Path, "/") || strings.HasPrefix(parsed.String(), parsed.Scheme+"://") {
 		// com.example.app:/callback; not com.example.app:callback, with no
@@ -153,7 +234,8 @@ func isReverseDomainScheme(scheme string) bool {
 }
 
 // isPrivateUseAuthority reports whether host, a private-use redirect
-// URI's authority, is a non-empty name of ASCII letters, digits, "-",
+// URI's authority, is a non-empty name of lowercase ASCII letters,
+// digits, "-",
 // ".", "_" and "~" (RFC 3986 §2.3's unreserved characters) that isn't an
 // IP address: one net/url gives back as written, with no port, and that
 // can't be mistaken for a loopback or other network destination.
@@ -162,7 +244,7 @@ func isPrivateUseAuthority(host string) bool {
 		return false
 	}
 	for _, r := range host {
-		if !isLabelRune(r) && r != '.' && r != '_' && r != '~' {
+		if 'A' <= r && r <= 'Z' || !isLabelRune(r) && r != '.' && r != '_' && r != '~' {
 			return false
 		}
 	}

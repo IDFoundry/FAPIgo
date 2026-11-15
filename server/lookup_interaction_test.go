@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/server"
@@ -203,5 +204,43 @@ func TestProductionChecksInteractionLookup(t *testing.T) {
 				t.Fatalf("New(production, %s lookup) = %v, want %q", name, err, tc.want)
 			}
 		})
+	}
+}
+
+// TestLookupInteractionClientStoreOutage: a client repository that
+// couldn't answer is a server error, as at BeginAuthorization, not a
+// client no longer registered.
+func TestLookupInteractionClientStoreOutage(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		storeErr error
+		cancel   bool
+	}{
+		{"store unavailable", fmt.Errorf("db: %w", storage.ErrStoreUnavailable), false},
+		{"request cancelled", errors.New("lookup interrupted"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, required := lookupHarness(t)
+			h.clients.err = tc.storeErr
+			_, err := h.server.LookupInteraction(lookupContext(t, tc.cancel), required.Handle)
+			checkServerError(t, err, server.ErrorServerError, 500)
+		})
+	}
+}
+
+// TestLookupInteractionRefusesAnUnreadableRecord: a stored request the
+// server can't decode, as from a store that altered it, isn't shown.
+func TestLookupInteractionRefusesAnUnreadableRecord(t *testing.T) {
+	h, required := lookupHarness(t)
+	deps := h.deps
+	deps.InteractionLookup = expiryIgnoringLookup{storage.PendingInteraction{
+		ClientID: testClientID, Request: json.RawMessage(`{"not":"a request record"}`), ExpiresAt: h.now.Add(time.Minute),
+	}}
+	srv, err := server.New(h.cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	if _, err := srv.LookupInteraction(context.Background(), required.Handle); err == nil {
+		t.Fatal("LookupInteraction(unreadable record) = nil error, want error")
 	}
 }

@@ -148,6 +148,10 @@ func TestNewRegisteredClientRefusesRedirectURINotWrittenAsSent(t *testing.T) {
 		{"Com.Example.App:/cb", true, false},
 		{"https://rp.example/c%20b?x=a%20b", false, true},
 		{"https://rp.example:8443/cb", false, true},
+		{"https://rp.example/cb?a=<x>", false, false},
+		{"https://rp.example/a/../cb", false, false},
+		{"https://rp.example:0/cb", false, false},
+		{"com.example.app://Wallet/cb", true, false},
 		{"com.example.app:/cb", true, true},
 	} {
 		t.Run(tc.uri, func(t *testing.T) {
@@ -162,8 +166,8 @@ func TestNewRegisteredClientRefusesRedirectURINotWrittenAsSent(t *testing.T) {
 			if (err == nil) != tc.want {
 				t.Fatalf("NewRegisteredClient(%q) = %v, want accepted %v", tc.uri, err, tc.want)
 			}
-			if !tc.want && !strings.Contains(err.Error(), "written exactly as it is sent") {
-				t.Errorf("NewRegisteredClient(%q) = %v, want it to say how to write the URI", tc.uri, err)
+			if !tc.want && !strings.Contains(err.Error(), "redirect URI") {
+				t.Errorf("NewRegisteredClient(%q) = %v, want it to name the redirect URI", tc.uri, err)
 			}
 		})
 	}

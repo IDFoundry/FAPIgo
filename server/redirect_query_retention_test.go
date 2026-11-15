@@ -14,14 +14,16 @@ import (
 // when adding additional query parameters". The response's parameters
 // follow the registered query, which is kept byte for byte — not
 // reordered, and with a value-less name, a ";" and an escape
-// url.ParseQuery can't decode all left as registered.
+// url.Values.Encode would rewrite ("%2b", not "%2B") all left as
+// registered. (A malformed escape can't be registered:
+// fapi.CheckRedirectURIForm.)
 func TestAuthorizationResponseRetainsRedirectQuery(t *testing.T) {
 	for name, profile := range map[string]server.Profile{"plain": server.ProfileFAPISecurity, "message signing": server.ProfileFAPISecurityWithMessageSigning} {
 		for _, registered := range []string{
 			"https://rp.example/callback?b=2&a=1",
 			"https://rp.example/callback?flag",
 			"https://rp.example/callback?x=1;y=2",
-			"https://rp.example/callback?bad=%zz&keep=1",
+			"https://rp.example/callback?plus=%2b&keep=1",
 			"https://rp.example/callback?",
 		} {
 			t.Run(name+" "+registered, func(t *testing.T) {

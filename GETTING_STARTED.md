@@ -433,7 +433,7 @@ private-use scheme in reverse-domain form
 private-use form with a single slash, as RFC 8252 §7.1 writes it:
 `com.example.wallet:/callback`. The form with an authority,
 `com.example.wallet://callback`, which some deployed wallets register,
-is accepted too, with an authority of letters, digits, `-`, `.`, `_`
+is accepted too, with an authority of lowercase letters, digits, `-`, `.`, `_`
 and `~` (no port, userinfo or IP address), and is matched exactly like
 any other. In
 production a web client can use neither; under development assurance

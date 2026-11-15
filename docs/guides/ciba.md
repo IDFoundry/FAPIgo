@@ -186,6 +186,10 @@ because the inbox holds handles: give it storage that encrypts at rest,
 and the binding means a handle read from it still can't be approved by
 another account. The resolver refuses a hint as `BackchannelHints`
 does (`server.ErrUnknownUserID`), so it can stand in for it.
+`srv.DenyBackchannelInteractions(ctx, subject, reason)` denies every
+request awaiting a user at once, when their account closes, say: each
+client gets `access_denied`, a ping client is notified, and the inbox
+empties.
 
 FAPI-CIBA §5.2.2 makes one more thing yours: the user must be able to
 tell which request they're approving. Either each request carries a

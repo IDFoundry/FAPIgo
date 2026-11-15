@@ -334,3 +334,58 @@ func TestBackchannelSubjectsMustNameSomeone(t *testing.T) {
 		t.Fatalf("begin with a resolver naming nobody = %+v, want server_error", local)
 	}
 }
+
+// TestDenyBackchannelInteractions denies every request awaiting one
+// user, and none of another's.
+func TestDenyBackchannelInteractions(t *testing.T) {
+	h := inboxHarness(t, memstore.NewBackchannelInbox())
+	first := beginFiled(t, h, "user-1")
+	second := beginFiled(t, h, "user-1")
+	other := beginFiled(t, h, "user-2")
+
+	n, err := h.server.DenyBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1"), "the account was closed")
+	if err != nil || n != 2 {
+		t.Fatalf("DenyBackchannelInteractions(user-1) = %d, %v, want 2", n, err)
+	}
+	for _, req := range []server.BackchannelInteractionRequired{first, second} {
+		if _, err := exchangeCIBA(t, h, req.AuthReqID.String()); serverErrorCode(t, err) != server.ErrorAccessDenied {
+			t.Errorf("token request for a denied request = %v, want access_denied", err)
+		}
+	}
+	if left := inboxOf(t, h, "user-1"); len(left) != 0 {
+		t.Errorf("inbox of user-1 after = %d requests, want none", len(left))
+	}
+	if left := inboxOf(t, h, "user-2"); len(left) != 1 || left[0].Handle.String() != other.Handle.String() {
+		t.Errorf("inbox of user-2 = %d requests, want its one left alone", len(left))
+	}
+}
+
+// staleInbox lists a request after it has been decided, as an inbox
+// whose removal failed would.
+type staleInbox struct{ *memstore.BackchannelInbox }
+
+func (staleInbox) RemoveBackchannelRequest(context.Context, [32]byte) error {
+	return errors.New("inbox down")
+}
+
+// TestDenyBackchannelInteractionsPassesOverDecided: a request decided
+// since it was listed is passed over, not an error.
+func TestDenyBackchannelInteractionsPassesOverDecided(t *testing.T) {
+	h := inboxHarness(t, staleInbox{memstore.NewBackchannelInbox()})
+	required := beginFiled(t, h, "user-1")
+	approveAs(t, h, required.Handle, required.Interaction.Scope, "user-1")
+	if n, err := h.server.DenyBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1"), "closed"); err != nil || n != 0 {
+		t.Fatalf("DenyBackchannelInteractions(only a decided request) = %d, %v, want 0, nil", n, err)
+	}
+}
+
+// TestDenyBackchannelInteractionsReportsFailures: an inbox it can't read
+// fails at once.
+func TestDenyBackchannelInteractionsReportsFailures(t *testing.T) {
+	t.Run("list", func(t *testing.T) {
+		h := inboxHarness(t, &stubInbox{BackchannelInbox: memstore.NewBackchannelInbox(), listErr: errors.New("inbox down")})
+		if n, err := h.server.DenyBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1"), "closed"); err == nil || n != 0 {
+			t.Fatalf("DenyBackchannelInteractions = %d, %v, want 0 and an error", n, err)
+		}
+	})
+}

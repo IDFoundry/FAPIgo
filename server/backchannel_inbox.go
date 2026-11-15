@@ -208,3 +208,42 @@ func (s *Server) unfileBackchannelRequest(ctx context.Context, handleHash [32]by
 	}
 	_ = s.deps.BackchannelInbox.RemoveBackchannelRequest(ctx, handleHash)
 }
+
+// DenyBackchannelInteractions denies every CIBA request awaiting
+// subject's decision (ListBackchannelInteractions), with reason, and
+// returns how many it denied: for closing an account, or a user who
+// wants every pending request refused at once. Each is completed as
+// CompleteBackchannelAuthentication with Deny(reason) would: its client
+// gets access_denied, a ping client is notified, and it leaves the
+// inbox. One CompleteBackchannelAuthentication refuses as invalid or
+// expired is passed over and not counted: decided meanwhile, by another
+// call or instance, or expired — or not recorded because the store
+// failed, which CompleteBackchannelAuthentication reports the same way,
+// so check ListBackchannelInteractions when every request must be gone.
+// It stops at any other failure, returning how many it had denied and
+// the error; the rest are still listed, so calling it again finishes
+// the job.
+//
+// DenyBackchannelInteractions doesn't check who is asking: the
+// application must make sure the request is subject's own, or an
+// administrator's.
+func (s *Server) DenyBackchannelInteractions(ctx context.Context, subject SubjectID, reason string) (int, error) {
+	pending, err := s.ListBackchannelInteractions(ctx, subject)
+	if err != nil {
+		return 0, fmt.Errorf("server: deny backchannel interactions: %w", err)
+	}
+	denied := 0
+	for _, p := range pending {
+		err := s.CompleteBackchannelAuthentication(ctx, CompleteBackchannelAuthenticationRequest{Handle: p.Handle, Result: Deny(reason)})
+		var serverErr *Error
+		switch {
+		case err == nil:
+			denied++
+		case errors.As(err, &serverErr) && (serverErr.Code() == ErrorInvalidRequest || serverErr.Code() == ErrorExpiredToken):
+			// Decided or expired since it was listed.
+		default:
+			return denied, fmt.Errorf("server: deny backchannel interactions: %w", err)
+		}
+	}
+	return denied, nil
+}

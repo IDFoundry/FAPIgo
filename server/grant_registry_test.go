@@ -330,3 +330,42 @@ func TestRevokeListedGrantRefusesAnEntryWithoutItsToken(t *testing.T) {
 		t.Error("the entry was deleted though its refresh token wasn't revoked")
 	}
 }
+
+// TestRevokeListedGrantReportsEachFailure: a revocation that fails part
+// way is reported, and the entry isn't deleted, so a retry finishes.
+func TestRevokeListedGrantReportsEachFailure(t *testing.T) {
+	for name, tc := range map[string]struct {
+		extra map[string]any
+		fail  func(h harness)
+	}{
+		"grant ID":      {map[string]any{"grant_id": "grant-1"}, func(h harness) { h.revocation.fail = errors.New("revocation down") }},
+		"code grant":    {map[string]any{"code_grant_id": "code-1"}, func(h harness) { h.revocation.fail = errors.New("revocation down") }},
+		"refresh token": {nil, func(h harness) { h.grants.failRevokeRefresh = errors.New("grants down") }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			registry := &stubRegistry{}
+			h := stubRegistryHarness(t, registry)
+			registry.entries = []storage.GrantEntry{registryEntry(t, h, "k", testIssuer, "user-1", h.now, tc.extra)}
+			tc.fail(h)
+			if err := h.server.RevokeListedGrant(context.Background(), mustSubjectID(t, "user-1"), "k"); err == nil {
+				t.Fatal("RevokeListedGrant = nil error, want the failure")
+			}
+			if len(registry.deleted) != 0 {
+				t.Error("the entry was deleted though revoking it failed")
+			}
+		})
+	}
+}
+
+// TestRevokeTokenReportsARegistryFailure: a refresh token revoked at the
+// revocation endpoint whose registry entry couldn't be removed is a
+// server error, so the client retries.
+func TestRevokeTokenReportsARegistryFailure(t *testing.T) {
+	_, owner := registryHarness(t, &stubRegistry{deleteErr: errors.New("registry down")})
+	refreshToken := owner.issueRefreshToken()
+	err := owner.revoke(formParam("token", refreshToken))
+	var serverErr *server.Error
+	if !errors.As(err, &serverErr) || serverErr.Code() != server.ErrorServerError {
+		t.Fatalf("RevokeToken with the registry down = %v, want server_error", err)
+	}
+}

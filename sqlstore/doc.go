@@ -36,6 +36,9 @@
 //
 //	deps.AccessTokens = server.OpaqueAccessTokens{Store: db.AccessTokens()} // opaque access tokens; JWTs need none
 //	deps.Backchannel = db.Backchannel()                                    // CIBA
+//	deps.InteractionLookup = db.InteractionLookup()                        // Server.LookupInteraction
+//	deps.GrantRegistry = db.GrantRegistry()                                // Server.ListGrants, RevokeListedGrant
+//	deps.BackchannelInbox = db.BackchannelInbox()                          // Server.ListBackchannelInteractions
 //	deps.PairwiseSubjects, err = pairwise.NewMapping(db.PairwiseSubjects()) // pairwise subs (Config.Subjects), random and mapped
 //
 // A relying party (package client) takes its session store from a DB
@@ -219,9 +222,11 @@
 // consent), opaque access tokens' records (subject, scope, binding and
 // claims), and CIBA requests and decisions (the request, a ping
 // request's auth_req_id and client notification token — a bearer
-// secret the server presents — and the approved grant), and a relying
-// party's sessions (the PKCE verifier and nonce it later presents and
-// checks). Each is bound, as AEAD additional data, to its table,
+// secret the server presents — and the approved grant), the grant
+// registry's entries (a user's grant: its client, scope and consent),
+// the CIBA inbox's (a pending request's backchannel authentication
+// handle), and a relying party's sessions (the PKCE verifier and nonce
+// it later presents and checks). Each is bound, as AEAD additional data, to its table,
 // column, row key, client_id (the empty string for a session, whose
 // row has none) and the DB's TablePrefix, so a sealed blob copied to
 // another row, client, table or prefix fails to open; and to the

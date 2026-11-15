@@ -314,6 +314,30 @@ func TestDatabaseFailureIsStoreUnavailable(t *testing.T) {
 				_, err := d.PairwiseSubjects().Lookup(ctx, "i", "s", "b")
 				return err
 			},
+			"ForgetPairwiseSubject": func() error {
+				_, err := d.PairwiseSubjects().ForgetSubject(ctx, "i", "u")
+				return err
+			},
+			"LookupAuthorization": func() error {
+				_, err := d.InteractionLookup().LookupAuthorization(ctx, storage.LookupAuthorizationTransaction{Handle: "h", Now: time.Now()})
+				return err
+			},
+			"RecordGrant": func() error {
+				return d.GrantRegistry().RecordGrant(ctx, storage.NewGrantEntry{Key: "k", SubjectKey: "s", ClientID: "c", ExpiresAt: later})
+			},
+			"ListGrants": func() error {
+				_, err := d.GrantRegistry().ListGrants(ctx, storage.GrantListing{SubjectKey: "s", Now: time.Now()})
+				return err
+			},
+			"DeleteGrant": func() error { return d.GrantRegistry().DeleteGrant(ctx, "k") },
+			"AddBackchannelRequest": func() error {
+				return d.BackchannelInbox().AddBackchannelRequest(ctx, storage.NewBackchannelInboxEntry{HandleHash: digest, SubjectKey: "s", ClientID: "c", ExpiresAt: later})
+			},
+			"ListBackchannelRequests": func() error {
+				_, err := d.BackchannelInbox().ListBackchannelRequests(ctx, storage.BackchannelInboxListing{SubjectKey: "s", Now: time.Now()})
+				return err
+			},
+			"RemoveBackchannelRequest": func() error { return d.BackchannelInbox().RemoveBackchannelRequest(ctx, digest) },
 		} {
 			calls[name] = call
 		}
@@ -597,5 +621,107 @@ func TestSQLiteBusyTimeoutIsSetOncePerConnection(t *testing.T) {
 	must(t, d.Replay().UseOnce(ctx, storage.ReplayUse{Namespace: "n", Digest: sha256.Sum256([]byte("once")), ExpiresAt: time.Now().Add(time.Minute)}))
 	if ms := busyTimeout(); ms != 777 {
 		t.Fatalf("busy_timeout after another write on the same connection = %d, want 777: set again", ms)
+	}
+}
+
+// The stores v0.74.0's server reads answer a key PostgreSQL's text
+// can't hold as unknown, refuse one on write, and ForgetSubject leaves
+// a forgotten subject's own name alone.
+func TestUnstorableKeysInNewStores(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		d := freshDB(t, dialect)
+		ctx := context.Background()
+		later := time.Now().Add(time.Minute)
+		const key = "a\x00b"
+		if _, err := d.InteractionLookup().LookupAuthorization(ctx, storage.LookupAuthorizationTransaction{Handle: key, Now: time.Now()}); !errors.Is(err, sqlstore.ErrNotFound) {
+			t.Errorf("LookupAuthorization(%q) = %v, want ErrNotFound", key, err)
+		}
+		if got, err := d.GrantRegistry().ListGrants(ctx, storage.GrantListing{SubjectKey: key, Now: time.Now()}); err != nil || len(got) != 0 {
+			t.Errorf("ListGrants(%q) = %v, %v, want none", key, got, err)
+		}
+		if got, err := d.BackchannelInbox().ListBackchannelRequests(ctx, storage.BackchannelInboxListing{SubjectKey: key, Now: time.Now()}); err != nil || len(got) != 0 {
+			t.Errorf("ListBackchannelRequests(%q) = %v, %v, want none", key, got, err)
+		}
+		if err := d.GrantRegistry().DeleteGrant(ctx, key); err != nil {
+			t.Errorf("DeleteGrant(%q) = %v, want nil", key, err)
+		}
+		for _, subject := range []string{key, "\x01forgotten\x01body"} {
+			if n, err := d.PairwiseSubjects().ForgetSubject(ctx, "i", subject); err != nil || n != 0 {
+				t.Errorf("ForgetSubject(%q) = %d, %v, want 0, nil", subject, n, err)
+			}
+		}
+		for name, err := range map[string]error{
+			"RecordGrant":           d.GrantRegistry().RecordGrant(ctx, storage.NewGrantEntry{Key: key, SubjectKey: "s", ClientID: "c", ExpiresAt: later}),
+			"AddBackchannelRequest": d.BackchannelInbox().AddBackchannelRequest(ctx, storage.NewBackchannelInboxEntry{SubjectKey: key, ClientID: "c", ExpiresAt: later}),
+		} {
+			if err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
+				t.Errorf("%s(%q) = %v, want a refusal", name, key, err)
+			}
+		}
+	})
+}
+
+// A grant entry or inbox entry sealed under another key, or an inbox row
+// whose handle hash isn't a digest, is an outage, not an empty listing.
+func TestNewStoresRefuseUnreadableRows(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		ctx := context.Background()
+		later := time.Now().Add(time.Hour)
+		p := newPlace(t, dialect)
+		writer := p.migratedWith(sqlstore.Options{Sealer: testSealer(t)})
+		hash := sha256.Sum256([]byte("h"))
+		if err := writer.GrantRegistry().RecordGrant(ctx, storage.NewGrantEntry{Key: "k", SubjectKey: "s", ClientID: "c", Record: []byte(`{"v":1}`), ExpiresAt: later}); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.BackchannelInbox().AddBackchannelRequest(ctx, storage.NewBackchannelInboxEntry{HandleHash: hash, SubjectKey: "s", ClientID: "c", Record: []byte(`{"v":1}`), ExpiresAt: later}); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Transactions().CreatePAR(ctx, storage.NewPARRecord{Reference: "r", ClientID: "c", Request: []byte(`{"v":1}`), ExpiresAt: later}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Transactions().BeginAuthorization(ctx, storage.BeginAuthorizationTransaction{Reference: "r", Handle: "h", HandleExpiresAt: later, Now: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		_, db := p.open()
+		reader := p.handleWith(db, sqlstore.Options{Sealer: testSealer(t)}) // another key
+		if _, err := reader.GrantRegistry().ListGrants(ctx, storage.GrantListing{SubjectKey: "s", Now: time.Now()}); !errors.Is(err, storage.ErrStoreUnavailable) {
+			t.Errorf("ListGrants(sealed under another key) = %v, want ErrStoreUnavailable", err)
+		}
+		if _, err := reader.BackchannelInbox().ListBackchannelRequests(ctx, storage.BackchannelInboxListing{SubjectKey: "s", Now: time.Now()}); !errors.Is(err, storage.ErrStoreUnavailable) {
+			t.Errorf("ListBackchannelRequests(sealed under another key) = %v, want ErrStoreUnavailable", err)
+		}
+		if _, err := reader.InteractionLookup().LookupAuthorization(ctx, storage.LookupAuthorizationTransaction{Handle: "h", Now: time.Now()}); !errors.Is(err, storage.ErrStoreUnavailable) {
+			t.Errorf("LookupAuthorization(sealed under another key) = %v, want ErrStoreUnavailable", err)
+		}
+
+		insert := "INSERT INTO " + p.prefix + "backchannel_inbox (handle_hash, subject_key, client_id, record, expires_at, sweep_after) VALUES ($1, 's2', 'c', $2, $3, $4)"
+		if dialect == sqlstore.SQLite {
+			insert = strings.NewReplacer("$1", "?", "$2", "?", "$3", "?", "$4", "?").Replace(insert)
+		}
+		if _, err := db.ExecContext(ctx, insert, []byte{1, 2, 3}, []byte(`{}`), later.UnixNano(), later.UnixNano()); err != nil {
+			t.Fatalf("inserting a short handle hash: %v", err)
+		}
+		if _, err := writer.BackchannelInbox().ListBackchannelRequests(ctx, storage.BackchannelInboxListing{SubjectKey: "s2", Now: time.Now()}); !errors.Is(err, storage.ErrStoreUnavailable) {
+			t.Errorf("ListBackchannelRequests(a short handle hash) = %v, want ErrStoreUnavailable", err)
+		}
+	})
+}
+
+// A Sealer that can't seal fails the new stores' writes as an outage,
+// storing nothing unsealed.
+func TestNewStoresWritesFailWithTheSealer(t *testing.T) {
+	ctx := context.Background()
+	d := newPlace(t, sqlstore.SQLite).migratedWith(sqlstore.Options{Sealer: failingSealer{}})
+	later := time.Now().Add(time.Hour)
+	for name, err := range map[string]error{
+		"RecordGrant":           d.GrantRegistry().RecordGrant(ctx, storage.NewGrantEntry{Key: "k", SubjectKey: "s", ClientID: "c", Record: []byte(`{}`), ExpiresAt: later}),
+		"AddBackchannelRequest": d.BackchannelInbox().AddBackchannelRequest(ctx, storage.NewBackchannelInboxEntry{SubjectKey: "s", ClientID: "c", Record: []byte(`{}`), ExpiresAt: later}),
+	} {
+		if !errors.Is(err, storage.ErrStoreUnavailable) {
+			t.Errorf("%s with a failing Sealer = %v, want ErrStoreUnavailable", name, err)
+		}
+	}
+	if got, err := d.GrantRegistry().ListGrants(ctx, storage.GrantListing{SubjectKey: "s", Now: time.Now()}); err != nil || len(got) != 0 {
+		t.Errorf("ListGrants after the failed write = %d entries, %v, want none stored", len(got), err)
 	}
 }

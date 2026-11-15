@@ -883,7 +883,8 @@ case server.AuthorizationLocalError:
 ```
 
 **A "connected apps" page.** Set `Dependencies.GrantRegistry`
-(`memstore.NewGrantRegistry()` in development) and the server records
+(`memstore.NewGrantRegistry()` in development, sqlstore's
+`db.GrantRegistry()` in production) and the server records
 each grant it issues a refresh token for, by the user who authorized
 it. `srv.ListGrants(ctx, subject)` then lists that user's grants, with
 the client, scope, authorization details and expiry, and
@@ -900,8 +901,8 @@ every grant the registry lists for the user, and, with a CIBA inbox,
 `srv.DenyBackchannelInteractions(ctx, subject, reason)` denies the
 requests still awaiting them. If you map pairwise subs
 (`pairwise.NewMapping`), also call the store's `ForgetSubject(ctx, issuer,
-subject)` (`storage.PairwiseSubjectEraser`, which `memstore`
-implements): the subs relying parties hold for the user stop resolving,
+subject)` (`storage.PairwiseSubjectEraser`, which `memstore` and
+`sqlstore` implement): the subs relying parties hold for the user stop resolving,
 and are retired, so they can never come to name someone else. Keyed
 derivers (`pairwise.NewHMAC`, `pairwise.NewReversible`) store nothing to
 forget; retire the subject ID itself, never reusing it for a new user.
@@ -982,9 +983,9 @@ the claims asked for), and no interaction is too large for it. Set
 `LookupInteraction`:
 
 ```go
-transactions := memstore.NewTransactionStore()
+transactions := memstore.NewTransactionStore() // or db.Transactions() with sqlstore
 deps.Transactions = transactions
-deps.InteractionLookup = memstore.NewInteractionLookup(transactions)
+deps.InteractionLookup = memstore.NewInteractionLookup(transactions) // or db.InteractionLookup()
 // ...srv, err := server.New(cfg, deps)
 
 cookie, err := interactioncookie.New(cookieKeys, interactioncookie.Options{Lookup: srv.LookupInteraction})
@@ -996,7 +997,7 @@ once the interaction has completed or expired, and any other error, such
 as a store outage, for you to answer as a server error. Every instance
 needs the store; under `AssuranceProduction` the lookup must declare
 `storage.StoreAssurance`, as `Transactions` does. The payment-consent,
-identity-check and federated-union demos work this way.
+identity-check, federated-union and linked-accounts demos work this way.
 
 Keeping the interaction somewhere else — a server-side session — means
 doing yourself the two things the package does:

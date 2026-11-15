@@ -149,3 +149,50 @@ func (s *TransactionStore) CompleteAuthorization(ctx context.Context, txn storag
 // Capabilities implements storage.StoreAssurance — see the package
 // documentation.
 func (s *TransactionStore) Capabilities() storage.Capabilities { return s.d.sealedCapabilities() }
+
+// InteractionLookup returns the storage.InteractionLookup reading d's
+// interactions: server.Dependencies.InteractionLookup, for a server
+// whose Dependencies.Transactions is d.Transactions(). It's a
+// storage.StoreAssurance with the TransactionStore's Capabilities.
+//
+// It's a method of DB, rather than of TransactionStore, so that a
+// wrapper of a deployment's own that embeds *TransactionStore and
+// changes how handles are keyed (a tenant prefix, say) doesn't inherit a
+// lookup that reads past that: give such a wrapper a lookup keyed the
+// same way.
+func (d *DB) InteractionLookup() storage.InteractionLookup { return interactionLookup{d} }
+
+type interactionLookup struct{ d *DB }
+
+// errLookupHandleUnusable is LookupAuthorization's answer for a handle
+// that is unknown, completed (through it or another handle for its
+// request_uri), swept or expired.
+var errLookupHandleUnusable = fmt.Errorf("sqlstore: look up interaction: %w: interaction handle (unknown, completed or expired)", ErrNotFound)
+
+// LookupAuthorization implements storage.InteractionLookup: one read,
+// outside any transaction, of the handle's row, joined to its
+// request_uri's to see it unconsumed.
+func (l interactionLookup) LookupAuthorization(ctx context.Context, txn storage.LookupAuthorizationTransaction) (storage.PendingInteraction, error) {
+	if !validTextKey(txn.Handle) {
+		return storage.PendingInteraction{}, errLookupHandleUnusable
+	}
+	var reference, clientID string
+	var request []byte
+	var expires int64
+	err := l.d.queryRow(ctx, "SELECT i.reference, i.client_id, i.request, i.expires_at FROM {interactions} i JOIN {par_requests} p ON p.reference = i.reference WHERE i.handle = ? AND i.expires_at > ? AND p.consumed = 0",
+		txn.Handle, nanos(txn.Now)).Scan(&reference, &clientID, &request, &expires)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return storage.PendingInteraction{}, errLookupHandleUnusable
+	case err != nil:
+		return storage.PendingInteraction{}, unavailable("look up interaction", err)
+	}
+	plain, err := l.d.open(interactionRef(txn.Handle, clientID, reference, expires), request)
+	if err != nil {
+		return storage.PendingInteraction{}, unavailable("look up interaction", err)
+	}
+	return storage.PendingInteraction{ClientID: fapi.ClientID(clientID), Request: plain, ExpiresAt: timeOf(expires)}, nil
+}
+
+// Capabilities implements storage.StoreAssurance: the TransactionStore's.
+func (l interactionLookup) Capabilities() storage.Capabilities { return l.d.sealedCapabilities() }

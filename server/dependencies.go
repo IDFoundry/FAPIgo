@@ -27,7 +27,8 @@ type Dependencies struct {
 	// InteractionLookup, if set, reads an in-progress interaction back
 	// from Transactions' storage without consuming it, for
 	// LookupInteraction: give the lookup built on the same storage
-	// (memstore.NewInteractionLookup for a memstore TransactionStore).
+	// (memstore.NewInteractionLookup for a memstore TransactionStore,
+	// sqlstore's DB.InteractionLookup for sqlstore's).
 	// Nil leaves LookupInteraction unavailable, and the login UI carries
 	// the InteractionRequest itself, as server/interactioncookie does by
 	// default. Under

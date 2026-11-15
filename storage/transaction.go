@@ -152,8 +152,9 @@ type PendingInteraction struct {
 // carry only the interaction handle and read the request back from the
 // server's store. It's optional, and separate from TransactionStore so
 // adding it changes no existing store: give the one built on the same
-// storage as Dependencies.Transactions, such as
-// memstore.NewInteractionLookup for a memstore TransactionStore. A
+// storage as Dependencies.Transactions: memstore.NewInteractionLookup
+// for a memstore TransactionStore, sqlstore's DB.InteractionLookup for
+// sqlstore's. A
 // TransactionStore wrapper that changes how handles are keyed needs a
 // lookup that keys them the same way, or every lookup misses.
 type InteractionLookup interface {

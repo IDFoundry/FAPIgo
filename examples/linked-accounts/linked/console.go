@@ -32,13 +32,13 @@ var tour = []tourStep{
 	{
 		Title: "Withdraw Pocketwise's access",
 		Do:    "Open Alder Bank's Connected apps, revoke Pocketwise, then sync in Pocketwise.",
-		Notice: "Revoking calls RevokeGrant with the grant ID the bank stored when you approved. The next refresh is refused with invalid_grant, and the access token Pocketwise still holds is refused by the API too: " +
-			"every token from the grant carries its grant_id.",
+		Notice: "Connected apps lists your grants with ListGrants, from the bank's database, and revoking calls RevokeListedGrant for yours alone. The next refresh is refused with invalid_grant, and the access token Pocketwise still holds is refused by the API too: " +
+			"every token from the grant carries its grant_id. Pocketwise is gone from the list.",
 	},
 	{
 		Title:  "Let the consent run out",
 		Do:     "Link again, then fast-forward the clock by 91 days and sync.",
-		Notice: "The refresh token expires 90 days after it was issued, and refreshing doesn't extend it. Pocketwise has to ask you again.",
+		Notice: "The refresh token expires 90 days after it was issued, and refreshing doesn't extend it: Pocketwise is gone from Connected apps, and has to ask you again.",
 	},
 }
 

@@ -205,7 +205,10 @@ func checkCapabilities(t *testing.T, d *sqlstore.DB, plain, sealed storage.Capab
 	}
 	for name, s := range map[string]storage.StoreAssurance{
 		"Transactions": d.Transactions(), "Grants": d.Grants(), "AccessTokens": d.AccessTokens(), "Backchannel": d.Backchannel(),
-		"Sessions": d.Sessions(),
+		"Sessions":          d.Sessions(),
+		"InteractionLookup": d.InteractionLookup().(storage.StoreAssurance),
+		"GrantRegistry":     d.GrantRegistry().(storage.StoreAssurance),
+		"BackchannelInbox":  d.BackchannelInbox().(storage.StoreAssurance),
 	} {
 		if got := s.Capabilities(); got != sealed {
 			t.Errorf("%s().Capabilities() = %+v, want %+v", name, got, sealed)

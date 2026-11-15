@@ -35,10 +35,14 @@ type notificationView struct {
 	Expires                 string
 }
 
+// bankUnreachable is the heading of a page the bank's server couldn't
+// answer for.
+const bankUnreachable = "The bank couldn't be reached"
+
 func (p *phone) home(w http.ResponseWriter, r *http.Request) {
 	pending, err := p.w.bank.pendingFor(r.Context(), p.owner)
 	if err != nil {
-		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't be reached", publicMessage(err, tryAgain))
+		p.w.renderError(w, phoneHost, http.StatusInternalServerError, bankUnreachable, publicMessage(err, tryAgain))
 		return
 	}
 	var views []notificationView
@@ -100,7 +104,7 @@ var actionLabels = map[string]string{
 func (p *phone) request(w http.ResponseWriter, r *http.Request) {
 	req, ok, err := p.w.bank.lookup(r.Context(), p.owner, r.URL.Query().Get("id"))
 	if err != nil {
-		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't be reached", publicMessage(err, tryAgain))
+		p.w.renderError(w, phoneHost, http.StatusInternalServerError, bankUnreachable, publicMessage(err, tryAgain))
 		return
 	}
 	if !ok {
@@ -160,7 +164,7 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	req, ok, err := p.w.bank.lookup(r.Context(), p.owner, r.PostForm.Get("id"))
 	if err != nil {
-		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't be reached", publicMessage(err, tryAgain))
+		p.w.renderError(w, phoneHost, http.StatusInternalServerError, bankUnreachable, publicMessage(err, tryAgain))
 		return
 	}
 	if !ok { // answered or expired meanwhile

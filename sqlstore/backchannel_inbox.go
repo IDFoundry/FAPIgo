@@ -8,6 +8,9 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
+// opListBackchannelRequests names ListBackchannelRequests in its errors.
+const opListBackchannelRequests = "list backchannel requests"
+
 // BackchannelInbox returns the storage.BackchannelInbox keeping d's
 // pending CIBA requests by end user: server.Dependencies.BackchannelInbox.
 // Its entries hold the requests' backchannel authentication handles, so
@@ -55,7 +58,7 @@ func (b backchannelInbox) ListBackchannelRequests(ctx context.Context, listing s
 	rows, err := b.d.db.QueryContext(ctx, b.d.q("SELECT handle_hash, client_id, record, expires_at FROM {backchannel_inbox} WHERE subject_key = ? AND expires_at > ?"), // NOSONAR: go:S2077 — a constant query of this package's; q substitutes only the validated TablePrefix and placeholders.
 		listing.SubjectKey, nanos(listing.Now))
 	if err != nil {
-		return nil, unavailable("list backchannel requests", err)
+		return nil, unavailable(opListBackchannelRequests, err)
 	}
 	defer func() { _ = rows.Close() }()
 	var out []storage.BackchannelInboxEntry
@@ -64,21 +67,21 @@ func (b backchannelInbox) ListBackchannelRequests(ctx context.Context, listing s
 		var clientID string
 		var expires int64
 		if err := rows.Scan(&hashBytes, &clientID, &record, &expires); err != nil {
-			return nil, unavailable("list backchannel requests", err)
+			return nil, unavailable(opListBackchannelRequests, err)
 		}
 		var hash [32]byte
 		if len(hashBytes) != len(hash) {
-			return nil, unavailable("list backchannel requests", errors.New("stored handle hash isn't 32 bytes"))
+			return nil, unavailable(opListBackchannelRequests, errors.New("stored handle hash isn't 32 bytes"))
 		}
 		copy(hash[:], hashBytes)
 		plain, err := b.d.open(inboxEntryRef(hash, clientID, expires), record)
 		if err != nil {
-			return nil, unavailable("list backchannel requests", err)
+			return nil, unavailable(opListBackchannelRequests, err)
 		}
 		out = append(out, storage.BackchannelInboxEntry{HandleHash: hash, ClientID: fapi.ClientID(clientID), Record: plain, ExpiresAt: timeOf(expires)})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, unavailable("list backchannel requests", err)
+		return nil, unavailable(opListBackchannelRequests, err)
 	}
 	return out, nil
 }

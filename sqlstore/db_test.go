@@ -630,35 +630,51 @@ func TestSQLiteBusyTimeoutIsSetOncePerConnection(t *testing.T) {
 func TestUnstorableKeysInNewStores(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
 		d := freshDB(t, dialect)
-		ctx := context.Background()
-		later := time.Now().Add(time.Minute)
 		const key = "a\x00b"
-		if _, err := d.InteractionLookup().LookupAuthorization(ctx, storage.LookupAuthorizationTransaction{Handle: key, Now: time.Now()}); !errors.Is(err, sqlstore.ErrNotFound) {
-			t.Errorf("LookupAuthorization(%q) = %v, want ErrNotFound", key, err)
-		}
-		if got, err := d.GrantRegistry().ListGrants(ctx, storage.GrantListing{SubjectKey: key, Now: time.Now()}); err != nil || len(got) != 0 {
-			t.Errorf("ListGrants(%q) = %v, %v, want none", key, got, err)
-		}
-		if got, err := d.BackchannelInbox().ListBackchannelRequests(ctx, storage.BackchannelInboxListing{SubjectKey: key, Now: time.Now()}); err != nil || len(got) != 0 {
-			t.Errorf("ListBackchannelRequests(%q) = %v, %v, want none", key, got, err)
-		}
-		if err := d.GrantRegistry().DeleteGrant(ctx, key); err != nil {
-			t.Errorf("DeleteGrant(%q) = %v, want nil", key, err)
-		}
-		for _, subject := range []string{key, "\x01forgotten\x01body"} {
-			if n, err := d.PairwiseSubjects().ForgetSubject(ctx, "i", subject); err != nil || n != 0 {
-				t.Errorf("ForgetSubject(%q) = %d, %v, want 0, nil", subject, n, err)
-			}
-		}
-		for name, err := range map[string]error{
-			"RecordGrant":           d.GrantRegistry().RecordGrant(ctx, storage.NewGrantEntry{Key: key, SubjectKey: "s", ClientID: "c", ExpiresAt: later}),
-			"AddBackchannelRequest": d.BackchannelInbox().AddBackchannelRequest(ctx, storage.NewBackchannelInboxEntry{SubjectKey: key, ClientID: "c", ExpiresAt: later}),
-		} {
-			if err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
-				t.Errorf("%s(%q) = %v, want a refusal", name, key, err)
-			}
-		}
+		checkUnstorableKeyReads(t, d, key)
+		checkUnstorableKeyWrites(t, d, key)
 	})
+}
+
+// checkUnstorableKeyReads checks that the new stores' reads and deletes
+// answer key as unknown, and that ForgetSubject leaves a forgotten
+// subject's own name alone.
+func checkUnstorableKeyReads(t *testing.T, d *sqlstore.DB, key string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := d.InteractionLookup().LookupAuthorization(ctx, storage.LookupAuthorizationTransaction{Handle: key, Now: time.Now()}); !errors.Is(err, sqlstore.ErrNotFound) {
+		t.Errorf("LookupAuthorization(%q) = %v, want ErrNotFound", key, err)
+	}
+	if got, err := d.GrantRegistry().ListGrants(ctx, storage.GrantListing{SubjectKey: key, Now: time.Now()}); err != nil || len(got) != 0 {
+		t.Errorf("ListGrants(%q) = %v, %v, want none", key, got, err)
+	}
+	if got, err := d.BackchannelInbox().ListBackchannelRequests(ctx, storage.BackchannelInboxListing{SubjectKey: key, Now: time.Now()}); err != nil || len(got) != 0 {
+		t.Errorf("ListBackchannelRequests(%q) = %v, %v, want none", key, got, err)
+	}
+	if err := d.GrantRegistry().DeleteGrant(ctx, key); err != nil {
+		t.Errorf("DeleteGrant(%q) = %v, want nil", key, err)
+	}
+	for _, subject := range []string{key, "\x01forgotten\x01body"} {
+		if n, err := d.PairwiseSubjects().ForgetSubject(ctx, "i", subject); err != nil || n != 0 {
+			t.Errorf("ForgetSubject(%q) = %d, %v, want 0, nil", subject, n, err)
+		}
+	}
+}
+
+// checkUnstorableKeyWrites checks that the new stores refuse to write
+// key, without reporting an outage.
+func checkUnstorableKeyWrites(t *testing.T, d *sqlstore.DB, key string) {
+	t.Helper()
+	ctx := context.Background()
+	later := time.Now().Add(time.Minute)
+	for name, err := range map[string]error{
+		"RecordGrant":           d.GrantRegistry().RecordGrant(ctx, storage.NewGrantEntry{Key: key, SubjectKey: "s", ClientID: "c", ExpiresAt: later}),
+		"AddBackchannelRequest": d.BackchannelInbox().AddBackchannelRequest(ctx, storage.NewBackchannelInboxEntry{SubjectKey: key, ClientID: "c", ExpiresAt: later}),
+	} {
+		if err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
+			t.Errorf("%s(%q) = %v, want a refusal", name, key, err)
+		}
+	}
 }
 
 // A grant entry or inbox entry sealed under another key, or an inbox row

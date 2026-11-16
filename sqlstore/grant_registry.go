@@ -8,6 +8,9 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
+// opListGrants names ListGrants in its errors.
+const opListGrants = "list grants"
+
 // GrantRegistry returns the storage.GrantRegistry keeping d's grant
 // entries: server.Dependencies.GrantRegistry. It's a
 // storage.StoreAssurance with the other stores' Capabilities, and seals
@@ -52,7 +55,7 @@ func (r grantRegistry) ListGrants(ctx context.Context, listing storage.GrantList
 	rows, err := r.d.db.QueryContext(ctx, r.d.q("SELECT entry_key, client_id, record, expires_at FROM {grant_registry} WHERE subject_key = ? AND expires_at > ?"), // NOSONAR: go:S2077 — a constant query of this package's; q substitutes only the validated TablePrefix and placeholders.
 		listing.SubjectKey, nanos(listing.Now))
 	if err != nil {
-		return nil, unavailable("list grants", err)
+		return nil, unavailable(opListGrants, err)
 	}
 	defer func() { _ = rows.Close() }()
 	var out []storage.GrantEntry
@@ -61,16 +64,16 @@ func (r grantRegistry) ListGrants(ctx context.Context, listing storage.GrantList
 		var record []byte
 		var expires int64
 		if err := rows.Scan(&key, &clientID, &record, &expires); err != nil {
-			return nil, unavailable("list grants", err)
+			return nil, unavailable(opListGrants, err)
 		}
 		plain, err := r.d.open(grantEntryRef(key, clientID, expires), record)
 		if err != nil {
-			return nil, unavailable("list grants", err)
+			return nil, unavailable(opListGrants, err)
 		}
 		out = append(out, storage.GrantEntry{Key: key, ClientID: fapi.ClientID(clientID), Record: plain, ExpiresAt: timeOf(expires)})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, unavailable("list grants", err)
+		return nil, unavailable(opListGrants, err)
 	}
 	return out, nil
 }

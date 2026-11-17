@@ -15,6 +15,36 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.76.0
+
+### An attester's x5c must be a single path, in order (server)
+
+**Affects:** a deployment using `server.X5CAttesterChain` whose wallets
+send an attestation `x5c` that:
+
+- lists its certificates out of order: each must come before the
+  certificate that certifies it, as RFC 7515 §4.1.6 requires;
+- has two certificates with the same subject or the same public key,
+  other than up to two cross-certificates of one CA at the end;
+- ends with more than two certificates of one CA.
+
+An `x5c` in the order RFC 7515 and HAIP 1.0 require, leaf first, is
+unaffected, and so is a CA cross-certified to two anchors sent as its
+last two certificates.
+
+**Why:** the certificates were handed to crypto/x509's path builder as
+an unordered pool. An unauthenticated caller could send CA certificates
+under two names that certify each other, and drive the builder to its
+limit of 100 signature checks, about 60 ms of CPU per request with
+P-521 keys. The cost now grows only with the length of `x5c`.
+
+**What fails:** the request is refused with `invalid_client`, as for a
+chain that doesn't verify. The error names the certificates at fault.
+
+**What to change:** have the wallet send `x5c` leaf first, each
+certificate followed by the one that certifies it, with no certificate
+repeated except a cross-certified CA at the end.
+
 ## v0.75.0
 
 ### Redirect URIs: query text, dot segments, ports and private-use authorities (fapi, storage, client)

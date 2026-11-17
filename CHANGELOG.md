@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.76.0](https://github.com/IDFoundry/FAPIgo/compare/v0.75.0...v0.76.0) (2026-11-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** an attester x5c out of RFC 7515 order, with a subject or public key repeated, or ending with more than two certificates of one CA, is refused with invalid_client. See UPGRADING.md.
+
+### Bug Fixes
+
+* **server:** bound attester x5c path building to a single path ([3936974](https://github.com/IDFoundry/FAPIgo/commit/3936974ce2639acf330e9b0fc033a07e0b3d078b))
+
 ## [0.75.0](https://github.com/IDFoundry/FAPIgo/compare/v0.74.0...v0.75.0) (2026-11-15)
 
 

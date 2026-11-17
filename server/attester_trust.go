@@ -144,10 +144,14 @@ func (r RegisteredAttesterKeys) validate() error {
 // fallback to "kid", which would let an attestation skip the chain
 // check just by omitting it — and "kid" plays no part.
 //
-// Every "x5c" certificate holding an RSA key must hold one of at most
-// 4096 bits with exponent 65537, the limits on any RSA key a caller
-// supplies; this is checked before any signature, so a chain can't
-// choose how much work verifying it costs. Anchors TrustAnchors or
+// "x5c" must be a single path, in order (RFC 7515 §4.1.6): each
+// certificate is named as the issuer of the one before it, and no two
+// share a subject or a public key, except that the last two may be
+// cross-certificates of one CA (one subject and key, different issuers). Every "x5c" certificate holding an
+// RSA key must hold one of at most 4096 bits with exponent 65537, the
+// limits on any RSA key a caller supplies. All of this is checked before
+// any signature, so a chain can't choose how much work verifying it
+// costs. Anchors TrustAnchors or
 // Anchors return are configured, not sent, and aren't limited.
 //
 // The signing certificate must:
@@ -580,6 +584,56 @@ func (StaticAttesterTrustAnchors) Capabilities() keys.KeySourceCapabilities {
 	return keys.KeySourceCapabilities{LiveFetchHardened: true}
 }
 
+// checkX5COrder refuses an "x5c" that isn't a single path, before any
+// signature is checked, comparing names and keys only. Each certificate
+// must be named as the issuer of the one before it, in the order RFC 7515
+// §4.1.6 requires, and no two may share a subject or a public key, with
+// one exception: the last two certificates may be copies of one CA
+// (one subject, one key) certified by different issuers, its
+// cross-certificates to different anchors. Path building then has at
+// most one candidate from "x5c" at each step below the top, so its cost
+// grows with the length of "x5c" rather than with the paths through it.
+// Without these rules, a chain of certificates that certify each other
+// under two names drives crypto/x509's path builder to its limit of
+// signature checks, about 60 ms of CPU for P-521 keys, on an
+// unauthenticated request.
+func checkX5COrder(certs []*x509.Certificate) error {
+	top := len(certs) - 1
+	for top > 1 && sameCA(certs[top-1], certs[top]) {
+		top--
+	}
+	if copies := len(certs) - top; copies > maxX5CCrossCertificates {
+		return fmt.Errorf("attester x5c ends with %d certificates of one CA, more than %d", copies, maxX5CCrossCertificates)
+	}
+	subjects := make(map[string]int, len(certs))
+	keys := make(map[string]int, len(certs))
+	for i, c := range certs[:top+1] {
+		if j, seen := subjects[string(c.RawSubject)]; seen {
+			return fmt.Errorf("attester x5c certificates %d and %d have the same subject: x5c must be a single path", j, i)
+		}
+		if j, seen := keys[string(c.RawSubjectPublicKeyInfo)]; seen {
+			return fmt.Errorf("attester x5c certificates %d and %d have the same public key: x5c must be a single path", j, i)
+		}
+		subjects[string(c.RawSubject)] = i
+		keys[string(c.RawSubjectPublicKeyInfo)] = i
+		if i > 0 && !bytes.Equal(certs[i-1].RawIssuer, c.RawSubject) {
+			return fmt.Errorf("attester x5c certificate %d isn't named as the issuer of certificate %d: x5c must list each certificate before the one that certifies it (RFC 7515 §4.1.6)", i, i-1)
+		}
+	}
+	return nil
+}
+
+// maxX5CCrossCertificates bounds the copies of one CA checkX5COrder
+// accepts at the top of "x5c": each is a path the builder tries, and
+// a CA in transition between two anchors needs two.
+const maxX5CCrossCertificates = 2
+
+// sameCA reports whether a and b certify one CA: the same subject and
+// the same public key.
+func sameCA(a, b *x509.Certificate) bool {
+	return bytes.Equal(a.RawSubject, b.RawSubject) && bytes.Equal(a.RawSubjectPublicKeyInfo, b.RawSubjectPublicKeyInfo)
+}
+
 // verifyAttesterChain parses ders (leaf first) and verifies the leaf
 // against roots at now, returning it and the chains that verify (each
 // ending at an anchor); see X5CAttesterChain for the rules.
@@ -600,6 +654,9 @@ func verifyAttesterChain(ders [][]byte, roots *x509.CertPool, now time.Time) (*x
 			return nil, nil, fmt.Errorf("x5c certificate %d: %w", i, err)
 		}
 		certs[i] = cert
+	}
+	if err := checkX5COrder(certs); err != nil {
+		return nil, nil, err
 	}
 	leaf := certs[0]
 	if isSelfSigned(leaf) {

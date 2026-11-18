@@ -52,13 +52,10 @@ func FromRequest(request json.RawMessage) ([]json.RawMessage, bool) {
 	}
 	// "value" is decoded once, not once per entry of "values": a large
 	// "value" and many entries would otherwise cost their product.
-	want, ok := decode(value)
-	if !ok {
-		return []json.RawMessage{}, true
-	}
+	want, wantOK := decode(value)
 	acceptable := make([]json.RawMessage, 0, len(values))
 	for _, v := range values {
-		if got, ok := decode(v); ok && equalValues(got, want) {
+		if got, ok := decode(v); ok && wantOK && equalValues(got, want) {
 			acceptable = append(acceptable, v)
 		}
 	}

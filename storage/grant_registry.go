@@ -43,6 +43,14 @@ type GrantListing struct {
 	// Now is the server's current time (server.Dependencies.Clock): an
 	// entry whose ExpiresAt isn't after it is not listed.
 	Now time.Time
+
+	// Key, when set, asks only whether the entry with that Key is
+	// listed: the server sets it to confirm a grant it just recorded is
+	// still there, on each refresh token it issues. A store should then
+	// return at most that entry, found by its key, so the cost doesn't
+	// grow with the subject's other grants. A store that ignores Key and
+	// lists all of the subject's entries is still correct, only slower.
+	Key string
 }
 
 // GrantEntry is one entry ListGrants returns.
@@ -65,7 +73,8 @@ type GrantEntry struct {
 //
 // RecordGrant stores entry, replacing any entry with the same Key.
 // ListGrants returns every entry with listing.SubjectKey whose ExpiresAt
-// is after listing.Now, in any order. DeleteGrant deletes the entry with
+// is after listing.Now, in any order; with listing.Key set, it may return
+// only the entry with that Key. DeleteGrant deletes the entry with
 // key, and succeeds when there is none. A store that couldn't answer
 // wraps ErrStoreUnavailable. Run TestGrantRegistryContract against an
 // implementation.

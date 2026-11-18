@@ -26,6 +26,7 @@ const (
 	maxClaimsParameterBytes       = 16 << 10
 	maxRequestedClaimsPerLocation = 256
 	maxEssentialACRValues         = 32
+	maxRequestedClaimValues       = 64
 )
 
 func validateClaimsParameter(params map[string]json.RawMessage) error {
@@ -95,9 +96,32 @@ func validateClaimsLocationValue(member string, value json.RawMessage) error {
 		return fmt.Errorf("claims.%s must not request more than %d claims", member, maxRequestedClaimsPerLocation)
 	}
 	for name, request := range requests {
-		if trimmed := bytes.TrimSpace(request); !isJSONNull(trimmed) && (len(trimmed) == 0 || trimmed[0] != '{') {
+		trimmed := bytes.TrimSpace(request)
+		if isJSONNull(trimmed) {
+			continue
+		}
+		if len(trimmed) == 0 || trimmed[0] != '{' {
 			return &detailedError{description: "claims." + member + " must map each claim name to null or a JSON object", detail: fmt.Sprintf("claim %q", name)}
 		}
+		if err := checkClaimValuesCount(member, name, trimmed); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkClaimValuesCount refuses a claim request whose "values" array
+// has more than maxRequestedClaimValues entries. The acceptable values
+// are kept with the grant and compared with the released claim at each
+// token issuance and UserInfo request, so their number is bounded here.
+func checkClaimValuesCount(member, name string, request json.RawMessage) error {
+	var members map[string]json.RawMessage
+	if json.Unmarshal(request, &members) != nil {
+		return &detailedError{description: "claims." + member + " must map each claim name to null or a JSON object", detail: fmt.Sprintf("claim %q", name)}
+	}
+	var values []json.RawMessage
+	if raw, ok := members["values"]; ok && json.Unmarshal(raw, &values) == nil && len(values) > maxRequestedClaimValues {
+		return &detailedError{description: fmt.Sprintf("claims.%s must not give a claim more than %d values", member, maxRequestedClaimValues), detail: fmt.Sprintf("claim %q", name)}
 	}
 	return nil
 }

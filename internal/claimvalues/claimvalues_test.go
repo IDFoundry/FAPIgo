@@ -2,7 +2,9 @@ package claimvalues
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestFromRequest(t *testing.T) {
@@ -82,5 +84,44 @@ func TestEqualNumbersExactly(t *testing.T) {
 	a := Acceptable{"account_no": {json.RawMessage(`9007199254740993`)}}
 	if a.Allows("account_no", json.RawMessage(`9007199254740992`)) {
 		t.Error("Allows released 9007199254740992 for a request of value 9007199254740993")
+	}
+}
+
+// A large "value" with as many "values" entries as a 16 KiB claims
+// parameter holds used to be decoded once per entry: about 3 s of CPU
+// for each completed authorization. It's now decoded once.
+func TestFromRequestDecodesValueOnce(t *testing.T) {
+	value := "[" + strings.Repeat("1,", 2699) + "1]"
+	request := json.RawMessage(`{"value":` + value + `,"values":[` + strings.Repeat("0,", 5399) + value + `]}`)
+	start := time.Now()
+	acceptable, constrained := FromRequest(request)
+	elapsed := time.Since(start)
+	if !constrained || len(acceptable) != 1 || !Equal(acceptable[0], json.RawMessage(value)) {
+		t.Fatalf("FromRequest = %d values, %v; want only the one equal to value", len(acceptable), constrained)
+	}
+	if elapsed > 250*time.Millisecond {
+		t.Fatalf("FromRequest took %v, want a few milliseconds", elapsed)
+	}
+}
+
+// Allows decodes the released value once, not once per acceptable
+// value, and still matches by JSON equality.
+func TestAllowsDecodesValueOnce(t *testing.T) {
+	released := json.RawMessage(`[` + strings.Repeat("1,", 2699) + `1]`)
+	acceptable := make([]json.RawMessage, 0, 5001)
+	for range 5000 {
+		acceptable = append(acceptable, json.RawMessage(`0`))
+	}
+	acceptable = append(acceptable, json.RawMessage(`[`+strings.Repeat("1.0,", 2699)+`1e0]`))
+	a := Acceptable{"c": acceptable}
+	start := time.Now()
+	if !a.Allows("c", released) {
+		t.Fatal("Allows = false, want true for a value equal as JSON")
+	}
+	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
+		t.Fatalf("Allows took %v, want a few milliseconds", elapsed)
+	}
+	if a.Allows("c", json.RawMessage(`[1]`)) || a.Allows("c", json.RawMessage(`{`)) {
+		t.Fatal("Allows = true for a value not among the acceptable ones")
 	}
 }

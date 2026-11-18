@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.77.0](https://github.com/IDFoundry/FAPIgo/compare/v0.76.0...v0.77.0) (2026-11-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** a claims parameter giving one claim more than 64 values is refused with invalid_request. See UPGRADING.md.
+
+### Bug Fixes
+
+* **server:** confirm a refresh token's grant by its key ([4194907](https://github.com/IDFoundry/FAPIgo/commit/41949076d37d3dae7a80fe1d067b64995850ff7b))
+* **server:** decode a claim's value once and bound its values ([3f00893](https://github.com/IDFoundry/FAPIgo/commit/3f00893eca8ebd2fdf152adb8ae55233472c2440))
+
 ## [0.76.0](https://github.com/IDFoundry/FAPIgo/compare/v0.75.0...v0.76.0) (2026-11-17)
 
 

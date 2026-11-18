@@ -127,11 +127,14 @@ func (s *Server) confirmGrantRecorded(ctx context.Context, subject string, refre
 	if s.deps.GrantRegistry == nil {
 		return nil
 	}
-	entries, err := s.deps.GrantRegistry.ListGrants(ctx, storage.GrantListing{SubjectKey: s.grantSubjectKey(subject), Now: s.deps.Clock.Now()})
+	// Key asks for this entry alone, so the cost doesn't grow with the
+	// subject's other grants; a store that lists them all anyway is
+	// searched below.
+	key := grantEntryKey(refreshTokenHash)
+	entries, err := s.deps.GrantRegistry.ListGrants(ctx, storage.GrantListing{SubjectKey: s.grantSubjectKey(subject), Now: s.deps.Clock.Now(), Key: key})
 	if err != nil {
 		return s.withdrawRefreshToken(ctx, refreshTokenHash, fmt.Errorf("confirm the grant is recorded: %w", err))
 	}
-	key := grantEntryKey(refreshTokenHash)
 	if slices.ContainsFunc(entries, func(e storage.GrantEntry) bool { return e.Key == key }) {
 		return nil
 	}

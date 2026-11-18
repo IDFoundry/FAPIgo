@@ -595,3 +595,41 @@ func TestGrantRevokedWhileIssuedWithdrawalFails(t *testing.T) {
 		t.Fatalf("IssueRefreshToken = %v, want the withdrawal failure reported", err)
 	}
 }
+
+// keyRecordingRegistry records the GrantListing.Key of each listing,
+// and with ignoreKey lists every one of the subject's entries anyway, as
+// a store written before Key existed would.
+type keyRecordingRegistry struct {
+	*memstore.GrantRegistry
+	ignoreKey bool
+	keys      *[]string
+}
+
+func (r keyRecordingRegistry) ListGrants(ctx context.Context, listing storage.GrantListing) ([]storage.GrantEntry, error) {
+	*r.keys = append(*r.keys, listing.Key)
+	if r.ignoreKey {
+		listing.Key = ""
+	}
+	return r.GrantRegistry.ListGrants(ctx, listing)
+}
+
+// TestRefreshTokenIssuanceConfirmsItsOwnEntry: confirming a refresh
+// token's grant is still recorded asks for its own entry by key, so its
+// cost doesn't grow with the user's other grants, and still issues the
+// token from a store that ignores the key and lists them all.
+func TestRefreshTokenIssuanceConfirmsItsOwnEntry(t *testing.T) {
+	for name, ignoreKey := range map[string]bool{"store honours Key": false, "store ignores Key": true} {
+		t.Run(name, func(t *testing.T) {
+			var keys []string
+			h, owner := registryHarness(t, keyRecordingRegistry{memstore.NewGrantRegistry(), ignoreKey, &keys})
+			owner.issueRefreshToken()
+			owner.issueRefreshToken()
+			if len(keys) != 2 || keys[0] == "" || keys[1] == "" || keys[0] == keys[1] {
+				t.Fatalf("issuance listed with keys %q, want each its own entry's key", keys)
+			}
+			if grants := listGrants(t, h, "user-1"); len(grants) != 2 {
+				t.Fatalf("ListGrants(user-1) = %d grants, want 2", len(grants))
+			}
+		})
+	}
+}

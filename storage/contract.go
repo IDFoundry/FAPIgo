@@ -2022,6 +2022,7 @@ func TestGrantRegistryContract(t *testing.T, factory func() GrantRegistry) {
 	t.Run("ListOnlyUnexpired", func(t *testing.T) { testGrantRegistryListOnlyUnexpired(t, factory) })
 	t.Run("RecordReplacesByKey", func(t *testing.T) { testGrantRegistryRecordReplacesByKey(t, factory) })
 	t.Run("Delete", func(t *testing.T) { testGrantRegistryDelete(t, factory) })
+	t.Run("ListByKey", func(t *testing.T) { testGrantRegistryListByKey(t, factory) })
 }
 
 func recordGrantEntry(t *testing.T, registry GrantRegistry, entry NewGrantEntry) {
@@ -2119,6 +2120,45 @@ func testGrantRegistryDelete(t *testing.T, factory func() GrantRegistry) {
 	}
 	if err := registry.DeleteGrant(ctx, "g1"); err != nil {
 		t.Errorf("DeleteGrant(already deleted) = %v, want nil", err)
+	}
+}
+
+// testGrantRegistryListByKey covers GrantListing.Key: the entry with
+// that key is listed while it's the subject's and unexpired, and never
+// another subject's entry. A store may list the subject's other entries
+// too, so only their absence from another subject's listing is checked.
+func testGrantRegistryListByKey(t *testing.T, factory func() GrantRegistry) {
+	registry := factory()
+	expires := time.Now().Add(time.Hour)
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g1", SubjectKey: "s1", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g2", SubjectKey: "s1", ClientID: "client-2", Record: contractPayload, ExpiresAt: expires})
+	recordGrantEntry(t, registry, NewGrantEntry{Key: "g3", SubjectKey: "s2", ClientID: "client-1", Record: contractPayload, ExpiresAt: expires})
+	keyed := func(subjectKey, key string, now time.Time) []string {
+		t.Helper()
+		entries, err := registry.ListGrants(context.Background(), GrantListing{SubjectKey: subjectKey, Now: now, Key: key})
+		if err != nil {
+			t.Fatalf("ListGrants(%q, key %q): %v", subjectKey, key, err)
+		}
+		keys := make([]string, 0, len(entries))
+		for _, e := range entries {
+			keys = append(keys, e.Key)
+		}
+		return keys
+	}
+	if got := keyed("s1", "g1", time.Now()); !slices.Contains(got, "g1") || slices.Contains(got, "g3") {
+		t.Errorf("ListGrants(s1, key g1) = %v, want g1 and nothing of s2's", got)
+	}
+	if got := keyed("s2", "g1", time.Now()); slices.Contains(got, "g1") {
+		t.Errorf("ListGrants(s2, key g1) = %v, want no entry of s1's", got)
+	}
+	if got := keyed("s1", "g1", expires); slices.Contains(got, "g1") {
+		t.Errorf("ListGrants(s1, key g1) at expiry = %v, want g1 not listed", got)
+	}
+	if err := registry.DeleteGrant(context.Background(), "g1"); err != nil {
+		t.Fatalf("DeleteGrant(g1): %v", err)
+	}
+	if got := keyed("s1", "g1", time.Now()); slices.Contains(got, "g1") {
+		t.Errorf("ListGrants(s1, key g1) after deleting it = %v, want g1 not listed", got)
 	}
 }
 

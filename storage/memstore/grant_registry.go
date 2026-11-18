@@ -32,14 +32,26 @@ func (r *GrantRegistry) RecordGrant(_ context.Context, entry storage.NewGrantEnt
 func (r *GrantRegistry) ListGrants(_ context.Context, listing storage.GrantListing) ([]storage.GrantEntry, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	listed := func(e storage.NewGrantEntry) bool {
+		return e.SubjectKey == listing.SubjectKey && listing.Now.Before(e.ExpiresAt)
+	}
 	var out []storage.GrantEntry
-	for _, e := range r.entries {
-		if e.SubjectKey != listing.SubjectKey || !listing.Now.Before(e.ExpiresAt) {
-			continue
+	if listing.Key != "" {
+		if e, ok := r.entries[listing.Key]; ok && listed(e) {
+			out = append(out, grantEntryOf(e))
 		}
-		out = append(out, storage.GrantEntry{Key: e.Key, ClientID: e.ClientID, Record: cloneRawMessage(e.Record), ExpiresAt: e.ExpiresAt})
+		return out, nil
+	}
+	for _, e := range r.entries {
+		if listed(e) {
+			out = append(out, grantEntryOf(e))
+		}
 	}
 	return out, nil
+}
+
+func grantEntryOf(e storage.NewGrantEntry) storage.GrantEntry {
+	return storage.GrantEntry{Key: e.Key, ClientID: e.ClientID, Record: cloneRawMessage(e.Record), ExpiresAt: e.ExpiresAt}
 }
 
 // DeleteGrant implements storage.GrantRegistry.

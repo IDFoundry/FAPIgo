@@ -28,6 +28,23 @@ func TestGrantRegistryContract(t *testing.T) {
 	storage.TestGrantRegistryContract(t, func() storage.GrantRegistry { return NewGrantRegistry() })
 }
 
+// GrantRegistry honours GrantListing.Key: only that entry is listed,
+// not the subject's others.
+func TestGrantRegistryListsByKeyAlone(t *testing.T) {
+	r := NewGrantRegistry()
+	ctx := context.Background()
+	expires := time.Now().Add(time.Hour)
+	for _, key := range []string{"g1", "g2"} {
+		if err := r.RecordGrant(ctx, storage.NewGrantEntry{Key: key, SubjectKey: "s1", ClientID: "c", ExpiresAt: expires}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := r.ListGrants(ctx, storage.GrantListing{SubjectKey: "s1", Now: time.Now(), Key: "g1"})
+	if err != nil || len(entries) != 1 || entries[0].Key != "g1" {
+		t.Fatalf("ListGrants(s1, key g1) = %+v, %v, want g1 alone", entries, err)
+	}
+}
+
 func TestBackchannelInboxContract(t *testing.T) {
 	storage.TestBackchannelInboxContract(t, func() storage.BackchannelInbox { return NewBackchannelInbox() })
 }

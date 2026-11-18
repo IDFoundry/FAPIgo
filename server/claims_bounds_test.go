@@ -44,9 +44,19 @@ func pushClaims(t *testing.T, h harness, claims string) error {
 	return err
 }
 
+// claimWithValues is a "claims" parameter giving one userinfo claim n
+// distinct "values".
+func claimWithValues(n int) string {
+	values := make([]string, n)
+	for i := range values {
+		values[i] = fmt.Sprintf(`"%x"`, i)
+	}
+	return `{"userinfo":{"c":{"values":[` + strings.Join(values, ",") + `]}}}`
+}
+
 // TestPushAuthorizationRequestBoundsClaimsParameter: a plain-form PAR
 // request's claims parameter is bounded in size, in claims requested per
-// location, and in essential acr values, each refused as invalid_request
+// location, in essential acr values and in one claim's values, each refused as invalid_request
 // at the bound plus one and accepted at the bound.
 func TestPushAuthorizationRequestBoundsClaimsParameter(t *testing.T) {
 	tests := []struct {
@@ -56,6 +66,7 @@ func TestPushAuthorizationRequestBoundsClaimsParameter(t *testing.T) {
 		{"id_token names", claimsWithNames("id_token", 256), claimsWithNames("id_token", 257)},
 		{"userinfo names", claimsWithNames("userinfo", 256), claimsWithNames("userinfo", 257)},
 		{"essential acr values", essentialACRWithValues(32), essentialACRWithValues(33)},
+		{"one claim's values", claimWithValues(64), claimWithValues(65)},
 		{"size", `{"userinfo":{"c":{"value":"` + strings.Repeat("a", 16<<10-len(`{"userinfo":{"c":{"value":""}}}`)) + `"}}}`,
 			`{"userinfo":{"c":{"value":"` + strings.Repeat("a", 16<<10-len(`{"userinfo":{"c":{"value":""}}}`)+1) + `"}}}`},
 	}
@@ -93,6 +104,7 @@ func TestCIBABoundsClaimsParameter(t *testing.T) {
 	for name, claims := range map[string]string{
 		"names":                claimsWithNames("id_token", 257),
 		"essential acr values": essentialACRWithValues(33),
+		"one claim's values":   claimWithValues(65),
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, _ := newHarnessWithBackchannel(t)

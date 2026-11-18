@@ -47,9 +47,15 @@ func FromRequest(request json.RawMessage) ([]json.RawMessage, bool) {
 	if json.Unmarshal(valuesRaw, &values) != nil {
 		return []json.RawMessage{}, true
 	}
+	if !hasValue {
+		return values, true
+	}
+	// "value" is decoded once, not once per entry of "values": a large
+	// "value" and many entries would otherwise cost their product.
+	want, wantOK := decode(value)
 	acceptable := make([]json.RawMessage, 0, len(values))
 	for _, v := range values {
-		if !hasValue || Equal(v, value) {
+		if got, ok := decode(v); ok && wantOK && equalValues(got, want) {
 			acceptable = append(acceptable, v)
 		}
 	}
@@ -150,8 +156,13 @@ func (a Acceptable) Allows(name string, value json.RawMessage) bool {
 	if !constrained {
 		return true
 	}
+	// value is decoded once, not once per acceptable value.
+	got, ok := decode(value)
+	if !ok {
+		return false
+	}
 	for _, v := range acceptable {
-		if Equal(v, value) {
+		if want, ok := decode(v); ok && equalValues(got, want) {
 			return true
 		}
 	}

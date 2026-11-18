@@ -15,6 +15,27 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.77.0
+
+### A claim may be requested with at most 64 values (server)
+
+**Affects:** a client whose OIDC `claims` parameter (OIDC Core §5.5.1)
+gives one claim, in `id_token` or `userinfo`, a `values` array of more
+than 64 entries, at PAR or the backchannel authentication endpoint.
+
+**Why:** the acceptable values are kept with the grant and compared with
+the released claim at each token issuance and UserInfo request. Only the
+whole parameter's 16 KiB limit bounded how many there could be. The
+comparison of `value` with each entry of `values` is also now linear;
+before, a large `value` with many entries cost about 3 s of CPU for each
+completed authorization.
+
+**What fails:** the request is refused with `invalid_request`, naming
+the claim.
+
+**What to change:** give a claim at most 64 acceptable values. Real
+requests give a handful.
+
 ## v0.76.0
 
 ### An attester's x5c must be a single path, in order (server)

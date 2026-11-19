@@ -8,6 +8,6 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "oidc-provider": "9.13.3"
+    "oidc-provider": "9.15.0"
   }
 }

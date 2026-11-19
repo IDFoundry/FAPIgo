@@ -129,7 +129,11 @@ const (
 	// of ExpectedSANURI against one of the presented certificate's
 	// subjectAltName uniformResourceIdentifier entries — RFC 8705
 	// §2.1's "tls_client_auth_san_uri". Same chain-trust posture as
-	// ClientAuthMethodTLSClientAuth — see its own doc comment.
+	// ClientAuthMethodTLSClientAuth — see its own doc comment. Where the
+	// trusted CAs are shared, any CA under them that may issue a URI SAN
+	// can name this client's value: only uniformResourceIdentifier name
+	// constraints confine URI SANs (RFC 5280 §4.2.1.10), dNSName ones
+	// don't.
 	ClientAuthMethodTLSClientAuthSANURI
 
 	// ClientAuthMethodTLSClientAuthSANIP authenticates by match of

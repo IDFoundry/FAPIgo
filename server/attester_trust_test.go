@@ -43,6 +43,8 @@ type certOptions struct {
 	keyUsage           x509.KeyUsage
 	key                crypto.Signer // nil: fresh P-256
 	uris               []string      // URI subject alternative names
+	permittedDNS       []string      // dNSName name constraints
+	permittedURI       []string      // uniformResourceIdentifier name constraints
 	extKeyUsage        []x509.ExtKeyUsage
 	unknownExtKeyUsage []asn1.ObjectIdentifier
 }
@@ -82,6 +84,8 @@ func newTestCert(t *testing.T, name string, o certOptions) testCert {
 		IsCA:                  o.isCA,
 		ExtKeyUsage:           o.extKeyUsage,
 		UnknownExtKeyUsage:    o.unknownExtKeyUsage,
+		PermittedDNSDomains:   o.permittedDNS,
+		PermittedURIDomains:   o.permittedURI,
 	}
 	for _, raw := range o.uris {
 		u, err := url.Parse(raw)
@@ -497,6 +501,48 @@ func TestX5CAttesterChainIssuerInCertificate(t *testing.T) {
 			instanceKey := generateKey(t)
 			// "iss" is always the client's attester: the attester controls it.
 			attestation := createX5CAttestation(t, leaf.key, x5cOf(leaf), "", &instanceKey.PublicKey, h.now)
+			err := requestWithAttestation(t, h, attestation, instanceKey)
+			if tc.wantOK {
+				if err != nil {
+					t.Fatalf("RequestClientCredentialsToken: %v", err)
+				}
+				return
+			}
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+				t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+			}
+		})
+	}
+}
+
+// TestX5CAttesterChainIssuerInCertificateNameConstraints pins what name
+// constraints do for AttesterIssuerInCertificate under a shared anchor:
+// attester A's CA, constrained to A's host, issues a certificate naming
+// the client's attester. A dNSName constraint doesn't confine a URI SAN
+// (RFC 5280 §4.2.1.10), so A attests for the client; only a
+// uniformResourceIdentifier constraint stops it.
+func TestX5CAttesterChainIssuerInCertificateNameConstraints(t *testing.T) {
+	sharedRoot := newTestCert(t, "trust list CA", certOptions{isCA: true})
+	cases := map[string]struct {
+		constraints certOptions
+		wantOK      bool
+	}{
+		"dNSName constraint doesn't confine a URI SAN": {certOptions{permittedDNS: []string{"attester-a.example"}}, true},
+		"uniformResourceIdentifier constraint does":    {certOptions{permittedURI: []string{"attester-a.example"}}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			opts := tc.constraints
+			opts.parent, opts.isCA = &sharedRoot, true
+			attesterACA := newTestCert(t, "attester A CA", opts)
+			leaf := newTestCert(t, "attester", certOptions{parent: &attesterACA, uris: []string{testAttesterIssuer}})
+			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{
+				Revocation:    server.NoClientCertificateRevocationCheck{},
+				TrustAnchors:  server.StaticAttesterTrustAnchors{Roots: poolOf(sharedRoot)},
+				IssuerBinding: server.AttesterIssuerInCertificate,
+			})
+			instanceKey := generateKey(t)
+			attestation := createX5CAttestation(t, leaf.key, x5cOf(leaf, attesterACA), "", &instanceKey.PublicKey, h.now)
 			err := requestWithAttestation(t, h, attestation, instanceKey)
 			if tc.wantOK {
 				if err != nil {

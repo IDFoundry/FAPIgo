@@ -267,9 +267,13 @@ const (
 	// only while it can't put that identity in a certificate: with
 	// anchors shared between attesters — a trust list, one anchor pool
 	// for every client — any attester that runs a CA under any of the
-	// anchors (or holds an intermediate without name constraints) can
-	// issue itself a certificate naming another attester, and attest for
-	// that attester's clients. Choose AttesterIssuerBoundToAnchor for
+	// anchors can issue itself a certificate naming another attester,
+	// and attest for that attester's clients. Name constraints confine
+	// that only if they are uniformResourceIdentifier constraints, on the
+	// attester's CA or one above it, and then only a URI's host: RFC 5280
+	// §4.2.1.10 applies each constraint to names of its own type, so a
+	// CA constrained to the dNSName attester-a.example can still certify
+	// https://attester-b.example. Choose AttesterIssuerBoundToAnchor for
 	// shared trust lists; this mode suits anchors that issue only to
 	// attesters they have vetted for every identifier they certify.
 	AttesterIssuerInCertificate

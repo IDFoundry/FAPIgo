@@ -470,7 +470,7 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 	candidates, err := s.resolveClientKeys(ctx, client.ID(), keys.ClientAssertionVerification, alg, assertion.KeyID())
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidClient, 401, "no matching client key", err)
+			unresolvedClientKeysError(ctx, err, newError(ErrorInvalidClient, 401, "no matching client key", err))
 	}
 
 	audiences := s.acceptableClientAssertionAudiences(client, endpoints, mtlsEndpoints)
@@ -488,7 +488,7 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidClient, 401, clientAssertionFailureDescription(err, audiences), err)
+			storeFailure(ctx, err, "failed to check client assertion replay", newError(ErrorInvalidClient, 401, clientAssertionFailureDescription(err, audiences), err))
 	}
 
 	return client, verified, nil
@@ -626,7 +626,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 
 	candidates, err := s.resolveClientKeys(ctx, client.ID(), keys.RequestObjectVerification, alg, obj.KeyID())
 	if err != nil {
-		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "no matching client key", err)
+		return nil, nil, nil, unresolvedClientKeysError(ctx, err, newError(ErrorInvalidRequestObject, 400, "no matching client key", err))
 	}
 
 	policy := requestobject.VerifyPolicy{
@@ -652,7 +652,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		return obj.Verify(ctx, pub, policy)
 	})
 	if err != nil {
-		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object verification failed", err)
+		return nil, nil, nil, storeFailure(ctx, err, "failed to check request object replay", newError(ErrorInvalidRequestObject, 400, "request object verification failed", err))
 	}
 	// RFC 9101 §4 ("request and request_uri parameters MUST NOT be
 	// included in Request Objects"): the counterpart, inside the signed
@@ -893,7 +893,7 @@ func (s *Server) verifyOptionalDPoPProof(ctx context.Context, proof string, endp
 		Replay:       s.dpopReplayChecker(),
 	}, endpoint, mtlsAlias)
 	if err != nil {
-		return "", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err)
+		return "", storeFailure(ctx, err, "failed to check DPoP proof replay", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err))
 	}
 	if s.deps.Nonces != nil {
 		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {

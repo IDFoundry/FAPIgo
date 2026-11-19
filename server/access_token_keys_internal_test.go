@@ -61,8 +61,10 @@ func TestAccessTokenSigningKeys(t *testing.T) {
 
 // TestIsOwnJWTAccessToken: RevokeToken recognises a JWT access token
 // signed with any key the issuer currently publishes (all of a
-// keys.RotatingKeyManager's), and nothing when the issuer signs no
-// tokens or its keys can't be read.
+// keys.RotatingKeyManager's, or a keys.KeyManager's one), and nothing
+// when the issuer signs no tokens. Keys that can't be read are a
+// server_error: the 200 RevokeToken answers a no with would tell the
+// client its token was revoked.
 func TestIsOwnJWTAccessToken(t *testing.T) {
 	issuer, err := fapi.ParseIssuerURL("https://as.example.com")
 	if err != nil {
@@ -85,17 +87,32 @@ func TestIsOwnJWTAccessToken(t *testing.T) {
 			deps: Dependencies{AccessTokens: issuerDep, Clock: SystemClock{}},
 		}
 	}
-	if !serverWith(jwt).isOwnJWTAccessToken(context.Background(), "client-1", raw) {
-		t.Error("rotating key manager: isOwnJWTAccessToken = false, want true")
+	for name, tc := range map[string]struct {
+		issuer AccessTokenIssuer
+		want   bool
+	}{
+		"rotating key manager": {jwt, true},
+		"single key manager":   {JWTAccessTokens{Keys: singleKeyManager{manager}, Algorithm: fapi.ES256}, true},
+		"opaque issuer":        {OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}, false},
+	} {
+		if got, err := serverWith(tc.issuer).isOwnJWTAccessToken(context.Background(), "client-1", raw); got != tc.want || err != nil {
+			t.Errorf("%s: isOwnJWTAccessToken = %v, %v, want %v", name, got, err, tc.want)
+		}
 	}
-	if serverWith(OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}).isOwnJWTAccessToken(context.Background(), "client-1", raw) {
-		t.Error("opaque issuer: isOwnJWTAccessToken = true, want false")
-	}
-	unreadable := JWTAccessTokens{Keys: mustKeyManager(t, keys.IDTokenSigning), Algorithm: fapi.ES256}
-	if serverWith(unreadable).isOwnJWTAccessToken(context.Background(), "client-1", raw) {
-		t.Error("keys without an access token key: isOwnJWTAccessToken = true, want false")
+	for name, unreadable := range map[string]keys.KeyManager{
+		"rotating key manager": mustKeyManager(t, keys.IDTokenSigning),
+		"single key manager":   singleKeyManager{mustKeyManager(t, keys.IDTokenSigning)},
+	} {
+		got, err := serverWith(JWTAccessTokens{Keys: unreadable, Algorithm: fapi.ES256}).isOwnJWTAccessToken(context.Background(), "client-1", raw)
+		if got || err == nil || err.Code() != ErrorServerError {
+			t.Errorf("%s whose keys can't be read: isOwnJWTAccessToken = %v, %v, want false and server_error", name, got, err)
+		}
 	}
 }
+
+// singleKeyManager is a keys.KeyManager that isn't a
+// keys.RotatingKeyManager: it has one key per purpose.
+type singleKeyManager struct{ keys.KeyManager }
 
 // mustKeyManager is a keys.RotatingKeyManager holding one ES256 key for
 // purpose.

@@ -61,7 +61,7 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 	// decision of any kind is recorded once the request has expired.
 	pending, lookupErr := s.deps.Backchannel.LookupBackchannelAuthentication(ctx, handleHash)
 	if lookupErr != nil {
-		wrapped := newError(ErrorInvalidRequest, 400, invalidBackchannelHandleMessage, lookupErr)
+		wrapped := storeFailure(ctx, lookupErr, "failed to look up the backchannel authentication request", newError(ErrorInvalidRequest, 400, invalidBackchannelHandleMessage, lookupErr))
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
 		return wrapped
 	}
@@ -100,7 +100,7 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 
 	decided, err := s.deps.Backchannel.DecideBackchannelAuthentication(ctx, decision)
 	if err != nil {
-		wrapped := newError(ErrorInvalidRequest, 400, invalidBackchannelHandleMessage, err)
+		wrapped := storeFailure(ctx, err, "failed to record the backchannel authentication decision", newError(ErrorInvalidRequest, 400, invalidBackchannelHandleMessage, err))
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
 		return wrapped
 	}

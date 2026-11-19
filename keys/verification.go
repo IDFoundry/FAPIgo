@@ -81,6 +81,13 @@ type VerificationKeySet struct {
 // and ClientJWKSSource are this package's production implementations;
 // TestClientKeySourceContract checks another implementation keeps the
 // same per-client isolation.
+//
+// The server answers an error from ResolveVerificationKeys as the
+// client's: no usable key. A source that couldn't answer at all, such
+// as one reading the server's own database while it's unreachable,
+// wraps storage.ErrStoreUnavailable to say so, and the server answers
+// 500 server_error instead. A failed jwks_uri fetch doesn't: the
+// client keeps that endpoint.
 type ClientKeySource interface {
 	ResolveVerificationKeys(ctx context.Context, req ClientKeyRequest) (VerificationKeySet, error)
 }

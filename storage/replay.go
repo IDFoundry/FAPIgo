@@ -45,9 +45,10 @@ type ReplayUse struct {
 //
 // UseOnce's error means the digest was already recorded, unless it
 // wraps ErrStoreUnavailable (the store couldn't answer at all), or
-// context.Canceled or context.DeadlineExceeded; a resource server
-// answers those with 500 server_error rather than refusing the DPoP
-// proof as replayed.
+// context.Canceled or context.DeadlineExceeded; the authorization
+// server and a resource server answer those with 500 server_error
+// rather than refusing the DPoP proof, client assertion, request object
+// or Client Attestation PoP as replayed.
 type ReplayStore interface {
 	UseOnce(ctx context.Context, use ReplayUse) error
 }

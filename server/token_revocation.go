@@ -145,8 +145,14 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 	// influence the revocation response", and only orders the search
 	// (§2.1), so a refresh token sent as "access_token" is still revoked
 	// above.
-	if !result.Revoked && s.isOwnAccessToken(ctx, client.ID(), token) {
-		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), newError(ErrorUnsupportedTokenType, 400, "only refresh tokens can be revoked", nil))
+	if !result.Revoked {
+		own, ownErr := s.isOwnAccessToken(ctx, client.ID(), token)
+		if ownErr != nil {
+			return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), ownErr)
+		}
+		if own {
+			return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), newError(ErrorUnsupportedTokenType, 400, "only refresh tokens can be revoked", nil))
+		}
 	}
 	// The client gets the same 200 either way; the audit record says
 	// whether anything was revoked, so an operator can see requests for
@@ -162,7 +168,7 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 // isOwnAccessToken reports whether rawToken is a live access token this
 // server issued to clientID: an opaque one (isOwnOpaqueAccessToken) or
 // a JWT one (isOwnJWTAccessToken).
-func (s *Server) isOwnAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) bool {
+func (s *Server) isOwnAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) (bool, *Error) {
 	if strings.Contains(rawToken, ".") {
 		return s.isOwnJWTAccessToken(ctx, clientID, rawToken)
 	}
@@ -174,44 +180,51 @@ func (s *Server) isOwnAccessToken(ctx context.Context, clientID fapi.ClientID, r
 // JWTAccessTokens', or those an AccessTokenKeyPublisher names — for this
 // server's issuer and clientID, and not expired (allowing
 // Limits.MaxClockSkew). Only the client's own tokens are reported, as
-// isOwnOpaqueAccessToken reports only the client's own; a key that
-// can't be read counts as no.
-func (s *Server) isOwnJWTAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) bool {
+// isOwnOpaqueAccessToken reports only the client's own. Keys that can't
+// be read are a 500 server_error, not a no: New has already read every
+// one (checkSigningKeys), so now it's the key manager failing (a KMS
+// outage), and RevokeToken's 200 would tell the client the token was
+// revoked.
+func (s *Server) isOwnJWTAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) (bool, *Error) {
 	signing, ok := accessTokenSigningKeys(s.deps.AccessTokens)
 	if !ok {
-		return false
+		return false, nil
 	}
 	parsed, err := token.ParseAccessToken(rawToken)
 	if err != nil || parsed.Algorithm() != signing.Algorithm {
-		return false
+		return false, nil
 	}
-	for _, key := range accessTokenVerificationKeys(ctx, signing) {
+	verificationKeys, err := accessTokenVerificationKeys(ctx, signing)
+	if err != nil {
+		return false, newError(ErrorServerError, 500, "failed to read the access token signing keys", err)
+	}
+	for _, key := range verificationKeys {
 		claims, err := parsed.SignedClaims(key.PublicKey, signing.Algorithm)
 		if err != nil {
 			continue
 		}
 		return claims.Issuer == s.cfg.Issuer.String() && claims.ClientID == clientID.String() &&
-			s.deps.Clock.Now().Before(claims.ExpiresAt.Add(s.cfg.Limits.MaxClockSkew))
+			s.deps.Clock.Now().Before(claims.ExpiresAt.Add(s.cfg.Limits.MaxClockSkew)), nil
 	}
-	return false
+	return false, nil
 }
 
 // accessTokenVerificationKeys is every key signing currently publishes:
 // all of a keys.RotatingKeyManager's, or the one keys.KeyManager.PublicKey
 // returns.
-func accessTokenVerificationKeys(ctx context.Context, signing keys.SigningKeyUse) []keys.PublicKeyInfo {
+func accessTokenVerificationKeys(ctx context.Context, signing keys.SigningKeyUse) ([]keys.PublicKeyInfo, error) {
 	if rotating, ok := signing.Manager.(keys.RotatingKeyManager); ok {
 		set, err := rotating.PublicKeys(ctx, signing.Purpose, signing.Algorithm)
 		if err != nil {
-			return nil
+			return nil, err
 		}
-		return set.Keys
+		return set.Keys, nil
 	}
 	info, err := signing.Manager.PublicKey(ctx, signing.Purpose, signing.Algorithm)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return []keys.PublicKeyInfo{info}
+	return []keys.PublicKeyInfo{info}, nil
 }
 
 // isOwnOpaqueAccessToken reports whether rawToken is an opaque access
@@ -219,9 +232,10 @@ func accessTokenVerificationKeys(ctx context.Context, signing keys.SigningKeyUse
 // ownsRecord) issued to clientID. RFC 7009 §2.2.1 has a server
 // that can't revoke a token's type answer unsupported_token_type, rather
 // than the 200 that says it was revoked. Only the client's own tokens
-// are reported, so the answer reveals nothing about another's; a store
-// that can't answer counts as no.
-func (s *Server) isOwnOpaqueAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) bool {
+// are reported, so the answer reveals nothing about another's. A store
+// that couldn't answer (storeUnavailable) is a 500 server_error, not a
+// no: that 200 would tell the client the token was revoked.
+func (s *Server) isOwnOpaqueAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) (bool, *Error) {
 	var store storage.AccessTokenStore
 	switch t := s.deps.AccessTokens.(type) {
 	case OpaqueAccessTokens:
@@ -232,10 +246,13 @@ func (s *Server) isOwnOpaqueAccessToken(ctx context.Context, clientID fapi.Clien
 		}
 	}
 	if store == nil {
-		return false
+		return false, nil
 	}
 	looked, err := store.LookupAccessToken(ctx, storage.AccessTokenLookup{TokenHash: sha256.Sum256([]byte(rawToken))})
-	return err == nil && looked.ClientID == clientID && s.ownsAccessTokenRecord(looked.Claims)
+	if err != nil {
+		return false, storeFailure(ctx, err, "failed to look up the access token", nil)
+	}
+	return looked.ClientID == clientID && s.ownsAccessTokenRecord(looked.Claims), nil
 }
 
 // revokeRefreshToken revokes rawToken if it is a live refresh token

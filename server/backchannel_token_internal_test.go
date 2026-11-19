@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -12,20 +13,23 @@ import (
 
 // TestBackchannelPollError covers the CIBA token endpoint's answer for
 // each way polling can fail (CIBA Core §11): a wrapped storage error is
-// still recognized.
+// still recognized, and a store that couldn't answer is the server's
+// failure, not an unknown auth_req_id the client would give up on.
 func TestBackchannelPollError(t *testing.T) {
 	for _, tc := range []struct {
-		err  error
-		want ErrorCode
+		err    error
+		want   ErrorCode
+		status int
 	}{
-		{&storage.BackchannelAuthenticationExpiredError{}, ErrorExpiredToken},
-		{&storage.BackchannelAuthenticationSlowDownError{}, ErrorSlowDown},
-		{fmt.Errorf("wrapped: %w", &storage.BackchannelAuthenticationSlowDownError{}), ErrorSlowDown},
-		{&storage.BackchannelAuthenticationAlreadyRedeemedError{}, ErrorInvalidGrant},
-		{errors.New("not found"), ErrorInvalidGrant},
+		{&storage.BackchannelAuthenticationExpiredError{}, ErrorExpiredToken, 400},
+		{&storage.BackchannelAuthenticationSlowDownError{}, ErrorSlowDown, 400},
+		{fmt.Errorf("wrapped: %w", &storage.BackchannelAuthenticationSlowDownError{}), ErrorSlowDown, 400},
+		{&storage.BackchannelAuthenticationAlreadyRedeemedError{}, ErrorInvalidGrant, 400},
+		{errors.New("not found"), ErrorInvalidGrant, 400},
+		{fmt.Errorf("db: %w", storage.ErrStoreUnavailable), ErrorServerError, 500},
 	} {
-		if got := backchannelPollError(tc.err); got.Code() != tc.want || got.HTTPStatus() != 400 {
-			t.Errorf("backchannelPollError(%v) = %s %d, want %s 400", tc.err, got.Code(), got.HTTPStatus(), tc.want)
+		if got := backchannelPollError(context.Background(), tc.err); got.Code() != tc.want || got.HTTPStatus() != tc.status {
+			t.Errorf("backchannelPollError(%v) = %s %d, want %s %d", tc.err, got.Code(), got.HTTPStatus(), tc.want, tc.status)
 		}
 	}
 }

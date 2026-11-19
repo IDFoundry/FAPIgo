@@ -261,7 +261,7 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 		TokenHash: sha256.Sum256([]byte(rawToken)),
 	})
 	if err != nil {
-		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, refreshTokenUnknownDescription, err)
+		return grantRecord{}, time.Time{}, storeFailure(ctx, err, "failed to look up the refresh token", newError(ErrorInvalidGrant, 400, refreshTokenUnknownDescription, err))
 	}
 
 	// Another client's refresh token is as unknown as no token, and

@@ -42,6 +42,8 @@ var reviewedDescriptions = map[string]bool{
 	`"the client_credentials grant has no end user: "+tok+" cannot be requested"`: true,
 	// a fixed record name.
 	`"failed to decode "+what`: true,
+	// storeFailure's fixed text: a string literal at every call.
+	"what": true,
 	// a constant.
 	`fmt.Sprintf("the end user's internal subject is longer than the reversible pairwise deriver's %d-byte limit (pairwise.MaxReversibleSubjectLength)", pairwise.MaxReversibleSubjectLength)`: true,
 	// a constant.

@@ -95,7 +95,7 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), grantErr)
 	}
 
-	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
+	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate, req.HTTP.EndpointRoute)
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), bindingErr)
 	}

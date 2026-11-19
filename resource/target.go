@@ -53,49 +53,49 @@ func (r resourceURL) covers(target *url.URL) bool {
 	return c == r.prefix || strings.HasPrefix(c, r.prefix+"/")
 }
 
-// requestTargets returns the URLs a DPoP proof's htu may name for req:
-// for a request built by VerifyRequestFromHTTP, its escaped path at each
-// configured origin whose path prefix covers it; for an explicit
-// req.URL, that URL, once it is known to be under one of
-// Config.ResourceURLs.
-func (v *Verifier) requestTargets(req VerifyRequest) ([]*url.URL, *Error) {
+// requestTarget checks an explicit target or resolves the received path
+// against the configured origins.
+func (v *Verifier) requestTarget(req VerifyRequest, dpop bool) (*url.URL, *Error) {
 	if req.URL != nil {
 		return v.explicitTarget(req.URL)
 	}
-	return v.pathTargets(req.requestPath)
+	return v.pathTarget(req.requestPath, dpop)
 }
 
 // explicitTarget is target, once it is known to be an absolute http(s)
 // URL under one of Config.ResourceURLs.
-func (v *Verifier) explicitTarget(target *url.URL) ([]*url.URL, *Error) {
+func (v *Verifier) explicitTarget(target *url.URL) (*url.URL, *Error) {
 	if !target.IsAbs() || target.Host == "" || (target.Scheme != "https" && target.Scheme != "http") {
 		return nil, newError(ErrorServerError, 500, "failed to verify request", errors.New("resource: VerifyRequest.URL must be an absolute http(s) URL, or left nil with a request built by VerifyRequestFromHTTP"))
 	}
 	for _, r := range v.resourceURLs {
 		if r.covers(target) {
-			return []*url.URL{target}, nil
+			return target, nil
 		}
 	}
 	return nil, outsideResourceURLs(target.String())
 }
 
-// pathTargets is escapedPath at each configured origin whose path
-// prefix covers it.
-func (v *Verifier) pathTargets(escapedPath string) ([]*url.URL, *Error) {
+// pathTarget resolves escapedPath under the configured prefixes. DPoP needs
+// one unambiguous URI. Certificate binding only requires a covered path.
+func (v *Verifier) pathTarget(escapedPath string, dpop bool) (*url.URL, *Error) {
 	if !strings.HasPrefix(escapedPath, "/") {
 		return nil, outsideResourceURLs(escapedPath)
 	}
-	var targets []*url.URL
+	var target *url.URL
 	for _, r := range v.resourceURLs {
 		t, err := url.Parse(r.origin.String() + escapedPath)
 		if err == nil && t.Host == r.origin.Host && t.RawQuery == "" && t.Fragment == "" && r.covers(t) {
-			targets = append(targets, t)
+			if target != nil && dpop && canonical.URI(target) != canonical.URI(t) {
+				return nil, newError(ErrorServerError, 500, "ambiguous DPoP request target", errors.New("set VerifyRequest.URL from trusted routing metadata when multiple resource origins cover the request path"))
+			}
+			target = t
 		}
 	}
-	if len(targets) == 0 {
+	if target == nil {
 		return nil, outsideResourceURLs(escapedPath)
 	}
-	return targets, nil
+	return target, nil
 }
 
 // outsideResourceURLs refuses a request whose target isn't under any of

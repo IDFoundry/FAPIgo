@@ -97,7 +97,7 @@ func validConfig(t *testing.T) resource.Config {
 			MaxClockSkew:    5 * time.Second,
 		},
 		Assurance:    resource.AssuranceDevelopment,
-		ResourceURLs: testResourceURLs(t),
+		ResourceURLs: testResourceURLs(t)[:1],
 	}
 }
 

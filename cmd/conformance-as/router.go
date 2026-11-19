@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 
@@ -66,4 +67,25 @@ func newRouter(srv *server.Server, consent *consentHandler, backchannel *backcha
 		mux.HandleFunc("POST /internal/federation/trust-anchors", federationTrustAnchorAdminHandler(dynFederationClients, federationTrustAnchorAdminToken))
 	}
 	return mux
+}
+
+type listenerKey struct{}
+
+type publicListener struct {
+	route server.EndpointRoute
+	base  string
+}
+
+// listenerHandler supplies the advertised URL base of the listener that actually
+// accepted the connection. Both listeners use the same ServeMux.
+func listenerHandler(next http.Handler, route server.EndpointRoute, base string) http.Handler {
+	listener := publicListener{route: route, base: base}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), listenerKey{}, listener)))
+	})
+}
+
+func receivingListener(r *http.Request) publicListener {
+	listener, _ := r.Context().Value(listenerKey{}).(publicListener)
+	return listener
 }

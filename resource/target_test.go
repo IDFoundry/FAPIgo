@@ -102,12 +102,23 @@ func TestVerifyRequestFromHTTPIgnoresHost(t *testing.T) {
 	}
 }
 
-// TestVerifyRequestFromHTTPAcceptsEachConfiguredOrigin: a proof naming
-// any of Config.ResourceURLs' origins verifies.
-func TestVerifyRequestFromHTTPAcceptsEachConfiguredOrigin(t *testing.T) {
+func TestVerifyDPoPTargetWithOverlappingOrigins(t *testing.T) {
 	f := newFixture(t)
-	if got := serveThroughMux(t, f, "/accounts/1", "", f.proofFor(t, "GET", "https://rs.example/accounts/1")); got != http.StatusOK {
-		t.Errorf("proof naming the second origin: status %d, want 200", got)
+	cfg := validConfig(t)
+	cfg.ResourceURLs = testResourceURLs(t)
+	f.verifier = newVerifierLike(t, f, cfg)
+	r := httptest.NewRequest(http.MethodGet, "/accounts/1", nil)
+	r.Header.Set("Authorization", "DPoP "+f.accessToken)
+	r.Header.Set("DPoP", f.proofFor(t, "GET", "https://rs.example/accounts/1"))
+	req := resource.VerifyRequestFromHTTP(r)
+	_, err := f.verifier.Verify(r.Context(), req)
+	assertCode(t, "ambiguous route", err, resource.ErrorServerError)
+	req.URL, _ = url.Parse("https://rs.example.com/accounts/1")
+	_, err = f.verifier.Verify(r.Context(), req)
+	assertCode(t, "different origin", err, resource.ErrorInvalidDPoPProof)
+	req.URL, _ = url.Parse("https://rs.example/accounts/1")
+	if _, err := f.verifier.Verify(r.Context(), req); err != nil {
+		t.Fatalf("receiving origin: %v", err)
 	}
 }
 

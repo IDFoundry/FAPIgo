@@ -20,7 +20,8 @@ import (
 // r's Host header, which the client controls, nor from the decoded
 // r.URL.Path, under which /accounts/a%2Fb would be /accounts/a/b. A
 // handler mounted on a path outside every ResourceURLs prefix has each
-// request refused.
+// request refused. When several origins cover the path, a DPoP request
+// requires VerifyRequest.URL from the listener or trusted proxy route.
 //
 // Behind a proxy that terminates TLS, r carries no client certificate:
 // set PeerCertificate afterwards from however the proxy forwards it

@@ -201,6 +201,7 @@ func TestVerifyTokenRequestBindingAtTheMTLSAlias(t *testing.T) {
 		cfg.MTLSEndpoints.Token = u
 	})
 	req := extensionTokenRequest(t, preAuthorizedForm(), dpopHeader(dpopProofAt(t, generateKey(t), alias, "", h.now)), nil)
+	req.SetEndpointRoute(server.MTLSEndpointAlias)
 	if _, err := h.server.VerifyTokenRequestBinding(context.Background(), registeredClient(t, h), req); err != nil {
 		t.Fatalf("VerifyTokenRequestBinding(proof for the mTLS alias): %v", err)
 	}

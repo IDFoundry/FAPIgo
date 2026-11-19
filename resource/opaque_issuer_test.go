@@ -28,7 +28,7 @@ func TestOpaqueAccessTokenFromAnotherIssuerIsRefused(t *testing.T) {
 	const (
 		issuerA = "https://idp.example/tenant-a"
 		issuerB = "https://idp.example/tenant-b"
-		api     = "https://rs.example"
+		api     = "https://rs.example.com"
 	)
 	now := time.Now()
 	shared := memstore.NewAccessTokenStore()

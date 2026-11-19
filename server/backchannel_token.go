@@ -107,7 +107,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), paramErr)
 	}
 
-	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
+	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate, req.HTTP.EndpointRoute)
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), bindingErr)
 	}

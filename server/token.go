@@ -24,6 +24,16 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
+// EndpointRoute identifies the receiving route for a DPoP proof (RFC 9449 §4.3).
+type EndpointRoute uint8
+
+const (
+	// PrimaryEndpoint selects the configured endpoint in Config.Endpoints.
+	PrimaryEndpoint EndpointRoute = iota + 1
+	// MTLSEndpointAlias selects the corresponding Config.MTLSEndpoints URL.
+	MTLSEndpointAlias
+)
+
 // AuthorizationCodeExchangeRequest is the input to
 // Server.ExchangeAuthorizationCode.
 type AuthorizationCodeExchangeRequest struct {
@@ -217,7 +227,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), paramErr)
 	}
 
-	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
+	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate, req.HTTP.EndpointRoute)
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), bindingErr)
 	}
@@ -644,14 +654,14 @@ func resolveDPoPProof(proofs []string) (string, *Error) {
 // AccessTokenParams.Thumbprint (and, for a DPoP-bound client, the same
 // value stored authorization-code/backchannel-request bindings are
 // checked against).
-func (s *Server) verifyTokenRequestBinding(ctx context.Context, client storage.RegisteredClient, dpopProof string, peerCert *x509.Certificate) (string, *Error) {
+func (s *Server) verifyTokenRequestBinding(ctx context.Context, client storage.RegisteredClient, dpopProof string, peerCert *x509.Certificate, route EndpointRoute) (string, *Error) {
 	if client.SenderConstrain() == storage.SenderConstrainMTLS {
 		if peerCert == nil {
 			return "", newError(ErrorInvalidRequest, 400, "a client certificate is required", nil)
 		}
 		return mtls.Thumbprint(peerCert), nil
 	}
-	verified, err := s.verifyTokenRequestDPoP(ctx, dpopProof)
+	verified, err := s.verifyTokenRequestDPoP(ctx, dpopProof, route)
 	if err != nil {
 		return "", err
 	}
@@ -672,20 +682,20 @@ func tokenTypeFor(senderConstrain storage.SenderConstrain) string {
 	return "DPoP"
 }
 
-func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop.VerifiedProof, *Error) {
+func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string, route EndpointRoute) (dpop.VerifiedProof, *Error) {
 	if proof == "" {
 		return dpop.VerifiedProof{}, newError(ErrorInvalidRequest, 400, "DPoP proof is required", nil)
 	}
-	verified, err := verifyDPoPAtEitherEndpoint(ctx, dpop.VerifyRequest{
+	verified, err := verifyEndpointDPoP(ctx, dpop.VerifyRequest{
 		Proof:        proof,
 		Method:       "POST",
 		Now:          s.deps.Clock.Now(),
 		MaxProofAge:  s.cfg.Limits.MaxDPoPProofAge,
 		MaxClockSkew: s.cfg.Limits.MaxClockSkew,
 		Replay:       s.dpopReplayChecker(),
-	}, s.cfg.Endpoints.Token, s.cfg.MTLSEndpoints.Token)
+	}, s.cfg.Endpoints.Token, s.cfg.MTLSEndpoints.Token, route)
 	if err != nil {
-		return dpop.VerifiedProof{}, storeFailure(ctx, err, "failed to check DPoP proof replay", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err))
+		return dpop.VerifiedProof{}, err
 	}
 	if s.deps.Nonces != nil {
 		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {
@@ -695,37 +705,29 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop
 	return verified, nil
 }
 
-// verifyDPoPAtEitherEndpoint verifies a DPoP proof's "htm"/"htu" against
-// primary, retrying once against mtlsAlias (RFC 8705 §5) on a pure htu
-// mismatch — never on any other failure, and never once req.Replay has
-// actually been consulted (dpop.Verify's own htu check runs strictly
-// before its replay check, confirmed by reading its source — so a
-// mismatched first attempt never touches replay state, making the
-// retry safe rather than a second, distinct use of the same jti).
-//
-// This is not sender-constraining-specific: a DPoP-sender-constrained
-// client that is *also* registered for RFC 8705 §2 certificate-based
-// authentication (storage.ClientAuthMethodSelfSignedTLSClientAuth/
-// TLSClientAuth) must call this endpoint's mTLS-alias URL to present
-// its certificate at all — its DPoP proof's own htu then legitimately
-// names that alias, not the plain endpoint. Confirmed live: the OIDF
-// conformance suite's own FAPI2SPFinal driver does exactly this once it
-// discovers mtls_endpoint_aliases, for a client_auth_type=mtls client
-// that is otherwise plain sender_constrain=dpop. Both URLs
-// unambiguously identify this same authorization server, so accepting
-// either is interoperability, not a security relaxation — and
-// unconditional on which client, unlike acceptableClientAssertionAudiences's
-// CIBA-only "aud" widening: any client may legitimately reach either URL.
-func verifyDPoPAtEitherEndpoint(ctx context.Context, req dpop.VerifyRequest, primary, mtlsAlias fapi.URL) (dpop.VerifiedProof, error) {
-	primaryURL := primary.URL()
-	req.URL = &primaryURL
-	verified, err := dpop.Verify(ctx, req)
-	if err == nil || !errors.Is(err, dpop.ErrURIMismatch) || mtlsAlias.IsZero() {
-		return verified, err
+// verifyEndpointDPoP matches htu to the one endpoint that received the request.
+func verifyEndpointDPoP(ctx context.Context, req dpop.VerifyRequest, primary, alias fapi.URL, route EndpointRoute) (dpop.VerifiedProof, *Error) {
+	target := primary.URL()
+	switch route {
+	case PrimaryEndpoint:
+	case MTLSEndpointAlias:
+		if alias.IsZero() {
+			return dpop.VerifiedProof{}, newError(ErrorServerError, 500, "cannot determine DPoP request target", errors.New("no mTLS endpoint alias configured"))
+		}
+		target = alias.URL()
+	case 0:
+		if !alias.IsZero() && alias.String() != primary.String() {
+			return dpop.VerifiedProof{}, newError(ErrorServerError, 500, "cannot determine DPoP request target", errors.New("a DPoP request to an endpoint with an alias requires FormRequest.EndpointRoute"))
+		}
+	default:
+		return dpop.VerifiedProof{}, newError(ErrorServerError, 500, "cannot determine DPoP request target", errors.New("unknown DPoP endpoint route"))
 	}
-	aliasURL := mtlsAlias.URL()
-	req.URL = &aliasURL
-	return dpop.Verify(ctx, req)
+	req.URL = &target
+	verified, err := dpop.Verify(ctx, req)
+	if err != nil {
+		return dpop.VerifiedProof{}, storeFailure(ctx, err, "failed to check DPoP proof replay", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err))
+	}
+	return verified, nil
 }
 
 // withIdentityClaims merges whatever Dependencies.IdentityClaims

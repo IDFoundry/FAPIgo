@@ -36,7 +36,8 @@ type VerifyRequest struct {
 	// URL is the absolute URL the client called, which a DPoP proof's
 	// htu must name. Leave it nil with a request built by
 	// VerifyRequestFromHTTP: Verify then builds it from the request's
-	// escaped path and Config.ResourceURLs. Set, it must be an absolute
+	// escaped path and Config.ResourceURLs when one origin covers the path.
+	// For DPoP at overlapping origins, set URL from trusted routing. Set, it must be an absolute
 	// http(s) URL under one of Config.ResourceURLs, or Verify refuses
 	// the request — so one built from the request's Host header, which
 	// the client controls, can name no other resource server.
@@ -283,14 +284,14 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 	if perr != nil {
 		return AuthorizationContext{}, usedDPoP, perr
 	}
-	targets, terr := v.requestTargets(req)
+	target, terr := v.requestTarget(req, usedDPoP)
 	if terr != nil {
 		return AuthorizationContext{}, usedDPoP, terr
 	}
 
 	now := v.deps.Clock.Now()
 
-	senderConstrain, verifiedProof, certThumbprint, verr := v.resolveCredential(ctx, req, targets, dpopProof, raw, usedDPoP, now)
+	senderConstrain, verifiedProof, certThumbprint, verr := v.resolveCredential(ctx, req, target, dpopProof, raw, usedDPoP, now)
 	if verr != nil {
 		return AuthorizationContext{}, usedDPoP, verr
 	}
@@ -502,7 +503,7 @@ func (v *Verifier) checkEachNotRevoked(ctx context.Context, resolved ResolvedAcc
 // the resolved access token against. Split out of Verify purely to keep
 // that method's own token-resolution/binding/revocation pipeline
 // readable — this is the one genuinely separable sub-task within it.
-func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, targets []*url.URL, dpopProof, raw string, usedDPoP bool, now time.Time) (storage.SenderConstrain, dpop.VerifiedProof, string, *Error) {
+func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, target *url.URL, dpopProof, raw string, usedDPoP bool, now time.Time) (storage.SenderConstrain, dpop.VerifiedProof, string, *Error) {
 	if usedDPoP {
 		if dpopProof == "" {
 			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "DPoP header is required", nil)
@@ -513,14 +514,13 @@ func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, tar
 		// proof's key. A proof anyone can sign with their own key and a
 		// made-up token must not be able to write to either store.
 		verifiedProof, err := dpop.Verify(ctx, dpop.VerifyRequest{
-			Proof:         dpopProof,
-			Method:        req.Method,
-			URL:           targets[0],
-			AlternateURLs: targets[1:],
-			AccessToken:   raw,
-			Now:           now,
-			MaxProofAge:   v.cfg.Limits.MaxDPoPProofAge,
-			MaxClockSkew:  v.cfg.Limits.MaxClockSkew,
+			Proof:        dpopProof,
+			Method:       req.Method,
+			URL:          target,
+			AccessToken:  raw,
+			Now:          now,
+			MaxProofAge:  v.cfg.Limits.MaxDPoPProofAge,
+			MaxClockSkew: v.cfg.Limits.MaxClockSkew,
 		})
 		if err != nil {
 			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidDPoPProof, 401, "DPoP proof verification failed", err)

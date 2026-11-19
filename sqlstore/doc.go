@@ -240,6 +240,17 @@
 // opens. A sealed blob starts with a format byte (3) that no JSON
 // record starts with.
 //
+// The binding stops at the TablePrefix: the additional data names no
+// schema, database or file. A blob copied into another schema or SQLite
+// file whose tables have the same TablePrefix, and read by a DB with
+// the same key, opens there. A record moved to another issuer's tables
+// is still refused, as the server of that issuer treats a record another
+// issuer stamped as unknown (see package storage), and a relying party
+// a session begun with another issuer or client_id. But copies served
+// under one issuer, such as a blue/green, regional or staging copy, can
+// exchange rows, as putting back a row can (below). To keep such copies
+// apart too, give each its own key or TablePrefix.
+//
 // Not sealed, since the stores look rows up, consume and sweep them by
 // them: keys and digests (which reveal nothing of the values they're
 // digests of, though a session's state is the value itself, which the
@@ -289,8 +300,10 @@
 //
 // Keep the key outside the database — in a secrets manager or a KMS —
 // and away from its backups, which is what makes them unreadable
-// without it. Losing it makes every sealed record unreadable: clients
-// authorize again, as they would once the records expired.
+// without it. Losing it makes every sealed record unreadable, which
+// the server and a resource server answer as an outage (500
+// server_error, see Errors) until the record expires: delete those
+// records to have their clients authorize again sooner.
 // Changing it does the same for the records sealed under the old one;
 // to rotate without that, use RotatingSealer, in three deploys: first
 // RotatingSealer(oldSealer, newSealer), which still seals with the old

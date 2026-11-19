@@ -37,7 +37,7 @@ func (s *Server) LookupInteraction(ctx context.Context, handle InteractionHandle
 		Now:    now,
 	})
 	if err != nil {
-		if clientStoreUnavailable(ctx, err) {
+		if storeUnavailable(ctx, err) {
 			return InteractionRequest{}, newError(ErrorServerError, 500, "failed to look up the interaction", err)
 		}
 		return InteractionRequest{}, newError(ErrorInvalidRequest, 400, "interaction handle is invalid, expired, or already used", err)
@@ -56,7 +56,7 @@ func (s *Server) LookupInteraction(ctx context.Context, handle InteractionHandle
 	// shown as one to consent to.
 	client, err := s.deps.Clients.ResolveClient(ctx, pending.ClientID)
 	if err != nil {
-		if clientStoreUnavailable(ctx, err) {
+		if storeUnavailable(ctx, err) {
 			return InteractionRequest{}, newError(ErrorServerError, 500, "failed to look up the client", err)
 		}
 		return InteractionRequest{}, newError(ErrorUnauthorizedClient, 400, "client is no longer registered", err)

@@ -252,7 +252,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 			s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeFailure, "code reused by another client")
 			return TokenResult{}, invalidErr
 		}
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), invalidErr)
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), storeFailure(ctx, err, "failed to redeem the authorization code", invalidErr))
 	}
 
 	now := s.deps.Clock.Now()
@@ -685,7 +685,7 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop
 		Replay:       s.dpopReplayChecker(),
 	}, s.cfg.Endpoints.Token, s.cfg.MTLSEndpoints.Token)
 	if err != nil {
-		return dpop.VerifiedProof{}, newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err)
+		return dpop.VerifiedProof{}, storeFailure(ctx, err, "failed to check DPoP proof replay", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err))
 	}
 	if s.deps.Nonces != nil {
 		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {

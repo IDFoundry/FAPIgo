@@ -53,10 +53,12 @@
 // An error from a store means what its method's contract says (unknown,
 // already used, refused). A store that couldn't answer at all — its
 // backend unreachable, a timeout — may wrap ErrStoreUnavailable to say
-// so, and a resource server then answers 500 rather than telling the
-// client its token or DPoP proof is invalid. The authorization server
-// doesn't distinguish it: there, any ClientRepository error reads as an
-// unknown client, and any other store error fails the request.
+// so, and the authorization server and a resource server then answer
+// 500 server_error rather than telling the client its credentials,
+// code, refresh token, request_uri, auth_req_id, token or DPoP proof is
+// invalid: a client told its refresh token is invalid discards it. A
+// store that never wraps it has every error read as its method's
+// contract says, so an outage there is answered as unknown.
 //
 // Records keep as explicit fields only what a store itself acts on — a
 // lookup hash, ClientID, ExpiresAt, and for CIBA the decision status and

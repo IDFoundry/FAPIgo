@@ -92,7 +92,7 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, formClien
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidClient, 401, "client attestation pop verification failed", err)
+			storeFailure(ctx, err, "failed to check client attestation pop replay", newError(ErrorInvalidClient, 401, "client attestation pop verification failed", err))
 	}
 	instanceKey := verifiedPoP.InstanceKey.String()
 	if stillErr := s.checkAttestationStillValid(ctx, client, verifiedAttestation, signer, instanceKey); stillErr != nil {

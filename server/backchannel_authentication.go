@@ -365,7 +365,7 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 		return obj.Verify(ctx, pub, policy)
 	})
 	if err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "backchannel authentication request verification failed", err)
+		return verifiedBackchannelRequest{}, storeFailure(ctx, err, "failed to check backchannel authentication request replay", newError(ErrorInvalidRequest, 400, "backchannel authentication request verification failed", err))
 	}
 	// CIBA Core §13 has no invalid_request_object: a malformed member of
 	// the signed request is invalid_request, as everywhere on this path.
@@ -786,7 +786,7 @@ func (s *Server) LookupBackchannelInteraction(ctx context.Context, handle Backch
 func (s *Server) lookupBackchannelInteraction(ctx context.Context, handle BackchannelAuthenticationHandle) (BackchannelInteractionRequest, string, error) {
 	pending, err := s.deps.Backchannel.LookupBackchannelAuthentication(ctx, backchannelHandleHash(handle))
 	if err != nil {
-		if clientStoreUnavailable(ctx, err) {
+		if storeUnavailable(ctx, err) {
 			return BackchannelInteractionRequest{}, "", newError(ErrorServerError, 500, "failed to look up the backchannel authentication request", err)
 		}
 		return BackchannelInteractionRequest{}, "", newError(ErrorInvalidRequest, 400, "backchannel authentication handle is unknown", err)
@@ -797,7 +797,7 @@ func (s *Server) lookupBackchannelInteraction(ctx context.Context, handle Backch
 	}
 	client, err := s.deps.Clients.ResolveClient(ctx, pending.ClientID)
 	if err != nil {
-		if clientStoreUnavailable(ctx, err) {
+		if storeUnavailable(ctx, err) {
 			return BackchannelInteractionRequest{}, "", newError(ErrorServerError, 500, "the request's client could not be resolved", err)
 		}
 		return BackchannelInteractionRequest{}, "", newError(ErrorUnauthorizedClient, 400, "client is no longer registered", err)

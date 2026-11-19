@@ -46,7 +46,7 @@ func (s *Server) claimInteractionSlot(ctx context.Context, referenceKey string, 
 		if err == nil {
 			return nil
 		}
-		if clientStoreUnavailable(ctx, err) {
+		if storeUnavailable(ctx, err) {
 			return newError(ErrorServerError, 500, "failed to record the interaction", err)
 		}
 	}

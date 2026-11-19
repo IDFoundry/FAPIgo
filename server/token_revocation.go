@@ -145,8 +145,14 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 	// influence the revocation response", and only orders the search
 	// (§2.1), so a refresh token sent as "access_token" is still revoked
 	// above.
-	if !result.Revoked && s.isOwnAccessToken(ctx, client.ID(), token) {
-		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), newError(ErrorUnsupportedTokenType, 400, "only refresh tokens can be revoked", nil))
+	if !result.Revoked {
+		own, ownErr := s.isOwnAccessToken(ctx, client.ID(), token)
+		if ownErr != nil {
+			return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), ownErr)
+		}
+		if own {
+			return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), newError(ErrorUnsupportedTokenType, 400, "only refresh tokens can be revoked", nil))
+		}
 	}
 	// The client gets the same 200 either way; the audit record says
 	// whether anything was revoked, so an operator can see requests for
@@ -162,9 +168,9 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 // isOwnAccessToken reports whether rawToken is a live access token this
 // server issued to clientID: an opaque one (isOwnOpaqueAccessToken) or
 // a JWT one (isOwnJWTAccessToken).
-func (s *Server) isOwnAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) bool {
+func (s *Server) isOwnAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) (bool, *Error) {
 	if strings.Contains(rawToken, ".") {
-		return s.isOwnJWTAccessToken(ctx, clientID, rawToken)
+		return s.isOwnJWTAccessToken(ctx, clientID, rawToken), nil
 	}
 	return s.isOwnOpaqueAccessToken(ctx, clientID, rawToken)
 }
@@ -219,9 +225,10 @@ func accessTokenVerificationKeys(ctx context.Context, signing keys.SigningKeyUse
 // ownsRecord) issued to clientID. RFC 7009 §2.2.1 has a server
 // that can't revoke a token's type answer unsupported_token_type, rather
 // than the 200 that says it was revoked. Only the client's own tokens
-// are reported, so the answer reveals nothing about another's; a store
-// that can't answer counts as no.
-func (s *Server) isOwnOpaqueAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) bool {
+// are reported, so the answer reveals nothing about another's. A store
+// that couldn't answer (storeUnavailable) is a 500 server_error, not a
+// no: that 200 would tell the client the token was revoked.
+func (s *Server) isOwnOpaqueAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) (bool, *Error) {
 	var store storage.AccessTokenStore
 	switch t := s.deps.AccessTokens.(type) {
 	case OpaqueAccessTokens:
@@ -232,10 +239,13 @@ func (s *Server) isOwnOpaqueAccessToken(ctx context.Context, clientID fapi.Clien
 		}
 	}
 	if store == nil {
-		return false
+		return false, nil
 	}
 	looked, err := store.LookupAccessToken(ctx, storage.AccessTokenLookup{TokenHash: sha256.Sum256([]byte(rawToken))})
-	return err == nil && looked.ClientID == clientID && s.ownsAccessTokenRecord(looked.Claims)
+	if err != nil {
+		return false, storeFailure(ctx, err, "failed to look up the access token", nil)
+	}
+	return looked.ClientID == clientID && s.ownsAccessTokenRecord(looked.Claims), nil
 }
 
 // revokeRefreshToken revokes rawToken if it is a live refresh token

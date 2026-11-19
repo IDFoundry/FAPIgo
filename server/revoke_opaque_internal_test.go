@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -52,16 +53,29 @@ func TestIsOwnOpaqueAccessToken(t *testing.T) {
 		{"client-1", "other-issuer", false},
 		{"client-1", "no-issuer", false},
 	} {
-		if got := opaque.isOwnOpaqueAccessToken(context.Background(), tc.client, tc.token); got != tc.want {
-			t.Errorf("isOwnOpaqueAccessToken(%s, %q) = %v, want %v", tc.client, tc.token, got, tc.want)
+		if got, err := opaque.isOwnOpaqueAccessToken(context.Background(), tc.client, tc.token); got != tc.want || err != nil {
+			t.Errorf("isOwnOpaqueAccessToken(%s, %q) = %v, %v, want %v", tc.client, tc.token, got, err, tc.want)
 		}
 	}
 	pointer := &Server{cfg: Config{Issuer: issuer}, deps: Dependencies{AccessTokens: &OpaqueAccessTokens{Store: store}}}
-	if !pointer.isOwnOpaqueAccessToken(context.Background(), "client-1", "opaque-at") {
-		t.Error("isOwnOpaqueAccessToken under *OpaqueAccessTokens = false, want true")
+	if got, err := pointer.isOwnOpaqueAccessToken(context.Background(), "client-1", "opaque-at"); !got || err != nil {
+		t.Errorf("isOwnOpaqueAccessToken under *OpaqueAccessTokens = %v, %v, want true", got, err)
 	}
 	jwt := &Server{deps: Dependencies{AccessTokens: JWTAccessTokens{}}}
-	if jwt.isOwnOpaqueAccessToken(context.Background(), "client-1", "opaque-at") {
-		t.Error("isOwnOpaqueAccessToken under JWT access tokens = true, want false")
+	if got, err := jwt.isOwnOpaqueAccessToken(context.Background(), "client-1", "opaque-at"); got || err != nil {
+		t.Errorf("isOwnOpaqueAccessToken under JWT access tokens = %v, %v, want false", got, err)
 	}
+	// A store that couldn't answer isn't a no: RevokeToken's 200 would
+	// tell the client the token was revoked.
+	down := &Server{cfg: Config{Issuer: issuer}, deps: Dependencies{AccessTokens: OpaqueAccessTokens{Store: unavailableAccessTokens{}}}}
+	if got, err := down.isOwnOpaqueAccessToken(context.Background(), "client-1", "opaque-at"); got || err == nil || err.Code() != ErrorServerError {
+		t.Errorf("isOwnOpaqueAccessToken with the store down = %v, %v, want false and server_error", got, err)
+	}
+}
+
+// unavailableAccessTokens is an AccessTokenStore that can't answer.
+type unavailableAccessTokens struct{ storage.AccessTokenStore }
+
+func (unavailableAccessTokens) LookupAccessToken(context.Context, storage.AccessTokenLookup) (storage.LookedUpAccessToken, error) {
+	return storage.LookedUpAccessToken{}, fmt.Errorf("db: %w", storage.ErrStoreUnavailable)
 }

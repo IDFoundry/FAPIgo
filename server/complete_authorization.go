@@ -92,7 +92,7 @@ func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthoriz
 		Handle: interactionHandleKey(req.Handle.String()),
 	})
 	if err != nil {
-		return s.completeLocalFail(ctx, "", newError(ErrorInvalidRequest, 400, "interaction handle is invalid, expired, or already used", err)), nil
+		return s.completeLocalFail(ctx, "", storeFailure(ctx, err, "failed to complete the interaction", newError(ErrorInvalidRequest, 400, "interaction handle is invalid, expired, or already used", err))), nil
 	}
 
 	now := s.deps.Clock.Now()

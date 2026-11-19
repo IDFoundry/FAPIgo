@@ -147,7 +147,7 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		Now:             now,
 	})
 	if err != nil {
-		return s.beginFail(ctx, "", newError(ErrorInvalidRequestURI, 400, "request_uri is invalid, expired, or already used", err)), nil
+		return s.beginFail(ctx, "", storeFailure(ctx, err, "failed to look up the pushed authorization request", newError(ErrorInvalidRequestURI, 400, "request_uri is invalid, expired, or already used", err))), nil
 	}
 
 	// Backstops: a store keying by Reference can't return another
@@ -164,7 +164,7 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	// no longer holds) shouldn't be consented to.
 	client, err := s.deps.Clients.ResolveClient(ctx, req.ClientID)
 	if err != nil {
-		if clientStoreUnavailable(ctx, err) {
+		if storeUnavailable(ctx, err) {
 			return s.beginFail(ctx, req.ClientID, newError(ErrorServerError, 500, "failed to look up the client", err)), nil
 		}
 		return s.beginFail(ctx, req.ClientID, newError(ErrorUnauthorizedClient, 400, "client is no longer registered", err)), nil
@@ -334,7 +334,7 @@ func (s *Server) BuildAuthorizationErrorRedirect(ctx context.Context, client sto
 func (s *Server) checkRedirectURIStillRegistered(ctx context.Context, clientID fapi.ClientID, redirectURI string) *Error {
 	client, err := s.deps.Clients.ResolveClient(ctx, clientID)
 	if err != nil {
-		if clientStoreUnavailable(ctx, err) {
+		if storeUnavailable(ctx, err) {
 			return newError(ErrorServerError, 500, "failed to look up the client", err)
 		}
 		return newError(ErrorUnauthorizedClient, 400, "client is no longer registered", err)

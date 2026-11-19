@@ -118,7 +118,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	now := s.deps.Clock.Now()
 	polled, authReqIDHash, err := s.pollBackchannelAuthentication(ctx, client, authReqID, authn.InstanceKey, thumbprint, now)
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), backchannelPollError(err))
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), backchannelPollError(ctx, err))
 	}
 
 	grant, grantErr := s.approvedBackchannelGrant(polled, client.ID(), thumbprint, authn.InstanceKey)
@@ -228,7 +228,9 @@ func backchannelAuthReqIDHash(authReqID, instanceKey, dpopJKT string) [32]byte {
 // (backchannelAuthReqIDHash), so it is looked for under the presented
 // DPoP key first, then under none, without the dpop_jkt it may not
 // have. A miss leaves the store unchanged, so the second lookup is
-// polled as if it were the only one.
+// polled as if it were the only one. A store that couldn't answer the
+// first isn't asked the second: had it recovered, the second would miss
+// a request stored under the DPoP key, and answer it as unknown.
 func (s *Server) pollBackchannelAuthentication(ctx context.Context, client storage.RegisteredClient, authReqID, instanceKey, thumbprint string, now time.Time) (storage.PolledBackchannelAuthentication, [32]byte, error) {
 	poll := func(hash [32]byte) (storage.PolledBackchannelAuthentication, error) {
 		return s.deps.Backchannel.PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{
@@ -240,7 +242,7 @@ func (s *Server) pollBackchannelAuthentication(ctx context.Context, client stora
 	if client.SenderConstrain() != storage.SenderConstrainMTLS {
 		hash := backchannelAuthReqIDHash(authReqID, instanceKey, thumbprint)
 		polled, err := poll(hash)
-		if err == nil || isBackchannelPollOutcome(err) {
+		if err == nil || isBackchannelPollOutcome(err) || storeOutage(ctx, err) {
 			return polled, hash, err
 		}
 	}
@@ -299,8 +301,10 @@ func (s *Server) approvedBackchannelGrant(polled storage.PolledBackchannelAuthen
 const authReqIDUnknownDescription = "auth_req_id is invalid or unknown"
 
 // backchannelPollError is the token endpoint's answer when polling the
-// backchannel authentication request fails with err.
-func backchannelPollError(err error) *Error {
+// backchannel authentication request fails with err: the store's
+// typed answers first, then 500 server_error for a store that couldn't
+// answer (storeUnavailable), and an unknown auth_req_id otherwise.
+func backchannelPollError(ctx context.Context, err error) *Error {
 	var expired *storage.BackchannelAuthenticationExpiredError
 	if errors.As(err, &expired) {
 		return newError(ErrorExpiredToken, 400, "auth_req_id has expired", err)
@@ -313,7 +317,7 @@ func backchannelPollError(err error) *Error {
 	if errors.As(err, &alreadyRedeemed) {
 		return newError(ErrorInvalidGrant, 400, "auth_req_id has already been used", err)
 	}
-	return newError(ErrorInvalidGrant, 400, authReqIDUnknownDescription, err)
+	return storeFailure(ctx, err, "failed to poll the backchannel authentication request", newError(ErrorInvalidGrant, 400, authReqIDUnknownDescription, err))
 }
 
 // backchannelStatusError is the token endpoint's answer for a polled

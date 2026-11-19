@@ -648,6 +648,9 @@ func checkUnstorableKeyReads(t *testing.T, d *sqlstore.DB, key string) {
 	if got, err := d.GrantRegistry().ListGrants(ctx, storage.GrantListing{SubjectKey: key, Now: time.Now()}); err != nil || len(got) != 0 {
 		t.Errorf("ListGrants(%q) = %v, %v, want none", key, got, err)
 	}
+	if got, err := d.GrantRegistry().ListGrants(ctx, storage.GrantListing{SubjectKey: "s", Key: key, Now: time.Now()}); err != nil || len(got) != 0 {
+		t.Errorf("ListGrants(Key: %q) = %v, %v, want none", key, got, err)
+	}
 	if got, err := d.BackchannelInbox().ListBackchannelRequests(ctx, storage.BackchannelInboxListing{SubjectKey: key, Now: time.Now()}); err != nil || len(got) != 0 {
 		t.Errorf("ListBackchannelRequests(%q) = %v, %v, want none", key, got, err)
 	}

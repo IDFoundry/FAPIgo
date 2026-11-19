@@ -2,12 +2,14 @@ package server_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
@@ -314,4 +316,54 @@ func TestStoreOutageAtReplayCheck(t *testing.T) {
 		})
 		checkServerError(t, err, server.ErrorServerError, 500)
 	})
+}
+
+// flakyKeyManager is a KeyManager whose public keys can't be read while
+// *down is set, as during a KMS outage.
+type flakyKeyManager struct {
+	keys.KeyManager
+	down *bool
+}
+
+func (f flakyKeyManager) PublicKey(ctx context.Context, purpose keys.SigningPurpose, alg fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
+	if *f.down {
+		return keys.PublicKeyInfo{}, errors.New("kms: unavailable")
+	}
+	return f.KeyManager.PublicKey(ctx, purpose, alg)
+}
+
+// TestKeyManagerOutageAtRevocationIsNotRevoked: RevokeToken answers the
+// client's own JWT access token unsupported_token_type, but can't tell
+// whether a token is the client's while the access token signing keys
+// can't be read. It answers 500 then, not the 200 that would tell the
+// client the token was revoked.
+func TestKeyManagerOutageAtRevocationIsNotRevoked(t *testing.T) {
+	revocation, err := fapi.ParseEndpointURL(testRevocationEndpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	down := false
+	h := rebuilt(t, newHarness(t, server.ProfileFAPISecurity, true), func(c *server.Config) { c.Endpoints.Revocation = revocation }, func(d *server.Dependencies) {
+		jwt, ok := d.AccessTokens.(server.JWTAccessTokens)
+		if !ok {
+			t.Fatalf("AccessTokens = %T, want server.JWTAccessTokens", d.AccessTokens)
+		}
+		jwt.Keys = flakyKeyManager{KeyManager: jwt.Keys, down: &down}
+		d.AccessTokens = jwt
+	})
+	tokens, _ := exchangeForTokensWithOfflineAccess(t, h)
+	revoke := func() error {
+		_, err := h.server.RevokeToken(context.Background(), server.TokenRevocationRequest{
+			HTTP: server.FormRequest{Parameters: []server.FormParameter{
+				formParam("client_assertion", h.clientAssertion(t)),
+				formParam("client_assertion_type", clientassertion.AssertionType),
+				formParam("token", tokens.AccessToken.Reveal()),
+			}},
+		})
+		return err
+	}
+	down = true
+	checkServerError(t, revoke(), server.ErrorServerError, 500)
+	down = false
+	checkServerError(t, revoke(), server.ErrorUnsupportedTokenType, 400)
 }

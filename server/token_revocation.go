@@ -170,7 +170,7 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 // a JWT one (isOwnJWTAccessToken).
 func (s *Server) isOwnAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) (bool, *Error) {
 	if strings.Contains(rawToken, ".") {
-		return s.isOwnJWTAccessToken(ctx, clientID, rawToken), nil
+		return s.isOwnJWTAccessToken(ctx, clientID, rawToken)
 	}
 	return s.isOwnOpaqueAccessToken(ctx, clientID, rawToken)
 }
@@ -180,44 +180,51 @@ func (s *Server) isOwnAccessToken(ctx context.Context, clientID fapi.ClientID, r
 // JWTAccessTokens', or those an AccessTokenKeyPublisher names — for this
 // server's issuer and clientID, and not expired (allowing
 // Limits.MaxClockSkew). Only the client's own tokens are reported, as
-// isOwnOpaqueAccessToken reports only the client's own; a key that
-// can't be read counts as no.
-func (s *Server) isOwnJWTAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) bool {
+// isOwnOpaqueAccessToken reports only the client's own. Keys that can't
+// be read are a 500 server_error, not a no: New has already read every
+// one (checkSigningKeys), so now it's the key manager failing (a KMS
+// outage), and RevokeToken's 200 would tell the client the token was
+// revoked.
+func (s *Server) isOwnJWTAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) (bool, *Error) {
 	signing, ok := accessTokenSigningKeys(s.deps.AccessTokens)
 	if !ok {
-		return false
+		return false, nil
 	}
 	parsed, err := token.ParseAccessToken(rawToken)
 	if err != nil || parsed.Algorithm() != signing.Algorithm {
-		return false
+		return false, nil
 	}
-	for _, key := range accessTokenVerificationKeys(ctx, signing) {
+	verificationKeys, err := accessTokenVerificationKeys(ctx, signing)
+	if err != nil {
+		return false, newError(ErrorServerError, 500, "failed to read the access token signing keys", err)
+	}
+	for _, key := range verificationKeys {
 		claims, err := parsed.SignedClaims(key.PublicKey, signing.Algorithm)
 		if err != nil {
 			continue
 		}
 		return claims.Issuer == s.cfg.Issuer.String() && claims.ClientID == clientID.String() &&
-			s.deps.Clock.Now().Before(claims.ExpiresAt.Add(s.cfg.Limits.MaxClockSkew))
+			s.deps.Clock.Now().Before(claims.ExpiresAt.Add(s.cfg.Limits.MaxClockSkew)), nil
 	}
-	return false
+	return false, nil
 }
 
 // accessTokenVerificationKeys is every key signing currently publishes:
 // all of a keys.RotatingKeyManager's, or the one keys.KeyManager.PublicKey
 // returns.
-func accessTokenVerificationKeys(ctx context.Context, signing keys.SigningKeyUse) []keys.PublicKeyInfo {
+func accessTokenVerificationKeys(ctx context.Context, signing keys.SigningKeyUse) ([]keys.PublicKeyInfo, error) {
 	if rotating, ok := signing.Manager.(keys.RotatingKeyManager); ok {
 		set, err := rotating.PublicKeys(ctx, signing.Purpose, signing.Algorithm)
 		if err != nil {
-			return nil
+			return nil, err
 		}
-		return set.Keys
+		return set.Keys, nil
 	}
 	info, err := signing.Manager.PublicKey(ctx, signing.Purpose, signing.Algorithm)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return []keys.PublicKeyInfo{info}
+	return []keys.PublicKeyInfo{info}, nil
 }
 
 // isOwnOpaqueAccessToken reports whether rawToken is an opaque access

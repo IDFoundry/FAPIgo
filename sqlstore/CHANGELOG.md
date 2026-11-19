@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.9.0...sqlstore/v0.9.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **sqlstore:** read a keyed grant listing by its primary key ([15046fc](https://github.com/IDFoundry/FAPIgo/commit/15046fc2e56f8a582c03b7215f8ad3890f99fe1c))
+
 ## [0.9.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.8.1...sqlstore/v0.9.0) (2026-11-15)
 
 

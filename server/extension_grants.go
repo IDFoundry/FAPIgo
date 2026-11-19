@@ -142,7 +142,7 @@ func (s *Server) verifyExtensionGrantBinding(ctx context.Context, client storage
 	if err != nil {
 		return TokenBinding{}, err
 	}
-	thumbprint, err := s.verifyTokenRequestBinding(ctx, client, proof, parts.PeerCertificate)
+	thumbprint, err := s.verifyTokenRequestBinding(ctx, client, proof, parts.PeerCertificate, parts.HTTP.EndpointRoute)
 	if err != nil {
 		return TokenBinding{}, err
 	}
@@ -207,7 +207,7 @@ func (s *Server) verifyClientlessDPoP(ctx context.Context, req TokenEndpointRequ
 	if err != nil {
 		return DPoPProofBinding{}, err
 	}
-	verified, err := s.verifyTokenRequestDPoP(ctx, proof)
+	verified, err := s.verifyTokenRequestDPoP(ctx, proof, req.parts.get().HTTP.EndpointRoute)
 	if err != nil {
 		return DPoPProofBinding{}, err
 	}

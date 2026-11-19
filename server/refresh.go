@@ -117,7 +117,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), paramErr)
 	}
 
-	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
+	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate, req.HTTP.EndpointRoute)
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), bindingErr)
 	}

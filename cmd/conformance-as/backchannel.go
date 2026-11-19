@@ -60,6 +60,7 @@ func (h *backchannelHandler) handleAuthenticate(w http.ResponseWriter, r *http.R
 		writeOAuthJSONError(w, err)
 		return
 	}
+	req.HTTP.EndpointRoute = receivingListener(r).route
 	action, err := h.srv.BeginBackchannelAuthentication(r.Context(), req)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

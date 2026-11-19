@@ -39,11 +39,6 @@ type VerifyRequest struct {
 	Method string
 	URL    *url.URL
 
-	// AlternateURLs are further target URIs the proof's "htu" may name
-	// instead of URL, for a resource reachable at more than one origin;
-	// each is held to URL's own rules. Empty, the htu must name URL.
-	AlternateURLs []*url.URL
-
 	// AccessToken, if non-empty, is the access token presented alongside
 	// this proof. When set, the proof's "ath" claim must match its hash;
 	// when empty, the proof must not carry an "ath" claim at all.
@@ -105,10 +100,8 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 	if req.URL == nil {
 		return VerifiedProof{}, fmt.Errorf("dpop: url is nil")
 	}
-	for _, u := range append([]*url.URL{req.URL}, req.AlternateURLs...) {
-		if !isAbsoluteHTTP(u) {
-			return VerifiedProof{}, fmt.Errorf("dpop: url must be an absolute http or https URL with a host")
-		}
+	if !isAbsoluteHTTP(req.URL) {
+		return VerifiedProof{}, fmt.Errorf("dpop: url must be an absolute http or https URL with a host")
 	}
 	if req.Now.IsZero() {
 		return VerifiedProof{}, fmt.Errorf("dpop: now is zero")
@@ -169,17 +162,6 @@ func isAbsoluteHTTP(u *url.URL) bool {
 	return scheme == "https" || scheme == "http"
 }
 
-// namesTarget reports whether htu, canonicalized, names req.URL or one
-// of req.AlternateURLs. A target whose host isn't ASCII never matches.
-func namesTarget(htu string, req VerifyRequest) bool {
-	for _, u := range append([]*url.URL{req.URL}, req.AlternateURLs...) {
-		if canonical.IsASCII(u.Host) && canonical.URI(u) == htu {
-			return true
-		}
-	}
-	return false
-}
-
 // checkProofTimes holds the proof to its iat: no further in the future
 // than MaxClockSkew and no older than MaxProofAge. An nbf or exp the
 // proof carries counts too (RFC 7519 §4.1.4-§4.1.5): FAPI 2.0 Security
@@ -230,7 +212,7 @@ func verifyProofClaims(c claims, req VerifyRequest, iat time.Time) error {
 	if err != nil || !isAbsoluteHTTP(htu) || !canonical.IsASCII(htu.Host) {
 		return ErrURIMismatch
 	}
-	if !namesTarget(canonical.URI(htu), req) {
+	if !canonical.IsASCII(req.URL.Host) || canonical.URI(htu) != canonical.URI(req.URL) {
 		return ErrURIMismatch
 	}
 

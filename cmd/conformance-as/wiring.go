@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -445,7 +446,11 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP, dpopNonceChallenge
 	// called, never one taken from the request's Host header.
 	resourceOpts := serverresource.Options{ResourceURLs: []fapi.URL{userinfoURL, accountsURL}}
 	if mtlsUserinfoURL != nil {
-		resourceOpts.ResourceURLs = append(resourceOpts.ResourceURLs, *mtlsUserinfoURL)
+		aliasAccounts, err := fapi.ParseEndpointURL(strings.TrimSuffix(mtlsUserinfoURL.String(), "/userinfo") + "/accounts")
+		if err != nil {
+			return nil, err
+		}
+		resourceOpts.ResourceURLs = append(resourceOpts.ResourceURLs, *mtlsUserinfoURL, aliasAccounts)
 	}
 	if dpopNonceChallenge {
 		resourceOpts.Nonces = memstore.NewNonceStore()

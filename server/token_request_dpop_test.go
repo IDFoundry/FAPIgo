@@ -184,7 +184,16 @@ func TestVerifyTokenRequestDPoPAtTheMTLSAlias(t *testing.T) {
 		}
 		cfg.MTLSEndpoints.Token = u
 	})
-	if _, err := h.server.VerifyTokenRequestDPoP(context.Background(), clientlessTokenRequest(t, dpopProofAt(t, generateKey(t), alias, "", h.now))); err != nil {
+	req := clientlessTokenRequest(t, dpopProofAt(t, generateKey(t), alias, "", h.now))
+	if _, err := h.server.VerifyTokenRequestDPoP(context.Background(), req); err == nil {
+		t.Fatal("accepted ambiguous route")
+	}
+	req.SetEndpointRoute(server.PrimaryEndpoint)
+	if _, err := h.server.VerifyTokenRequestDPoP(context.Background(), req); serverErrorCode(t, err) != server.ErrorInvalidDPoPProof {
+		t.Fatalf("alias proof at primary endpoint: %v", err)
+	}
+	req.SetEndpointRoute(server.MTLSEndpointAlias)
+	if _, err := h.server.VerifyTokenRequestDPoP(context.Background(), req); err != nil {
 		t.Fatalf("VerifyTokenRequestDPoP(proof for the mTLS alias): %v", err)
 	}
 }

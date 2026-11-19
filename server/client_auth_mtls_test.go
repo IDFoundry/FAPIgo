@@ -709,10 +709,7 @@ func TestBeginBackchannelAuthenticationCertClientAuthReachesPeerCertificate(t *t
 // sender_constrain=dpop plan): a client authenticating via certificate
 // must reach the mTLS-alias URL to present it at all, so its DPoP
 // proof's own "htu" legitimately names that alias rather than the plain
-// endpoint. Config.MTLSEndpoints uses deliberately different URLs from
-// testEndpoints(t)'s plain ones, so a test here genuinely exercises
-// verifyDPoPAtEitherEndpoint's fallback rather than happening to match
-// by coincidence.
+// endpoint. The two configured URLs are distinct.
 func newHarnessWithClientAuthMTLSAndDPoP(t *testing.T) (harness, *x509.Certificate, string, string) {
 	t.Helper()
 	now := time.Now()
@@ -815,18 +812,13 @@ func dpopProofForURL(t *testing.T, key *ecdsa.PrivateKey, rawURL string, now tim
 // registered for certificate-based authentication but plain DPoP
 // sender-constraining must call the mTLS-alias URL to present its
 // certificate at all, so its DPoP proof's own "htu" legitimately names
-// that alias rather than this server's plain endpoint. Before
-// verifyDPoPAtEitherEndpoint, this server rejected such a proof
-// outright with ErrURIMismatch, wrapped as "DPoP proof verification
-// failed" — confirmed live, not just reasoned about (see
-// ARCHITECTURE.md's conformance strategy section for the exact
-// suite-side failure this reproduces).
+// the mTLS alias route.
 func TestPushAuthorizationRequestCertClientAuthAcceptsDPoPProofAtMTLSAlias(t *testing.T) {
 	h, cert, _, mtlsPAR := newHarnessWithClientAuthMTLSAndDPoP(t)
 	dpopKey := generateKey(t)
 
 	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
-		HTTP:            server.FormRequest{Parameters: certFormParameters(nil)},
+		HTTP:            server.FormRequest{EndpointRoute: server.MTLSEndpointAlias, Parameters: certFormParameters(nil)},
 		DPoPProofs:      []string{dpopProofForURL(t, dpopKey, mtlsPAR, h.now)},
 		PeerCertificate: cert,
 	}); err != nil {
@@ -840,7 +832,7 @@ func TestExchangeAuthorizationCodeCertClientAuthAcceptsDPoPProofAtMTLSAlias(t *t
 	dpopKey := generateKey(t)
 
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+		HTTP: server.FormRequest{EndpointRoute: server.MTLSEndpointAlias, Parameters: []server.FormParameter{
 			formParam("client_id", testClientID.String()),
 			formParam("grant_type", "authorization_code"),
 			formParam("code", code),

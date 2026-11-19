@@ -23,7 +23,8 @@ import (
 // request refused, and so is a path with a dot segment ("/a/../b") or a
 // percent-encoded unreserved character ("/accounts/%31"): htu matching
 // would resolve it, while a router dispatching on the path as sent
-// wouldn't.
+// wouldn't. When several origins cover the path, a DPoP request
+// requires VerifyRequest.URL from the listener or trusted proxy route.
 //
 // Behind a proxy that terminates TLS, r carries no client certificate:
 // set PeerCertificate afterwards from however the proxy forwards it

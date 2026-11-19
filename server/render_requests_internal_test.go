@@ -86,13 +86,13 @@ func TestFormParameterPrintsOnlyAllowedValues(t *testing.T) {
 
 func TestFormRequestPrintsNoCredential(t *testing.T) {
 	rendertest.Check(t, renderForm, renderFormSecrets, exportedResidual)
-	if got := fmt.Sprintf("%#v", FormRequest{Parameters: []FormParameter{{Name: "code", Value: renderCode}}}); got != `server.FormRequest{Parameters:[]server.FormParameter{server.FormParameter{Name:"code", Value:"[REDACTED]"}}}` {
+	if got := fmt.Sprintf("%#v", FormRequest{Parameters: []FormParameter{{Name: "code", Value: renderCode}}}); got != `server.FormRequest{Parameters:[]server.FormParameter{server.FormParameter{Name:"code", Value:"[REDACTED]"}}, EndpointRoute:0x0}` {
 		t.Errorf("%%#v = %s", got)
 	}
 	if got := logged(renderForm); !strings.Contains(got, `k.Parameters="[grant_type=authorization_code code=[REDACTED]`) {
 		t.Errorf("slog = %s", got)
 	}
-	if got := fmt.Sprint(FormRequest{}); got != "{[]}" {
+	if got := fmt.Sprint(FormRequest{}); got != "{[] unset}" {
 		t.Errorf("an empty form prints %s", got)
 	}
 }
@@ -158,7 +158,7 @@ func TestTokenEndpointRequestPrintsNoCredential(t *testing.T) {
 			t.Errorf("%s prints %s, want an address and no value", name, got)
 		}
 	}
-	if got := fmt.Sprintf("%+v", req); got != "{parts:{HTTP:{Parameters:[{Name:grant_type Value:refresh_token} {Name:refresh_token Value:[REDACTED]} {Name:client_assertion_type Value:x} {Name:client_assertion Value:[REDACTED]}]} DPoPProofs:[[REDACTED]] ClientAttestations:[] ClientAttestationPoPs:[] PeerCertificate:}}" {
+	if got := fmt.Sprintf("%+v", req); got != "{parts:{HTTP:{Parameters:[{Name:grant_type Value:refresh_token} {Name:refresh_token Value:[REDACTED]} {Name:client_assertion_type Value:x} {Name:client_assertion Value:[REDACTED]}] EndpointRoute:0} DPoPProofs:[[REDACTED]] ClientAttestations:[] ClientAttestationPoPs:[] PeerCertificate:}}" {
 		t.Errorf("%%+v = %s", got)
 	}
 	if got := fmt.Sprintf("%#v", req); !strings.HasPrefix(got, "server.TokenEndpointRequest{parts:server.httpRequestParts{HTTP:server.FormRequest{") {
@@ -207,7 +207,7 @@ func TestOtherRequestsPrintNoCredential(t *testing.T) {
 		ClientAttestations: []string{renderAttestation}, ClientAttestationPoPs: []string{renderAttestation + "-POP"},
 	}
 	rendertest.Check(t, revocation, []string{renderToken, renderAttestation}, exportedResidual)
-	if got := fmt.Sprintf("%+v", revocation); got != "{HTTP:{Parameters:[{Name:token Value:[REDACTED]} {Name:token_type_hint Value:refresh_token}]} ClientAttestations:[[REDACTED]] ClientAttestationPoPs:[[REDACTED]] PeerCertificate:}" {
+	if got := fmt.Sprintf("%+v", revocation); got != "{HTTP:{Parameters:[{Name:token Value:[REDACTED]} {Name:token_type_hint Value:refresh_token}] EndpointRoute:unset} ClientAttestations:[[REDACTED]] ClientAttestationPoPs:[[REDACTED]] PeerCertificate:}" {
 		t.Errorf("%%+v = %s", got)
 	}
 	if got := logged(revocation); !strings.Contains(got, "k.ClientAttestations=[[REDACTED]]") || strings.Contains(got, renderToken) {

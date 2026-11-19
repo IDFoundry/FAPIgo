@@ -1456,8 +1456,9 @@ sent to, and only you know yours: the `Host` header, and whatever path
 a front end forwards, are the client's to choose. `Verify` takes the
 request's target to be its escaped path at one of these origins, and
 refuses a request no `ResourceURLs` prefix covers. List more than one
-for an API reachable under several names (an mTLS alias host, say): a
-proof naming any of them is accepted. As with the server,
+for an API reachable under several names (an mTLS alias host, say): set
+`VerifyRequest.URL` from the trusted listener or proxy route when multiple
+origins cover the same DPoP request path. As with the server,
 `resource.AssuranceProduction` refuses `memstore`'s stores and
 `keys/ephemeral`'s key sources: it requires the issuer key source to
 declare `keys.KeySourceAssurance` (`keys.LocalIssuerKeys` does, and so

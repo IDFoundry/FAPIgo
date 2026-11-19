@@ -86,14 +86,15 @@ func (p FormParameter) LogValue() slog.Value {
 }
 
 type formRequestShadow struct {
-	Parameters []formParameterShadow
+	Parameters    []formParameterShadow
+	EndpointRoute EndpointRoute
 }
 
 func (f FormRequest) shadow() formRequestShadow {
 	if f.Parameters == nil {
-		return formRequestShadow{}
+		return formRequestShadow{EndpointRoute: f.EndpointRoute}
 	}
-	shadow := formRequestShadow{Parameters: make([]formParameterShadow, len(f.Parameters))}
+	shadow := formRequestShadow{Parameters: make([]formParameterShadow, len(f.Parameters)), EndpointRoute: f.EndpointRoute}
 	for i, p := range f.Parameters {
 		shadow.Parameters[i] = p.shadow()
 	}
@@ -116,7 +117,7 @@ func (f FormRequest) LogValue() slog.Value {
 	for i, p := range f.Parameters {
 		params[i] = p.LogValue().String()
 	}
-	return slog.GroupValue(slog.Any("Parameters", params))
+	return slog.GroupValue(slog.Any("Parameters", params), slog.String("EndpointRoute", f.EndpointRoute.String()))
 }
 
 // certificateSummary is cert as a rendering shows it: its subject, or ""

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.77.1](https://github.com/IDFoundry/FAPIgo/compare/v0.77.0...v0.77.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **server:** answer a client key source outage with server_error ([443b732](https://github.com/IDFoundry/FAPIgo/commit/443b7320f74ac3023eb36b52dc85c7e00725b66d))
+* **server:** answer a store outage with server_error, not a client error ([ccc147a](https://github.com/IDFoundry/FAPIgo/commit/ccc147af6a162541171dc2a2e4169c4d824d4b8e))
+* **server:** answer unreadable access token keys at revocation with server_error ([fe37601](https://github.com/IDFoundry/FAPIgo/commit/fe376015baefb3203d83a66288ecfe481857f01b))
+
 ## [0.77.0](https://github.com/IDFoundry/FAPIgo/compare/v0.76.0...v0.77.0) (2026-11-18)
 
 

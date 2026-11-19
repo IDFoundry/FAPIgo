@@ -339,7 +339,7 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 
 	candidates, err := s.resolveClientKeys(ctx, client.ID(), keys.BackchannelAuthenticationRequestVerification, alg, obj.KeyID())
 	if err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "no matching client key", err)
+		return verifiedBackchannelRequest{}, unresolvedClientKeysError(ctx, err, newError(ErrorInvalidRequest, 400, "no matching client key", err))
 	}
 
 	policy := requestobject.VerifyPolicy{

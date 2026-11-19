@@ -367,3 +367,76 @@ func TestKeyManagerOutageAtRevocationIsNotRevoked(t *testing.T) {
 	down = false
 	checkServerError(t, revoke(), server.ErrorUnsupportedTokenType, 400)
 }
+
+// downClientKeys is a ClientKeySource that fails with err for purpose.
+type downClientKeys struct {
+	keys.ClientKeySource
+	purpose keys.VerificationPurpose
+	err     error
+}
+
+func (d downClientKeys) ResolveVerificationKeys(ctx context.Context, req keys.ClientKeyRequest) (keys.VerificationKeySet, error) {
+	if req.Purpose == d.purpose {
+		return keys.VerificationKeySet{}, d.err
+	}
+	return d.ClientKeySource.ResolveVerificationKeys(ctx, req)
+}
+
+// TestClientKeysOutageIsServerError: a client key source that couldn't
+// answer (sqlstore's DB.ClientKeys reads the server's own database)
+// isn't a client without a usable key. Any other failure, such as a
+// jwks_uri fetch, still is.
+func TestClientKeysOutageIsServerError(t *testing.T) {
+	pushHarness := func(t *testing.T) harness { return newHarness(t, server.ProfileFAPISecurity, true) }
+	backchannelHarness := func(t *testing.T) harness {
+		return newHarnessWithBackchannelStore(t, memstore.NewBackchannelAuthenticationStore())
+	}
+	sites := []struct {
+		name    string
+		purpose keys.VerificationPurpose
+		refused server.ErrorCode
+		status  int
+		harness func(t *testing.T) harness
+		request func(t *testing.T, h harness) error
+	}{
+		{"client assertion", keys.ClientAssertionVerification, server.ErrorInvalidClient, 401, pushHarness, func(t *testing.T, h harness) error {
+			_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+				HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
+			})
+			return err
+		}},
+		{"request object", keys.RequestObjectVerification, server.ErrorInvalidRequestObject, 400, pushHarness, func(t *testing.T, h harness) error {
+			return pushRequestObject(t, h, h.requestObject(t, standardAuthParams(t)))
+		}},
+		{"backchannel authentication request", keys.BackchannelAuthenticationRequestVerification, server.ErrorInvalidRequest, 400, backchannelHarness, func(t *testing.T, h harness) error {
+			action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+				HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, standardBackchannelParams(t)))},
+			})
+			if err != nil {
+				return err
+			}
+			local, ok := action.(server.BackchannelAuthenticationLocalError)
+			if !ok {
+				t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+			}
+			return local.Error
+		}},
+	}
+	for _, site := range sites {
+		for name, tc := range map[string]struct {
+			err    error
+			want   server.ErrorCode
+			status int
+		}{
+			"store unavailable": {errStoreDown, server.ErrorServerError, 500},
+			"no usable key":     {errors.New("jwks_uri: fetch failed"), site.refused, site.status},
+		} {
+			t.Run(site.name+"/"+name, func(t *testing.T) {
+				h := withDependencies(t, site.harness(t), func(d *server.Dependencies) {
+					d.ClientKeys = downClientKeys{ClientKeySource: d.ClientKeys, purpose: site.purpose, err: tc.err}
+				})
+				checkServerError(t, site.request(t, h), tc.want, tc.status)
+			})
+		}
+	}
+}

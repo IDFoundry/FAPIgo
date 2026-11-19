@@ -42,6 +42,20 @@ func storeFailure(ctx context.Context, err error, what string, refused *Error) *
 	return refused
 }
 
+// unresolvedClientKeysError is the error for a ClientKeys lookup that
+// failed: a 500 server_error when the source couldn't answer, by
+// storeUnavailable's rule (a source reading the server's own database,
+// such as sqlstore's DB.ClientKeys, wraps storage.ErrStoreUnavailable),
+// otherwise refused, the endpoint's answer for a client with no usable
+// key. As for ResolveClient, a timeout of the source's own, a jwks_uri
+// or Trust Chain fetch, is the client's to fix, not an outage.
+func unresolvedClientKeysError(ctx context.Context, err error, refused *Error) *Error {
+	if storeUnavailable(ctx, err) {
+		return newError(ErrorServerError, 500, "failed to look up the client's keys", err)
+	}
+	return refused
+}
+
 // unresolvedClientError is the error for a ResolveClient failure at a
 // client-authenticating endpoint: 500 server_error when the store
 // couldn't answer (storeUnavailable), otherwise 401 invalid_client.

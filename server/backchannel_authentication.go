@@ -173,7 +173,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	// see verifyOptionalDPoPProof. A client authenticating with its
 	// certificate calls the mTLS alias (RFC 8705 §5), and its proof names
 	// that URL, as at PAR and the token endpoint.
-	dpopThumbprint, dpopErr := s.verifyOptionalDPoPProof(ctx, dpopProof, s.cfg.Endpoints.BackchannelAuthentication, s.cfg.MTLSEndpoints.BackchannelAuthentication)
+	dpopThumbprint, dpopErr := s.verifyOptionalDPoPProof(ctx, dpopProof, s.cfg.Endpoints.BackchannelAuthentication, s.cfg.MTLSEndpoints.BackchannelAuthentication, req.HTTP.EndpointRoute)
 	if dpopErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), dpopErr), nil
 	}

@@ -154,6 +154,12 @@ func TokenEndpointRequestFromHTTP(r *http.Request) (TokenEndpointRequest, error)
 // this package implements.
 func (t TokenEndpointRequest) GrantType() string { return t.parts.HTTP.Get("grant_type") }
 
+// SetEndpointRoute records which configured public route received the request.
+// Set this from trusted routing metadata when the token endpoint has an alias.
+func (t *TokenEndpointRequest) SetEndpointRoute(route EndpointRoute) {
+	t.parts.HTTP.EndpointRoute = route
+}
+
 // SetPeerCertificate sets the TLS client certificate, for a server
 // behind a proxy that terminates TLS and forwards the certificate itself.
 // Set it only from your own proxy's forwarding, never from anything the

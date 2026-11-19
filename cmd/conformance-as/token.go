@@ -14,6 +14,7 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 			return
 		}
 
+		req.SetEndpointRoute(receivingListener(r).route)
 		var result server.TokenResult
 		switch req.GrantType() {
 		case "authorization_code":

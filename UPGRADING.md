@@ -15,6 +15,23 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.78.0
+
+### Bind DPoP proofs to the receiving endpoint
+
+Authorization servers advertising a distinct mTLS alias must identify which
+route received each DPoP request at PAR, the token endpoint (including custom
+grants), and the backchannel authentication endpoint. Set
+`FormRequest.EndpointRoute` to `server.PrimaryEndpoint` or
+`server.MTLSEndpointAlias` from the listener or trusted proxy route. For
+`TokenEndpointRequestFromHTTP`, call `SetEndpointRoute` before dispatch.
+A server with one endpoint URL can continue to omit the field.
+
+Resource servers with multiple configured origins covering the same path
+must set `VerifyRequest.URL` to the actual public request URL for DPoP,
+preserving the escaped path. Use trusted routing information for the
+origin. An ambiguous target fails closed before replay or nonce processing.
+
 ## v0.77.0
 
 ### A claim may be requested with at most 64 values (server)

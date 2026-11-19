@@ -296,7 +296,13 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 // client/userinfo_test.go, and this handler's job is the transport, not
 // re-proving that.
 func (a *authServer) handleUserInfo(w http.ResponseWriter, r *http.Request) {
-	authz, err := a.resource.Verify(r.Context(), resource.VerifyRequestFromHTTP(r))
+	req := resource.VerifyRequestFromHTTP(r)
+	target, err := url.Parse(a.ts.URL + r.URL.EscapedPath())
+	if err != nil {
+		a.t.Fatalf("fapitest: build UserInfo target: %v", err)
+	}
+	req.URL = target
+	authz, err := a.resource.Verify(r.Context(), req)
 	if err != nil {
 		a.writeResourceError(w, err)
 		return

@@ -3,12 +3,29 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 
 	fapires "github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/serverresource"
 	"github.com/idfoundry/fapigo/storage"
 )
+
+// resourceRequest preserves the escaped path the client called and selects
+// the origin from the listener. The request Host and forwarding headers
+// cannot select the expected URI.
+func resourceRequest(r *http.Request) fapires.VerifyRequest {
+	req := fapires.VerifyRequestFromHTTP(r)
+	if base := receivingListener(r).base; base != "" {
+		// base is a validated issuer or alias base and EscapedPath is URL-encoded.
+		target, err := url.Parse(base + r.URL.EscapedPath())
+		if err != nil {
+			target = &url.URL{} // Verify rejects a relative target.
+		}
+		req.URL = target
+	}
+	return req
+}
 
 // contentTypeHeader is the HTTP header name every JSON/JWT response
 // this file writes sets.
@@ -58,7 +75,7 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, identityCla
 		}
 		w.Header().Set(fapires.InteractionIDHeader, interactionID)
 
-		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequestFromHTTP(r))
+		authCtx, err := verifier.Verify(r.Context(), resourceRequest(r))
 		if err != nil {
 			writeResourceError(w, err)
 			return
@@ -117,7 +134,7 @@ func accountsHandler(verifier *fapires.Verifier) http.HandlerFunc {
 		}
 		w.Header().Set(fapires.InteractionIDHeader, interactionID)
 
-		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequestFromHTTP(r))
+		authCtx, err := verifier.Verify(r.Context(), resourceRequest(r))
 		if err != nil {
 			writeResourceError(w, err)
 			return

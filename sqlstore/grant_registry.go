@@ -47,13 +47,18 @@ func (r grantRegistry) RecordGrant(ctx context.Context, entry storage.NewGrantEn
 	return nil
 }
 
-// ListGrants implements storage.GrantRegistry: one indexed read.
+// ListGrants implements storage.GrantRegistry: one indexed read. With
+// listing.Key set it reads only that entry, by its primary key, so the
+// read doesn't grow with the subject's other grants.
 func (r grantRegistry) ListGrants(ctx context.Context, listing storage.GrantListing) ([]storage.GrantEntry, error) {
-	if !validTextKey(listing.SubjectKey) {
+	if !validTextKey(listing.SubjectKey) || (listing.Key != "" && !validTextKey(listing.Key)) {
 		return nil, nil
 	}
-	rows, err := r.d.db.QueryContext(ctx, r.d.q("SELECT entry_key, client_id, record, expires_at FROM {grant_registry} WHERE subject_key = ? AND expires_at > ?"), // NOSONAR: go:S2077 — a constant query of this package's; q substitutes only the validated TablePrefix and placeholders.
-		listing.SubjectKey, nanos(listing.Now))
+	query, args := "SELECT entry_key, client_id, record, expires_at FROM {grant_registry} WHERE subject_key = ? AND expires_at > ?", []any{listing.SubjectKey, nanos(listing.Now)}
+	if listing.Key != "" {
+		query, args = "SELECT entry_key, client_id, record, expires_at FROM {grant_registry} WHERE entry_key = ? AND subject_key = ? AND expires_at > ?", []any{listing.Key, listing.SubjectKey, nanos(listing.Now)}
+	}
+	rows, err := r.d.db.QueryContext(ctx, r.d.q(query), args...) // NOSONAR: go:S2077 — one of two constant queries of this package's; q substitutes only the validated TablePrefix and placeholders.
 	if err != nil {
 		return nil, unavailable(opListGrants, err)
 	}

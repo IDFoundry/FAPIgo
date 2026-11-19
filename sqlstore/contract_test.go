@@ -3,6 +3,7 @@ package sqlstore_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/idfoundry/fapigo/sqlstore"
 	"github.com/idfoundry/fapigo/storage"
@@ -81,6 +82,25 @@ func TestInteractionLookupContract(t *testing.T) {
 func TestGrantRegistryContract(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
 		storage.TestGrantRegistryContract(t, func() storage.GrantRegistry { return freshDB(t, dialect).GrantRegistry() })
+	})
+}
+
+// TestGrantRegistryListsByKeyAlone checks that a keyed listing reads
+// only that entry, not the subject's other grants with it.
+func TestGrantRegistryListsByKeyAlone(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		r := freshDB(t, dialect).GrantRegistry()
+		ctx := context.Background()
+		expires := time.Now().Add(time.Hour)
+		for _, key := range []string{"g1", "g2"} {
+			if err := r.RecordGrant(ctx, storage.NewGrantEntry{Key: key, SubjectKey: "s1", ClientID: "c", Record: []byte(`{}`), ExpiresAt: expires}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		entries, err := r.ListGrants(ctx, storage.GrantListing{SubjectKey: "s1", Now: time.Now(), Key: "g1"})
+		if err != nil || len(entries) != 1 || entries[0].Key != "g1" {
+			t.Fatalf("ListGrants(s1, key g1) = %+v, %v, want g1 alone", entries, err)
+		}
 	})
 }
 

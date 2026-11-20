@@ -98,14 +98,26 @@
   {
     "id": "rar-unregistered-granted-type",
     "file": "extension/rar.go",
-    "old": "def, ok := r.byType[typ]\n\t\tif !ok {\n\t\t\treturn fmt.Errorf(\"%w: %q\", ErrRARUnregisteredType, typ)",
-    "new": "def, ok := r.byType[typ]\n\t\tif !ok && false {\n\t\t\treturn fmt.Errorf(\"%w: %q\", ErrRARUnregisteredType, typ)",
+    "old": "def, ok := r.byType[typ]\n\t\tif !ok {\n\t\t\treturn nil, fmt.Errorf(\"%w: %q\", ErrRARUnregisteredType, typ)",
+    "new": "def, ok := r.byType[typ]\n\t\tif !ok && false {\n\t\t\treturn nil, fmt.Errorf(\"%w: %q\", ErrRARUnregisteredType, typ)",
     "module": "root",
     "packages": [
       "./extension"
     ],
     "run": "^TestRARRegistryValidateRefusesUnregisteredGrantedType$",
     "why": "ValidateGrant/ValidateNarrowing refuse a granted RAR type the registry never registered"
+  },
+  {
+    "id": "rar-omission-refused",
+    "file": "extension/rar.go",
+    "old": "if err := def.validateOmission(raw, scope); err != nil {",
+    "new": "if err := def.validateOmission(raw, scope); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestRARRegistryValidateNarrowingAsksAboutEachOmission$",
+    "why": "ValidateNarrowing refuses a token request leaving out a granted object its type's ValidateOmission won't drop"
   },
   {
     "id": "extension-definition-validate",

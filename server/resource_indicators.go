@@ -262,22 +262,23 @@ func (s *Server) allowedGrantAudience(ctx context.Context, client storage.Regist
 	if err := s.checkGrantStillAllowed(client, grant, scope); err != nil {
 		return grantRecord{}, "", nil, err
 	}
-	return s.narrowedAccessGrant(ctx, client, grant, details, requested)
+	return s.narrowedAccessGrant(ctx, client, grant, scope, details, requested)
 }
 
 // usableGrantAudience is allowedGrantAudience for the CIBA token
-// exchange, whose grant checkGrantUsable checks.
+// exchange, whose grant checkGrantUsable checks and whose access token
+// carries the grant's whole scope.
 func (s *Server) usableGrantAudience(ctx context.Context, client storage.RegisteredClient, grant grantRecord, details requestedAuthorizationDetails, requested []string) (grantRecord, string, []string, *Error) {
 	if err := s.checkGrantUsable(ctx, client, grant); err != nil {
 		return grantRecord{}, "", nil, err
 	}
-	return s.narrowedAccessGrant(ctx, client, grant, details, requested)
+	return s.narrowedAccessGrant(ctx, client, grant, grant.Scope, details, requested)
 }
 
-// narrowedAccessGrant is accessTokenGrant for details, then
-// narrowedAudience for the requested resources.
-func (s *Server) narrowedAccessGrant(ctx context.Context, client storage.RegisteredClient, grant grantRecord, details requestedAuthorizationDetails, requested []string) (grantRecord, string, []string, *Error) {
-	accessGrant, err := s.accessTokenGrant(grant, details)
+// narrowedAccessGrant is accessTokenGrant for details, given scope, the
+// access token's, then narrowedAudience for the requested resources.
+func (s *Server) narrowedAccessGrant(ctx context.Context, client storage.RegisteredClient, grant grantRecord, scope []string, details requestedAuthorizationDetails, requested []string) (grantRecord, string, []string, *Error) {
+	accessGrant, err := s.accessTokenGrant(grant, scope, details)
 	if err != nil {
 		return grantRecord{}, "", nil, err
 	}

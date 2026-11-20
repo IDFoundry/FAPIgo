@@ -87,7 +87,7 @@ func TestRARRegistryValidateNarrowing(t *testing.T) {
 			}
 			base, subset := mustParseRAR(t, reg, tc.base), mustParseRAR(t, reg, tc.subset)
 			assertRARCheck(t, "ValidateGrant", reg.ValidateGrant(base, subset), tc.grantOK)
-			assertRARCheck(t, "ValidateNarrowing", reg.ValidateNarrowing(base, subset), tc.narrowingOK)
+			assertRARCheck(t, "ValidateNarrowing", reg.ValidateNarrowing(base, subset, nil), tc.narrowingOK)
 		})
 	}
 }
@@ -115,5 +115,5 @@ func TestRARRegistryValidateNarrowingRejectsMoreObjectsThanGranted(t *testing.T)
 	}
 	granted := mustParseRAR(t, reg, mintedIDAB)
 	narrowed := mustParseRAR(t, reg, `[{"type":"minted","ids":["a"]},{"type":"minted","ids":["b"]}]`)
-	assertRARCheck(t, "ValidateNarrowing", reg.ValidateNarrowing(granted, narrowed), false)
+	assertRARCheck(t, "ValidateNarrowing", reg.ValidateNarrowing(granted, narrowed, nil), false)
 }

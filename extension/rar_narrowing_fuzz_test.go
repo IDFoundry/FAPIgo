@@ -2,6 +2,8 @@ package extension_test
 
 import (
 	"encoding/json"
+	"errors"
+	"maps"
 	"slices"
 	"testing"
 
@@ -32,6 +34,12 @@ func sameLimit(a, b *float64) bool {
 	return (a == nil) == (b == nil) && (a == nil || *a == *b)
 }
 
+// refuseOmission is a ValidateOmission that lets no granted object be
+// left out.
+func refuseOmission[T any](T, []string) error {
+	return errors.New("may not be left out")
+}
+
 // FuzzRARValidateNarrowing checks RARRegistry.ValidateNarrowing and
 // ValidateGrant on two authorization_details arrays Parse accepts — a
 // grant, and what a client asks for at the token endpoint. Beyond never
@@ -43,7 +51,10 @@ func sameLimit(a, b *float64) bool {
 //     of the granted ones, so greedy matching never lets two narrowed
 //     objects use one granted object;
 //   - with or without hooks, a grant always narrows to itself, and
-//     ValidateNarrowing falls back to ValidateGrant's hook.
+//     ValidateNarrowing falls back to ValidateGrant's hook;
+//   - with every omission refused (ValidateOmission), it accepts exactly
+//     when the narrowed objects are the granted ones, canonically, in
+//     any order: whatever greedy matching leaves unmatched is left out.
 func FuzzRARValidateNarrowing(f *testing.F) {
 	plain, err := extension.NewRARRegistry(1024, 4, plainCredentialDef, fuzzAccountDef)
 	if err != nil {
@@ -53,16 +64,46 @@ func FuzzRARValidateNarrowing(f *testing.F) {
 	if err != nil {
 		f.Fatalf("NewRARRegistry: %v", err)
 	}
+	keepCredentials, keepAccounts := plainCredentialDef, fuzzAccountDef
+	keepCredentials.ValidateOmission = refuseOmission[fuzzCredentialDetail]
+	keepAccounts.ValidateOmission = refuseOmission[fuzzAccountDetail]
+	keepAll, err := extension.NewRARRegistry(1024, 4, keepCredentials, keepAccounts)
+	if err != nil {
+		f.Fatalf("NewRARRegistry: %v", err)
+	}
 	f.Add([]byte(`[{"type":"credential","actions":["a","b"]},{"type":"credential","actions":["a"]}]`), []byte(`[{"type":"credential","actions":["a"]}]`))
 	f.Add([]byte(`[{"type":"credential","actions":["a"]}]`), []byte(`[{"type":"credential","actions":["a"]},{"type":"credential","actions":["a"]}]`))
 	f.Add([]byte(`[{"type":"credential","limit":1.0}]`), []byte(`[{"type":"credential","limit":1}]`))
 	f.Add([]byte(`[{"type":"credential","actions":[]}]`), []byte(`[{"actions":null,"type":"credential"}]`))
 	f.Add([]byte(`[{"type":"account_information","actions":["x"]}]`), []byte(`[{"type":"credential"}]`))
 	f.Add([]byte(`[]`), []byte(`[]`))
+	f.Add([]byte(`[{"type":"credential","actions":["a"]},{"type":"credential","actions":["b"]}]`), []byte(`[{"type":"credential","actions":["b"]},{"type":"credential","actions":["a"]}]`))
+	f.Add([]byte(`[{"type":"credential","actions":["a"]},{"type":"account_information","actions":["x"]}]`), []byte(`[]`))
 	f.Fuzz(func(t *testing.T, grantedRaw, narrowedRaw []byte) {
 		checkExactNarrowing(t, plain, grantedRaw, narrowedRaw)
 		checkHookedNarrowing(t, subset, grantedRaw, narrowedRaw)
+		checkOmissionsRefused(t, keepAll, grantedRaw, narrowedRaw)
 	})
+}
+
+// checkOmissionsRefused checks that, with every omission refused,
+// ValidateNarrowing accepts exactly when narrowed keeps every granted
+// object, and refuses a narrowing that leaves one out as an omission.
+func checkOmissionsRefused(t *testing.T, reg *extension.RARRegistry, grantedRaw, narrowedRaw []byte) {
+	t.Helper()
+	granted, err1 := reg.Parse(grantedRaw)
+	narrowed, err2 := reg.Parse(narrowedRaw)
+	if err1 != nil || err2 != nil {
+		return
+	}
+	err := reg.ValidateNarrowing(granted, narrowed, nil)
+	want := maps.Equal(canonicalCounts(t, granted), canonicalCounts(t, narrowed))
+	if (err == nil) != want {
+		t.Fatalf("with every omission refused, ValidateNarrowing(%s, %s) = %v, want acceptance %v", grantedRaw, narrowedRaw, err, want)
+	}
+	if err != nil && canonicalSubMultiset(t, granted, narrowed) && !errors.Is(err, extension.ErrRAROmissionRefused) {
+		t.Fatalf("ValidateNarrowing(%s, %s) leaving out an object = %v, want ErrRAROmissionRefused", grantedRaw, narrowedRaw, err)
+	}
 }
 
 func checkExactNarrowing(t *testing.T, reg *extension.RARRegistry, grantedRaw, narrowedRaw []byte) {
@@ -72,7 +113,7 @@ func checkExactNarrowing(t *testing.T, reg *extension.RARRegistry, grantedRaw, n
 	if err1 != nil || err2 != nil {
 		return
 	}
-	narrowErr := reg.ValidateNarrowing(granted, narrowed)
+	narrowErr := reg.ValidateNarrowing(granted, narrowed, nil)
 	grantErr := reg.ValidateGrant(granted, narrowed)
 	if (narrowErr == nil) != (grantErr == nil) {
 		t.Fatalf("with no hooks, ValidateNarrowing = %v but ValidateGrant = %v for %s narrowed to %s", narrowErr, grantErr, grantedRaw, narrowedRaw)
@@ -81,7 +122,7 @@ func checkExactNarrowing(t *testing.T, reg *extension.RARRegistry, grantedRaw, n
 	if (narrowErr == nil) != want {
 		t.Fatalf("ValidateNarrowing(%s, %s) = %v, want acceptance %v", grantedRaw, narrowedRaw, narrowErr, want)
 	}
-	if err := reg.ValidateNarrowing(granted, granted); err != nil {
+	if err := reg.ValidateNarrowing(granted, granted, nil); err != nil {
 		t.Fatalf("grant %s doesn't narrow to itself: %v", grantedRaw, err)
 	}
 }
@@ -93,10 +134,10 @@ func checkHookedNarrowing(t *testing.T, reg *extension.RARRegistry, grantedRaw, 
 	if err1 != nil || err2 != nil {
 		return
 	}
-	if err := reg.ValidateNarrowing(granted, granted); err != nil {
+	if err := reg.ValidateNarrowing(granted, granted, nil); err != nil {
 		t.Fatalf("grant %s doesn't narrow to itself under a hook: %v", grantedRaw, err)
 	}
-	narrowErr := reg.ValidateNarrowing(granted, narrowed)
+	narrowErr := reg.ValidateNarrowing(granted, narrowed, nil)
 	grantErr := reg.ValidateGrant(granted, narrowed)
 	if (narrowErr == nil) != (grantErr == nil) {
 		t.Fatalf("with no ValidateNarrowing hook, ValidateNarrowing = %v but ValidateGrant = %v", narrowErr, grantErr)

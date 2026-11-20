@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -101,7 +102,35 @@ type RARDefinition[T any] struct {
 	// ValidateGrant can't tell a client's narrowing from the server's
 	// grant: the fallback fails open at the token endpoint. A definition
 	// with a server-minted member must set ValidateNarrowing.
+	//
+	// It judges only the objects a token request keeps. ValidateOmission
+	// judges those it leaves out.
 	ValidateNarrowing func(granted, narrowed T) error
+
+	// ValidateOmission, if non-nil, decides whether a token request
+	// narrowing a grant (RARRegistry.ValidateNarrowing) may leave out
+	// granted, an object of this type the grant holds that none of the
+	// request's objects matched. scope is the scope the access token will
+	// carry, a copy the hook may keep or change. An error refuses the
+	// request, which the server answers with invalid_authorization_details.
+	// If nil, any granted object may be left out, as RFC 9396 §6.1 allows.
+	//
+	// Set it when what an object authorizes is also reachable another
+	// way, so that leaving the object out widens the access token rather
+	// than narrowing it. OpenID4VCI 1.0 §5.1.2 is the case in point: a
+	// credential configuration may be authorized by a scope and by an
+	// openid_credential object at once, and the object then governs. A
+	// token that keeps the scope but not the object loses what the object
+	// narrowed: claims the holder's consent limited, or a dataset the
+	// server pinned with credential_identifiers. Refusing to leave out an
+	// object only while scope still covers it keeps other omissions open,
+	// such as a token for one of two granted credentials.
+	//
+	// It runs for every object left out: when the request names none of
+	// the type, and when its array is empty. It runs only on a token
+	// request: at consent, what a resource owner or RARPolicy leaves out
+	// of a request is the server's own decision.
+	ValidateOmission func(granted T, scope []string) error
 }
 
 // RARDetail is one validated authorization_details object: its type and
@@ -120,6 +149,7 @@ type registeredRAR interface {
 	decodeCheck(raw json.RawMessage, request bool) error
 	validateGrant(requestedRaw, grantedRaw json.RawMessage) error
 	validateNarrowing(grantedRaw, narrowedRaw json.RawMessage) error
+	validateOmission(grantedRaw json.RawMessage, scope []string) error
 }
 
 func (d RARDefinition[T]) rarType() string        { return d.Type }
@@ -179,6 +209,24 @@ func (d RARDefinition[T]) validateNarrowing(grantedRaw, narrowedRaw json.RawMess
 		hook = d.ValidateGrant
 	}
 	return d.compare(grantedRaw, narrowedRaw, "granted", "narrowed", hook)
+}
+
+// validateOmission decides whether a token request may leave out
+// grantedRaw, an object of the grant it narrows: see
+// RARDefinition.ValidateOmission. The hook gets its own copy of scope,
+// which is the access token's.
+func (d RARDefinition[T]) validateOmission(grantedRaw json.RawMessage, scope []string) error {
+	if d.ValidateOmission == nil {
+		return nil
+	}
+	var granted T
+	if err := json.Unmarshal(grantedRaw, &granted); err != nil {
+		return fmt.Errorf("extension: authorization_details type %q: malformed granted value: %w", d.Type, err)
+	}
+	if err := d.ValidateOmission(granted, slices.Clone(scope)); err != nil {
+		return fmt.Errorf("%w: type %q: %w", ErrRAROmissionRefused, d.Type, err)
+	}
+	return nil
 }
 
 // compare decodes baseRaw and candidateRaw (named baseName and
@@ -441,7 +489,8 @@ func (r *RARRegistry) parse(raw json.RawMessage, request bool) (RARValues, error
 // passed its own decodeCheck) — ValidateGrant only checks granted against
 // requested, not granted's own well-formedness again.
 func (r *RARRegistry) ValidateGrant(requested, granted RARValues) error {
-	return r.matchAll(requested, granted, false)
+	_, err := r.matchAll(requested, granted, false)
+	return err
 }
 
 // ValidateNarrowing checks that narrowed — the authorization_details a
@@ -453,23 +502,37 @@ func (r *RARRegistry) ValidateGrant(requested, granted RARValues) error {
 // hook, then to exact match. Use it rather than ValidateGrant wherever the
 // client, not the authorization server, chooses the narrower objects.
 //
+// Each granted object that no narrowed object matched is then left out
+// of the access token, which its type's ValidateOmission hook, if set,
+// may refuse, given scope: the scope the access token will carry, nil
+// when it carries none. Such a refusal wraps ErrRAROmissionRefused. A
+// granted type this registry doesn't register is refused when it's left
+// out, since no hook can be asked.
+//
 // Matching is greedy in array order, as ValidateGrant's is, and here the
 // client chooses that order: with a hook that accepts more than an exact
 // match (a lower amount, say), narrowed objects in one order may be
-// refused while the same objects in another order are accepted. It never
-// accepts a narrowing that a matcher trying every assignment would
-// refuse: an accepted narrowing is one valid assignment.
+// refused while the same objects in another order are accepted, and
+// which granted object counts as left out can depend on that order too.
+// It never accepts a narrowing that a matcher trying every assignment
+// would refuse: an accepted narrowing is one valid assignment, with
+// every object it leaves out accepted by ValidateOmission.
 //
 // Like ValidateGrant's granted, narrowed must already have been produced
 // by this same registry's own Parse.
-func (r *RARRegistry) ValidateNarrowing(granted, narrowed RARValues) error {
-	return r.matchAll(granted, narrowed, true)
+func (r *RARRegistry) ValidateNarrowing(granted, narrowed RARValues, scope []string) error {
+	matched, err := r.matchAll(granted, narrowed, true)
+	if err != nil {
+		return err
+	}
+	return r.checkOmissions(granted, matched, scope)
 }
 
 // matchAll is ValidateGrant (narrowing false) and ValidateNarrowing
 // (narrowing true): every object of candidates must match a distinct,
-// not-yet-matched object of base of the same type.
-func (r *RARRegistry) matchAll(base, candidates RARValues, narrowing bool) error {
+// not-yet-matched object of base of the same type. It returns, by type,
+// which of base's objects a candidate matched.
+func (r *RARRegistry) matchAll(base, candidates RARValues, narrowing bool) (map[string][]bool, error) {
 	consumed := make(map[string][]bool, len(base.byType))
 	for typ, raws := range base.byType {
 		consumed[typ] = make([]bool, len(raws))
@@ -477,13 +540,34 @@ func (r *RARRegistry) matchAll(base, candidates RARValues, narrowing bool) error
 	for typ, candidateRaws := range candidates.byType {
 		def, ok := r.byType[typ]
 		if !ok {
-			return fmt.Errorf("%w: %q", ErrRARUnregisteredType, typ)
+			return nil, fmt.Errorf("%w: %q", ErrRARUnregisteredType, typ)
 		}
 		baseRaws := base.byType[typ]
 		usedIdx := consumed[typ]
 		for _, candidateRaw := range candidateRaws {
 			if !matchObject(def, candidateRaw, baseRaws, usedIdx, narrowing) {
-				return fmt.Errorf("%w: type %q", ErrRARGrantExceedsRequest, typ)
+				return nil, fmt.Errorf("%w: type %q", ErrRARGrantExceedsRequest, typ)
+			}
+		}
+	}
+	return consumed, nil
+}
+
+// checkOmissions asks each type's RARDefinition.ValidateOmission about
+// every object of granted that no narrowed object matched (matched, from
+// matchAll), with scope, the access token's.
+func (r *RARRegistry) checkOmissions(granted RARValues, matched map[string][]bool, scope []string) error {
+	for typ, raws := range granted.byType {
+		for i, raw := range raws {
+			if matched[typ][i] {
+				continue
+			}
+			def, ok := r.byType[typ]
+			if !ok {
+				return fmt.Errorf("%w: %q", ErrRARUnregisteredType, typ)
+			}
+			if err := def.validateOmission(raw, scope); err != nil {
+				return err
 			}
 		}
 	}

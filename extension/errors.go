@@ -64,4 +64,10 @@ var (
 	// RARRegistry.ValidateNarrowing returns it likewise for a token
 	// request's object that exceeds the grant.
 	ErrRARGrantExceedsRequest = errors.New("extension: granted authorization_details exceeds what was requested")
+
+	// ErrRAROmissionRefused indicates a token request left out a granted
+	// authorization_details object that its RARDefinition.ValidateOmission
+	// refused to have left out (RARRegistry.ValidateNarrowing). The
+	// error also wraps the hook's own.
+	ErrRAROmissionRefused = errors.New("extension: a granted authorization_details object may not be left out")
 )

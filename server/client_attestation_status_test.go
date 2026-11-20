@@ -532,23 +532,30 @@ func TestNewClientAttestationStatusRequirements(t *testing.T) {
 			Revocation:    revocation,
 		}
 	}
+	const uncheckedChecker = "client_attestation_status must implement server.ClientAttestationStatusAssurance under AssuranceProduction"
 	for name, tc := range map[string]struct {
 		production bool
 		trust      server.AttesterTrust
 		checker    server.ClientAttestationStatusChecker
 		want       string // "" accepts
 	}{
-		"production refuses no checker":           {true, nil, nil, "client_attestation_status is required under AssuranceProduction"},
-		"production accepts the explicit decline": {true, nil, server.NoClientAttestationStatusCheck{}, ""},
-		"production accepts a checker":            {true, nil, &recordingStatusChecker{}, ""},
-		"development accepts no checker":          {false, nil, nil, ""},
-		"nil decline pointer":                     {false, nil, (*server.NoClientAttestationStatusCheck)(nil), "nil *NoClientAttestationStatusCheck"},
-		"decline by pointer":                      {false, nil, &server.NoClientAttestationStatusCheck{}, ""},
-		"x5c chain without revocation":            {false, x5c(nil), nil, "X5CAttesterChain.Revocation is required"},
-		"x5c chain declining revocation":          {false, x5c(server.NoClientCertificateRevocationCheck{}), nil, ""},
-		"x5c chain with CRLs":                     {false, x5c(staticCRLs()), nil, ""},
-		"x5c chain with CRLs lacking lists":       {false, x5c(server.ClientCertificateCRLs{}), nil, "X5CAttesterChain.Revocation"},
-		"x5c chain by pointer without revocation": {false, &server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerInCertificate}, nil, "X5CAttesterChain.Revocation is required"},
+		"production refuses no checker":                          {true, nil, nil, "client_attestation_status is required under AssuranceProduction"},
+		"production accepts the explicit decline":                {true, nil, server.NoClientAttestationStatusCheck{}, ""},
+		"production accepts the explicit decline by pointer":     {true, nil, &server.NoClientAttestationStatusCheck{}, ""},
+		"production accepts a checker checking itself":           {true, nil, &selfCheckingStatusChecker{}, ""},
+		"production refuses a checker not checking itself":       {true, nil, &recordingStatusChecker{}, uncheckedChecker},
+		"production refuses a checker embedding the decline":     {true, nil, embeddedStatusDecline{}, uncheckedChecker},
+		"production accepts an embedded decline checking itself": {true, nil, checkingEmbeddedStatusDecline{}, ""},
+		"development accepts a checker not checking itself":      {false, nil, &recordingStatusChecker{}, ""},
+		"development accepts no checker":                         {false, nil, nil, ""},
+		"nil decline pointer":                                    {false, nil, (*server.NoClientAttestationStatusCheck)(nil), "nil *NoClientAttestationStatusCheck"},
+		"nil checker pointer, never asked to check itself":       {false, nil, (*selfCheckingStatusChecker)(nil), "client_attestation_status is a nil"},
+		"decline by pointer":                                     {false, nil, &server.NoClientAttestationStatusCheck{}, ""},
+		"x5c chain without revocation":                           {false, x5c(nil), nil, "X5CAttesterChain.Revocation is required"},
+		"x5c chain declining revocation":                         {false, x5c(server.NoClientCertificateRevocationCheck{}), nil, ""},
+		"x5c chain with CRLs":                                    {false, x5c(staticCRLs()), nil, ""},
+		"x5c chain with CRLs lacking lists":                      {false, x5c(server.ClientCertificateCRLs{}), nil, "X5CAttesterChain.Revocation"},
+		"x5c chain by pointer without revocation":                {false, &server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerInCertificate}, nil, "X5CAttesterChain.Revocation is required"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := validAttestationConfig(t)
@@ -578,6 +585,112 @@ func TestNewClientAttestationStatusRequirements(t *testing.T) {
 	t.Run("not required with attestation disabled", func(t *testing.T) {
 		if err := productionNew(t, func(*server.Dependencies) {}); err != nil {
 			t.Fatalf("New(production, attestation disabled): %v", err)
+		}
+	})
+}
+
+// selfCheckingStatusChecker is a ClientAttestationStatusChecker checking
+// its own configuration (ClientAttestationStatusAssurance): it returns
+// configErr, recording each level it's asked about.
+type selfCheckingStatusChecker struct {
+	configErr error
+	levels    []server.AssuranceLevel
+}
+
+func (*selfCheckingStatusChecker) CheckClientAttestationStatus(context.Context, server.VerifiedClientAttestation) error {
+	return nil
+}
+
+func (c *selfCheckingStatusChecker) CheckConfiguration(level server.AssuranceLevel) error {
+	c.levels = append(c.levels, level)
+	return c.configErr
+}
+
+// embeddedStatusDecline embeds NoClientAttestationStatusCheck but
+// decides for itself, as a wrapper fetching status lists might, so it
+// inherits no check of its configuration.
+type embeddedStatusDecline struct {
+	server.NoClientAttestationStatusCheck
+}
+
+func (embeddedStatusDecline) CheckClientAttestationStatus(context.Context, server.VerifiedClientAttestation) error {
+	return nil
+}
+
+// checkingEmbeddedStatusDecline is embeddedStatusDecline checking its
+// own configuration.
+type checkingEmbeddedStatusDecline struct{ embeddedStatusDecline }
+
+func (checkingEmbeddedStatusDecline) CheckConfiguration(server.AssuranceLevel) error {
+	return nil
+}
+
+// TestClientAttestationStatusChecksItsConfiguration covers New calling a
+// checker's own check of its configuration (ClientAttestationStatusAssurance):
+// once, with Config.Assurance, at each level, refusing on its error —
+// joined, under AssuranceProduction, with production's other refusals —
+// and only when attestation-based client authentication is set.
+func TestClientAttestationStatusChecksItsConfiguration(t *testing.T) {
+	misconfigured := errors.New("status list fetcher may reach private addresses")
+	for name, production := range map[string]bool{"development": false, "production": true} {
+		t.Run(name, func(t *testing.T) {
+			level := server.AssuranceDevelopment
+			if production {
+				level = server.AssuranceProduction
+			}
+			build := func(attestation bool, mutate func(*server.Dependencies)) error {
+				cfg := validConfig(t)
+				if attestation {
+					cfg = validAttestationConfig(t)
+				}
+				deps := validDependencies()
+				if production {
+					asProduction(&cfg)
+					cfg.Deployment = server.DeploymentSingleInstance
+					deps.Audit = &fakeAuditSink{}
+				}
+				mutate(&deps)
+				_, err := server.New(cfg, deps)
+				return err
+			}
+
+			passing := &selfCheckingStatusChecker{}
+			if err := build(true, func(d *server.Dependencies) { d.ClientAttestationStatus = passing }); err != nil {
+				t.Fatalf("New with a checker whose configuration passes: %v", err)
+			}
+			if len(passing.levels) != 1 || passing.levels[0] != level {
+				t.Fatalf("CheckConfiguration asked at %v, want once at %v", passing.levels, level)
+			}
+
+			failing := &selfCheckingStatusChecker{configErr: misconfigured}
+			err := build(true, func(d *server.Dependencies) { d.ClientAttestationStatus = failing })
+			if !errors.Is(err, misconfigured) || !strings.Contains(err.Error(), "server: dependencies: client_attestation_status: "+misconfigured.Error()) {
+				t.Fatalf("New with a misconfigured checker = %v, want its error as client_attestation_status's", err)
+			}
+			if len(failing.levels) != 1 {
+				t.Fatalf("CheckConfiguration asked %d times, want once", len(failing.levels))
+			}
+
+			unasked := &selfCheckingStatusChecker{configErr: misconfigured}
+			if err := build(false, func(d *server.Dependencies) { d.ClientAttestationStatus = unasked }); err != nil {
+				t.Fatalf("New with attestation disabled: %v", err)
+			}
+			if len(unasked.levels) != 0 {
+				t.Fatalf("CheckConfiguration asked at %v with attestation disabled, want never", unasked.levels)
+			}
+		})
+	}
+
+	t.Run("joined with production's other refusals", func(t *testing.T) {
+		cfg := validAttestationConfig(t)
+		asProduction(&cfg)
+		cfg.Deployment = server.DeploymentSingleInstance
+		deps := validDependencies()
+		deps.Audit = nil
+		deps.ClientAttestationStatus = &selfCheckingStatusChecker{configErr: misconfigured}
+		_, err := server.New(cfg, deps)
+		if !errors.Is(err, misconfigured) || !strings.Contains(err.Error(), "audit is required under AssuranceProduction") {
+			t.Fatalf("New = %v, want both the checker's refusal and the missing audit sink", err)
 		}
 	})
 }

@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -31,7 +32,10 @@ import (
 // status mechanism an attester uses, how its lists are signed and who
 // may sign them, and how long a fetched list may be relied on are
 // ecosystem decisions. The checker makes them, from what
-// VerifiedClientAttestation carries.
+// VerifiedClientAttestation carries. New can't see how a checker is
+// configured to make them, so a checker checks that itself, through
+// ClientAttestationStatusAssurance; AssuranceProduction requires that of
+// every checker but NoClientAttestationStatusCheck.
 type ClientAttestationStatusChecker interface {
 	// CheckClientAttestationStatus returns nil when a's attestation is
 	// still valid, an error wrapping ErrClientAttestationRevoked when it
@@ -63,8 +67,40 @@ type ClientAttestationStatusChecker interface {
 	// attestation — through SignerKey or SignerCertificates — not merely
 	// to a trust list: with anchors shared between attesters, another
 	// Wallet Provider could otherwise sign a status list that decides
-	// this one's attestations.
+	// this one's attestations. Its CheckConfiguration
+	// (ClientAttestationStatusAssurance) is where it refuses, when New
+	// builds the server, a configuration that falls short of this: a
+	// fetcher that isn't hardened, say.
 	CheckClientAttestationStatus(ctx context.Context, a VerifiedClientAttestation) error
+}
+
+// ClientAttestationStatusAssurance is implemented by a
+// ClientAttestationStatusChecker to check its own configuration, which
+// New can't see: the fetcher a checker reaches the status-list URIs
+// attestations name with, whether it checks a list signer's certificate
+// for revocation, whether it caches the lists it fetches. When
+// Config.AttestationBasedClientAuthentication is set, New calls
+// CheckConfiguration with Config.Assurance, at every assurance level, so
+// a checker applies its development rules as well as its production
+// ones, and refuses to build the server on its error. Under
+// AssuranceProduction New refuses a checker that doesn't implement it:
+// the status-list fetch is otherwise the one outbound request whose
+// hardening production never checks. NoClientAttestationStatusCheck,
+// which fetches nothing, is accepted without it.
+//
+// A check describes the checking type's own configuration. A checker
+// embedding one that implements it inherits the check through Go's
+// method promotion, and New can't tell it from one the wrapper made
+// itself: a wrapper embedding a status-list checker whose
+// CheckClientAttestationStatus fetches some other way must override
+// CheckConfiguration with a check of what its own fetching relies on. A
+// struct embedding NoClientAttestationStatusCheck inherits no check, so
+// under AssuranceProduction it must implement this itself.
+type ClientAttestationStatusAssurance interface {
+	// CheckConfiguration returns nil when the checker's configuration
+	// meets level's rules, and otherwise an error saying what falls
+	// short.
+	CheckConfiguration(level AssuranceLevel) error
 }
 
 // VerifiedClientAttestation is a Client Attestation that has verified,
@@ -118,7 +154,10 @@ var ErrClientAttestationRevoked = errors.New("server: the client attestation is 
 // revocation. Exists so declining under AssuranceProduction, which
 // requires Dependencies.ClientAttestationStatus with attestation-based
 // client authentication, is a conscious, visible line of code, the same
-// reason NoClientCertificateRevocationCheck exists.
+// reason NoClientCertificateRevocationCheck exists. It fetches nothing,
+// so production accepts it, by value or pointer, without a
+// ClientAttestationStatusAssurance check; a struct embedding it is a
+// checker of its own, and must implement that check itself.
 type NoClientAttestationStatusCheck struct{}
 
 // CheckClientAttestationStatus implements ClientAttestationStatusChecker
@@ -136,14 +175,39 @@ func validateClientAttestationStatus(checker ClientAttestationStatusChecker) err
 	return nil
 }
 
-// checkProductionClientAttestationStatus refuses, under
-// AssuranceProduction with attestation-based client authentication, no
-// ClientAttestationStatus at all.
-func checkProductionClientAttestationStatus(checker ClientAttestationStatusChecker) error {
-	if checker == nil {
-		return errors.New("server: dependencies: client_attestation_status is required under AssuranceProduction when attestation_based_client_authentication is set (pass a ClientAttestationStatusChecker, or NoClientAttestationStatusCheck{} when your attesters publish no status)")
+// checkClientAttestationStatusConfiguration runs checker's own check of
+// its configuration at level, when it implements
+// ClientAttestationStatusAssurance.
+func checkClientAttestationStatusConfiguration(checker ClientAttestationStatusChecker, level AssuranceLevel) error {
+	asserter, ok := checker.(ClientAttestationStatusAssurance)
+	if !ok {
+		return nil
+	}
+	if err := asserter.CheckConfiguration(level); err != nil {
+		return fmt.Errorf("server: dependencies: client_attestation_status: %w", err)
 	}
 	return nil
+}
+
+// checkProductionClientAttestationStatus refuses, under
+// AssuranceProduction with attestation-based client authentication, no
+// ClientAttestationStatus at all, and a checker that doesn't check its
+// own configuration (ClientAttestationStatusAssurance) unless it is
+// NoClientAttestationStatusCheck itself, by value or pointer, which
+// fetches nothing. It runs the check of one that does: here rather than
+// in validateAttestationDependencies, so a refusal joins the rest of
+// production's.
+func checkProductionClientAttestationStatus(checker ClientAttestationStatusChecker) error {
+	switch checker.(type) {
+	case nil:
+		return errors.New("server: dependencies: client_attestation_status is required under AssuranceProduction when attestation_based_client_authentication is set (pass a ClientAttestationStatusChecker, or NoClientAttestationStatusCheck{} when your attesters publish no status)")
+	case NoClientAttestationStatusCheck, *NoClientAttestationStatusCheck:
+		return nil
+	}
+	if _, ok := checker.(ClientAttestationStatusAssurance); !ok {
+		return errors.New("server: dependencies: client_attestation_status must implement server.ClientAttestationStatusAssurance under AssuranceProduction, to check its own configuration: the fetcher it reaches the status-list URIs attestations name with, say")
+	}
+	return checkClientAttestationStatusConfiguration(checker, AssuranceProduction)
 }
 
 // checkAttestationStillValid runs, once an attestation and its PoP have

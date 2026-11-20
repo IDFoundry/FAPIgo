@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.78.0](https://github.com/IDFoundry/FAPIgo/compare/v0.77.1...v0.78.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **extension:** RARRegistry.ValidateNarrowing takes the access token's scope as a third argument (nil when it carries none). See UPGRADING.md.
+* **server:** under AssuranceProduction with attestation-based client authentication, a ClientAttestationStatusChecker of the application's own must implement server.ClientAttestationStatusAssurance, a CheckConfiguration method; NoClientAttestationStatusCheck is unaffected. See UPGRADING.md.
+
+### Features
+
+* **extension:** let a RAR type refuse a token request leaving out a granted object ([dee98c1](https://github.com/IDFoundry/FAPIgo/commit/dee98c1c662af43a976dcaac02aedf46c61747bc))
+
+
+### Bug Fixes
+
+* **server:** check the attestation status checker's own configuration ([840b812](https://github.com/IDFoundry/FAPIgo/commit/840b8122d7c75134930aea2aff9d30b58685a81d))
+
 ## [0.77.1](https://github.com/IDFoundry/FAPIgo/compare/v0.77.0...v0.77.1) (2026-11-19)
 
 

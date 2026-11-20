@@ -61,6 +61,30 @@ at every assurance level, so it can apply development rules too. A
 wrapper embedding a checker that implements it inherits that check: if
 the wrapper fetches some other way, override `CheckConfiguration`.
 
+### RARRegistry.ValidateNarrowing takes the access token's scope (extension)
+
+**Affects:** code that calls `extension.RARRegistry.ValidateNarrowing`
+itself. The server calls it at the token endpoint, so a deployment that
+only registers `RARDefinition`s is unaffected.
+
+**Why:** the new `RARDefinition.ValidateOmission` hook judges each
+granted object a token request leaves out, given the scope the access
+token will carry, so a type can refuse an omission that widens the
+token: an OpenID4VCI `openid_credential` object left out while its
+credential configuration's scope is kept, say. `ValidateNarrowing` runs
+it, so it needs that scope.
+
+**What fails:** the call doesn't compile.
+
+**What to change:** pass the scope the access token will carry as the
+third argument, or nil when it carries none.
+
+A token request whose `authorization_details` is an empty array now has
+the grant's stored details checked, as a request naming objects always
+has. So a grant holding a type `Config.RAR` no longer registers is
+refused with `invalid_authorization_details`, rather than given a token
+without details.
+
 ## v0.77.0
 
 ### A claim may be requested with at most 64 values (server)

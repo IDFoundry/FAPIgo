@@ -724,7 +724,14 @@ driven by `RARDefinition.ValidateNarrowing(granted, narrowed T) error`,
 which falls back to `ValidateGrant(granted, narrowed)` and then to exact
 match. The split exists because a `ValidateGrant` that lets consent add a
 server-minted member would otherwise let a client add one of its own
-choosing at the token endpoint. `RARDefinition.Validate` runs on every
+choosing at the token endpoint. Each granted object the token request
+leaves out (all of them for an empty array) then goes to
+`RARDefinition.ValidateOmission(granted T, scope []string) error`, with
+the scope the access token will carry: a type whose objects narrow what
+a scope also authorizes (OpenID4VCI's `openid_credential`) refuses an
+omission that would leave the token the scope's wider access. Nothing
+judges what consent leaves out of a request; that is the server's own
+decision. `RARDefinition.Validate` runs on every
 parse, requested and granted alike; `RARDefinition.ValidateRequest` runs
 only through `RARRegistry.ParseRequest`, which the server uses solely
 where a client starts a grant (`parseRequestedAuthorizationDetails`: PAR,

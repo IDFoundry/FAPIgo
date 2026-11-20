@@ -402,7 +402,7 @@ func TestRARRegistryValidateRefusesUnregisteredGrantedType(t *testing.T) {
 	if err := reg.ValidateGrant(requested, unregistered); !errors.Is(err, extension.ErrRARUnregisteredType) {
 		t.Errorf("ValidateGrant(granted holds an unregistered type) = %v, want ErrRARUnregisteredType", err)
 	}
-	if err := reg.ValidateNarrowing(requested, unregistered); !errors.Is(err, extension.ErrRARUnregisteredType) {
+	if err := reg.ValidateNarrowing(requested, unregistered, nil); !errors.Is(err, extension.ErrRARUnregisteredType) {
 		t.Errorf("ValidateNarrowing(narrowed holds an unregistered type) = %v, want ErrRARUnregisteredType", err)
 	}
 }

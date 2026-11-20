@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -70,6 +71,9 @@ func (s *Server) parseRequestedAuthorizationDetails(params map[string]json.RawMe
 // it, so re-checking it here would only strand an in-flight request when a
 // ValidateRequest is added or tightened between its PAR and its consent.
 func (s *Server) validateGrantedAuthorizationDetails(requestedRaw json.RawMessage, granted []json.RawMessage) (json.RawMessage, error) {
+	if len(granted) == 0 {
+		return nil, nil
+	}
 	return s.checkAuthorizationDetailsSubset(requestedRaw, granted, (*extension.RARRegistry).ValidateGrant)
 }
 
@@ -77,38 +81,48 @@ func (s *Server) validateGrantedAuthorizationDetails(requestedRaw json.RawMessag
 // for a client's token request narrowing a grant (RFC 9396 §6.1): narrowed
 // is checked against grantedRaw, the grant's own stored details, by
 // RARRegistry.ValidateNarrowing, so a RARDefinition that lets consent add a
-// member the server mints can still refuse a client adding one.
-func (s *Server) validateNarrowedAuthorizationDetails(grantedRaw json.RawMessage, narrowed []json.RawMessage) (json.RawMessage, error) {
-	return s.checkAuthorizationDetailsSubset(grantedRaw, narrowed, (*extension.RARRegistry).ValidateNarrowing)
+// member the server mints can still refuse a client adding one. scope is
+// the access token's, for the RARDefinition.ValidateOmission of each
+// granted object narrowed leaves out. An empty narrowed is checked too,
+// since it leaves out every one of them.
+func (s *Server) validateNarrowedAuthorizationDetails(grantedRaw json.RawMessage, narrowed []json.RawMessage, scope []string) (json.RawMessage, error) {
+	return s.checkAuthorizationDetailsSubset(grantedRaw, narrowed, func(registry *extension.RARRegistry, granted, narrowed extension.RARValues) error {
+		return registry.ValidateNarrowing(granted, narrowed, scope)
+	})
 }
 
 // checkAuthorizationDetailsSubset parses baseRaw and subset with
 // Config.RAR and has check compare them, returning subset as one JSON
-// array — the shared body of validateGrantedAuthorizationDetails and
-// validateNarrowedAuthorizationDetails.
+// array, or nil when subset is empty — the shared body of
+// validateGrantedAuthorizationDetails and
+// validateNarrowedAuthorizationDetails. An empty subset of an empty base
+// needs no check.
 func (s *Server) checkAuthorizationDetailsSubset(baseRaw json.RawMessage, subset []json.RawMessage, check func(*extension.RARRegistry, extension.RARValues, extension.RARValues) error) (json.RawMessage, error) {
-	if len(subset) == 0 {
-		return nil, nil
-	}
 	if len(baseRaw) == 0 {
+		if len(subset) == 0 {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("authorization_details was granted but never requested")
 	}
 	if s.cfg.RAR == nil {
 		return nil, fmt.Errorf("authorization_details is not supported by this server")
 	}
-
-	// Unescaped, so the array is checked, stored and issued as the bytes
-	// it arrived as: json.Marshal's HTML escaping could grow it past
-	// Config.RAR's bounds here, or at a later re-check of the grant.
-	subsetRaw, _ := strictjson.MarshalUnescaped(subset) // marshaling a []json.RawMessage cannot fail
-
 	baseValues, err := s.cfg.RAR.Parse(baseRaw)
 	if err != nil {
 		return nil, fmt.Errorf("stored requested authorization_details is invalid: %w", err)
 	}
-	subsetValues, err := s.cfg.RAR.Parse(subsetRaw)
-	if err != nil {
-		return nil, err
+
+	var subsetRaw json.RawMessage
+	var subsetValues extension.RARValues
+	if len(subset) > 0 {
+		// Unescaped, so the array is checked, stored and issued as the
+		// bytes it arrived as: json.Marshal's HTML escaping could grow it
+		// past Config.RAR's bounds here, or at a later re-check of the
+		// grant.
+		subsetRaw, _ = strictjson.MarshalUnescaped(subset) // marshaling a []json.RawMessage cannot fail
+		if subsetValues, err = s.cfg.RAR.Parse(subsetRaw); err != nil {
+			return nil, err
+		}
 	}
 	if err := check(s.cfg.RAR, baseValues, subsetValues); err != nil {
 		return nil, err
@@ -347,7 +361,9 @@ func (s *Server) CheckClientRegistration(client storage.RegisteredClient) error 
 // "authorization_details" parameter (RFC 9396 §6), shape-checked by
 // tokenRequestAuthorizationDetails: its detail objects, and whether the
 // request carried the parameter at all (an empty array asks for a token
-// with no authorization details; no parameter asks for the grant's).
+// with no authorization details, if every granted object's
+// RARDefinition.ValidateOmission allows; no parameter asks for the
+// grant's).
 type requestedAuthorizationDetails struct {
 	objects []json.RawMessage
 	present bool
@@ -402,21 +418,28 @@ func (s *Server) tokenRequestAuthorizationDetails(params map[string]string) (req
 // (validateNarrowedAuthorizationDetails): every requested object must
 // match a distinct granted object of its type, exactly or as its
 // RARDefinition.ValidateNarrowing hook allows (ValidateGrant if that is
-// nil).
+// nil). Each granted object left out, including every one when requested
+// is an empty array, is then put to its RARDefinition.ValidateOmission
+// with scope, the scope the access token will carry: leaving an object
+// out narrows the token only when nothing else in it, such as a scope,
+// still authorizes what the object limited.
 //
 // Only the access token is narrowed: the grant itself, which a refresh
 // token carries forward, is the caller's to keep unchanged (RFC 9396
 // §6.1: "the resource owner's previous authorization is unchanged by such
 // requests").
-func (s *Server) accessTokenGrant(grant grantRecord, requested requestedAuthorizationDetails) (grantRecord, *Error) {
+func (s *Server) accessTokenGrant(grant grantRecord, scope []string, requested requestedAuthorizationDetails) (grantRecord, *Error) {
 	if !requested.present {
 		return grant, nil
 	}
 	if len(requested.objects) > 0 && len(grant.AuthorizationDetails) == 0 {
 		return grantRecord{}, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details was not granted", nil)
 	}
-	narrowed, err := s.validateNarrowedAuthorizationDetails(grant.AuthorizationDetails, requested.objects)
-	if err != nil {
+	narrowed, err := s.validateNarrowedAuthorizationDetails(grant.AuthorizationDetails, requested.objects, scope)
+	switch {
+	case errors.Is(err, extension.ErrRAROmissionRefused):
+		return grantRecord{}, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details leaves out a granted object this access token must carry", err)
+	case err != nil:
 		return grantRecord{}, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details exceeds what was granted", err)
 	}
 	grant.AuthorizationDetails = narrowed

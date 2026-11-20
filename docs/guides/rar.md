@@ -51,6 +51,18 @@ can't tell a client's token request from the server's own grant, so it
 would accept the client's value. A type with a member the server mints
 must set `ValidateNarrowing`.
 
+`ValidateOmission` decides whether a token request may leave out a
+granted object, given the scope the access token will carry; left nil,
+any object may be left out. Set it when what an object authorizes can
+also be reached through a scope, so that leaving the object out widens
+the token instead of narrowing it. An OpenID4VCI `openid_credential`
+object is one: when a grant carries a credential configuration's scope
+beside its object, the object governs, and may limit the claims issued
+or pin a dataset. A token keeping the scope without the object would
+lose those limits. Refuse leaving out an object while the scope still
+covers it, and a client can still ask for a token for one of two granted
+credentials.
+
 The hooks see objects decoded into your Go type, so they can't tell a
 member that's absent, or `null`, from one holding its zero value: a
 missing `actions` list passes a "subset of the requested actions" check,
@@ -109,7 +121,10 @@ grant the way it compares a grant with the request (`ValidateNarrowing`,
 else `ValidateGrant`, else an exact match), issues the access token with only what was asked for,
 and refuses anything malformed or wider with
 `invalid_authorization_details`. An empty array gets a token without
-details; no parameter gets the whole grant. The refresh token always
+details; no parameter gets the whole grant. Each granted object a
+request leaves out, every one for an empty array, goes to its type's
+`ValidateOmission`, and a refusal is `invalid_authorization_details`
+too. The refresh token always
 keeps the whole grant, so a later refresh can ask for any of it.
 Objects are matched greedily, in the order the client sends them: with a
 hook that accepts more than an exact match, the client may be refused a

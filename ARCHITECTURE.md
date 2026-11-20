@@ -490,9 +490,13 @@ held durably (`keys.KeyCustodyAssurance`; an HSM or KMS is not required,
 only that the keys survive a restart), each also cross-instance
 consistent under `DeploymentHorizontallyScaled` — plus an audit sink,
 `crypto/rand.Reader` itself as `Dependencies.Random` (an `io.Reader`
-can't declare that it is a CSPRNG) and, with CIBA, a ping notifier
-declaring hardened outbound sending (`server.BackchannelNotifierAssurance`),
-and rejects loopback `http` issuer and endpoint URLs. Production
+can't declare that it is a CSPRNG), with CIBA a ping notifier
+declaring hardened outbound sending (`server.BackchannelNotifierAssurance`)
+and, with attestation-based client authentication, a client attestation
+status checker that checks its own configuration — its status-list
+fetcher, say — when `New` runs (`server.ClientAttestationStatusAssurance`;
+that check, unlike the declarations, runs at every level), and rejects
+loopback `http` issuer and endpoint URLs. Production
 also requires `Config.Deployment` — single instance or horizontally
 scaled — so a fleet can't be checked as one instance by omission. The assurance level is itself a
 required `Config.Assurance` choice with no default, so a caller can never

@@ -717,7 +717,15 @@ fetch status lists; a checker does, along these lines:
 
 ```go
 type walletStatus struct {
-	lists *statusLists // yours: fetches through a *fapihttp.Client, caches by ttl/exp
+	lists *statusLists // yours: fetches through lists.fetcher, a *fapihttp.Client, caches by ttl/exp
+}
+
+// CheckConfiguration implements server.ClientAttestationStatusAssurance.
+func (w walletStatus) CheckConfiguration(level server.AssuranceLevel) error {
+	if level == server.AssuranceProduction && !w.lists.fetcher.HardenedForProduction() {
+		return errors.New("status lists must be fetched through fapihttp.New over fapihttp.NewClient's client")
+	}
+	return nil
 }
 
 func (w walletStatus) CheckClientAttestationStatus(ctx context.Context, a server.VerifiedClientAttestation) error {
@@ -752,9 +760,14 @@ func (w walletStatus) CheckClientAttestationStatus(ctx context.Context, a server
 An error wrapping `server.ErrClientAttestationRevoked` refuses the
 request with `invalid_client`; any other error with `server_error`. The
 checker runs on every attestation-authenticated request, after the PoP
-has verified, so cache the lists you fetch. When the attesters you
-trust publish no status, pass `server.NoClientAttestationStatusCheck{}`
-instead. [The native wallet guide](docs/guides/native-wallet.md) covers
+has verified, so cache the lists you fetch. `New` can't see how your
+checker fetches, so it asks: it calls `CheckConfiguration`
+(`server.ClientAttestationStatusAssurance`) with the assurance level,
+at every level, and won't start on its error. Under
+`AssuranceProduction` a checker without it is refused. When the
+attesters you trust publish no status, pass
+`server.NoClientAttestationStatusCheck{}` instead; it fetches nothing,
+so it needs no check. [The native wallet guide](docs/guides/native-wallet.md) covers
 the rest of a wallet's setup, on both sides.
 
 ## 5. The one piece that's genuinely yours: the login flow

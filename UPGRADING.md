@@ -15,6 +15,52 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.78.0
+
+### A client attestation status checker must check its own configuration (server, *production only*)
+
+**Affects:** a server under `AssuranceProduction` with
+`Config.AttestationBasedClientAuthentication` whose
+`Dependencies.ClientAttestationStatus` is a checker of your own, not
+`server.NoClientAttestationStatusCheck{}`. A struct embedding
+`NoClientAttestationStatusCheck` counts as your own.
+
+**Why:** a checker fetching Token Status Lists reaches URIs the
+attester's attestations name. How it's configured to do so is out of
+`New`'s sight: whether its fetcher may reach loopback or private
+addresses, whether it checks a list signer's certificate for
+revocation, whether it caches what it fetches. Every other outbound
+dependency production relies on, such as the CIBA notifier, the
+federation fetcher and the attester trust-anchor sources, has to show
+`New` it's hardened; the status-list fetch was the one production
+never checked. The new `server.ClientAttestationStatusAssurance` lets a
+checker check its own configuration: `New` calls its
+`CheckConfiguration` with `Config.Assurance` and refuses to start on its
+error, as `client_attestation_status: …`.
+
+**What fails:** under `AssuranceProduction`, `server.New` returns an
+error naming `server.ClientAttestationStatusAssurance` for a checker
+that doesn't implement it. At any level, a checker that does implement
+it and returns an error stops `New`.
+
+**What to change:** add `CheckConfiguration` to your checker, refusing
+what your production rules don't allow:
+
+```go
+func (w walletStatus) CheckConfiguration(level server.AssuranceLevel) error {
+	if level == server.AssuranceProduction && !w.lists.fetcher.HardenedForProduction() {
+		return errors.New("status lists must be fetched through fapihttp.New over fapihttp.NewClient's client")
+	}
+	return nil
+}
+```
+
+A checker that fetches nothing, reading a revocation table of your own
+say, returns nil, or checks that table's store. `New` calls the method
+at every assurance level, so it can apply development rules too. A
+wrapper embedding a checker that implements it inherits that check: if
+the wrapper fetches some other way, override `CheckConfiguration`.
+
 ## v0.77.0
 
 ### A claim may be requested with at most 64 values (server)

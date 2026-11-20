@@ -311,11 +311,15 @@ type Dependencies struct {
 	// and what an implementation fetching status lists must do.
 	//
 	// Used only when Config.AttestationBasedClientAuthentication is set.
-	// Under AssuranceProduction it is then required: pass your own
-	// checker, or NoClientAttestationStatusCheck{} when your attesters
-	// publish no status. Otherwise nil means no attestation's status is
-	// checked. Whether the attester's own signing certificate has been
-	// revoked is X5CAttesterChain.Revocation's to decide, not this.
+	// A checker implementing ClientAttestationStatusAssurance then checks
+	// its own configuration when New builds the server, at every
+	// assurance level. Under AssuranceProduction it is required: pass
+	// your own checker, which must implement
+	// ClientAttestationStatusAssurance, or
+	// NoClientAttestationStatusCheck{} when your attesters publish no
+	// status. Otherwise nil means no attestation's status is checked.
+	// Whether the attester's own signing certificate has been revoked is
+	// X5CAttesterChain.Revocation's to decide, not this.
 	ClientAttestationStatus ClientAttestationStatusChecker
 
 	// PairwiseSubjects derives the body of each pairwise sub (see

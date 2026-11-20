@@ -727,7 +727,7 @@ func validateConditionalDependencies(cfg Config, deps Dependencies) error {
 		return fmt.Errorf("server: dependencies: backchannel inbox needs backchannel subjects, to know whose inbox a request goes to")
 	}
 	if cfg.AttestationBasedClientAuthentication {
-		if err := validateAttestationDependencies(deps); err != nil {
+		if err := validateAttestationDependencies(deps, cfg.Assurance); err != nil {
 			return err
 		}
 	}
@@ -753,11 +753,19 @@ func validateEncryptionDependencies(cfg Config, deps Dependencies) error {
 
 // validateAttestationDependencies checks the dependencies
 // attestation-based client authentication uses: AttesterTrust, and
-// ClientAttestationStatus when it's set (AssuranceProduction's
-// requirement of it is checkProductionClientSources').
-func validateAttestationDependencies(deps Dependencies) error {
+// ClientAttestationStatus when it's set, with the checker's own check of
+// its configuration at level (ClientAttestationStatusAssurance). Under
+// AssuranceProduction that check is left to checkProductionClientSources,
+// with production's requirement of the checker, so its refusal joins
+// the rest of production's.
+func validateAttestationDependencies(deps Dependencies, level AssuranceLevel) error {
 	if err := validateAttesterTrust(deps.AttesterTrust); err != nil {
 		return err
+	}
+	if level != AssuranceProduction {
+		if err := checkClientAttestationStatusConfiguration(deps.ClientAttestationStatus, level); err != nil {
+			return err
+		}
 	}
 	return validateClientAttestationStatus(deps.ClientAttestationStatus)
 }
@@ -819,9 +827,9 @@ func checkProductionKeyCustody(deps Dependencies, issuer AccessTokenAssurance, s
 // checkProductionClientSources checks the client registry, the sources
 // of clients' verification and encryption keys, when attestation is
 // enabled the attester trust's key or trust-anchor source and the
-// attestation status checker's presence, and that
-// client certificates' chains are trusted somehow
-// (checkProductionClientCertificateTrust).
+// attestation status checker (present, and checking its own
+// configuration unless it declines), and that client certificates'
+// chains are trusted somehow (checkProductionClientCertificateTrust).
 func checkProductionClientSources(deps Dependencies, scaled, attestation bool) []error {
 	errs := []error{
 		checkStoreAssurance("clients", deps.Clients, false, scaled),

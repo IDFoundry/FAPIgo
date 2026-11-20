@@ -102,7 +102,10 @@ const (
 	// notification endpoints.
 	// With Config.AttestationBasedClientAuthentication set,
 	// Dependencies.ClientAttestationStatus is required: a checker of the
-	// attestations' status, or NoClientAttestationStatusCheck{} to
+	// attestations' status, which must implement
+	// ClientAttestationStatusAssurance and pass its own check of its
+	// configuration (a status-list checker's fetcher reaches URIs the
+	// attestations name), or NoClientAttestationStatusCheck{} to
 	// explicitly decline.
 	// Config.Limits must keep to the FAPI 2.0 Security Profile's fixed
 	// numbers (RecommendedLimits does): AuthorizationCodeLifetime at

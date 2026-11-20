@@ -88,8 +88,11 @@ claim of each verified attestation, along with the attester's key and
 certificate chain to check a Status List Token's signer against, and
 refuses a withdrawn attestation by returning an error wrapping
 `server.ErrClientAttestationRevoked` (`invalid_client`). Fetch lists
-through a `fapihttp.Client`, and cache them. Under
-`AssuranceProduction` the dependency is required;
+through a `fapihttp.Client`, and cache them. A checker also checks its
+own configuration, a hardened fetcher say, in `CheckConfiguration`
+(`server.ClientAttestationStatusAssurance`), which `New` calls at every
+assurance level. Under `AssuranceProduction` the dependency is
+required, and so is that check;
 `server.NoClientAttestationStatusCheck{}` declines when your attesters
 publish no status. [GETTING_STARTED.md](../../GETTING_STARTED.md#wallet-attestation-status)
 sketches a checker.

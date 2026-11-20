@@ -135,9 +135,12 @@
 //     AccessTokenIssuer that declares what it relies on
 //     (AccessTokenIssuerAssurance), crypto/rand.Reader as
 //     Dependencies.Random, a hardened CIBA notifier
-//     (BackchannelNotifierAssurance) when CIBA is configured, no loopback
-//     exception on Dependencies.FederationHTTP, and https issuer, endpoint
-//     and mTLS alias URLs — see AssuranceProduction.
+//     (BackchannelNotifierAssurance) when CIBA is configured, a client
+//     attestation status checker that checks its own configuration
+//     (ClientAttestationStatusAssurance) with attestation-based client
+//     authentication, no loopback exception on
+//     Dependencies.FederationHTTP, and https issuer, endpoint and mTLS
+//     alias URLs — see AssuranceProduction.
 //   - Every access token this server issues is sender-constrained,
 //     either by DPoP (RFC 9449) or by the client's mTLS certificate (RFC
 //     8705 §3), per the client's registered SenderConstrain. Under DPoP,

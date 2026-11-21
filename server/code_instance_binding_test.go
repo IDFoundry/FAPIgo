@@ -59,8 +59,13 @@ func (i *attestedInstance) attestedCode() string {
 // exchangeCode presents code authenticated by i's attestation, with
 // verifier as its PKCE code_verifier.
 func (i *attestedInstance) exchangeCode(code, verifier string) (server.TokenResult, error) {
+	return i.h.server.ExchangeAuthorizationCode(context.Background(), i.exchangeCodeRequest(code, verifier))
+}
+
+// exchangeCodeRequest is the token request exchangeCode presents.
+func (i *attestedInstance) exchangeCodeRequest(code, verifier string) server.AuthorizationCodeExchangeRequest {
 	attestations, pops := i.headers()
-	return i.h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+	return server.AuthorizationCodeExchangeRequest{
 		HTTP: server.FormRequest{Parameters: []server.FormParameter{
 			formParam("client_id", testClientID.String()),
 			formParam("grant_type", "authorization_code"),
@@ -70,7 +75,7 @@ func (i *attestedInstance) exchangeCode(code, verifier string) (server.TokenResu
 		}},
 		DPoPProofs:         []string{createDPoPProof(i.t, generateKey(i.t), i.h.now)},
 		ClientAttestations: attestations, ClientAttestationPoPs: pops,
-	})
+	}
 }
 
 const wrongCodeVerifier = "not-the-verifier-of-this-code-0123456789abcdefghijk"

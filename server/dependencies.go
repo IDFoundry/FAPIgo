@@ -45,11 +45,16 @@ type Dependencies struct {
 	// and RevokeListedGrant: a "connected apps" page, or revoking a
 	// user's grants when their account closes. Nil leaves both
 	// unavailable. A grant is recorded before its refresh token is
-	// stored, and confirmed still recorded after, so a recording failure,
-	// or a revocation racing the issuance, fails the token request rather
-	// than issuing a refresh token the registry doesn't list. Under
-	// AssuranceProduction it must declare storage.StoreAssurance
-	// (Durable, and CrossInstanceConsistent with
+	// stored, so a recording failure fails the token request rather than
+	// issuing a refresh token the registry doesn't list. A
+	// RevokeListedGrant or RevokeSubjectGrants racing the issuance, once
+	// it has listed the grant, either fails the token request or revokes
+	// the refresh token the request was issued, even when Grants keeps no
+	// record of revoking a token before the token was stored: the
+	// issuance confirms the grant is still recorded once it has stored
+	// the token, and the revocation revokes the token again once it has
+	// deleted the grant's entry. Under AssuranceProduction it must declare
+	// storage.StoreAssurance (Durable, and CrossInstanceConsistent with
 	// DeploymentHorizontallyScaled).
 	GrantRegistry storage.GrantRegistry
 

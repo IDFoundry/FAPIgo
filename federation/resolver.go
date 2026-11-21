@@ -290,7 +290,9 @@ type ResolvedEntity struct {
 	// superior's, merged (§6.1.4.1). Automatic registration reads it to
 	// hold the values it takes from a parameter's RP Metadata Choices
 	// sibling to the policy on the parameter itself (see
-	// intfed.PermittedStrings). Nil for a Trust Anchor resolved as
+	// intfed.PermittedStrings), and the grants of an RP leaving
+	// grant_types out to what the policy lets grant_types hold (see
+	// intfed.PermittedArrayStrings). Nil for a Trust Anchor resolved as
 	// itself, whose metadata no policy applies to.
 	policy MetadataPolicy
 

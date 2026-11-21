@@ -423,6 +423,73 @@ func PermittedStrings(ops PolicyOperators) (permitted []string, constrained bool
 	return permitted, true, nil
 }
 
+// PermittedArrayStrings is the set of string values ops — the merged
+// policy for one array-valued metadata parameter, such as grant_types —
+// lets that parameter hold, whether or not it is present: the subset_of
+// operator's values, intersected with the value operator's own when it
+// sets one. constrained is false when ops has neither (value null removes
+// the parameter rather than restricting it), so the parameter may hold
+// any value; an element that isn't a string permits nothing, and nor does
+// a value that isn't an array. ops must already have passed
+// ValidatePolicy (as a policy ApplyPolicy accepted has). The operands are
+// read as given, so this isn't for a space-delimited parameter (scope),
+// whose value may be a string.
+//
+// subset_of acts on a parameter only "if the metadata parameter is
+// present" (§6.1.3.1.5), so a Relying Party that leaves an array
+// parameter out keeps it absent under a superior's subset_of, and so
+// does one whose parameter a subordinate's value null removed. A caller
+// reading an absent parameter as permitting whatever it would otherwise
+// grant uses this to keep that within what the policy lets the
+// parameter hold.
+func PermittedArrayStrings(ops PolicyOperators) (permitted []string, constrained bool, err error) {
+	if raw, ok := ops[opSubsetOf]; ok {
+		var options []json.RawMessage
+		if options, err = decodeArray(raw); err != nil {
+			return nil, false, err
+		}
+		permitted, constrained = stringElements(options), true
+	}
+	raw, ok := ops[opValue]
+	if !ok || isJSONNull(raw) {
+		return permitted, constrained, nil
+	}
+	values, _ := decodeArray(raw) // a value that isn't an array holds no string
+	if !constrained {
+		return stringElements(values), true, nil
+	}
+	return intersectStrings(stringElements(values), permitted), true, nil
+}
+
+// stringElements is the strings among values, in order: any other value,
+// null included, is left out.
+func stringElements(values []json.RawMessage) []string {
+	out := []string{}
+	for _, v := range values {
+		var s *string
+		if json.Unmarshal(v, &s) == nil && s != nil {
+			out = append(out, *s)
+		}
+	}
+	return out
+}
+
+// intersectStrings is a's values that b also has, in a's order, in time
+// linear in their lengths (see valueSet).
+func intersectStrings(a, b []string) []string {
+	in := make(map[string]struct{}, len(b))
+	for _, s := range b {
+		in[s] = struct{}{}
+	}
+	out := []string{}
+	for _, s := range a {
+		if _, ok := in[s]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // ValidatePolicy checks every metadata parameter policy in policy with
 // validateCombination.
 func ValidatePolicy(policy MetadataPolicy, crit []string) error {

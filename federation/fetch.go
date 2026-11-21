@@ -6,7 +6,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/idfoundry/fapigo/fapihttp"
 	intfed "github.com/idfoundry/fapigo/internal/federation"
@@ -135,6 +137,26 @@ func ValidEntityID(id string) error {
 	return err
 }
 
+// maxQuotedEntityIDBytes bounds how much of an Entity Identifier
+// quoteEntityID quotes: enough for a usual one whole.
+const maxQuotedEntityIDBytes = 128
+
+// quoteEntityID quotes id for error text, as %q does, cut to its first
+// maxQuotedEntityIDBytes bytes (at a character boundary) and marked "…"
+// when longer. Automatic registration resolves whatever client_id a
+// caller names, and its errors reach logs and OnResolutionFailure, so
+// they quote only this much of it.
+func quoteEntityID(id string) string {
+	if len(id) <= maxQuotedEntityIDBytes {
+		return strconv.Quote(id)
+	}
+	cut := maxQuotedEntityIDBytes
+	for cut > 0 && !utf8.RuneStart(id[cut]) {
+		cut--
+	}
+	return strconv.Quote(id[:cut] + "…")
+}
+
 // fetchEntityConfiguration fetches and parses (but does not verify)
 // entityID's own Entity Configuration, returning the raw compact-
 // serialized token alongside the parsed Statement — Resolve's own
@@ -150,12 +172,12 @@ func fetchEntityConfiguration(ctx context.Context, fetcher *fapihttp.Client, ent
 	}
 	res, err := fetcher.Fetch(ctx, fapihttp.FetchRequest{URL: target, ExpectedContentType: EntityStatementContentType})
 	if err != nil {
-		return intfed.Statement{}, "", fmt.Errorf("federation: fetch entity configuration for %q: %w", entityID, err)
+		return intfed.Statement{}, "", fmt.Errorf("federation: fetch entity configuration for %s: %w", quoteEntityID(entityID), err)
 	}
 	token := string(res.Body)
 	stmt, err := intfed.Parse(token)
 	if err != nil {
-		return intfed.Statement{}, "", fmt.Errorf("federation: parse entity configuration for %q: %w", entityID, err)
+		return intfed.Statement{}, "", fmt.Errorf("federation: parse entity configuration for %s: %w", quoteEntityID(entityID), err)
 	}
 	return stmt, token, nil
 }

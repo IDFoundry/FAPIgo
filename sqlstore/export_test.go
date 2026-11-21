@@ -2,6 +2,8 @@ package sqlstore
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -22,12 +24,20 @@ func ClientCacheLen(d *DB) int {
 	return len(d.clients.entries)
 }
 
+// ClientCacheKeys is the client IDs d's client cache keys its entries
+// by: the very strings, so a test can tell what memory they share.
+func ClientCacheKeys(d *DB) []fapi.ClientID {
+	d.clients.mu.Lock()
+	defer d.clients.mu.Unlock()
+	return slices.Collect(maps.Keys(d.clients.entries))
+}
+
 // ResolveClientCounting is ResolveClient, adding one to *parses each
 // time it parses the row rather than reusing the cache's client.
 func ResolveClientCounting(ctx context.Context, d *DB, id fapi.ClientID, parses *int) (storage.RegisteredClient, error) {
-	return cachedRow(ctx, d.Clients(), "resolve client", id, parsedClient, func(config []byte) (storage.RegisteredClient, error) {
+	return cachedRow(ctx, d.Clients(), "resolve client", id, parsedClient, func(kept fapi.ClientID, config []byte) (storage.RegisteredClient, error) {
 		*parses++
-		return resolveRow(id, config)
+		return resolveRow(kept, config)
 	})
 }
 

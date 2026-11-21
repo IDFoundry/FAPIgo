@@ -33,17 +33,17 @@ func (d *DB) Clients() *ClientRepository { return &ClientRepository{d} }
 // read less than that long ago isn't read again (see there). The
 // client built from a configuration is kept, and reused while the row
 // reads back the same, byte for byte; a storage.RegisteredClient is
-// immutable, so no caller can change another's. An unknown id is an
-// error wrapping ErrNotFound; a row whose configuration doesn't parse,
-// or that NewRegisteredClient refuses, is the operator's mistake rather
-// than the client's, so its error wraps ErrClientConfig and
-// storage.ErrStoreUnavailable, and the server answers it with 500
+// immutable, so no caller can change another's. It's built with, and
+// kept under, a copy of id, never id itself: id may be a slice of a
+// whole request body, which keeping id would keep in memory. An unknown
+// id is an error wrapping ErrNotFound; a row whose configuration
+// doesn't parse, or that NewRegisteredClient refuses, is the operator's
+// mistake rather than the client's, so its error wraps ErrClientConfig
+// and storage.ErrStoreUnavailable, and the server answers it with 500
 // server_error rather than invalid_client. Neither is kept: the next
 // call reads the row again.
 func (r *ClientRepository) ResolveClient(ctx context.Context, id fapi.ClientID) (storage.RegisteredClient, error) {
-	return cachedRow(ctx, r, "resolve client", id, parsedClient, func(config []byte) (storage.RegisteredClient, error) {
-		return resolveRow(id, config)
-	})
+	return cachedRow(ctx, r, "resolve client", id, parsedClient, resolveRow)
 }
 
 // config is the configuration document of the client registered as
@@ -229,7 +229,7 @@ func (d *DB) ClientKeys(fetcher *fapihttp.Client, opts ...keys.ClientJWKSOption)
 // lookupKeys is ClientKeys' keys.ClientJWKSLookup. The inline JWK Set
 // it returns is a copy: the cached registration's stays as parsed.
 func (r *ClientRepository) lookupKeys(ctx context.Context, id fapi.ClientID) (fapi.URL, []byte, error) {
-	reg, err := cachedRow(ctx, r, "client keys", id, parsedKeys, func(config []byte) (ClientKeyRegistration, error) {
+	reg, err := cachedRow(ctx, r, "client keys", id, parsedKeys, func(_ fapi.ClientID, config []byte) (ClientKeyRegistration, error) {
 		reg, err := ParseClientKeys(config)
 		if err != nil {
 			return ClientKeyRegistration{}, fmt.Errorf("sqlstore: client keys %q: %w: %w", id, storage.ErrStoreUnavailable, err)

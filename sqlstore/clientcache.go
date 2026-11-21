@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"crypto/sha256"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,7 +41,10 @@ const (
 // read never replaces an entry for another configuration that a read
 // begun after it returned, so a read that stalled can't bring back what
 // a later one found replaced, by another DB, say, and give it a fresh
-// ttl.
+// ttl. It keys an entry by its own copy of the client's id, and parses
+// with that copy, never the caller's id: a server hands ResolveClient a
+// client_id sliced from the request, and keeping the slice would keep
+// the whole request body in memory while the cache held the client.
 type clientCache struct {
 	ttl time.Duration
 	max int
@@ -120,6 +124,7 @@ func (c *clientCache) lookup(id fapi.ClientID, sum [sha256.Size]byte, kind parse
 // r began. It stores nothing if a write through this DB since r began
 // may have made it stale, or if c holds another configuration from a
 // read that began after r: the row may have changed since r's SELECT.
+// id is cachedRow's copy, never a caller's: add keys an entry by it.
 func (c *clientCache) store(id fapi.ClientID, sum [sha256.Size]byte, kind parsedKind, v any, r cacheRead) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -141,7 +146,9 @@ func (c *clientCache) store(id fapi.ClientID, sum [sha256.Size]byte, kind parsed
 }
 
 // add puts a new, empty entry for id in c, dropping an arbitrary other
-// client's if c is full. c.mu is held.
+// client's if c is full. c.mu is held. The entry is keyed by id itself
+// (assigning to the map replaces the key of an entry already held for
+// id, too), so id must be c's own copy, never a caller's.
 func (c *clientCache) add(id fapi.ClientID) *clientCacheEntry {
 	if c.entries == nil {
 		c.entries = make(map[fapi.ClientID]*clientCacheEntry)
@@ -173,7 +180,11 @@ func (c *clientCache) invalidate(id fapi.ClientID) {
 // when it holds it for the row's current configuration (or, within
 // Options.ClientCacheTTL, for the configuration last read). A read
 // error, and a parse error, are returned as they are, and never cached.
-func cachedRow[T any](ctx context.Context, r *ClientRepository, op string, id fapi.ClientID, kind parsedKind, parse func(config []byte) (T, error)) (T, error) {
+// To parse a row, it hands parse a copy of id, which what parse returns
+// may keep, and caches the result under that copy: id itself may be a
+// slice of a far larger string, such as a request body, that the cache
+// mustn't keep alive. A cache hit copies nothing.
+func cachedRow[T any](ctx context.Context, r *ClientRepository, op string, id fapi.ClientID, kind parsedKind, parse func(id fapi.ClientID, config []byte) (T, error)) (T, error) {
 	c := &r.d.clients
 	if v, ok := c.fresh(id, kind); ok {
 		return v.(T), nil
@@ -188,11 +199,12 @@ func cachedRow[T any](ctx context.Context, r *ClientRepository, op string, id fa
 	if v, ok := c.lookup(id, sum, kind, read); ok {
 		return v.(T), nil
 	}
-	v, err := parse(config)
+	kept := fapi.ClientID(strings.Clone(string(id)))
+	v, err := parse(kept, config)
 	if err != nil {
 		var zero T
 		return zero, err
 	}
-	c.store(id, sum, kind, v, read)
+	c.store(kept, sum, kind, v, read)
 	return v, nil
 }

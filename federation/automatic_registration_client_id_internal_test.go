@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -15,6 +17,24 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 )
+
+// settableTestClock is a Clock a test moves between calls.
+type settableTestClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *settableTestClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *settableTestClock) set(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = now
+}
 
 // newResolveTestRepository is an AutomaticClientRepository at clock's
 // time, with empty caches and neither resolver nor fetcher: resolving a
@@ -63,6 +83,60 @@ func TestCachesKeepTheirOwnCopyOfAClientID(t *testing.T) {
 		if inBody(string(key)) || inBody(string(slot.elem.Value.(fapi.ClientID))) {
 			t.Error("the registration cache's key, or its superior's list, shares the request body's memory")
 		}
+	}
+}
+
+// TestResolveForgetsAnExpiredFailureItFinds: a lookup that finds its
+// client_id's failure expired deletes it, rather than only skipping it,
+// even when no sweep of the whole cache is due.
+func TestResolveForgetsAnExpiredFailureItFinds(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := newResolveTestRepository(fixedTestClock{now: now})
+	const id = fapi.ClientID("not-an-entity-id")
+	remembered := errors.New("federation: no path")
+	repo.rememberFailure(id, remembered, now.Add(-time.Minute)) // expires at now
+	repo.failureSweepDue = now.Add(time.Hour)
+
+	_, err := repo.resolve(context.Background(), id)
+	if err == nil || err.Error() == remembered.Error() {
+		t.Fatalf("resolve(client_id with an expired failure) = %v, want a new resolution's error", err)
+	}
+	if _, ok := repo.failures[id]; ok {
+		t.Fatal("expired failure still remembered after the lookup that found it")
+	}
+}
+
+// TestResolveSweepsExpiredFailuresBelowTheCap: the failures of
+// client_ids never named again don't stay until the cache fills. The
+// first lookup once FailureCacheAge has passed since the last sweep
+// deletes every expired failure; between sweeps, a lookup costs no pass
+// over the cache.
+func TestResolveSweepsExpiredFailuresBelowTheCap(t *testing.T) {
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	clock := &settableTestClock{now: start}
+	repo := newResolveTestRepository(clock)
+	lookup := func(at time.Duration) {
+		t.Helper()
+		clock.set(start.Add(at))
+		if _, err := repo.resolve(context.Background(), "not-an-entity-id"); err == nil {
+			t.Fatal("resolve(\"not-an-entity-id\") = nil error, want error")
+		}
+	}
+
+	lookup(0) // sweeps the empty cache; the next sweep is due a minute on
+	failed := errors.New("federation: no path")
+	const n = 100
+	for i := range n {
+		repo.rememberFailure(fapi.ClientID(fmt.Sprintf("https://rp%d.example", i)), failed, start.Add(10*time.Second))
+	}
+	lookup(time.Minute) // a sweep, before any has expired
+	lookup(90 * time.Second)
+	if len(repo.failures) != n {
+		t.Fatalf("failures = %d after a lookup between sweeps, want all %d (expired, not yet swept)", len(repo.failures), n)
+	}
+	lookup(2 * time.Minute)
+	if len(repo.failures) != 0 {
+		t.Fatalf("failures = %d after the next sweep, want 0 (every one had expired)", len(repo.failures))
 	}
 }
 

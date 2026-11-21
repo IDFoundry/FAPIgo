@@ -402,6 +402,9 @@ type AutomaticClientRepository struct {
 	// AutomaticRegistrationConfig.FailureCacheAge), at most
 	// maxFailedResolutions of them.
 	failures map[fapi.ClientID]failedResolution
+	// failureSweepDue is when lookupFailure next drops every expired
+	// failure.
+	failureSweepDue time.Time
 	// inflight holds the resolution currently running for each
 	// client_id, so concurrent requests naming the same unknown
 	// client_id share one Trust Chain resolution rather than each
@@ -584,9 +587,9 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 		a.mu.Unlock()
 		return entry, nil
 	}
-	if failed, ok := a.failures[id]; ok && now.Before(failed.expiresAt) {
+	if err := a.lookupFailure(id, now); err != nil {
 		a.mu.Unlock()
-		return cachedClient{}, failed.err
+		return cachedClient{}, err
 	}
 	call, ok := a.inflight[id]
 	if !ok {
@@ -614,6 +617,38 @@ func (a *AutomaticClientRepository) maxConcurrentResolutions() int {
 		return a.cfg.MaxConcurrentResolutions
 	}
 	return DefaultMaxConcurrentResolutions
+}
+
+// lookupFailure returns id's remembered registration failure, or nil if
+// none is remembered or it has expired at now. It deletes an expired one
+// it finds and, at most once per FailureCacheAge, every other expired
+// one: a failure is otherwise deleted only when its client_id is
+// resolved again or the cache is full, so the failures of client_ids
+// never named again would stay until it fills. a.mu must be held.
+func (a *AutomaticClientRepository) lookupFailure(id fapi.ClientID, now time.Time) error {
+	if !now.Before(a.failureSweepDue) {
+		a.dropExpiredFailures(now)
+	}
+	failed, ok := a.failures[id]
+	if !ok {
+		return nil
+	}
+	if !now.Before(failed.expiresAt) {
+		delete(a.failures, id)
+		return nil
+	}
+	return failed.err
+}
+
+// dropExpiredFailures deletes every failure expired at now, and puts
+// lookupFailure's next sweep FailureCacheAge later. a.mu must be held.
+func (a *AutomaticClientRepository) dropExpiredFailures(now time.Time) {
+	for id, failed := range a.failures {
+		if !now.Before(failed.expiresAt) {
+			delete(a.failures, id)
+		}
+	}
+	a.failureSweepDue = now.Add(a.cfg.FailureCacheAge)
 }
 
 // startResolution starts id's resolution and records it as in flight.
@@ -718,11 +753,7 @@ func (a *AutomaticClientRepository) rememberFailure(id fapi.ClientID, err error,
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if _, ok := a.failures[id]; !ok && len(a.failures) >= maxFailedResolutions {
-		for k, f := range a.failures {
-			if !now.Before(f.expiresAt) {
-				delete(a.failures, k)
-			}
-		}
+		a.dropExpiredFailures(now)
 		if len(a.failures) >= maxFailedResolutions {
 			return
 		}

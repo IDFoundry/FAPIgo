@@ -271,3 +271,69 @@ func TestAutomaticRegistrationBranchPolicyWithholdsGrants(t *testing.T) {
 		})
 	}
 }
+
+// TestAutomaticRegistrationBranchPolicyNarrowsRARTypes: a superior's
+// metadata policy on authorization_details_types narrows the Rich
+// Authorization Request types the operator allows every automatically
+// registered client, at the token, pushed authorization request and
+// backchannel authentication endpoints alike. A payment request from a
+// Relying Party in a branch held to account_information is refused with
+// invalid_authorization_details, whether the RP publishes payment among
+// its types, leaves the parameter out, or has its list removed by an
+// Intermediate's value null — though the operator allows payment and its
+// RARPolicy passes whatever the registration allows. A policy permitting
+// payment, or none at all, leaves it.
+func TestAutomaticRegistrationBranchPolicyNarrowsRARTypes(t *testing.T) {
+	rarTypes := func(operators string) string {
+		return `{"openid_relying_party":{"authorization_details_types":` + operators + `}}`
+	}
+	accountsOnly := rarTypes(`{"subset_of":["account_information"]}`)
+	publishesPayment := map[string]any{"authorization_details_types": []string{"payment"}}
+	for _, tc := range []struct {
+		name               string
+		taPolicy, imPolicy string
+		extra              map[string]any
+		wantAllowed        bool
+	}{
+		{name: "value", taPolicy: rarTypes(`{"value":["account_information"]}`), extra: publishesPayment},
+		{name: "subset_of", taPolicy: accountsOnly, extra: publishesPayment},
+		{name: "subset_of, the parameter left out", taPolicy: accountsOnly},
+		{name: "subset_of, the RP's types removed by the Intermediate's value null", taPolicy: accountsOnly,
+			imPolicy: rarTypes(`{"value":null}`), extra: publishesPayment},
+		{name: "a policy permitting payment", taPolicy: rarTypes(`{"subset_of":["payment","account_information"]}`),
+			extra: publishesPayment, wantAllowed: true},
+		{name: "no policy", wantAllowed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setupBranchFixture(t, tc.taPolicy, tc.imPolicy, tc.extra)
+			srv := newAutomaticRegistrationTestServer(t, f, enableFederatedGrants(t), func(cfg *server.Config, deps *server.Dependencies) {
+				cfg.RAR = newTestRARRegistry(t)
+				cfg.AutomaticRegistration.AuthorizationDetailsTypes = []string{"payment"}
+				deps.ClientCredentialsRARPolicy = server.AllowRequestedAuthorizationDetails{}
+				deps.AuthorizationCodeRARPolicy = server.AllowRequestedAuthorizationDetails{}
+				deps.CIBARARPolicy = server.AllowRequestedAuthorizationDetails{}
+			})
+
+			tokenErr := federatedClientCredentials(t, srv, f, paymentDetails)
+			_, parErr := srv.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+				HTTP: server.FormRequest{Parameters: plainFormParameters(t, federatedAssertion(t, f), map[string]string{"authorization_details": paymentDetails})},
+			})
+			action := federatedBackchannelAuthentication(t, srv, f, paymentDetails)
+			if tc.wantAllowed {
+				if tokenErr != nil || parErr != nil {
+					t.Errorf("client_credentials = %v, PAR = %v; want the payment details accepted", tokenErr, parErr)
+				}
+				if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+					t.Errorf("backchannel authentication action = %#v, want an interaction", action)
+				}
+				return
+			}
+			for endpoint, err := range map[string]error{"client_credentials": tokenErr, "PAR": parErr} {
+				if code := serverErrorCode(t, err); code != server.ErrorInvalidAuthorizationDetails {
+					t.Errorf("%s error code = %q, want %q", endpoint, code, server.ErrorInvalidAuthorizationDetails)
+				}
+			}
+			checkBackchannelRefused(t, action, server.ErrorInvalidAuthorizationDetails)
+		})
+	}
+}

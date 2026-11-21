@@ -52,8 +52,14 @@ type AutomaticRegistrationConfig struct {
 	// AuthorizationDetailsTypes are the Rich Authorization Request types
 	// every automatically-registered client may request
 	// (storage.RegisteredClientConfig.AuthorizationDetailsTypes) — for
-	// the same reason as AllowedScopes, never an RP's own
-	// self-published authorization_details_types. Empty means none.
+	// the same reason as AllowedScopes, never a type only an RP's own
+	// self-published authorization_details_types names. Empty means none.
+	// The federation can narrow them, never widen them: when the RP's
+	// resolved metadata has authorization_details_types, the client gets
+	// only the types that also lists (none, when it lists none of them),
+	// and a superior's metadata policy on authorization_details_types
+	// (subset_of, or a value) bounds them even when the RP leaves the
+	// parameter out, which the policy's operators then leave absent.
 	AuthorizationDetailsTypes []string
 
 	// AllowedResources confines every automatically-registered client to
@@ -968,12 +974,17 @@ type relyingPartyMetadata struct {
 	PolicyURI  string `json:"policy_uri"`
 	TOSURI     string `json:"tos_uri"`
 
-	// Scope and GrantTypes are RFC 7591 §2's scope and grant_types, as
-	// the Trust Chain's metadata policy left them. They never widen what
-	// AutomaticRegistrationConfig grants, only narrow it (see
-	// narrowedScopes and grantTypePermitted); nil means left out.
-	Scope      *string  `json:"scope"`
-	GrantTypes []string `json:"grant_types"`
+	// Scope, GrantTypes and AuthorizationDetailsTypes are RFC 7591 §2's
+	// scope and grant_types and RFC 9396 §10's
+	// authorization_details_types, as the Trust Chain's metadata policy
+	// left them. They never widen what AutomaticRegistrationConfig
+	// grants, only narrow it (see narrowedScopes, grantTypePermitted and
+	// narrowedAuthorizationDetailsTypes); nil means left out, while an
+	// empty array, which a superior's subset_of or value can leave,
+	// lists nothing.
+	Scope                     *string  `json:"scope"`
+	GrantTypes                []string `json:"grant_types"`
+	AuthorizationDetailsTypes []string `json:"authorization_details_types"`
 }
 
 // cibaGrantType is the grant_types value for CIBA (OpenID Connect
@@ -1018,6 +1029,26 @@ func grantTypePermitted(grantTypes []string, permitted *permittedValues, grant s
 	return (grantTypes == nil || slices.Contains(grantTypes, grant)) && permitted.allows(grant)
 }
 
+// narrowedAuthorizationDetailsTypes returns the operator's allowed Rich
+// Authorization Request types that the RP's resolved
+// authorization_details_types metadata also lists, or all of them when it
+// is left out (nil), less any that permitted, what the Trust Chain's
+// metadata policy lets authorization_details_types hold
+// (choiceLimits.authorizationDetailsTypes), doesn't allow either way.
+// Like narrowedScopes, it never adds a type the operator didn't allow,
+// whatever the RP lists, but leaving none is no error: an RP may be
+// registered for no type, as AutomaticRegistrationConfig's own list may
+// be empty.
+func narrowedAuthorizationDetailsTypes(allowed, resolved []string, permitted *permittedValues) []string {
+	var types []string
+	for _, typ := range allowed {
+		if (resolved == nil || slices.Contains(resolved, typ)) && permitted.allows(typ) {
+			types = append(types, typ)
+		}
+	}
+	return types
+}
+
 // registeredClientConfigFromMetadata parses raw (an openid_relying_party
 // Resolved Metadata object) and builds the storage.RegisteredClientConfig
 // it describes, returning the client's actual, resolved jwks bytes
@@ -1035,13 +1066,15 @@ func grantTypePermitted(grantTypes []string, permitted *permittedValues, grant s
 // parameters registration takes values of from somewhere the policy
 // doesn't act on (see choiceLimits): the choices taken from
 // token_endpoint_auth_methods_supported and
-// token_endpoint_auth_signing_alg_values_supported, and the grants an RP
-// leaving grant_types out would otherwise get.
+// token_endpoint_auth_signing_alg_values_supported, and the grants and
+// Rich Authorization Request types an RP leaving grant_types or
+// authorization_details_types out would otherwise get.
 //
 // a.cfg supplies the operator-level capability grants (AllowedScopes,
-// AllowedResources, AllowsClientCredentialsGrant, AllowsCIBA) that must
-// never be inferred from raw itself, which can only narrow some of them
-// (see applyGrants), plus the AllowedClientAuthMethods restriction raw's
+// AuthorizationDetailsTypes, AllowedResources,
+// AllowsClientCredentialsGrant, AllowsCIBA) that must never be inferred
+// from raw itself, which can only narrow some of them (see
+// applyGrants), plus the AllowedClientAuthMethods restriction raw's
 // own token_endpoint_auth_method is checked against — see
 // AutomaticRegistrationConfig's own doc comments for why.
 func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx context.Context, id fapi.ClientID, raw json.RawMessage, limits choiceLimits) (storage.RegisteredClientConfig, json.RawMessage, error) {
@@ -1085,7 +1118,6 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		ID: id, RedirectURIs: redirectURIs,
 		RequestObjectAlgorithm:          requestObjectAlg,
 		SenderConstrain:                 senderConstrain,
-		AuthorizationDetailsTypes:       a.cfg.AuthorizationDetailsTypes,
 		AllowedResources:                a.cfg.AllowedResources,
 		AutomaticFederationRegistration: true,
 	}
@@ -1160,17 +1192,19 @@ func requestObjectAlgorithm(m relyingPartyMetadata) (fapi.SignatureAlgorithm, er
 
 // applyGrants sets what cfg's client may do beyond the authorization
 // code flow, from AutomaticRegistrationConfig and never beyond it:
-// AllowedScopes narrowed by the scope of m, the RP's resolved metadata,
-// and AllowsClientCredentialsGrant and AllowsCIBA (with the CIBA
-// metadata that goes with it) narrowed by m's grant_types and by
-// limits.grantTypes, which also bounds an RP that leaves grant_types out
-// (see grantTypePermitted).
+// AllowedScopes narrowed by the scope of m, the RP's resolved metadata;
+// AuthorizationDetailsTypes by m's authorization_details_types and
+// limits.authorizationDetailsTypes; and AllowsClientCredentialsGrant and
+// AllowsCIBA (with the CIBA metadata that goes with it) by m's
+// grant_types and limits.grantTypes. Each limit also bounds an RP that
+// leaves its parameter out (see choiceLimits).
 func (a *AutomaticClientRepository) applyGrants(cfg *storage.RegisteredClientConfig, m relyingPartyMetadata, limits choiceLimits) error {
 	scopes, err := narrowedScopes(a.cfg.AllowedScopes, m.Scope)
 	if err != nil {
 		return err
 	}
 	cfg.AllowedScopes = scopes
+	cfg.AuthorizationDetailsTypes = narrowedAuthorizationDetailsTypes(a.cfg.AuthorizationDetailsTypes, m.AuthorizationDetailsTypes, limits.authorizationDetailsTypes)
 	cfg.AllowsClientCredentialsGrant = a.cfg.AllowsClientCredentialsGrant && grantTypePermitted(m.GrantTypes, limits.grantTypes, clientCredentialsGrantType)
 	return a.applyBackchannelAuthenticationFields(cfg, m, limits.grantTypes)
 }
@@ -1499,15 +1533,17 @@ func supportedAssertionAlgorithms(list []string, permitted *permittedValues) ([]
 //     plural sibling token_endpoint_auth_signing_alg_values_supported
 //     instead, would register a value the policy forbids, and likewise
 //     for token_endpoint_auth_method;
-//   - an RP leaving out grant_types under a subset_of on it would keep
-//     it absent, which registration reads as every grant the operator
-//     allows, so the policy would withhold none of them.
+//   - an RP leaving out grant_types or authorization_details_types under
+//     a subset_of on it would keep it absent, which registration reads
+//     as everything the operator allows, so the policy would withhold
+//     nothing.
 //
 // Each nil field means no policy restricts that parameter.
 type choiceLimits struct {
-	authMethods *permittedValues // token_endpoint_auth_method
-	signingAlgs *permittedValues // token_endpoint_auth_signing_alg
-	grantTypes  *permittedValues // grant_types' values
+	authMethods               *permittedValues // token_endpoint_auth_method
+	signingAlgs               *permittedValues // token_endpoint_auth_signing_alg
+	grantTypes                *permittedValues // grant_types' values
+	authorizationDetailsTypes *permittedValues // authorization_details_types' values
 }
 
 // permittedValues is the set of values a metadata policy allows a
@@ -1532,6 +1568,7 @@ func choiceLimitsFromPolicy(policy map[string]intfed.PolicyOperators) (choiceLim
 		{"token_endpoint_auth_method", intfed.PermittedStrings, &limits.authMethods},
 		{"token_endpoint_auth_signing_alg", intfed.PermittedStrings, &limits.signingAlgs},
 		{"grant_types", intfed.PermittedArrayStrings, &limits.grantTypes},
+		{"authorization_details_types", intfed.PermittedArrayStrings, &limits.authorizationDetailsTypes},
 	} {
 		permitted, constrained, err := field.permitted(policy[field.param])
 		if err != nil {

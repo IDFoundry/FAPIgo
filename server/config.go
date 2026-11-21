@@ -678,8 +678,10 @@ type AutomaticRegistrationConfig struct {
 	// AuthorizationDetailsTypes are the Rich Authorization Request types
 	// every automatically-registered client may request — see
 	// federation.AutomaticRegistrationConfig.AuthorizationDetailsTypes.
-	// Empty means none. Each must be registered in Config.RAR: New
-	// refuses one that isn't.
+	// The federation can narrow them, never widen them: by the RP's
+	// resolved authorization_details_types, and by a superior's metadata
+	// policy on it even when the RP leaves it out. Empty means none. Each
+	// must be registered in Config.RAR: New refuses one that isn't.
 	AuthorizationDetailsTypes []string
 
 	// AllowedResources confines every automatically-registered client to

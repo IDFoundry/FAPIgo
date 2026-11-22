@@ -17,6 +17,7 @@ var sweptTables = []string{
 	"interactions",                // BeginAuthorizationTransaction.HandleExpiresAt
 	"authorization_codes",         // NewAuthorizationCode.ExpiresAt; once redeemed, + RedeemedCodeRetention, or a later issued token's
 	"refresh_tokens",              // NewRefreshToken.ExpiresAt
+	"refresh_token_grants",        // NewRefreshToken.ExpiresAt, its token's
 	"replay",                      // ReplayUse.ExpiresAt
 	"dpop_nonces",                 // NonceIssuance.ExpiresAt
 	"revocations",                 // the latest expiresAt a key was revoked with

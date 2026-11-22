@@ -95,8 +95,11 @@ altered, or opened under another key is refused (`ErrRecordFormat`, as
 an outage), as is one whose row's expiry (or an interaction's pushed
 request, or a CIBA request's handle, delivery mode or interval) was
 changed. Lookup keys and digests, client IDs, times, CIBA status,
-replay digests, nonces, revocations, pairwise subjects and the clients
-table stay readable: the stores look rows up by them. The `Sealer`
+replay digests, nonces, revocations, refresh tokens' grant keys,
+pairwise subjects and the clients table stay readable: the stores look
+rows up by them. A grant key is the server's unkeyed digest of its
+issuer and a grant's ID, so a reader who guesses a grant ID can confirm
+it, as the revocations table names revoked grants' IDs outright. The `Sealer`
 interface is OID4VCgo's `verifier.TransactionSealer`, so one sealer
 serves both.
 
@@ -136,6 +139,28 @@ upgrading every instance to re-seal them in the current format (byte 3)
 and bind them too. Upgrade every instance sharing a database at once: a
 v0.2 instance can't open what an upgraded one seals, and rolling back
 to v0.2 leaves the records sealed since unreadable.
+
+## Upgrading from v0.9
+
+v0.10 adds migration 0005, a table indexing each refresh token by the
+grants it was issued from, so `RevokeGrant`, and the reuse of an
+authorization code, revoke the grant's refresh tokens in the store
+(`db.Grants()` and `db.BatchingGrants()` are
+`storage.GrantRefreshTokenRevoker`s) rather than leaving them to the
+grant's revocation record alone. It requires FAPIgo v0.79.0, which
+hands the store each refresh token's grant keys.
+
+- **Run `Migrate` before instances start v0.10**, from a deployment step
+  or the first upgraded instance: v0.10's `CheckSchema` refuses a schema
+  without migration 0005. The migration only adds, so v0.9 instances
+  still running keep working on the migrated database while the deploy
+  rolls out. But v0.9's `Migrate` and `CheckSchema`, like every
+  release's, refuse a schema migrated further than they know: a v0.9
+  instance that starts after the migration (restarted, scaled out, or
+  rolled back to) fails at startup, so finish the deploy.
+- **Refresh tokens stored before the migration**, or by a v0.9 instance
+  during the deploy, aren't indexed: `RevokeGrant` leaves them to the
+  grant's revocation record, which lasts at least 400 days, as before.
 
 ## Upgrading from v0.7
 

@@ -330,6 +330,13 @@ func TestDatabaseFailureIsStoreUnavailable(t *testing.T) {
 				return err
 			},
 			"DeleteGrant": func() error { return d.GrantRegistry().DeleteGrant(ctx, "k") },
+			"CreateRefreshToken with grant keys": func() error {
+				return d.Grants().CreateRefreshToken(ctx, storage.NewRefreshToken{TokenHash: digest, ClientID: "c", ExpiresAt: later, GrantKeys: []string{"k"}})
+			},
+			"RevokeGrantRefreshTokens": func() error {
+				_, err := d.Grants().RevokeGrantRefreshTokens(ctx, "k")
+				return err
+			},
 			"AddBackchannelRequest": func() error {
 				return d.BackchannelInbox().AddBackchannelRequest(ctx, storage.NewBackchannelInboxEntry{HandleHash: digest, SubjectKey: "s", ClientID: "c", ExpiresAt: later})
 			},

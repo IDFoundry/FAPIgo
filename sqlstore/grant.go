@@ -15,8 +15,20 @@ import (
 
 // GrantStore is a storage.GrantStore: server.Dependencies.Grants. It
 // keeps authorization codes and refresh tokens in separate tables, each
-// keyed by the digest the server hands it, never the value itself.
+// keyed by the digest the server hands it, never the value itself. It's
+// a storage.GrantRefreshTokenRevoker too: it indexes each refresh token
+// by its grant keys, so server.Server.RevokeGrant, and the reuse of an
+// authorization code, revoke the grant's refresh tokens in the store.
 type GrantStore struct{ d *DB }
+
+// Every store DB hands out for server.Dependencies.Grants revokes a
+// grant's refresh tokens: Grants itself, and BatchingGrants, whose store
+// keeps GrantStore's refresh token methods, so the one it promotes
+// revokes what they store.
+var (
+	_ storage.GrantRefreshTokenRevoker = (*GrantStore)(nil)
+	_ storage.GrantRefreshTokenRevoker = batchingGrantStore{}
+)
 
 // Grants returns d's storage.GrantStore.
 func (d *DB) Grants() *GrantStore { return &GrantStore{d} }
@@ -147,7 +159,8 @@ func (s *GrantStore) RecordIssuedRefreshToken(ctx context.Context, codeHash [32]
 // of the two tokens expires, as the two calls in turn would keep it.
 // The server discovers it by type assertion and makes one call where it
 // would otherwise make those two. It's otherwise d.Grants(), a
-// storage.StoreAssurance with its Capabilities.
+// storage.StoreAssurance with its Capabilities and a
+// storage.GrantRefreshTokenRevoker.
 //
 // It's a method of DB, rather than of GrantStore, so that a wrapper of
 // a deployment's own that embeds *GrantStore and overrides
@@ -199,25 +212,147 @@ func (s *GrantStore) recordIssued(ctx context.Context, what, set string, codeHas
 	return nil
 }
 
-// CreateRefreshToken implements storage.GrantStore.
+// opCreateRefreshToken names CreateRefreshToken in its errors.
+const opCreateRefreshToken = "create refresh token"
+
+// CreateRefreshToken implements storage.GrantStore. It also indexes the
+// token by each of its GrantKeys, for RevokeGrantRefreshTokens, in the
+// transaction that stores it, so a failure stores neither the token nor
+// any of its index rows. It refuses a grant key that isn't 1 to 64
+// base64url characters, which every key the server derives is (see
+// storage.NewRefreshToken.GrantKeys), and stores a key given twice once.
 func (s *GrantStore) CreateRefreshToken(ctx context.Context, token storage.NewRefreshToken) error {
 	if !validTextKey(string(token.ClientID)) {
 		return errors.New("sqlstore: create refresh token: client_id isn't valid UTF-8 without NUL")
 	}
+	keys, err := grantKeysOf(token.GrantKeys)
+	if err != nil {
+		return err
+	}
 	expires := nanos(token.ExpiresAt)
 	record, err := s.d.seal(blobRef{"refresh_tokens", recordColumn, string(token.TokenHash[:]), string(token.ClientID), expires, nil}, token.Grant)
 	if err != nil {
-		return unavailable("create refresh token", err)
+		return unavailable(opCreateRefreshToken, err)
 	}
-	err = s.d.writeOne(ctx, func(q querier) error {
-		_, err := q.ExecContext(ctx, s.d.q("INSERT INTO {refresh_tokens} (token_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
-			token.TokenHash[:], string(token.ClientID), record, expires, expires)
+	write := s.d.writeOne
+	if len(keys) > 0 {
+		write = s.d.write // the token and its index rows: more than one statement
+	}
+	err = write(ctx, func(q querier) error { return s.insertRefreshToken(ctx, q, token, record, keys) })
+	if err != nil {
+		return unavailable(opCreateRefreshToken, err)
+	}
+	return nil
+}
+
+// insertRefreshToken inserts, on q, token's row, its record as it's
+// stored, and an index row for each of keys.
+func (s *GrantStore) insertRefreshToken(ctx context.Context, q querier, token storage.NewRefreshToken, record []byte, keys []string) error {
+	expires := nanos(token.ExpiresAt)
+	if _, err := q.ExecContext(ctx, s.d.q("INSERT INTO {refresh_tokens} (token_hash, client_id, record, expires_at, sweep_after) VALUES (?, ?, ?, ?, ?)"),
+		token.TokenHash[:], string(token.ClientID), record, expires, expires); err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if _, err := q.ExecContext(ctx, s.d.q("INSERT INTO {refresh_token_grants} (grant_key, token_hash, sweep_after) VALUES (?, ?, ?)"),
+			key, token.TokenHash[:], expires); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// maxGrantKeyBytes is the longest grant key a refresh token is indexed
+// by (storage.NewRefreshToken.GrantKeys): the server's are base64url
+// SHA-256 digests, 43 bytes.
+const maxGrantKeyBytes = 64
+
+// validGrantKey reports whether key can be a grant key a refresh token
+// is indexed by: 1 to maxGrantKeyBytes characters of the base64url
+// alphabet, as storage.NewRefreshToken.GrantKeys documents, and so a
+// text key every dialect can hold (validTextKey).
+func validGrantKey(key string) bool {
+	if key == "" || len(key) > maxGrantKeyBytes {
+		return false
+	}
+	for i := range len(key) {
+		if !isBase64URLByte(key[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// isBase64URLByte reports whether c is in the base64url alphabet (RFC
+// 4648 §5), padding aside.
+func isBase64URLByte(c byte) bool {
+	return c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_'
+}
+
+// grantKeysOf is keys, a new refresh token's GrantKeys, each once, or
+// an error if one isn't a valid grant key (validGrantKey).
+func grantKeysOf(keys []string) ([]string, error) {
+	if slices.ContainsFunc(keys, func(key string) bool { return !validGrantKey(key) }) {
+		return nil, fmt.Errorf("sqlstore: create refresh token: a grant key isn't 1 to %d base64url characters", maxGrantKeyBytes)
+	}
+	return slices.Compact(slices.Sorted(slices.Values(keys))), nil
+}
+
+// RevokeGrantRefreshTokens implements storage.GrantRefreshTokenRevoker:
+// one DELETE … RETURNING, in a transaction, of every refresh token
+// CreateRefreshToken indexed by grantKey, which revokes all of them or,
+// failing, none, and returns their hashes. A grant key no token can have
+// (see CreateRefreshToken) has none, which isn't an error. A token whose
+// CreateRefreshToken commits after the DELETE has read the index is left
+// for the next call, as the interface allows. The index rows stay until
+// Sweep removes them, with their tokens' expiry: a later call finds
+// those tokens gone, and reports nothing for them.
+//
+// A wrapper of a deployment's own that embeds *GrantStore and overrides
+// CreateRefreshToken, RedeemRefreshToken or RevokeRefreshToken inherits
+// this method, which the server then calls past those overrides (see
+// storage.GrantRefreshTokenRevoker). Unlike the batch methods
+// DB.BatchingGrants keeps off this store, that can only leave a token the
+// wrapper keeps apart from this store unrevoked, never let one the
+// wrapper revoked be redeemed: the server checks the grant's revocation
+// record on every redemption, whatever this method revoked.
+func (s *GrantStore) RevokeGrantRefreshTokens(ctx context.Context, grantKey string) ([][32]byte, error) {
+	if !validGrantKey(grantKey) {
+		return nil, nil
+	}
+	var revoked [][32]byte
+	err := s.d.write(ctx, func(q querier) error {
+		var err error
+		revoked, err = s.deleteIndexedRefreshTokens(ctx, q, grantKey)
 		return err
 	})
 	if err != nil {
-		return unavailable("create refresh token", err)
+		return nil, unavailable("revoke grant refresh tokens", err)
 	}
-	return nil
+	return revoked, nil
+}
+
+// deleteIndexedRefreshTokens deletes, on q, every refresh token indexed
+// by grantKey, returning their hashes. A row whose token_hash isn't a
+// digest's 32 bytes, as no token CreateRefreshToken stored has, is
+// deleted but not reported.
+func (s *GrantStore) deleteIndexedRefreshTokens(ctx context.Context, q querier, grantKey string) ([][32]byte, error) {
+	rows, err := q.QueryContext(ctx, s.d.q("DELETE FROM {refresh_tokens} WHERE token_hash IN (SELECT token_hash FROM {refresh_token_grants} WHERE grant_key = ?) RETURNING token_hash"), grantKey)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var revoked [][32]byte
+	for rows.Next() {
+		var hash []byte
+		if err := rows.Scan(&hash); err != nil {
+			return nil, err
+		}
+		if len(hash) == 32 {
+			revoked = append(revoked, [32]byte(hash))
+		}
+	}
+	return revoked, rows.Err()
 }
 
 // RedeemRefreshToken implements storage.GrantStore. Not single-use (see

@@ -74,6 +74,50 @@ func TestBackchannelAuthReqIDHash(t *testing.T) {
 	}
 }
 
+// TestIsWellFormedAuthReqID: only the form generateAuthReqID gives an
+// auth_req_id is well-formed. The string a bound request's digest is
+// taken over, whose own unbound digest is that same digest, never is,
+// whatever the binding.
+func TestIsWellFormedAuthReqID(t *testing.T) {
+	id, err := generateAuthReqID(nil)
+	if err != nil {
+		t.Fatalf("generateAuthReqID: %v", err)
+	}
+	if !isWellFormedAuthReqID(id) {
+		t.Fatalf("generated auth_req_id %q isn't well-formed", id)
+	}
+	for name, v := range map[string]string{
+		"empty":         "",
+		"42 characters": id[:42],
+		"44 characters": id + "A",
+		"NUL":           id[:42] + "\x00",
+		"space":         " " + id[1:],
+		"plus":          id[:42] + "+",
+		"slash":         id[:42] + "/",
+		"padding":       id[:42] + "=",
+		"period":        id[:42] + ".",
+		"non-ASCII":     id[:41] + "é",
+	} {
+		if isWellFormedAuthReqID(v) {
+			t.Errorf("%s: %q is well-formed", name, v)
+		}
+	}
+	const thumbprint = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFG"
+	for name, binding := range map[string][2]string{
+		"DPoP key":        {"", thumbprint},
+		"client instance": {thumbprint, ""},
+		"both":            {thumbprint, thumbprint},
+	} {
+		preimage, collides := BoundAuthReqIDPreimage(id, binding[0], binding[1])
+		if !collides {
+			t.Fatalf("%s: the bound digest's preimage has another unbound digest", name)
+		}
+		if isWellFormedAuthReqID(preimage) {
+			t.Errorf("%s: the bound digest's preimage %q is well-formed", name, preimage)
+		}
+	}
+}
+
 // TestApprovedBackchannelGrantChecksInstance: the request record's own
 // client instance must match the polling instance's.
 func TestApprovedBackchannelGrantChecksInstance(t *testing.T) {

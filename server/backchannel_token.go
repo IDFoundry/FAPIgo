@@ -63,15 +63,19 @@ type BackchannelTokenExchangeRequest struct {
 // that honours storage.PollBackchannelAuthentication.ClientID refuses
 // it without spending the approval. So is an auth_req_id presented by
 // another client instance than the one that made the request (for a
-// client authenticated by Client Attestation), or, when the request
-// carried a dpop_jkt, with another DPoP key: to the store it is
-// unknown, so the approval is never spent by such a poll and the
-// right instance and key can still redeem it. An approved grant is checked
-// against the client's current registration first, as
-// RefreshAccessToken does: a scope or authorization_details type the
-// client may no longer use is refused (invalid_scope, invalid_grant),
-// and a client no longer registered for CIBA at all is refused with
-// ErrorUnauthorizedClient before the request is polled.
+// client authenticated by Client Attestation), or with another DPoP key
+// than the one the request is bound to (its dpop_jkt, or the key of the
+// DPoP proof sent with it): the poll looks for the request under a
+// digest of the presenting instance and key, not the one it is stored
+// under, so the approval is never spent by such a poll and the right
+// instance and key can still redeem it. A value of any other form than
+// the auth_req_ids this server issues is refused as an unknown one is,
+// without a poll. An approved grant is checked against the client's
+// current registration first, as RefreshAccessToken does: a scope or
+// authorization_details type the client may no longer use is refused
+// (invalid_scope, invalid_grant), and a client no longer registered for
+// CIBA at all is refused with ErrorUnauthorizedClient before the request
+// is polled.
 func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req BackchannelTokenExchangeRequest) (_ TokenResult, retErr error) {
 	if s.deps.Backchannel == nil {
 		// RFC 6749 §5.2: a server that doesn't do CIBA doesn't support
@@ -172,9 +176,10 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 // request must carry, once client is still registered for CIBA: the
 // registration may have changed since the request was made, as at the
 // authorization code exchange and refresh. Checked before polling, so an
-// approval refused this way isn't spent. So is a malformed
-// authorization_details (tokenRequestAuthorizationDetails), which it also
-// returns.
+// approval refused this way isn't spent. So are an auth_req_id of
+// another form than this server issues (isWellFormedAuthReqID), which is
+// refused as an unknown one is, and a malformed authorization_details
+// (tokenRequestAuthorizationDetails), which it also returns.
 func (s *Server) backchannelTokenParameters(client storage.RegisteredClient, params map[string]string) (string, requestedAuthorizationDetails, *Error) {
 	if _, permitted := client.BackchannelAuthenticationRequestAlgorithm(); !permitted {
 		return "", requestedAuthorizationDetails{}, newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for CIBA", nil)
@@ -183,6 +188,15 @@ func (s *Server) backchannelTokenParameters(client storage.RegisteredClient, par
 	if authReqID == "" {
 		return "", requestedAuthorizationDetails{}, newError(ErrorInvalidRequest, 400, "auth_req_id is required", nil)
 	}
+	// A value of another form names no request, so it's answered as an
+	// unknown one is, without a poll. A poll could find a request all
+	// the same: the string a bound request's digest is taken over
+	// (backchannelAuthReqIDHash) has that digest as its own unbound one,
+	// and would spend the approval without the client instance or DPoP
+	// key the request is bound to.
+	if !isWellFormedAuthReqID(authReqID) {
+		return "", requestedAuthorizationDetails{}, newError(ErrorInvalidGrant, 400, authReqIDUnknownDescription, nil)
+	}
 	details, err := s.tokenRequestAuthorizationDetails(params)
 	if err != nil {
 		return "", requestedAuthorizationDetails{}, err
@@ -190,9 +204,12 @@ func (s *Server) backchannelTokenParameters(client storage.RegisteredClient, par
 	return authReqID, details, nil
 }
 
-// backchannelAuthReqIDHashPrefix separates the digest of an auth_req_id
-// bound to a client instance or a DPoP key from the plain SHA-256 of an
-// unbound one.
+// backchannelAuthReqIDHashPrefix starts the string the digest of an
+// auth_req_id bound to a client instance or a DPoP key is taken over.
+// No auth_req_id this server issues starts with it (it has a space and
+// a NUL), so it separates that digest from the plain SHA-256 of every
+// unbound one, though not from that of an arbitrary string: see
+// backchannelAuthReqIDHash.
 const backchannelAuthReqIDHashPrefix = "fapigo bound auth_req_id\x00"
 
 // backchannelAuthReqIDHash is the digest a CIBA request is stored and
@@ -201,7 +218,9 @@ const backchannelAuthReqIDHashPrefix = "fapigo bound auth_req_id\x00"
 // client instance nor a DPoP key, as before such bindings existed, and
 // otherwise the SHA-256 of authReqID bound to instanceKey (the
 // thumbprint of the Client Instance Key of a client authenticated by
-// Client Attestation) and dpopJKT (the request's dpop_jkt).
+// Client Attestation) and dpopJKT (the thumbprint of the DPoP key the
+// request is bound to: its dpop_jkt, or the key of the DPoP proof sent
+// with it).
 //
 // The store spends an approval in the poll that observes it, before the
 // server can compare the poll's client instance or DPoP key with the
@@ -211,7 +230,13 @@ const backchannelAuthReqIDHashPrefix = "fapigo bound auth_req_id\x00"
 // as authorizationCodeHash makes another instance's code: the poll
 // neither spends the approval nor sees the request, so the poll from
 // the instance and key it was issued to still succeeds. Each part is
-// length-prefixed, so no two different bindings share a digest.
+// length-prefixed, so no two different bindings of one auth_req_id
+// share a digest. The plain digest of an arbitrary string can equal a
+// bound one, though: the string a bound digest is taken over, presented
+// as an unbound auth_req_id, has that same digest, and would find the
+// bound request. So the token endpoint polls only for an auth_req_id of
+// the form this server issues (isWellFormedAuthReqID), which that
+// string, starting with backchannelAuthReqIDHashPrefix, never has.
 func backchannelAuthReqIDHash(authReqID, instanceKey, dpopJKT string) [32]byte {
 	if instanceKey == "" && dpopJKT == "" {
 		return sha256.Sum256([]byte(authReqID))
@@ -231,6 +256,10 @@ func backchannelAuthReqIDHash(authReqID, instanceKey, dpopJKT string) [32]byte {
 // polled as if it were the only one. A store that couldn't answer the
 // first isn't asked the second: had it recovered, the second would miss
 // a request stored under the DPoP key, and answer it as unknown.
+// Without an instanceKey, the lookup under no DPoP key is the plain
+// SHA-256 of authReqID, which the string a bound digest is taken over
+// would share with that bound request; backchannelTokenParameters has
+// refused every such string, as not of the form this server issues.
 func (s *Server) pollBackchannelAuthentication(ctx context.Context, client storage.RegisteredClient, authReqID, instanceKey, thumbprint string, now time.Time) (storage.PolledBackchannelAuthentication, [32]byte, error) {
 	poll := func(hash [32]byte) (storage.PolledBackchannelAuthentication, error) {
 		return s.deps.Backchannel.PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{

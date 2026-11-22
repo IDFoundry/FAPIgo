@@ -32,15 +32,21 @@ func (c *hintChecker) CheckBackchannelHints(_ context.Context, clientID fapi.Cli
 	return c.err
 }
 
-// countingBackchannelStore counts the requests stored.
+// countingBackchannelStore counts the requests stored and the polls
+// made.
 type countingBackchannelStore struct {
 	storage.BackchannelAuthenticationStore
-	created int
+	created, polled int
 }
 
 func (s *countingBackchannelStore) CreateBackchannelAuthentication(ctx context.Context, record storage.NewBackchannelAuthentication) error {
 	s.created++
 	return s.BackchannelAuthenticationStore.CreateBackchannelAuthentication(ctx, record)
+}
+
+func (s *countingBackchannelStore) PollBackchannelAuthentication(ctx context.Context, poll storage.PollBackchannelAuthentication) (storage.PolledBackchannelAuthentication, error) {
+	s.polled++
+	return s.BackchannelAuthenticationStore.PollBackchannelAuthentication(ctx, poll)
 }
 
 func beginWithHint(t *testing.T, checker server.BackchannelHintChecker, loginHint string) (server.BackchannelAuthenticationAction, *countingBackchannelStore) {

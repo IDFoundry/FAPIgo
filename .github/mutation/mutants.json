@@ -216,6 +216,30 @@
     "why": "a CIBA request naming 33 acr values is refused"
   },
   {
+    "id": "srv-ciba-auth-req-id-format",
+    "file": "server/backchannel_token.go",
+    "old": "if !isWellFormedAuthReqID(authReqID) {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestExchangeBackchannelAuthenticationRefusesMalformedAuthReqID|TestCraftedAuthReqIDLeavesTheBoundApproval)$",
+    "why": "an auth_req_id of another form than the server issues, such as a bound digest's preimage, is never polled for"
+  },
+  {
+    "id": "srv-ciba-auth-req-id-length",
+    "file": "server/backchannel_interaction.go",
+    "old": "if len(authReqID) != base64.RawURLEncoding.EncodedLen(authReqIDSize) {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestIsWellFormedAuthReqID|TestExchangeBackchannelAuthenticationRefusesMalformedAuthReqID)$",
+    "why": "an auth_req_id must be exactly 43 characters"
+  },
+  {
     "id": "srv-idtoken-enc-content-alg",
     "file": "server/idtoken_encryption.go",
     "old": "if !s.cfg.Algorithms.IDTokenEncryptionContentEncryption.Contains(contentEncryption) {",

@@ -277,7 +277,10 @@ type BackchannelAuthenticationStore interface {
 	// longer allows the grant, or token issuance fails) leaves it spent,
 	// as a failed exchange spends an authorization code. The client
 	// starts a new request. A poll from another client instance, or
-	// with a DPoP key other than the request's dpop_jkt, never observes
-	// it (see NewBackchannelAuthentication.AuthReqIDHash).
+	// with a DPoP key other than the one the request is bound to, never
+	// observes it, though the store compares nothing but digests: the
+	// server polls under a digest of the presenting instance and key
+	// (see NewBackchannelAuthentication.AuthReqIDHash), and only for an
+	// auth_req_id of the form it issues, so such a poll finds no record.
 	PollBackchannelAuthentication(ctx context.Context, poll PollBackchannelAuthentication) (PolledBackchannelAuthentication, error)
 }

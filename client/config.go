@@ -695,9 +695,10 @@ const (
 	// store a server shares between users: it would bring login CSRF
 	// back. AssuranceProduction accepts it only for a native app: a
 	// Config.RedirectURI that is loopback http to 127.0.0.1 or [::1], or
-	// a private-use URI scheme, never https, and a Dependencies.Sessions
-	// that doesn't declare CrossInstanceConsistent, which only a shared
-	// store needs.
+	// a private-use URI scheme, never https or empty (a client without
+	// the authorization code flow, whether or not it has
+	// Dependencies.Sessions), and a Dependencies.Sessions that doesn't
+	// declare CrossInstanceConsistent, which only a shared store needs.
 	CallbackBindingDeviceLocalStore
 )
 

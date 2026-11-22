@@ -49,7 +49,10 @@
 // and no ID token or refresh token, ever — a Config with neither the
 // browser flow's endpoints nor Endpoints.BackchannelAuthentication set
 // is a legitimate client_credentials-only client, not an incomplete
-// one. ClientCredentialsResource sends its token to a protected
+// one. Such a client, like a CIBA-only one, refuses BeginAuthorization
+// and a callback with ErrorInvalidRequest, so an application routing
+// callbacks between several clients can't crash on one routed to it by
+// mistake. ClientCredentialsResource sends its token to a protected
 // resource. Such a client authenticating with a TLS client certificate
 // and holding mTLS-bound tokens signs nothing, and needs no
 // Dependencies.Keys.

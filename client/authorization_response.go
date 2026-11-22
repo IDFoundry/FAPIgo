@@ -121,8 +121,18 @@ func (CallbackDenied) callbackResult() {}
 // session requested, and authorization-code or error-response presence.
 // A JARM response with no Session, or whose "state" isn't the Session's,
 // is refused before any issuer key is resolved for it.
+//
+// It needs the authorization code flow configured, as BeginAuthorization
+// does: on a client missing either Endpoints.Authorization or
+// Dependencies.Sessions, such as one for CIBA or client credentials only
+// (with or without a session store), it returns ErrorInvalidRequest
+// before reading cb. An application running a Client per issuer routes
+// each callback to the Client that began its flow by a value it kept
+// with the session itself, such as the provider named by
+// client/sessioncookie's sealed value, never by the callback's own "iss"
+// or path, which whoever sends the callback chooses.
 func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb AuthorizationCallback) (CallbackResult, error) {
-	if err := c.checkTrustChain(); err != nil {
+	if err := c.checkAuthorizationCodeFlow(); err != nil {
 		return nil, err
 	}
 	params, respMode, err := c.parseCallbackParams(ctx, cb)

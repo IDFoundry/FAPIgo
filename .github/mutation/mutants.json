@@ -696,6 +696,42 @@
     "why": "a JARM response with no Session, or a state that isn't the Session's, is refused before any issuer key is resolved"
   },
   {
+    "id": "client-code-flow-guard",
+    "file": "client/begin_authorization.go",
+    "old": "if c.cfg.Endpoints.Authorization.IsZero() || c.deps.Sessions == nil {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^(TestCallbackOnAClientWithoutTheCodeFlowIsRefused|TestBeginAuthorizationWithoutTheCodeFlowSendsNothing|TestMisroutedCallbackToAClientWithoutTheCodeFlowOverHTTP)$",
+    "why": "a client without the authorization code flow refuses BeginAuthorization and callbacks before any request or store access"
+  },
+  {
+    "id": "client-code-flow-guard-sessions",
+    "file": "client/begin_authorization.go",
+    "old": "c.cfg.Endpoints.Authorization.IsZero() || c.deps.Sessions == nil",
+    "new": "c.cfg.Endpoints.Authorization.IsZero()",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestAuthorizationCodeFlowNeedsASessionStore$",
+    "why": "a client with no session store refuses the authorization code flow rather than panicking on the store"
+  },
+  {
+    "id": "client-device-local-without-sessions",
+    "file": "client/client.go",
+    "old": "\terrs = append(errs, checkDeviceLocalSessions(cfg, deps.Sessions))",
+    "new": "\tif deps.Sessions != nil {\n\t\terrs = append(errs, checkDeviceLocalSessions(cfg, deps.Sessions))\n\t}",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestNewProductionRefusesDeviceLocalBindingWithoutTheCodeFlow$",
+    "why": "AssuranceProduction refuses CallbackBindingDeviceLocalStore without a native redirect URI, session store or not"
+  },
+  {
     "id": "resource-pairwise-empty-subject",
     "file": "resource/verify.go",
     "old": "case internal == \"\":",

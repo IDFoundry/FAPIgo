@@ -2060,6 +2060,14 @@ delivers it, doesn't reveal it. Serve the redirect URI with
 `Referrer-Policy: no-referrer` and no third-party script, and redirect
 to a clean URL once the callback is handled.
 
+An application talking to several authorization servers keeps a Client
+per issuer and routes each callback to the one that began its flow by
+the value it sealed with the handle (`sessioncookie`'s value, naming
+the provider), never by the callback's own `iss` or path, which whoever
+sends the callback chooses. A Client without the authorization code
+flow, for CIBA or client credentials only, refuses a callback routed to
+it with `ErrorInvalidRequest`.
+
 `HandleAuthorizationResponse` followed by `ExchangeCode` is the same
 flow in two steps, for when you want the validated response before
 redeeming the code; its result is a `CallbackSuccess` or a

@@ -148,6 +148,27 @@ func (s *Server) recordBackchannelDecision(ctx context.Context, req CompleteBack
 	return decided, nil
 }
 
+// backchannelAuthenticationFailure is why result's authentication fails
+// request, or "" when it doesn't. Each of these is a failed
+// authentication: an essential "acr" request with values the
+// authentication doesn't meet (OIDC Core §5.5.1.1); a user other than
+// the one an id_token_hint or "sub" value named (OIDC Core §5.5.1),
+// which clientSub, the authenticated user's sub at the request's
+// client, is checked against; and a user other than the one
+// Dependencies.BackchannelSubjects bound the request to through its
+// hint.
+func backchannelAuthenticationFailure(request requestRecord, result authorizeResult, clientSub string) string {
+	switch {
+	case !meetsEssentialACR(request.EssentialACRValues, result.auth.acr):
+		return "the user's authentication doesn't meet the requested essential acr"
+	case !meetsRequiredSubject(request.RequiredSubject, clientSub):
+		return "the authenticated user isn't the one the request named"
+	case request.ResolvedSubject != "" && result.subject.id.value != request.ResolvedSubject:
+		return "the authenticated user isn't the one the request's hint named"
+	}
+	return ""
+}
+
 // approveBackchannelAuthentication records an Authorize for the pending
 // request in decision: approved, with its grant, or a failed
 // authentication when it doesn't meet the request's essential acr or
@@ -174,28 +195,10 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		return subErr
 	}
 
-	// OIDC Core §5.5.1.1: an essential "acr" request with values that
-	// the authentication doesn't meet is a failed authentication, so
-	// record it as one and issue nothing.
-	if !meetsEssentialACR(request.EssentialACRValues, result.auth.acr) {
+	// A failed authentication is recorded as one, and nothing is issued.
+	if reason := backchannelAuthenticationFailure(request, result, clientSub); reason != "" {
 		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
-		decision.Reason = "the user's authentication doesn't meet the requested essential acr"
-		return nil
-	}
-
-	// OIDC Core §5.5.1: the user an id_token_hint or "sub" value
-	// named must be the one authenticated; anyone else is a failed
-	// authentication.
-	if !meetsRequiredSubject(request.RequiredSubject, clientSub) {
-		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
-		decision.Reason = "the authenticated user isn't the one the request named"
-		return nil
-	}
-	// Dependencies.BackchannelSubjects bound the request to the user its
-	// hint names: anyone else is a failed authentication too.
-	if request.ResolvedSubject != "" && result.subject.id.value != request.ResolvedSubject {
-		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
-		decision.Reason = "the authenticated user isn't the one the request's hint named"
+		decision.Reason = reason
 		return nil
 	}
 

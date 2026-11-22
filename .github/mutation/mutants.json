@@ -1787,5 +1787,235 @@
     "run": "^TestPostgresPollWaitsForAConcurrentPoll$",
     "postgres": true,
     "why": "storage transactions run at READ COMMITTED"
+  },
+  {
+    "id": "sqlstore-refresh-token-grant-keys-indexed",
+    "file": "sqlstore/grant.go",
+    "old": "for _, key := range keys {",
+    "new": "for _, key := range keys[:0] {",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestRevokeGrantRefreshTokensByEitherKey|TestGrantStoreContract)$",
+    "why": "a refresh token is indexed by each of its grant keys"
+  },
+  {
+    "id": "sqlstore-pg-refresh-token-grant-keys-one-write",
+    "file": "sqlstore/grant.go",
+    "old": "write = s.d.write // the token and its index rows: more than one statement",
+    "new": "write = s.d.writeOne",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestRefreshTokenAndItsGrantKeysAreOneWrite$",
+    "postgres": true,
+    "why": "a refresh token and its grant keys are written in one transaction, or neither is"
+  },
+  {
+    "id": "sqlstore-grant-keys-validated",
+    "file": "sqlstore/grant.go",
+    "old": "if slices.ContainsFunc(keys, func(key string) bool { return !validGrantKey(key) }) {",
+    "new": "if false {",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestGrantKeysOutsideTheirBound$",
+    "why": "a grant key the server can't have derived is refused"
+  },
+  {
+    "id": "sqlstore-grant-key-length",
+    "file": "sqlstore/grant.go",
+    "old": "if key == \"\" || len(key) > maxGrantKeyBytes {",
+    "new": "if key == \"\" {",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestGrantKeysOutsideTheirBound$",
+    "why": "a grant key over 64 bytes is refused"
+  },
+  {
+    "id": "sqlstore-grant-key-alphabet",
+    "file": "sqlstore/grant.go",
+    "old": "if !isBase64URLByte(key[i]) {",
+    "new": "if !isBase64URLByte(key[i]) && false {",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestGrantKeysOutsideTheirBound$",
+    "why": "a grant key outside the base64url alphabet is refused"
+  },
+  {
+    "id": "sqlstore-grant-refresh-tokens-revoked",
+    "file": "sqlstore/grant.go",
+    "old": "revoked, err = s.deleteIndexedRefreshTokens(ctx, q, grantKey)",
+    "new": "revoked, err = nil, nil",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestRevokedGrantStaysRevokedAfterItsRecordIsSwept|TestGrantStoreContract)$",
+    "why": "revoking a grant revokes its refresh tokens, so none outlives the grant's record"
+  },
+  {
+    "id": "sqlstore-grant-refresh-tokens-reported",
+    "file": "sqlstore/grant.go",
+    "old": "revoked = append(revoked, [32]byte(hash))",
+    "new": "_ = hash",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestRevokeGrantRefreshTokensByEitherKey|TestGrantStoreContract)$",
+    "why": "revoking a grant reports the refresh tokens it revoked"
+  },
+  {
+    "id": "sqlstore-grant-refresh-tokens-digest-length",
+    "file": "sqlstore/grant.go",
+    "old": "if len(hash) == 32 {",
+    "new": "if true {",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestRevokeGrantRefreshTokensSkipsAKeyThatIsNoDigest$",
+    "why": "a planted token key that isn't a digest is skipped, not turned into one"
+  },
+  {
+    "id": "sqlstore-pg-grant-refresh-tokens-unstorable-key",
+    "file": "sqlstore/grant.go",
+    "old": "if !validGrantKey(grantKey) {",
+    "new": "if false {",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestGrantKeysOutsideTheirBound$",
+    "postgres": true,
+    "why": "a grant key no token can have revokes nothing, without asking the database"
+  },
+  {
+    "id": "sqlstore-sweep-refresh-token-grants",
+    "file": "sqlstore/sweep.go",
+    "old": "\t\"refresh_token_grants\",        // NewRefreshToken.ExpiresAt, its token's\n",
+    "new": "",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestSweepRemovesGrantIndexRowsWithTheirToken$",
+    "why": "Sweep removes a refresh token's index rows once it expires"
+  },
+  {
+    "id": "sqlstore-refresh-token-tombstone",
+    "file": "sqlstore/grant.go",
+    "old": "if err == nil && deleted == 0 {",
+    "new": "if err == nil && deleted == 0 && false {",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestRevokedRefreshTokenIsNeverRedeemable|TestRegistryRevocationBeforeTheTokenIsStoredRefusesTheIssuance)$",
+    "why": "revoking a refresh token not stored yet leaves a tombstone, so it's never stored redeemable"
+  },
+  {
+    "id": "sqlstore-refresh-token-tombstone-unredeemable",
+    "file": "sqlstore/grant.go",
+    "old": "WHERE token_hash = ? AND revoked = 0\",",
+    "new": "WHERE token_hash = ?\",",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestTombstoneIsNoSealedRecord$",
+    "why": "a tombstone redeems as an unknown token, never opened as a record"
+  },
+  {
+    "id": "sqlstore-refresh-token-tombstone-not-deleted",
+    "file": "sqlstore/grant.go",
+    "old": "WHERE token_hash = ? AND revoked = 0\"), tokenHash",
+    "new": "WHERE token_hash = ?\"), tokenHash",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestRevokingATombstoneAgainKeepsIt$",
+    "why": "revoking a hash again keeps its tombstone"
+  },
+  {
+    "id": "sqlstore-grant-refresh-tokens-keep-tombstones",
+    "file": "sqlstore/grant.go",
+    "old": "WHERE revoked = 0 AND token_hash IN",
+    "new": "WHERE token_hash IN",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestRevokedRefreshTokenIsNeverRedeemable$",
+    "why": "revoking a grant's refresh tokens deletes no tombstone"
+  },
+  {
+    "id": "sqlstore-refresh-token-tombstone-converts",
+    "file": "sqlstore/grant.go",
+    "old": "ON CONFLICT (token_hash) DO UPDATE SET client_id = excluded.client_id, record = excluded.record, expires_at = excluded.expires_at, sweep_after = excluded.sweep_after, revoked = excluded.revoked",
+    "new": "ON CONFLICT (token_hash) DO NOTHING",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestRevokedRefreshTokenIsNeverRedeemable$",
+    "why": "a token stored while its revocation runs becomes the tombstone"
+  },
+  {
+    "id": "sqlstore-refresh-token-tombstone-marked",
+    "file": "sqlstore/grant.go",
+    "old": "revoked = excluded.revoked",
+    "new": "revoked = 0",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestRevokedRefreshTokenIsNeverRedeemable$",
+    "why": "a token turned into a tombstone is marked revoked"
+  },
+  {
+    "id": "sqlstore-refresh-token-tombstone-replaces-token",
+    "file": "sqlstore/grant.go",
+    "old": "DO UPDATE SET client_id = excluded.client_id, record = excluded.record, expires_at = excluded.expires_at, sweep_after",
+    "new": "DO UPDATE SET sweep_after",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestRevokedRefreshTokenIsNeverRedeemable$",
+    "why": "a token turned into a tombstone loses its client, record and expiry, so a release without the revoked column can't redeem it"
+  },
+  {
+    "id": "sqlstore-refresh-token-tombstone-record",
+    "file": "sqlstore/grant.go",
+    "old": "var tombstoneRecord = []byte{recordSealed}",
+    "new": "var tombstoneRecord = []byte{}",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestTombstoneIsNoSealedRecord$",
+    "why": "a tombstone's record is the sealed format byte alone, which SealRecords leaves and no release opens"
+  },
+  {
+    "id": "sqlstore-refresh-token-tombstone-lifetime",
+    "file": "sqlstore/grant.go",
+    "old": "const tombstoneLifetime = time.Hour",
+    "new": "const tombstoneLifetime = time.Minute",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestSweepRemovesTombstonesAfterAnHour$",
+    "why": "a tombstone lasts an hour before Sweep removes it"
   }
 ]

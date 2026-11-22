@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -230,7 +231,10 @@ func (s *ClientJWKSSource) entry(ctx context.Context, id fapi.ClientID) (*client
 		return kept, nil // another caller got here first
 	}
 	s.makeRoomLocked(id)
-	s.entries[id] = fresh
+	// Keyed by a copy: id may share memory with the request it came
+	// from, which an entry kept for as long as the client is would
+	// otherwise keep alive.
+	s.entries[fapi.ClientID(strings.Clone(string(id)))] = fresh
 	return fresh, nil
 }
 

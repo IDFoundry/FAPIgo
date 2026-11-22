@@ -233,6 +233,10 @@ func (s *Server) checkPendingBackchannelRequests(ctx context.Context, clientID f
 // decision was recorded but whose removal failed is still listed until
 // it expires, and completing it again is refused as already decided.
 //
+// Each request listed costs store reads. Once ctx ends,
+// ListBackchannelInteractions reads no more of them and fails with
+// ctx's error, rather than returning part of the inbox.
+//
 // ListBackchannelInteractions doesn't check who is asking: the
 // application must make sure the user is subject, as it does before
 // approving.
@@ -252,7 +256,7 @@ func (s *Server) ListBackchannelInteractions(ctx context.Context, subject Subjec
 // or a request the backchannel store couldn't answer for) joined into
 // unreadable, so one bad entry doesn't hide the others from
 // DenyBackchannelInteractions. err is for a listing that failed as a
-// whole.
+// whole, ctx ending before it finished among them.
 func (s *Server) listBackchannelInteractions(ctx context.Context, subject SubjectID) (pending []PendingBackchannelInteraction, unreadable, err error) {
 	if s.deps.BackchannelInbox == nil {
 		return nil, nil, errors.New("server: list backchannel interactions: Dependencies.BackchannelInbox isn't set")
@@ -268,6 +272,9 @@ func (s *Server) listBackchannelInteractions(ctx context.Context, subject Subjec
 	}
 	var bad []error
 	for _, entry := range entries {
+		if ctx.Err() != nil {
+			break
+		}
 		p, ok, err := s.pendingBackchannelInteraction(ctx, subject, entry)
 		if err != nil {
 			bad = append(bad, fmt.Errorf("server: list backchannel interactions: %w", err))
@@ -276,6 +283,9 @@ func (s *Server) listBackchannelInteractions(ctx context.Context, subject Subjec
 		if ok {
 			pending = append(pending, p)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, fmt.Errorf("server: list backchannel interactions: %w", err)
 	}
 	slices.SortFunc(pending, func(a, b PendingBackchannelInteraction) int {
 		return cmp.Or(a.ExpiresAt.Compare(b.ExpiresAt), cmp.Compare(a.ID, b.ID))
@@ -358,7 +368,8 @@ func (s *Server) unfileBackchannelRequest(ctx context.Context, handleHash [32]by
 // Any other failure, or an entry it can't read, doesn't stop it: it
 // denies every other request, then returns how many it denied with every
 // failure joined. What failed is still listed, so calling it again
-// finishes the job.
+// finishes the job. If ctx ends before the requests are all listed, it
+// denies none of them and returns ctx's error.
 //
 // DenyBackchannelInteractions doesn't check who is asking: the
 // application must make sure the request is subject's own, or an

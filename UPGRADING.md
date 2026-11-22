@@ -53,7 +53,9 @@ values the client accepts, in order of preference.
 
 **Affects:** a server with `Dependencies.BackchannelInbox` set whose
 end users can have more than 32 CIBA requests awaiting their decision
-at once, or more than 8 from one client. A server without an inbox is
+at once, or more than 8 from one client, and code that relies on
+`ListBackchannelInteractions` or `DenyBackchannelInteractions` reading
+on after their context has ended. A server without an inbox is
 unaffected.
 
 **Why:** any registered CIBA client could file any number of requests
@@ -72,6 +74,10 @@ than `Limits.MaxPendingBackchannelAuthenticationRequests` pending
 requests (32 when zero), or more than
 `Limits.MaxPendingBackchannelAuthenticationRequestsPerClient` from its
 client (8 when zero). A request counts until it's decided or expires.
+`ListBackchannelInteractions` and `DenyBackchannelInteractions` return
+an error wrapping `ctx.Err()` if their context ends before the listing
+finishes, rather than reading on; `DenyBackchannelInteractions` then
+denies nothing.
 
 **What to change:** if your users legitimately have more requests
 pending at once, raise the limits:
@@ -85,7 +91,9 @@ limits.MaxPendingBackchannelAuthenticationRequestsPerClient = 16
 Otherwise, have a client wait for a request's outcome before it sends
 another for the same user, and keep
 `Limits.BackchannelAuthenticationRequestLifetime` short, so undecided
-requests free their place sooner.
+requests free their place sooner. Pass `ListBackchannelInteractions`
+and `DenyBackchannelInteractions` a context that lasts as long as the
+call needs.
 
 ## v0.78.0
 

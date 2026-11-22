@@ -372,6 +372,30 @@
     "why": "an inbox that can't count its end user's pending requests refuses the request"
   },
   {
+    "id": "srv-ciba-inbox-listing-stops",
+    "file": "server/backchannel_inbox.go",
+    "old": "if ctx.Err() != nil {\n\t\t\tbreak\n\t\t}",
+    "new": "if false {\n\t\t\tbreak\n\t\t}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInboxListingStopsWhenTheContextEnds$",
+    "why": "a CIBA inbox listing reads no more requests once its context ends"
+  },
+  {
+    "id": "srv-ciba-inbox-listing-context-error",
+    "file": "server/backchannel_inbox.go",
+    "old": "if err := ctx.Err(); err != nil {\n\t\treturn nil, nil, fmt.Errorf(\"server: list backchannel interactions: %w\", err)",
+    "new": "if err := ctx.Err(); err != nil && false {\n\t\treturn nil, nil, fmt.Errorf(\"server: list backchannel interactions: %w\", err)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInboxListingStopsWhenTheContextEnds$",
+    "why": "a CIBA inbox listing whose context ended fails, rather than returning part of the inbox"
+  },
+  {
     "id": "srv-access-token-size-cap",
     "file": "server/accesstoken.go",
     "old": "s.cfg.Limits.MaxAccessTokenBytes(); size > limit {",

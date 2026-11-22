@@ -180,6 +180,9 @@ stored, and `srv.ListBackchannelInteractions(ctx, subject)` lists what
 awaits them: each entry's `Interaction` to show, a page-safe `ID` to
 link to, and the `Handle` to complete it with, which stays on your
 server. A request leaves the inbox once decided, or when it expires.
+Each request listed costs store reads, so pass the listing your
+request's context: once it ends, the listing reads no more and fails
+with the context's error, rather than returning part of the inbox.
 
 The resolver also binds the request to that user: an `Authorize` for
 anyone else is a failed authentication (`access_denied`). That matters

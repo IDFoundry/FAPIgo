@@ -199,14 +199,24 @@ type Dependencies struct {
 	// ListBackchannelInteractions: what the user's authentication device
 	// shows, from any instance. It needs BackchannelSubjects. A request
 	// is filed before it's stored, so a filing failure fails the
-	// request. Its entries hold the requests' backchannel authentication
-	// handles, so give it storage that encrypts at rest. The subject
-	// binding means a handle read from it can still only be approved by
-	// the user it was filed for; it can still end the request, though, as
-	// any handle can: CompleteBackchannelAuthentication records a Deny,
-	// or an approval by someone else, for whoever presents the handle. Under AssuranceProduction it must
-	// declare storage.StoreAssurance (Durable, and
-	// CrossInstanceConsistent with DeploymentHorizontallyScaled).
+	// request, and one past a cap on its user's pending requests
+	// (Limits.MaxPendingBackchannelAuthenticationRequests,
+	// MaxPendingBackchannelAuthenticationRequestsPerClient) is refused
+	// with access_denied. The server's writes to it, filing a request and
+	// removing one decided, refused or not stored, don't end with the
+	// caller's context, which net/http ends when a client hangs up, so a
+	// client can't leave entries behind that count against those caps:
+	// each has a 30-second timeout of its own instead, and a store that
+	// stalls can hold the call that long for each write, even after its
+	// context has ended. Its entries hold the requests' backchannel
+	// authentication handles, so give it storage that encrypts at rest.
+	// The subject binding means a handle read from it can still only be
+	// approved by the user it was filed for; it can still end the
+	// request, though, as any handle can: CompleteBackchannelAuthentication
+	// records a Deny, or an approval by someone else, for whoever presents
+	// the handle. Under AssuranceProduction it must declare
+	// storage.StoreAssurance (Durable, and CrossInstanceConsistent with
+	// DeploymentHorizontallyScaled).
 	// Ignored unless Config.Endpoints.BackchannelAuthentication is set.
 	BackchannelInbox storage.BackchannelInbox
 

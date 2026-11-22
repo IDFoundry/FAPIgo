@@ -51,12 +51,16 @@ func backchannelHintError(err error) *Error {
 	}
 }
 
-// resolveBackchannelSubject applies Dependencies.BackchannelSubjects,
+// resolveBackchannelSubject checks the request's hints
+// (checkBackchannelHints), then applies Dependencies.BackchannelSubjects,
 // when set, returning the internal subject the request is bound to, or
 // "" without a resolver. requiredInternal is the subject an
 // id_token_hint already named, if the server could map it: the
 // resolver must agree with it.
 func (s *Server) resolveBackchannelSubject(ctx context.Context, clientID fapi.ClientID, hints BackchannelAuthenticationHints, requiredInternal string) (string, *Error) {
+	if hintErr := s.checkBackchannelHints(ctx, clientID, hints); hintErr != nil {
+		return "", hintErr
+	}
 	if s.deps.BackchannelSubjects == nil {
 		return "", nil
 	}
@@ -80,8 +84,9 @@ type PendingBackchannelInteraction struct {
 	// ID names the request among the user's pending ones, for a page to
 	// link to or a form to send back: opaque, stable while the request is
 	// pending, and safe to put in a URL, since it can't complete the
-	// request. Find the request again by listing and matching it; Handle
-	// is what completes it, and stays on the server.
+	// request. Find the request again by listing and matching it, a
+	// listing Limits.MaxPendingBackchannelAuthenticationRequests bounds;
+	// Handle is what completes it, and stays on the server.
 	ID string
 
 	Handle      BackchannelAuthenticationHandle
@@ -113,6 +118,51 @@ func backchannelInboxID(handleHash [32]byte) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
+// inboxFilingFailedDescription is the public description of a CIBA
+// request refused because its end user's inbox couldn't take it, or
+// couldn't count the requests it holds.
+const inboxFilingFailedDescription = "failed to file the backchannel authentication request in the end user's inbox"
+
+// storeBackchannelRequest stores the CIBA request
+// BeginBackchannelAuthentication accepted: filed in the inbox of
+// subject, the end user it's bound to (fileBackchannelRequest), refused
+// if that leaves them over a cap on pending requests
+// (checkPendingBackchannelRequests), and then persisted as stored. A
+// request refused or not persisted is taken out of the inbox again
+// (unfileBackchannelRequest), so it doesn't count against the caps
+// until it expires. That includes one whose filing failed, since a
+// store can keep an entry it reports failed.
+//
+// Neither the filing nor the removal ends with ctx, which net/http ends
+// once the client hangs up. A removal that ended with it wouldn't run,
+// and a filing that did could still land after its removal had run: a
+// database client can return as soon as its context ends, while the
+// database goes on to commit the write it was sent. Either way a client
+// hanging up would leave its entry behind, and enough of them would
+// take the user past a cap for every other client. Each write has
+// inboxWriteTimeout of its own instead, so a store that stalls can hold
+// the handler that long for the filing and again for the removal, even
+// once the client has gone. Only a store that fails to remove an entry,
+// or that stalls on a filing past that timeout and commits it later,
+// leaves the entry behind.
+func (s *Server) storeBackchannelRequest(ctx context.Context, handleRaw, subject string, stored storage.NewBackchannelAuthentication) *Error {
+	fileCtx, cancelFile := context.WithTimeout(context.WithoutCancel(ctx), inboxWriteTimeout)
+	defer cancelFile()
+	if err := s.fileBackchannelRequest(fileCtx, stored.ClientID, handleRaw, subject, stored.ExpiresAt); err != nil {
+		s.unfileBackchannelRequest(ctx, stored.HandleHash)
+		return newError(ErrorServerError, 500, inboxFilingFailedDescription, err)
+	}
+	if capErr := s.checkPendingBackchannelRequests(ctx, stored.ClientID, subject); capErr != nil {
+		s.unfileBackchannelRequest(ctx, stored.HandleHash)
+		return capErr
+	}
+	if err := s.deps.Backchannel.CreateBackchannelAuthentication(ctx, stored); err != nil {
+		s.unfileBackchannelRequest(ctx, stored.HandleHash)
+		return newError(ErrorServerError, 500, "failed to persist backchannel authentication request", err)
+	}
+	return nil
+}
+
 // fileBackchannelRequest adds the request handleRaw names, bound to
 // subject, to Dependencies.BackchannelInbox, when one is set. It runs
 // before the request is stored, so no pending request exists that its
@@ -131,6 +181,46 @@ func (s *Server) fileBackchannelRequest(ctx context.Context, clientID fapi.Clien
 	})
 }
 
+// checkPendingBackchannelRequests refuses the request clientID has just
+// filed for subject if subject now has more pending requests than
+// Limits.MaxPendingBackchannelAuthenticationRequests allows, or more from
+// clientID than MaxPendingBackchannelAuthenticationRequestsPerClient:
+// with access_denied, which CIBA Core §13 gives a request the OpenID
+// Provider itself denies, and sends with HTTP 403. It counts the
+// unexpired entries the inbox lists, by their ClientID, without reading
+// their records. A request is counted from the moment it's filed, before
+// it's checked, so requests filed at the same moment can be refused
+// together but are never admitted together past a cap. A listing that
+// fails refuses the request as a filing failure does.
+func (s *Server) checkPendingBackchannelRequests(ctx context.Context, clientID fapi.ClientID, subject string) *Error {
+	if s.deps.BackchannelInbox == nil || subject == "" {
+		return nil
+	}
+	now := s.deps.Clock.Now()
+	entries, err := s.deps.BackchannelInbox.ListBackchannelRequests(ctx, storage.BackchannelInboxListing{
+		SubjectKey: s.backchannelInboxSubjectKey(subject), Now: now,
+	})
+	if err != nil {
+		return newError(ErrorServerError, 500, inboxFilingFailedDescription, err)
+	}
+	maxPending, maxFromClient := s.cfg.Limits.pendingBackchannelAuthenticationRequestCaps()
+	pending, fromClient := 0, 0
+	for _, entry := range entries {
+		if !now.Before(entry.ExpiresAt) {
+			continue
+		}
+		pending++
+		if entry.ClientID == clientID {
+			fromClient++
+		}
+	}
+	if pending > maxPending || fromClient > maxFromClient {
+		return newError(ErrorAccessDenied, 403, "too many backchannel authentication requests are awaiting this end user",
+			fmt.Errorf("%d requests pending for the end user (at most %d), %d of them from the client (at most %d)", pending, maxPending, fromClient, maxFromClient))
+	}
+	return nil
+}
+
 // ListBackchannelInteractions returns the CIBA requests awaiting
 // subject's decision, soonest to expire first: what subject's
 // authentication device shows, on any instance sharing the store. It
@@ -142,6 +232,10 @@ func (s *Server) fileBackchannelRequest(ctx context.Context, clientID fapi.Clien
 // A request leaves the inbox once decided, or when it expires. One whose
 // decision was recorded but whose removal failed is still listed until
 // it expires, and completing it again is refused as already decided.
+//
+// Each request listed costs store reads. Once ctx ends,
+// ListBackchannelInteractions reads no more of them and fails with
+// ctx's error, rather than returning part of the inbox.
 //
 // ListBackchannelInteractions doesn't check who is asking: the
 // application must make sure the user is subject, as it does before
@@ -162,7 +256,7 @@ func (s *Server) ListBackchannelInteractions(ctx context.Context, subject Subjec
 // or a request the backchannel store couldn't answer for) joined into
 // unreadable, so one bad entry doesn't hide the others from
 // DenyBackchannelInteractions. err is for a listing that failed as a
-// whole.
+// whole, ctx ending before it finished among them.
 func (s *Server) listBackchannelInteractions(ctx context.Context, subject SubjectID) (pending []PendingBackchannelInteraction, unreadable, err error) {
 	if s.deps.BackchannelInbox == nil {
 		return nil, nil, errors.New("server: list backchannel interactions: Dependencies.BackchannelInbox isn't set")
@@ -178,6 +272,9 @@ func (s *Server) listBackchannelInteractions(ctx context.Context, subject Subjec
 	}
 	var bad []error
 	for _, entry := range entries {
+		if ctx.Err() != nil {
+			break
+		}
 		p, ok, err := s.pendingBackchannelInteraction(ctx, subject, entry)
 		if err != nil {
 			bad = append(bad, fmt.Errorf("server: list backchannel interactions: %w", err))
@@ -186,6 +283,9 @@ func (s *Server) listBackchannelInteractions(ctx context.Context, subject Subjec
 		if ok {
 			pending = append(pending, p)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, fmt.Errorf("server: list backchannel interactions: %w", err)
 	}
 	slices.SortFunc(pending, func(a, b PendingBackchannelInteraction) int {
 		return cmp.Or(a.ExpiresAt.Compare(b.ExpiresAt), cmp.Compare(a.ID, b.ID))
@@ -226,14 +326,31 @@ func (s *Server) pendingBackchannelInteraction(ctx context.Context, subject Subj
 	return PendingBackchannelInteraction{ID: backchannelInboxID(entry.HandleHash), Handle: handle, Interaction: interaction, ExpiresAt: entry.ExpiresAt}, true, nil
 }
 
-// unfileBackchannelRequest removes the decided request handleHash names
-// from Dependencies.BackchannelInbox, when one is set. Best-effort, as
-// the ping notification is: the decision is recorded, and an entry left
-// behind is refused as already decided and expires with the request.
+// inboxWriteTimeout bounds each inbox write that doesn't end with its
+// caller's context, storeBackchannelRequest's filing and
+// unfileBackchannelRequest's removal: long enough for a store waiting on
+// a write lock, as sqlstore's SQLite writes do for up to 10 seconds by
+// default, and short enough that a store that never answers can't hold
+// its caller for good.
+const inboxWriteTimeout = 30 * time.Second
+
+// unfileBackchannelRequest removes the request handleHash names from
+// Dependencies.BackchannelInbox, when one is set: one decided, or one
+// filed but then refused or not stored (storeBackchannelRequest).
+// Best-effort, as the ping notification is: an entry left behind
+// expires with its request, and completing a decided one again is
+// refused, while one never stored isn't listed; until it expires,
+// though, it counts against its end user's caps on pending requests. So
+// ctx ending doesn't stop the removal: net/http ends a request's context
+// once its client hangs up, which would otherwise let a client leave
+// its refused requests' entries behind. inboxWriteTimeout bounds the
+// removal instead.
 func (s *Server) unfileBackchannelRequest(ctx context.Context, handleHash [32]byte) {
 	if s.deps.BackchannelInbox == nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inboxWriteTimeout)
+	defer cancel()
 	_ = s.deps.BackchannelInbox.RemoveBackchannelRequest(ctx, handleHash)
 }
 
@@ -251,7 +368,8 @@ func (s *Server) unfileBackchannelRequest(ctx context.Context, handleHash [32]by
 // Any other failure, or an entry it can't read, doesn't stop it: it
 // denies every other request, then returns how many it denied with every
 // failure joined. What failed is still listed, so calling it again
-// finishes the job.
+// finishes the job. If ctx ends before the requests are all listed, it
+// denies none of them and returns ctx's error.
 //
 // DenyBackchannelInteractions doesn't check who is asking: the
 // application must make sure the request is subject's own, or an

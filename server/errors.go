@@ -88,7 +88,10 @@ const (
 	// browser-based flow, where a denial is always delivered as a
 	// redirect query parameter and never as a *Error (see
 	// AuthorizationResult), CIBA's token endpoint has no redirect to
-	// carry it in, so this is a real ErrorCode.
+	// carry it in, so this is a real ErrorCode. The backchannel
+	// authentication endpoint refuses with it too, with HTTP 403 (CIBA
+	// §13), a request past a cap on its end user's pending requests
+	// (Limits.MaxPendingBackchannelAuthenticationRequests).
 	ErrorAccessDenied ErrorCode = "access_denied"
 
 	// ErrorInvalidBindingMessage indicates a CIBA backchannel

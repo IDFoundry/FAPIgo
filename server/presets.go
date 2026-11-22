@@ -10,12 +10,17 @@ import (
 // Security Profile Final (https://openid.net/specs/fapi-security-profile-2_0-final.html)
 // and RFC 9449 (DPoP), for a caller who wants a defensible starting
 // point rather than researching each lifetime from scratch. Config
-// still has no implicit defaults — New never reaches for this on its
-// own; calling it is as deliberate a choice as SystemClock is.
+// still has no implicit defaults beyond the two caps on pending CIBA
+// requests — New never reaches for this on its own; calling it is as
+// deliberate a choice as SystemClock is.
 //
-// It covers the limits every server needs. The ones only an optional
-// feature needs are left zero, and New refuses that zero once the
-// feature is enabled, so set them yourself: the three BackchannelAuthentication limits
+// It covers the limits every server needs, and sets those two caps to
+// the defaults New gives them when they're zero. The other limits only
+// an optional feature needs are left zero, and New refuses that zero
+// once the feature is enabled, so set them yourself:
+// BackchannelAuthenticationRequestLifetime,
+// MaxBackchannelAuthenticationRequestLifetime and
+// BackchannelAuthenticationPollInterval
 // (Endpoints.BackchannelAuthentication), and MaxClientAttestationLifetime
 // and MaxClientAttestationPoPAge
 // (Config.AttestationBasedClientAuthentication).
@@ -148,6 +153,19 @@ func RecommendedLimits() Limits {
 		// if a real deployment's clock drift needs it, but never past
 		// 60s.
 		MaxClockSkew: 10 * time.Second,
+
+		// Not spec-mandated — CIBA Core sets no number, and FAPI-CIBA
+		// §7.2 only warns that a client can start an authentication its
+		// end user never asked for. An end user decides a request or two
+		// at a time; 32 leaves room for several clients asking at once
+		// while bounding what one listing of their inbox reads. Applies
+		// only with Dependencies.BackchannelInbox.
+		MaxPendingBackchannelAuthenticationRequests: 32,
+
+		// Not spec-mandated — a client rarely waits on one end user for
+		// more than a request or two. 8 is a quarter of the cap above,
+		// so it takes at least four clients to fill one end user's inbox.
+		MaxPendingBackchannelAuthenticationRequestsPerClient: 8,
 	}
 }
 

@@ -180,6 +180,9 @@ stored, and `srv.ListBackchannelInteractions(ctx, subject)` lists what
 awaits them: each entry's `Interaction` to show, a page-safe `ID` to
 link to, and the `Handle` to complete it with, which stays on your
 server. A request leaves the inbox once decided, or when it expires.
+Each request listed costs store reads, so pass the listing your
+request's context: once it ends, the listing reads no more and fails
+with the context's error, rather than returning part of the inbox.
 
 The resolver also binds the request to that user: an `Authorize` for
 anyone else is a failed authentication (`access_denied`). That matters
@@ -191,6 +194,48 @@ does (`server.ErrUnknownUserID`), so it can stand in for it.
 request awaiting a user at once, when their account closes, say: each
 client gets `access_denied`, a ping client is notified, and the inbox
 empties.
+
+**How much an inbox holds.** Any registered CIBA client can name a user
+whose hint it knows, so the inbox is capped. A user may have at most
+`Limits.MaxPendingBackchannelAuthenticationRequests` requests pending
+at once (32 when left zero), and at most
+`Limits.MaxPendingBackchannelAuthenticationRequestsPerClient` of them
+from any one client (8), so no single client can fill it alone. A
+request past either cap is refused with `access_denied` and HTTP 403,
+CIBA §13's answer for a request the provider itself denies, before
+it's stored; the client can try again once the user has decided, or
+some of its requests have expired. A request refused, or one the
+server couldn't store, leaves the inbox again, even if its client has
+hung up: neither the filing nor the removal ends with the request's
+context, since a database client can return as soon as that ends
+while the database goes on to commit the filing. Each has a 30-second
+timeout of its own instead. Only a store that fails to remove an
+entry, or that stalls on a filing past that timeout and commits it
+later, leaves the entry behind, counted until the request expires. A
+request counts from the moment it's filed, so requests filed at the
+same moment can be refused together, but are never admitted together
+past a cap.
+`server.RecommendedLimits()` sets both caps to those defaults, and
+`server.New` refuses a negative one. Without an inbox, nothing is
+counted.
+
+The caps bound what one user's inbox holds, not how fast a client
+sends requests. So also:
+
+- Rate-limit the backchannel authentication endpoint per client, in
+  front of `BeginBackchannelAuthentication`: each request is verified,
+  and written to the store, before a cap can refuse it.
+- Keep `Limits.BackchannelAuthenticationRequestLifetime` short, minutes
+  rather than an hour: a request counts against the caps, and is
+  listed, until it's decided or expires.
+- With sqlstore, set `sqlstore.Options.ClientCacheTTL` (a few
+  seconds), so a listing doesn't cost a client query for every request
+  it shows.
+- Prefer hints that work like a nonce, as FAPI-CIBA §7.2 recommends: a
+  `login_hint` or `login_hint_token` the user is given to present, not
+  an email address or account number anyone can learn. A client that
+  can't learn a user's hint can't start an authentication they never
+  asked for.
 
 FAPI-CIBA §5.2.2 makes one more thing yours: the user must be able to
 tell which request they're approving. Either each request carries a

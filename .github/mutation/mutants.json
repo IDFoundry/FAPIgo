@@ -276,6 +276,126 @@
     "why": "the backchannel authentication and PAR endpoints enforce DPoP nonces"
   },
   {
+    "id": "srv-ciba-pending-caps",
+    "file": "server/backchannel_inbox.go",
+    "old": "if pending > maxPending || fromClient > maxFromClient {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestBackchannelInboxCapsAClientsPendingRequests|TestBackchannelInboxCapsAUsersPendingRequests|TestBackchannelInboxCapsDefaults)$",
+    "why": "a CIBA request past a cap on its end user's pending requests is refused"
+  },
+  {
+    "id": "srv-ciba-pending-cap-per-client",
+    "file": "server/backchannel_inbox.go",
+    "old": "if pending > maxPending || fromClient > maxFromClient {",
+    "new": "if pending > maxPending {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInboxCapsAClientsPendingRequests$",
+    "why": "one client's pending requests for an end user have a cap of their own"
+  },
+  {
+    "id": "srv-ciba-pending-cap-per-user",
+    "file": "server/backchannel_inbox.go",
+    "old": "if pending > maxPending || fromClient > maxFromClient {",
+    "new": "if fromClient > maxFromClient {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInboxCapsAUsersPendingRequests$",
+    "why": "an end user's pending requests from every client together are capped"
+  },
+  {
+    "id": "srv-ciba-pending-cap-boundary",
+    "file": "server/backchannel_inbox.go",
+    "old": "if pending > maxPending || fromClient > maxFromClient {",
+    "new": "if pending > maxPending+1 || fromClient > maxFromClient+1 {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestBackchannelInboxCapsAClientsPendingRequests|TestBackchannelInboxCapsDefaults)$",
+    "why": "a request one past a cap on pending requests is refused"
+  },
+  {
+    "id": "srv-ciba-inbox-removal-outlives-caller",
+    "file": "server/backchannel_inbox.go",
+    "old": "ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inboxWriteTimeout)",
+    "new": "ctx, cancel := context.WithTimeout(ctx, inboxWriteTimeout)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInboxUnfilesARequestWhoseClientHungUp$",
+    "why": "a refused CIBA request leaves its end user's inbox even once its client has hung up"
+  },
+  {
+    "id": "srv-ciba-inbox-filing-outlives-caller",
+    "file": "server/backchannel_inbox.go",
+    "old": "fileCtx, cancelFile := context.WithTimeout(context.WithoutCancel(ctx), inboxWriteTimeout)",
+    "new": "fileCtx, cancelFile := context.WithCancel(ctx)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInboxUnfilesARequestWhoseClientHungUp$",
+    "why": "a CIBA request's filing doesn't end with its client hanging up, so it can't land after its removal"
+  },
+  {
+    "id": "srv-ciba-inbox-unfiles-failed-filing",
+    "file": "server/backchannel_inbox.go",
+    "old": "stored.ExpiresAt); err != nil {\n\t\ts.unfileBackchannelRequest(ctx, stored.HandleHash)",
+    "new": "stored.ExpiresAt); err != nil {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInboxUnfilesARequestWhoseClientHungUp$",
+    "why": "a CIBA request whose filing failed still leaves the inbox, which may have kept it"
+  },
+  {
+    "id": "srv-ciba-pending-cap-fails-closed",
+    "file": "server/backchannel_inbox.go",
+    "old": "return newError(ErrorServerError, 500, inboxFilingFailedDescription, err)\n\t}\n\tmaxPending, maxFromClient",
+    "new": "return nil\n\t}\n\tmaxPending, maxFromClient",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInboxCapsFailClosed$",
+    "why": "an inbox that can't count its end user's pending requests refuses the request"
+  },
+  {
+    "id": "srv-ciba-inbox-listing-stops",
+    "file": "server/backchannel_inbox.go",
+    "old": "if ctx.Err() != nil {\n\t\t\tbreak\n\t\t}",
+    "new": "if false {\n\t\t\tbreak\n\t\t}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInboxListingStopsWhenTheContextEnds$",
+    "why": "a CIBA inbox listing reads no more requests once its context ends"
+  },
+  {
+    "id": "srv-ciba-inbox-listing-context-error",
+    "file": "server/backchannel_inbox.go",
+    "old": "if err := ctx.Err(); err != nil {\n\t\treturn nil, nil, fmt.Errorf(\"server: list backchannel interactions: %w\", err)",
+    "new": "if err := ctx.Err(); err != nil && false {\n\t\treturn nil, nil, fmt.Errorf(\"server: list backchannel interactions: %w\", err)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInboxListingStopsWhenTheContextEnds$",
+    "why": "a CIBA inbox listing whose context ended fails, rather than returning part of the inbox"
+  },
+  {
     "id": "srv-access-token-size-cap",
     "file": "server/accesstoken.go",
     "old": "s.cfg.Limits.MaxAccessTokenBytes(); size > limit {",

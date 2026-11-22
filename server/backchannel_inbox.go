@@ -190,8 +190,10 @@ func (s *Server) fileBackchannelRequest(ctx context.Context, clientID fapi.Clien
 // unexpired entries the inbox lists, by their ClientID, without reading
 // their records. A request is counted from the moment it's filed, before
 // it's checked, so requests filed at the same moment can be refused
-// together but are never admitted together past a cap. A listing that
-// fails refuses the request as a filing failure does.
+// together but are never admitted together past a cap: whichever lists
+// last counts every one still filed, since storage.BackchannelInbox
+// requires an add to show at once. A listing that fails refuses the
+// request as a filing failure does.
 func (s *Server) checkPendingBackchannelRequests(ctx context.Context, clientID fapi.ClientID, subject string) *Error {
 	if s.deps.BackchannelInbox == nil || subject == "" {
 		return nil

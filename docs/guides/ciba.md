@@ -214,7 +214,8 @@ entry, or that stalls on a filing past that timeout and commits it
 later, leaves the entry behind, counted until the request expires. A
 request counts from the moment it's filed, so requests filed at the
 same moment can be refused together, but are never admitted together
-past a cap.
+past a cap. An inbox of your own must show each add at once for this
+to hold, as `storage.BackchannelInbox` says.
 `server.RecommendedLimits()` sets both caps to those defaults, and
 `server.New` refuses a negative one. Without an inbox, nothing is
 counted.

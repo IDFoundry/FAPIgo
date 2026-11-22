@@ -388,8 +388,9 @@ type Limits struct {
 	// Core §13's code for a request the OpenID Provider itself denies),
 	// and isn't stored. A request counts while its user's inbox holds it:
 	// until it's decided or expires. Requests filed at the same moment
-	// can be refused together, but are never admitted together past it.
-	// Zero means 32; New refuses a negative value.
+	// can be refused together, but are never admitted together past it:
+	// storage.BackchannelInbox requires an add to show at once. Zero
+	// means 32; New refuses a negative value.
 	MaxPendingBackchannelAuthenticationRequests int
 
 	// MaxPendingBackchannelAuthenticationRequestsPerClient bounds how

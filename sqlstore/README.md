@@ -269,6 +269,20 @@ between instances: use SQLite there.
 
 ## Running it
 
+- **Reads go to the primary.** Give `New` a `*sql.DB` that sends reads,
+  not just writes, to the database the writes commit on, never to a
+  replica: several storage contracts hold only because a read sees
+  every write committed before it. A proxy or pooler routing `SELECT`s
+  to a lagging replica would let a refresh token or grant just revoked
+  be accepted again (here and on resource servers), the grant registry
+  miss a grant just issued when `RevokeSubjectGrants` lists it, a CIBA
+  inbox listing miss a completed add (letting requests past the
+  per-user caps), a reused authorization code read as unknown (so its
+  tokens aren't revoked), a pairwise subject just forgotten still
+  resolve, or a forgotten user get their old pairwise subject back, and
+  a removed or rekeyed client still be served. PgBouncer in transaction
+  mode is fine. See the package documentation's "Reading from the
+  primary" section.
 - **Migrations** are embedded and versioned. `Migrate` applies the
   missing ones and is safe to run from several processes at once; nothing
   migrates implicitly. `Options.TablePrefix` (default `fapigo_`)

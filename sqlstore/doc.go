@@ -474,6 +474,55 @@
 // requires EncryptedAtRest; encrypting the database's storage as well
 // is still worth it.
 //
+// # Reading from the primary
+//
+// Give New a *sql.DB that sends every statement, reads as well as
+// writes, to the database the writes commit on — on PostgreSQL the
+// primary — never to a replica. Several of the storage contracts hold
+// only because a read sees every write committed before it began, and
+// CrossInstanceConsistent says so. A pooler or proxy that routes plain
+// SELECTs to a lagging replica (read/write splitting), or a DSN that can
+// connect to a standby, breaks them without an error, for as long as the
+// replica lags:
+//
+//   - RedeemRefreshToken could redeem a refresh token revoked a moment
+//     before, deleted or tombstoned, and IsRevoked and IsAnyRevoked could
+//     miss a revocation, so a revoked token or grant would be accepted
+//     again, by the server and by resource servers reading the same
+//     tables;
+//   - GrantRegistry's ListGrants could miss an entry just recorded, so
+//     RevokeSubjectGrants leaves a grant just issued unrevoked, or list
+//     one just deleted, so the server's check, after storing a refresh
+//     token, that its grant is still recorded passes once a revocation
+//     has removed it;
+//   - BackchannelInbox's ListBackchannelRequests could miss an add that
+//     had returned, which storage.BackchannelInbox requires it to
+//     include, so the server could admit CIBA requests past its caps on
+//     a user's pending requests;
+//   - a reused authorization code could read as unknown rather than as
+//     redeemed (RedeemAuthorizationCode reads its row once its UPDATE
+//     matched nothing), so the tokens its first redemption issued aren't
+//     revoked (RFC 6749 §4.1.2);
+//   - PairwiseSubjects' Lookup could still find the user of a pairwise
+//     subject ForgetSubject has just retired, and GetOrCreate, whose
+//     first SELECT answers a returning user, could go on giving a user
+//     ForgetSubject has just forgotten the retired body rather than a
+//     new one, so the user's relying parties could link them to their
+//     old identifier again;
+//   - ClientRepository and ClientKeys could go on serving a client the
+//     clients table no longer holds, or keys it has replaced, as
+//     Options.ClientCacheTTL does by design, but for as long as the
+//     replica lags.
+//
+// A read that misses a row just written — a pushed request, an
+// interaction, a DPoP nonce, an opaque access token or a CIBA request
+// the replica hasn't received yet — fails closed, as an unknown key or
+// an outage, and costs only availability. Every write, and every read a
+// consume makes inside its write, already runs on the database the
+// writes go to. PgBouncer in transaction mode (see Performance and
+// scaling) sends each transaction to the one database it pools, so it's
+// fine. A SQLite file has no replicas.
+//
 // # Clients
 //
 // ClientRepository reads the clients table, which the operator manages:

@@ -9,8 +9,10 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// GrantStore is an in-memory storage.GrantStore. See the package doc
-// comment for why this is development/testing only.
+// GrantStore is an in-memory storage.GrantStore, and a
+// storage.GrantRefreshTokenRevoker: it indexes each refresh token by its
+// grant keys, so revoking a grant revokes the grant's refresh tokens.
+// See the package doc comment for why this is development/testing only.
 type GrantStore struct {
 	mu              sync.Mutex
 	codes           map[[32]byte]storage.NewAuthorizationCode
@@ -19,6 +21,11 @@ type GrantStore struct {
 	codeRefreshHash map[[32]byte][32]byte
 	refresh         map[[32]byte]storage.NewRefreshToken
 	refreshRevoked  map[[32]byte]bool
+
+	// refreshByGrant holds the hashes of the refresh tokens created with
+	// each grant key (storage.NewRefreshToken.GrantKeys), until
+	// RevokeGrantRefreshTokens revokes them.
+	refreshByGrant map[string][][32]byte
 }
 
 // NewGrantStore builds an empty GrantStore.
@@ -30,6 +37,7 @@ func NewGrantStore() *GrantStore {
 		codeRefreshHash: make(map[[32]byte][32]byte),
 		refresh:         make(map[[32]byte]storage.NewRefreshToken),
 		refreshRevoked:  make(map[[32]byte]bool),
+		refreshByGrant:  make(map[string][][32]byte),
 	}
 }
 
@@ -86,12 +94,17 @@ func (s *GrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash [32]by
 	return nil
 }
 
-// CreateRefreshToken implements storage.GrantStore.
+// CreateRefreshToken implements storage.GrantStore, indexing the token by
+// each of its GrantKeys for RevokeGrantRefreshTokens.
 func (s *GrantStore) CreateRefreshToken(_ context.Context, token storage.NewRefreshToken) error {
 	token.Grant = cloneRawMessage(token.Grant)
+	token.GrantKeys = cloneStrings(token.GrantKeys)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.refresh[token.TokenHash] = token
+	for _, key := range token.GrantKeys {
+		s.refreshByGrant[key] = append(s.refreshByGrant[key], token.TokenHash)
+	}
 	return nil
 }
 
@@ -120,4 +133,29 @@ func (s *GrantStore) RevokeRefreshToken(_ context.Context, tokenHash [32]byte) e
 	defer s.mu.Unlock()
 	s.refreshRevoked[tokenHash] = true
 	return nil
+}
+
+// RevokeGrantRefreshTokens implements storage.GrantRefreshTokenRevoker:
+// it revokes each refresh token created with grantKey, as
+// RevokeRefreshToken does, and reports those it revoked, leaving out any
+// already revoked.
+//
+// A wrapper embedding this store inherits it (see
+// storage.GrantRefreshTokenRevoker). Unlike the batch methods this
+// package doesn't offer (see TestStoresHaveNoBatchMethods), that can
+// only leave a token the wrapper keeps apart from this store unrevoked,
+// never accept one the wrapper revoked: the server still checks the
+// grant's revocation record on every redemption.
+func (s *GrantStore) RevokeGrantRefreshTokens(_ context.Context, grantKey string) ([][32]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var revoked [][32]byte
+	for _, hash := range s.refreshByGrant[grantKey] {
+		if !s.refreshRevoked[hash] {
+			s.refreshRevoked[hash] = true
+			revoked = append(revoked, hash)
+		}
+	}
+	delete(s.refreshByGrant, grantKey)
+	return revoked, nil
 }

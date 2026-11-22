@@ -268,3 +268,10 @@ func TestStoresHaveNoBatchMethods(t *testing.T) {
 		t.Error("*RevocationStore implements storage.RevocationBatchChecker")
 	}
 }
+
+// GrantStore revokes a revoked grant's refresh tokens itself, so
+// TestGrantStoreContract checks it as a storage.GrantRefreshTokenRevoker
+// rather than skipping that subtest. A wrapper inheriting the method
+// can't accept a token it revoked (see RevokeGrantRefreshTokens), unlike
+// the batch methods above.
+var _ storage.GrantRefreshTokenRevoker = (*GrantStore)(nil)

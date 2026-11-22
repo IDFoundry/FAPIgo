@@ -47,6 +47,51 @@ type IssuedTokensRecorder interface {
 	RecordIssuedTokens(ctx context.Context, codeHash [32]byte, accessTokenKey string, accessExpiresAt time.Time, refreshTokenHash [32]byte, refreshExpiresAt time.Time) error
 }
 
+// GrantRefreshTokenRevoker is an optional interface a GrantStore may
+// implement to revoke every refresh token issued from a grant at once.
+// server.Server.RevokeGrant, and the reuse of an authorization code,
+// record the grant as revoked, then, with a store that implements it,
+// revoke the grant's refresh tokens too. Without it those stay stored,
+// refused only while the grant's revocation record lasts (at least 400
+// days): a refresh token lifetime longer than that, applying after the
+// revocation, can make one redeemable again.
+//
+// CreateRefreshToken indexes a token by each of its
+// NewRefreshToken.GrantKeys. RevokeGrantRefreshTokens revokes every
+// token indexed by grantKey, as RevokeRefreshToken revokes one, so
+// RedeemRefreshToken fails for each from then on, and returns their
+// hashes, in any order, for the server to remove from its
+// GrantRegistry. It may leave out, or report again, a token that was
+// already revoked. It revokes the tokens indexed by grantKey when it's
+// called: one created with grantKey afterwards is revoked by the next
+// call. An unknown grantKey has no tokens, which isn't an error. An
+// error means the tokens may not all have been revoked: RevokeGrant then
+// fails, so the application can call it again to revoke the rest. A
+// store that fails part way returns, with its error, the hashes of the
+// tokens it did revoke, since a later call may leave those out. A SQL
+// store can keep the keys in indexed columns, or a table of grant key
+// and token hash rows, and revoke the tokens with one DELETE ...
+// RETURNING, which revokes all of them or, failing, none.
+// TestGrantStoreContract checks a store that implements it.
+//
+// The server finds RevokeGrantRefreshTokens by type assertion. A wrapper
+// that embeds a store implementing it inherits the method through Go's
+// method promotion, so a wrapper overriding CreateRefreshToken,
+// RedeemRefreshToken or RevokeRefreshToken is bypassed: a token it keeps
+// or serves apart from the inner store isn't revoked, and its own
+// RevokeRefreshToken doesn't run. That never makes a revoked grant's
+// token redeemable — the server checks the grant's revocation on every
+// redemption, whatever this method did — but it leaves the token to that
+// record alone. A wrapper that overrides any of those methods must also
+// override RevokeGrantRefreshTokens, or hold the inner store in a field
+// of the plain GrantStore type, so nothing is promoted.
+// TestGrantStoreContract run against the wrapper catches the mismatch
+// whenever a token the call should have revoked can still be redeemed
+// through the wrapper.
+type GrantRefreshTokenRevoker interface {
+	RevokeGrantRefreshTokens(ctx context.Context, grantKey string) ([][32]byte, error)
+}
+
 // AuthorizationCodeAlreadyRedeemedError is what RedeemAuthorizationCode
 // must return (satisfying errors.As) when CodeHash was already
 // consumed — as opposed to any other failure (e.g. an unknown code),
@@ -153,6 +198,16 @@ type NewRefreshToken struct {
 	Grant json.RawMessage
 
 	ExpiresAt time.Time
+
+	// GrantKeys name the grants the token was issued from, for a
+	// GrantRefreshTokenRevoker to index it by: one for the application's
+	// grant ID (server.GrantedAuthorization.GrantID), one for the
+	// authorization code or CIBA request the grant came from, both, or
+	// neither — at most two today. Each is a digest the server derives
+	// from its issuer and the grant's ID (base64url, at most 64 bytes),
+	// never the ID itself. A store that doesn't implement
+	// GrantRefreshTokenRevoker ignores them.
+	GrantKeys []string
 }
 
 // RefreshTokenRedemption is the input to GrantStore.RedeemRefreshToken.

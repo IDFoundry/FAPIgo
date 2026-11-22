@@ -141,9 +141,10 @@ requires `Dependencies.Clock` to be `server.SystemClock{}` (or a clock
 declaring `server.ClockAssurance`) reading the real time. Those are what bound a leaked
 token when nothing else does, so keep them short, and shorter still with
 `Dependencies.Revocation: server.NoRevocation{}`: then a reused
-authorization code no longer revokes what it issued, `RevokeGrant`
-refuses, `RevokeToken` removes a refresh token but not the access tokens
-issued from it, and a stolen access token works until it expires.
+authorization code revokes the refresh token it issued but not its
+access tokens, `RevokeGrant` refuses, `RevokeToken` removes a refresh
+token but not the access tokens issued from it, and a stolen access
+token works until it expires.
 
 `AssuranceProduction` also requires `Dependencies.Nonces`: a DPoP nonce
 store (step 4), or `server.NoDPoPNonces{}` to explicitly decline.

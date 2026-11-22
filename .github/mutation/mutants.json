@@ -540,6 +540,78 @@
     "why": "a code whose grant was revoked before redemption is refused"
   },
   {
+    "id": "srv-code-reuse-audited",
+    "file": "server/token.go",
+    "old": "s.audit(ctx, AuditEventRevokeReusedAuthorizationCode, presentedBy, outcome, description)",
+    "new": "if false {\n\t\ts.audit(ctx, AuditEventRevokeReusedAuthorizationCode, presentedBy, outcome, description)\n\t}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokingCodeReuseIsAudited$",
+    "why": "a reuse that revokes what the code issued is audited as its own event"
+  },
+  {
+    "id": "srv-code-reuse-audit-failure",
+    "file": "server/token.go",
+    "old": "if s.revokeReusedCodeTokens(ctx, alreadyRedeemed, codeHash) != nil {",
+    "new": "if s.revokeReusedCodeTokens(ctx, alreadyRedeemed, codeHash) != nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokingCodeReuseIsAudited$",
+    "why": "a reuse whose revocation couldn't be written is audited as a failure"
+  },
+  {
+    "id": "srv-code-reuse-audit-refresh-failure",
+    "file": "server/token.go",
+    "old": "\t\tfailures = append(failures, revokeErr)\n\t}\n\tif _, ok := s.grantRevocationReader(); ok {",
+    "new": "\t\t_ = revokeErr\n\t}\n\tif _, ok := s.grantRevocationReader(); ok {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokingCodeReuseIsAudited$",
+    "why": "a reuse whose refresh token couldn't be revoked is audited as a failure"
+  },
+  {
+    "id": "srv-code-reuse-audit-access-token-failure",
+    "file": "server/token.go",
+    "old": "failures = append(failures, s.deps.Revocation.Revoke(ctx, reused.IssuedAccessTokenKey, s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew))))",
+    "new": "_ = s.deps.Revocation.Revoke(ctx, reused.IssuedAccessTokenKey, s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew)))",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCodeReuseAuditsEachFailedRevocation$",
+    "why": "a reuse whose first access token alone couldn't be revoked is audited as a failure"
+  },
+  {
+    "id": "srv-code-reuse-audit-code-grant-failure",
+    "file": "server/token.go",
+    "old": "failures = append(failures, s.deps.Revocation.Revoke(ctx, key, s.deps.Clock.Now().Add(s.grantRevocationRecordLifetime())))",
+    "new": "_ = s.deps.Revocation.Revoke(ctx, key, s.deps.Clock.Now().Add(s.grantRevocationRecordLifetime()))",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCodeReuseAuditsEachFailedRevocation$",
+    "why": "a reuse whose code grant alone couldn't be revoked is audited as a failure"
+  },
+  {
+    "id": "srv-code-reuse-audit-grant-refresh-failure",
+    "file": "server/token.go",
+    "old": "revokeErr, _ := s.revokeGrantRefreshTokens(ctx, key)\n\t\tfailures = append(failures, revokeErr)",
+    "new": "_, _ = s.revokeGrantRefreshTokens(ctx, key)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCodeReuseAuditsEachFailedRevocation$",
+    "why": "a reuse whose GrantStore couldn't revoke the code grant's refresh tokens is audited as a failure"
+  },
+  {
     "id": "srv-opaque-token-issuer",
     "file": "server/accesstoken.go",
     "old": "if p.Issuer == \"\" {",

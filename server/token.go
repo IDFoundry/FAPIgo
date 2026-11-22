@@ -451,7 +451,29 @@ func (s *Server) codeExchangeParameters(params map[string]string) (code, redirec
 // It revokes only when presentedBy is the client the code was issued to,
 // or the store didn't say which client that was (an empty ClientID),
 // and reports true when it declined because another client presented
-// the code.
+// the code. A revocation is audited on its own, as
+// AuditEventRevokeReusedAuthorizationCode: a failure when one of its
+// writes failed (revokeReusedCodeTokens), so something issued from the
+// code may still be accepted.
+func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, presentedBy fapi.ClientID, codeHash [32]byte) (crossClient bool) {
+	var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
+	if !errors.As(err, &alreadyRedeemed) {
+		return false
+	}
+	if alreadyRedeemed.ClientID != "" && alreadyRedeemed.ClientID != presentedBy {
+		return true
+	}
+	outcome, description := AuditOutcomeSuccess, ""
+	if s.revokeReusedCodeTokens(ctx, alreadyRedeemed, codeHash) != nil {
+		outcome, description = AuditOutcomeFailure, "the tokens issued from the code could not all be revoked"
+	}
+	s.audit(ctx, AuditEventRevokeReusedAuthorizationCode, presentedBy, outcome, description)
+	return false
+}
+
+// revokeReusedCodeTokens revokes what reused, the reuse of the code
+// stored under codeHash, says the code's first redemption issued, and
+// returns the failures of the revocations it wrote, joined.
 //
 // Besides the first access token and refresh token the store recorded,
 // it revokes the code's grant (grantrevocation.CodeGrantID of codeHash),
@@ -461,32 +483,31 @@ func (s *Server) codeExchangeParameters(params map[string]string) (code, redirec
 // record lasts as long as RevokeGrant's (grantRevocationRecordLifetime),
 // and a GrantStore that can find the code's refresh token by its grant
 // (storage.GrantRefreshTokenRevoker) then revokes it, even when the
-// store didn't record it against the code.
-func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, presentedBy fapi.ClientID, codeHash [32]byte) (crossClient bool) {
-	var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
-	if !errors.As(err, &alreadyRedeemed) {
-		return false
-	}
-	if alreadyRedeemed.ClientID != "" && alreadyRedeemed.ClientID != presentedBy {
-		return true
-	}
-	if alreadyRedeemed.IssuedAccessTokenKey != "" {
+// store didn't record it against the code. A revoked refresh token's
+// GrantRegistry entry is removed as well; failing to remove it isn't a
+// failed revocation, since the token stays revoked.
+func (s *Server) revokeReusedCodeTokens(ctx context.Context, reused *storage.AuthorizationCodeAlreadyRedeemedError, codeHash [32]byte) error {
+	var failures []error
+	if reused.IssuedAccessTokenKey != "" {
 		// Resource servers accept the token until exp+MaxClockSkew by
 		// their own clocks, which may lag this one's by another
 		// MaxClockSkew: the record must outlast both.
-		_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenKey, s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew)))
+		failures = append(failures, s.deps.Revocation.Revoke(ctx, reused.IssuedAccessTokenKey, s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew))))
 	}
-	if alreadyRedeemed.IssuedRefreshTokenHash != nil {
-		if s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash) == nil {
-			_ = s.forgetRevokedRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)
+	if reused.IssuedRefreshTokenHash != nil {
+		revokeErr := s.deps.Grants.RevokeRefreshToken(ctx, *reused.IssuedRefreshTokenHash)
+		if revokeErr == nil {
+			_ = s.forgetRevokedRefreshToken(ctx, *reused.IssuedRefreshTokenHash)
 		}
+		failures = append(failures, revokeErr)
 	}
 	if _, ok := s.grantRevocationReader(); ok {
 		key := grantrevocation.CodeKey(s.cfg.Issuer.String(), grantrevocation.CodeGrantID(codeHash))
-		_ = s.deps.Revocation.Revoke(ctx, key, s.deps.Clock.Now().Add(s.grantRevocationRecordLifetime()))
-		_, _ = s.revokeGrantRefreshTokens(ctx, key)
+		failures = append(failures, s.deps.Revocation.Revoke(ctx, key, s.deps.Clock.Now().Add(s.grantRevocationRecordLifetime())))
+		revokeErr, _ := s.revokeGrantRefreshTokens(ctx, key)
+		failures = append(failures, revokeErr)
 	}
-	return false
+	return errors.Join(failures...)
 }
 
 // issueCodeExchangeTokens issues the code exchange's access token, ID

@@ -39,7 +39,8 @@ are things no constructor can check.
   [Step 4](../GETTING_STARTED.md#4-wire-dependencies-and-construct-the-server)
 - [ ] **A revocation choice:** a revocation store the resource servers
   share, or `server.NoRevocation{}` with short access token lifetimes,
-  knowing that code reuse and `RevokeGrant` then revoke nothing.
+  knowing that a reused code then revokes its refresh token but not its
+  access tokens, and `RevokeGrant` refuses.
   [Step 2](../GETTING_STARTED.md#2-build-a-config)
 - [ ] *(yours)* **A revocation store sized for revoked grants,** each
   kept at least 400 days. With a `Limits.RefreshTokenLifetime` over

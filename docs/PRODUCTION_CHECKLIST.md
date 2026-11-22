@@ -41,6 +41,13 @@ are things no constructor can check.
   share, or `server.NoRevocation{}` with short access token lifetimes,
   knowing that code reuse and `RevokeGrant` then revoke nothing.
   [Step 2](../GETTING_STARTED.md#2-build-a-config)
+- [ ] *(yours)* **A revocation store sized for revoked grants,** each
+  kept at least 400 days. With a `Limits.RefreshTokenLifetime` over
+  that, withdraw grants with `RevokeListedGrant`, or through a
+  `Dependencies.Grants` that implements
+  `storage.GrantRefreshTokenRevoker`, so their refresh tokens are
+  revoked too, not only refused while the grant's record lasts.
+  [Step 5](../GETTING_STARTED.md#5-the-one-piece-thats-genuinely-yours-the-login-flow)
 - [ ] **A DPoP nonce choice:** a nonce store every instance shares
   (`Dependencies.Nonces`, with `Limits.DPoPNonceLifetime` of at most 15
   minutes), so a DPoP proof generated ahead of time or captured is

@@ -271,8 +271,10 @@ type grantRecord struct {
 	// Limits lifetime for its kind, whatever its stored expiry, so
 	// shortening a lifetime also shortens what was issued before; that
 	// keeps everything issued from a grant inside RevokeGrant's record
-	// lifetime, which is computed from the current Limits. Nil in records
-	// written before it existed; those keep their stored expiry only.
+	// lifetime, which is computed from the current Limits, and lasts at
+	// least minGrantRevocationRecordLifetime for a longer lifetime
+	// applying later. Nil in records written before it existed; those
+	// keep their stored expiry only.
 	IssuedAt *time.Time `json:"issued_at,omitempty"`
 }
 

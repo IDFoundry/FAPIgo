@@ -98,6 +98,9 @@ func TestGrantIDNeedsACheckableRevocationStore(t *testing.T) {
 	}
 }
 
+// TestRevokeGrantRecordsUntilEverythingFromTheGrantExpires: RevokeGrant's
+// record lasts 400 days, or until everything issued from the grant under
+// the current Limits has expired, when that's later.
 func TestRevokeGrantRecordsUntilEverythingFromTheGrantExpires(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	if err := h.server.RevokeGrant(context.Background(), "grant-1"); err != nil {
@@ -106,11 +109,21 @@ func TestRevokeGrantRecordsUntilEverythingFromTheGrantExpires(t *testing.T) {
 	if err := h.server.RevokeGrant(context.Background(), ""); err == nil {
 		t.Error("RevokeGrant(\"\") = nil error, want error")
 	}
-	// The harness's RefreshTokenLifetime and AccessTokenLifetime are 5
-	// minutes each (longer than its code lifetime), and its
-	// MaxClockSkew 5 seconds.
-	if got, want := h.revocation.until["grant:grant-1@"+testIssuer], h.now.Add(10*time.Minute+5*time.Second); !got.Equal(want) {
+	// The harness's lifetimes are minutes long: the record lasts 400 days.
+	if got, want := h.revocation.until["grant:grant-1@"+testIssuer], h.now.Add(400*24*time.Hour); !got.Equal(want) {
 		t.Errorf("revoked until %v, want %v", got, want)
+	}
+
+	// A refresh token lifetime past those 400 days: the record outlasts
+	// the refresh token, an access token issued just before it expires
+	// (the harness's AccessTokenLifetime is 5 minutes) and the clock skew
+	// (its MaxClockSkew, 5 seconds).
+	h = rebuilt(t, h, func(c *server.Config) { c.Limits.RefreshTokenLifetime = 500 * 24 * time.Hour }, func(*server.Dependencies) {})
+	if err := h.server.RevokeGrant(context.Background(), "grant-2"); err != nil {
+		t.Fatalf("RevokeGrant: %v", err)
+	}
+	if got, want := h.revocation.until["grant:grant-2@"+testIssuer], h.now.Add(500*24*time.Hour+5*time.Minute+5*time.Second); !got.Equal(want) {
+		t.Errorf("revoked until %v with a 500-day refresh token lifetime, want %v", got, want)
 	}
 }
 

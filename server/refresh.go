@@ -251,14 +251,16 @@ const refreshTokenUnknownDescription = "refresh_token is invalid, expired, or al
 // redeemRefreshGrant looks up the grant rawToken, a refresh token
 // presented by clientID, was issued from, refusing one that has expired,
 // was issued to another client or another client instance, or whose
-// grant was revoked. It also returns the time it judged expiry at.
+// grant was revoked (see checkRefreshGrantNotRevoked). It also returns
+// the time it judged expiry at.
 //
 // instanceKey is the presenting client's Client Instance Key thumbprint
 // (empty unless it authenticated by Client Attestation); see
 // checkRefreshInstance for how it must match the grant's.
 func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID, instanceKey, rawToken string) (grantRecord, time.Time, *Error) {
+	tokenHash := sha256.Sum256([]byte(rawToken))
 	redeemed, err := s.deps.Grants.RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{
-		TokenHash: sha256.Sum256([]byte(rawToken)),
+		TokenHash: tokenHash,
 	})
 	if err != nil {
 		return grantRecord{}, time.Time{}, storeFailure(ctx, err, "failed to look up the refresh token", newError(ErrorInvalidGrant, 400, refreshTokenUnknownDescription, err))
@@ -290,10 +292,28 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 	if instanceErr := checkRefreshInstance(grant, instanceKey); instanceErr != nil {
 		return grantRecord{}, time.Time{}, instanceErr
 	}
-	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
+	if revErr := s.checkRefreshGrantNotRevoked(ctx, grant, tokenHash); revErr != nil {
 		return grantRecord{}, time.Time{}, revErr
 	}
 	return grant, now, nil
+}
+
+// checkRefreshGrantNotRevoked is checkGrantNotRevoked for grant, the
+// grant of the refresh token stored under tokenHash. A token whose grant
+// is revoked is also revoked itself, best effort, and removed from
+// Dependencies.GrantRegistry: it's refused all the same (a later request
+// presenting it finds it unknown), but no longer by the grant's
+// revocation record alone, which can lapse before the token expires once
+// a longer Limits.RefreshTokenLifetime applies (see RevokeGrant). Only
+// the client, and client instance, the token was issued to get here.
+func (s *Server) checkRefreshGrantNotRevoked(ctx context.Context, grant grantRecord, tokenHash [32]byte) *Error {
+	revErr := s.checkGrantNotRevoked(ctx, grant)
+	if revErr != nil && revErr.Code() == ErrorInvalidGrant {
+		if s.deps.Grants.RevokeRefreshToken(ctx, tokenHash) == nil {
+			_ = s.forgetRevokedRefreshToken(ctx, tokenHash)
+		}
+	}
+	return revErr
 }
 
 // checkRefreshInstance refuses a refresh token presented by a Client

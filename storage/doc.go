@@ -61,8 +61,9 @@
 // contract says, so an outage there is answered as unknown.
 //
 // Records keep as explicit fields only what a store itself acts on — a
-// lookup hash, ClientID, ExpiresAt, and for CIBA the decision status and
-// delivery state. Everything else server needs later (the original
+// lookup hash, ClientID, ExpiresAt, a refresh token's GrantKeys (for a
+// GrantRefreshTokenRevoker to index), and for CIBA the decision status
+// and delivery state. Everything else server needs later (the original
 // request's parameters, the granted scope, subject, authentication
 // context, claims) travels as one opaque, versioned JSON value — the
 // Request and Grant fields — that a store persists and returns as-is

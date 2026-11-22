@@ -457,7 +457,11 @@ func (s *Server) codeExchangeParameters(params map[string]string) (code, redirec
 // it revokes the code's grant (grantrevocation.CodeGrantID of codeHash),
 // which every access token issued from the code or its refresh token
 // carries, when grants can be revoked: an access token the client
-// already minted from the refresh token is refused too.
+// already minted from the refresh token is refused too. The grant's
+// record lasts as long as RevokeGrant's (grantRevocationRecordLifetime),
+// and a GrantStore that can find the code's refresh token by its grant
+// (storage.GrantRefreshTokenRevoker) then revokes it, even when the
+// store didn't record it against the code.
 func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, presentedBy fapi.ClientID, codeHash [32]byte) (crossClient bool) {
 	var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
 	if !errors.As(err, &alreadyRedeemed) {
@@ -478,8 +482,9 @@ func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, prese
 		}
 	}
 	if _, ok := s.grantRevocationReader(); ok {
-		until := s.deps.Clock.Now().Add(s.grantRevocationHorizon())
-		_ = s.deps.Revocation.Revoke(ctx, grantrevocation.CodeKey(s.cfg.Issuer.String(), grantrevocation.CodeGrantID(codeHash)), until)
+		key := grantrevocation.CodeKey(s.cfg.Issuer.String(), grantrevocation.CodeGrantID(codeHash))
+		_ = s.deps.Revocation.Revoke(ctx, key, s.deps.Clock.Now().Add(s.grantRevocationRecordLifetime()))
+		_, _ = s.revokeGrantRefreshTokens(ctx, key)
 	}
 	return false
 }
@@ -866,7 +871,9 @@ func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClie
 // the access token issued alongside was narrowed to: a refresh request
 // may again ask for any of them (RFC 9396 §6, §6.1), as it may for any
 // of the grant's scopes (RFC 6749 §6). binding is what the token is
-// issued against — see refreshBinding.
+// issued against — see refreshBinding. The token is stored with its
+// grant's keys (refreshTokenGrantKeys), so a GrantStore that indexes
+// them can revoke it with its grant.
 func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, grant grantRecord, binding refreshBinding) (string, error) {
 	raw, err := generateRefreshToken(s.deps.Random)
 	if err != nil {
@@ -887,6 +894,7 @@ func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, 
 		ClientID:  clientID,
 		Grant:     encoded,
 		ExpiresAt: expiresAt,
+		GrantKeys: s.refreshTokenGrantKeys(grant),
 	}); err != nil {
 		return "", err
 	}

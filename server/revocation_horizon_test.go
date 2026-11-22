@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -100,10 +101,12 @@ func exchangeWithGrantID(t *testing.T, h harness, grantID string) string {
 }
 
 // TestRevokedGrantStaysRevokedAfterRefreshLifetimeShortened is the review's
-// scenario: a refresh token issued under a 1h lifetime, the lifetime then
-// lowered to 10m, the grant revoked. RevokeGrant's record lasts the
-// current horizon only, so once it lapses the refresh token must already
-// count as expired, judged by its issue time and the current lifetime.
+// scenario: a refresh token issued under a lifetime longer than the 400
+// days a grant's revocation record lasts at least, the lifetime then
+// lowered to 10m, the grant revoked. Once the record lapses the refresh
+// token must already count as expired, judged by its issue time and the
+// current lifetime — even when the server couldn't revoke the token
+// itself on refusing it as revoked.
 func TestRevokedGrantStaysRevokedAfterRefreshLifetimeShortened(t *testing.T) {
 	start := time.Now()
 	clock := &settableClock{now: start}
@@ -112,7 +115,7 @@ func TestRevokedGrantStaysRevokedAfterRefreshLifetimeShortened(t *testing.T) {
 	deps := h.deps
 	deps.Clock = clock
 	deps.Revocation = store
-	h = rebuild(t, h, func(c *server.Config) { c.Limits.RefreshTokenLifetime = time.Hour }, deps)
+	h = rebuild(t, h, func(c *server.Config) { c.Limits.RefreshTokenLifetime = 500 * 24 * time.Hour }, deps)
 
 	refreshToken := exchangeWithGrantID(t, h, "grant-1")
 
@@ -122,7 +125,11 @@ func TestRevokedGrantStaysRevokedAfterRefreshLifetimeShortened(t *testing.T) {
 		t.Fatalf("RevokeGrant: %v", err)
 	}
 
-	// Within the revocation record: refused as revoked.
+	// Within the revocation record: refused as revoked. Revoking the
+	// token itself then fails, so it stays stored.
+	h.grants.mu.Lock()
+	h.grants.failRevokeRefresh = errors.New("store down")
+	h.grants.mu.Unlock()
 	clock.set(start.Add(time.Minute))
 	h = rebuild(t, h, shortened, deps)
 	if _, err := refreshWith(t, h, refreshToken, ""); serverErrorCode(t, err) != server.ErrorInvalidGrant {
@@ -131,13 +138,14 @@ func TestRevokedGrantStaysRevokedAfterRefreshLifetimeShortened(t *testing.T) {
 
 	// The record has lapsed, but the token was issued more than the
 	// current 10m lifetime ago: refused as expired, not resurrected.
-	clock.set(start.Add(26 * time.Minute))
+	clock.set(start.Add(400*24*time.Hour + 26*time.Minute))
 	h = rebuild(t, h, shortened, deps)
 	if revoked, _ := store.IsRevoked(context.Background(), "grant:grant-1@"+testIssuer); revoked {
 		t.Fatal("test setup: the revocation record should have lapsed by now")
 	}
-	if _, err := refreshWith(t, h, refreshToken, ""); serverErrorCode(t, err) != server.ErrorInvalidGrant {
-		t.Fatalf("refresh 26m on, after the revocation record lapsed: %v, want invalid_grant", err)
+	_, err := refreshWith(t, h, refreshToken, "")
+	if serverErrorCode(t, err) != server.ErrorInvalidGrant || serverErrorDescription(t, err) != "refresh_token has expired" {
+		t.Fatalf("refresh 400 days and 26m on, after the revocation record lapsed: %v, want invalid_grant, expired", err)
 	}
 }
 

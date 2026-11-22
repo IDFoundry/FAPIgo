@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,9 +52,10 @@ func runConcurrently(attempts int, fn func() bool) int {
 // refresh tokens kept apart (neither redemption returns the other's
 // record under the same digest), faithful
 // round-tripping of stored fields, and exactly one winner under
-// concurrent redemption of the same code or token. factory must return
-// a fresh, empty GrantStore each call — its subtests share nothing
-// between them.
+// concurrent redemption of the same code or token. A store that also
+// implements IssuedTokensRecorder or GrantRefreshTokenRevoker is checked
+// against what those promise too. factory must return a fresh, empty
+// GrantStore each call — its subtests share nothing between them.
 func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 	t.Helper()
 
@@ -85,6 +87,95 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 	})
 	if _, ok := factory().(IssuedTokensRecorder); ok {
 		t.Run("RecordIssuedTokensMatchesTwoCalls", func(t *testing.T) { testGrantStoreRecordIssuedTokensMatchesTwoCalls(t, factory) })
+	}
+	if _, ok := factory().(GrantRefreshTokenRevoker); ok {
+		t.Run("RevokeGrantRefreshTokensRevokesTheGrantsTokens", func(t *testing.T) {
+			testGrantStoreRevokeGrantRefreshTokensRevokesTheGrantsTokens(t, factory)
+		})
+	}
+}
+
+// testGrantStoreRevokeGrantRefreshTokensRevokesTheGrantsTokens checks a
+// GrantRefreshTokenRevoker: RevokeGrantRefreshTokens revokes, and
+// reports, every refresh token created with the grant key, whichever of
+// its GrantKeys that is, and no other token; an unknown key revokes
+// nothing; and a token created with a grant key after the key's tokens
+// were revoked is revoked by the next call.
+func testGrantStoreRevokeGrantRefreshTokensRevokesTheGrantsTokens(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	revoker := store.(GrantRefreshTokenRevoker)
+	ctx := context.Background()
+	create := func(name string, grantKeys ...string) [32]byte {
+		t.Helper()
+		hash := sha256.Sum256([]byte(name))
+		if err := store.CreateRefreshToken(ctx, NewRefreshToken{
+			TokenHash: hash, ClientID: "client-1", Grant: contractPayload,
+			ExpiresAt: time.Now().Add(time.Hour), GrantKeys: grantKeys,
+		}); err != nil {
+			t.Fatalf("CreateRefreshToken(%s): %v", name, err)
+		}
+		return hash
+	}
+	revoke := func(grantKey string) [][32]byte {
+		t.Helper()
+		revoked, err := revoker.RevokeGrantRefreshTokens(ctx, grantKey)
+		if err != nil {
+			t.Fatalf("RevokeGrantRefreshTokens: %v", err)
+		}
+		return revoked
+	}
+	checkRedeemable := func(when string, want bool, tokens map[string][32]byte) {
+		t.Helper()
+		for name, hash := range tokens {
+			_, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash})
+			if got := err == nil; got != want {
+				t.Errorf("%s: RedeemRefreshToken(%s) redeemable = %v, want %v (error %v)", when, name, got, want, err)
+			}
+		}
+	}
+
+	grantKey, codeKey := contractGrantKey("grant"), contractGrantKey("code")
+	grantOnly := create("grant-key-refresh", grantKey)
+	both := create("both-keys-refresh", codeKey, grantKey)
+	codeOnly := create("code-key-refresh", codeKey)
+	other := create("other-key-refresh", contractGrantKey("other"))
+	none := create("no-key-refresh")
+
+	checkRevokedRefreshTokens(t, "revoking the grant key", revoke(grantKey), [][32]byte{grantOnly, both}, nil)
+	checkRedeemable("after revoking the grant key", false, map[string][32]byte{"the grant key's token": grantOnly, "the token with both keys": both})
+	checkRedeemable("after revoking the grant key", true, map[string][32]byte{"the code key's token": codeOnly, "another key's token": other, "a token without keys": none})
+
+	checkRevokedRefreshTokens(t, "revoking an unknown key", revoke(contractGrantKey("unknown")), nil, nil)
+
+	later := create("later-grant-key-refresh", grantKey)
+	checkRevokedRefreshTokens(t, "revoking the grant key again", revoke(grantKey), [][32]byte{later}, [][32]byte{grantOnly, both})
+	checkRevokedRefreshTokens(t, "revoking the code key", revoke(codeKey), [][32]byte{codeOnly}, [][32]byte{both})
+	checkRedeemable("after revoking both keys again", false, map[string][32]byte{"a token created after the grant key was revoked": later, "the code key's token": codeOnly})
+	checkRedeemable("after revoking both keys again", true, map[string][32]byte{"another key's token": other, "a token without keys": none})
+}
+
+// contractGrantKey is a NewRefreshToken.GrantKeys value shaped like the
+// server's own: a base64url SHA-256 digest.
+func contractGrantKey(name string) string {
+	sum := sha256.Sum256([]byte("contract grant key\x00" + name))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// checkRevokedRefreshTokens checks what a RevokeGrantRefreshTokens call
+// reported: every token in want, and none outside want and mayRepeat,
+// the tokens with the key that an earlier call already revoked, which a
+// store may report again.
+func checkRevokedRefreshTokens(t *testing.T, call string, got, want, mayRepeat [][32]byte) {
+	t.Helper()
+	for _, hash := range want {
+		if !slices.Contains(got, hash) {
+			t.Errorf("%s didn't report a token it should have revoked (reported %d)", call, len(got))
+		}
+	}
+	for _, hash := range got {
+		if !slices.Contains(want, hash) && !slices.Contains(mayRepeat, hash) {
+			t.Errorf("%s reported a token created without the key", call)
+		}
 	}
 }
 

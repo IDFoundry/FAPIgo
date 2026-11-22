@@ -92,7 +92,8 @@ func (s *Server) grantSubjectKey(subject string) string {
 // stored under refreshTokenHash, to Dependencies.GrantRegistry, when one
 // is set. It runs before the refresh token is stored, so no refresh
 // token is issued that the registry doesn't list; confirmGrantRecorded,
-// after the token is stored, covers a revocation that ran in between.
+// after the token is stored, and revokeListed's second revocation of the
+// token cover a revocation racing the issuance.
 func (s *Server) recordGrant(ctx context.Context, clientID fapi.ClientID, grant grantRecord, refreshTokenHash [32]byte, issuedAt, expiresAt time.Time) error {
 	if s.deps.GrantRegistry == nil {
 		return nil
@@ -117,12 +118,17 @@ var errGrantRevokedWhileIssued = errors.New("the grant was revoked while its ref
 
 // confirmGrantRecorded checks, after the refresh token stored under
 // refreshTokenHash was created, that its grant is still in
-// Dependencies.GrantRegistry, when one is set. A revocation listing the
-// grant between recordGrant and the token's creation found no token to
-// delete, then removed the entry: the token would be live, but unlisted
-// and so unrevocable by RevokeSubjectGrants. Then this revokes the
-// token itself and fails the issuance. A revocation from here on finds
-// the token, so revokes it.
+// Dependencies.GrantRegistry, when one is set. A revocation that lists
+// the grant once recordGrant has recorded it can revoke the token
+// before the token is created, which the GrantStore needn't remember (a
+// SQL store's DELETE finds nothing to delete): the token would be live,
+// and, once the revocation deletes the entry, unlisted, so unrevocable
+// by RevokeSubjectGrants. Such a revocation revokes the token again
+// after deleting the entry (revokeListed). So either this check comes
+// after the deletion and finds the entry gone, and then it revokes the
+// token itself and fails the issuance, or it finds the entry, and the
+// deletion and the second revocation are still to come: the token
+// exists by then, so that revocation revokes it.
 func (s *Server) confirmGrantRecorded(ctx context.Context, subject string, refreshTokenHash [32]byte) error {
 	if s.deps.GrantRegistry == nil {
 		return nil
@@ -152,10 +158,12 @@ func (s *Server) withdrawRefreshToken(ctx context.Context, refreshTokenHash [32]
 	return cause
 }
 
-// listedGrant pairs a ListedGrant with its decoded record.
+// listedGrant pairs a ListedGrant with its decoded record, and the
+// registry entry both were read from.
 type listedGrant struct {
 	listed ListedGrant
 	record grantRegistryRecord
+	entry  storage.GrantEntry
 }
 
 // ListGrants returns the grants subject authorized that a client still
@@ -255,6 +263,7 @@ func (s *Server) listedGrantFrom(ctx context.Context, subject SubjectID, entry s
 			IssuedAt: record.IssuedAt, ExpiresAt: entry.ExpiresAt,
 		},
 		record: record,
+		entry:  entry,
 	}, true, nil
 }
 
@@ -288,7 +297,18 @@ func (s *Server) RevokeListedGrant(ctx context.Context, subject SubjectID, id st
 
 // revokeListed revokes g as RevokeListedGrant describes. The grant goes
 // before its refresh token, as in revokeRefreshToken, and the registry
-// entry last, so a failure part way leaves it listed for a retry.
+// entry after both, so a failure part way leaves it listed for a retry.
+//
+// The refresh token is revoked again once the entry is deleted: the
+// token's issuance may still be in flight, having recorded the entry
+// this listed, and may store the token after the first revocation,
+// which the GrantStore needn't remember for a token it didn't hold yet.
+// The issuance confirms the entry is still recorded after storing the
+// token (confirmGrantRecorded): if it does so after the deletion, it
+// withdraws the token itself; if before, the token is stored by the
+// time of the second revocation, which revokes it. A second revocation
+// that fails records the entry again, so the grant is still listed for
+// a retry.
 func (s *Server) revokeListed(ctx context.Context, g listedGrant) error {
 	if g.record.GrantID != "" {
 		if err := s.RevokeGrant(ctx, g.record.GrantID); err != nil {
@@ -308,7 +328,24 @@ func (s *Server) revokeListed(ctx context.Context, g listedGrant) error {
 	if err := s.deps.GrantRegistry.DeleteGrant(ctx, g.listed.ID); err != nil {
 		return fmt.Errorf("server: revoke listed grant: %w", err)
 	}
+	if err := s.deps.Grants.RevokeRefreshToken(ctx, hash); err != nil {
+		return fmt.Errorf("server: revoke listed grant: %w", s.relistGrant(ctx, g, err))
+	}
 	return nil
+}
+
+// relistGrant records g's registry entry again, as it was listed, and
+// returns cause, the failure that stopped g's revocation after its entry
+// was deleted: the grant is then still listed for a retry. A failure to
+// record it is joined to cause.
+func (s *Server) relistGrant(ctx context.Context, g listedGrant, cause error) error {
+	if err := s.deps.GrantRegistry.RecordGrant(ctx, storage.NewGrantEntry{
+		Key: g.entry.Key, SubjectKey: s.grantSubjectKey(g.record.Subject),
+		ClientID: g.entry.ClientID, Record: g.entry.Record, ExpiresAt: g.entry.ExpiresAt,
+	}); err != nil {
+		return errors.Join(cause, fmt.Errorf("list the grant again: %w", err))
+	}
+	return cause
 }
 
 func refreshTokenHashOf(b []byte) ([32]byte, bool) {

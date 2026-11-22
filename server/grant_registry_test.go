@@ -17,12 +17,17 @@ import (
 
 // registryHarness is newRevocationHarness rebuilt with registry as
 // Dependencies.GrantRegistry, and an attested instance of its client.
-func registryHarness(t *testing.T, registry storage.GrantRegistry) (harness, *attestedInstance) {
+// Each mutate then changes the Dependencies further: one replacing
+// Grants leaves h.grants unused.
+func registryHarness(t *testing.T, registry storage.GrantRegistry, mutate ...func(*server.Dependencies)) (harness, *attestedInstance) {
 	t.Helper()
 	attesterKey := generateKey(t)
 	h := newRevocationHarness(t, attesterKey)
 	deps := h.deps
 	deps.GrantRegistry = registry
+	for _, m := range mutate {
+		m(&deps)
+	}
 	srv, err := server.New(h.cfg, deps)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -375,6 +380,99 @@ func TestRevokeListedGrantReportsEachFailure(t *testing.T) {
 				t.Error("the entry was deleted though revoking it failed")
 			}
 		})
+	}
+}
+
+// outageAfterDelete is a memstore GrantRegistry whose first DeleteGrant
+// takes grants down once it has deleted the entry: an outage starting
+// between a revocation's deletion of a grant's entry and its second
+// revocation of the grant's refresh token. With registryToo, RecordGrant
+// fails from then on as well.
+type outageAfterDelete struct {
+	*memstore.GrantRegistry
+	grants      *fakeGrantStore
+	registryToo bool
+	down        bool
+}
+
+func (r *outageAfterDelete) RecordGrant(ctx context.Context, entry storage.NewGrantEntry) error {
+	if r.down && r.registryToo {
+		return errors.New("registry down")
+	}
+	return r.GrantRegistry.RecordGrant(ctx, entry)
+}
+
+func (r *outageAfterDelete) DeleteGrant(ctx context.Context, key string) error {
+	err := r.GrantRegistry.DeleteGrant(ctx, key)
+	if !r.down {
+		r.down = true
+		r.grants.failRevokeRefresh = errors.New("grants down")
+	}
+	return err
+}
+
+// declineRevocation makes a registryHarness server decline revocation,
+// so a code grant has no code grant ID: only deleting its refresh token
+// ends it.
+func declineRevocation(deps *server.Dependencies) { deps.Revocation = server.NoRevocation{} }
+
+// TestRevokeListedGrantReportsAFailedSecondRevocation: revoking a
+// grant's refresh token again once its entry is deleted, and failing, is
+// reported as a failure before the deletion is, with the entry recorded
+// again: the grant is still listed, so a retry finishes the job. An
+// entry the registry can't record again is reported as well.
+func TestRevokeListedGrantReportsAFailedSecondRevocation(t *testing.T) {
+	ctx := context.Background()
+	subject := mustSubjectID(t, "user-1")
+	for name, revoke := range map[string]func(h harness, id string) (revoked int, err error){
+		"RevokeListedGrant": func(h harness, id string) (int, error) {
+			return 0, h.server.RevokeListedGrant(ctx, subject, id)
+		},
+		"RevokeSubjectGrants": func(h harness, _ string) (int, error) {
+			return h.server.RevokeSubjectGrants(ctx, subject)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			checkFailedSecondRevocationRetried(t, name, subject, revoke)
+		})
+	}
+	t.Run("registry down too", func(t *testing.T) {
+		registry := &outageAfterDelete{GrantRegistry: memstore.NewGrantRegistry(), registryToo: true}
+		h, owner := registryHarness(t, registry, declineRevocation)
+		registry.grants = h.grants
+		owner.issueRefreshToken()
+		err := h.server.RevokeListedGrant(ctx, subject, listGrants(t, h, "user-1")[0].ID)
+		if err == nil || !strings.Contains(err.Error(), "grants down") || !strings.Contains(err.Error(), "registry down") {
+			t.Fatalf("RevokeListedGrant = %v, want both failures reported", err)
+		}
+	})
+}
+
+// checkFailedSecondRevocationRetried issues user-1 a refresh token over
+// an outageAfterDelete registry, on a server declining revocation, then
+// checks that revoke, named name, reports the failed second revocation
+// of the token, counting nothing revoked, and leaves the grant listed,
+// and that RevokeSubjectGrants(subject), retried once grants are back,
+// ends it.
+func checkFailedSecondRevocationRetried(t *testing.T, name string, subject server.SubjectID, revoke func(h harness, id string) (revoked int, err error)) {
+	t.Helper()
+	registry := &outageAfterDelete{GrantRegistry: memstore.NewGrantRegistry()}
+	h, owner := registryHarness(t, registry, declineRevocation)
+	registry.grants = h.grants
+	refreshToken := owner.issueRefreshToken()
+	id := listGrants(t, h, "user-1")[0].ID
+	if n, err := revoke(h, id); n != 0 || err == nil || !strings.Contains(err.Error(), "grants down") {
+		t.Fatalf("%s = %d, %v, want the failed revocation reported, and nothing counted revoked", name, n, err)
+	}
+	if listed := listGrants(t, h, "user-1"); len(listed) != 1 || listed[0].ID != id {
+		t.Fatalf("ListGrants after = %+v, want the grant still listed, for a retry", listed)
+	}
+	h.grants.failRevokeRefresh = nil
+	if n, err := h.server.RevokeSubjectGrants(context.Background(), subject); n != 1 || err != nil {
+		t.Fatalf("RevokeSubjectGrants retried = %d, %v, want the grant revoked", n, err)
+	}
+	if _, err := owner.refresh(refreshToken); err == nil {
+		t.Error("the revoked grant's refresh token still refreshes")
 	}
 }
 

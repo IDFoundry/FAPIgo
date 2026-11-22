@@ -540,6 +540,103 @@
     "why": "a code whose grant was revoked before redemption is refused"
   },
   {
+    "id": "srv-code-digest-pkce-challenge",
+    "file": "server/token.go",
+    "old": "lengthPrefixed(binding.codeChallenge)",
+    "new": "lengthPrefixed(\"\")",
+    "module": "root",
+    "packages": [
+      "./server",
+      "./fapitest"
+    ],
+    "run": "^(TestCodeReuseWithoutItsBindingRevokesNothing|TestCodeIsNotSpentWithoutItsBinding|TestLeakedCodeDeliveredToItsClientRevokesNothing|TestLeakedCodeDeliveredToItsClientIsNotSpent)$",
+    "why": "a code is found only with the code_verifier of its PKCE challenge, so another verifier neither spends it nor revokes what it issued"
+  },
+  {
+    "id": "srv-code-digest-redirect-uri",
+    "file": "server/token.go",
+    "old": "lengthPrefixed(binding.redirectURI)",
+    "new": "lengthPrefixed(\"\")",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestCodeReuseWithoutItsBindingRevokesNothing|TestCodeIsNotSpentWithoutItsBinding)$",
+    "why": "a code is found only with its own redirect_uri, so another neither spends it nor revokes what it issued"
+  },
+  {
+    "id": "srv-code-digest-dpop-key",
+    "file": "server/token.go",
+    "old": "lengthPrefixed(binding.dpopJKT)",
+    "new": "lengthPrefixed(\"\")",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestCodeReuseWithoutItsBindingRevokesNothing|TestCodeIsNotSpentWithoutItsBinding)$",
+    "why": "a code bound to a DPoP key is found only with that key, so another neither spends it nor revokes what it issued"
+  },
+  {
+    "id": "srv-code-issued-under-dpop-key",
+    "file": "server/complete_authorization.go",
+    "old": "dpopJKT: dpopJKT,",
+    "new": "dpopJKT: \"\",",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestCodeReuseWithoutItsBindingRevokesNothing|TestCodeIsNotSpentWithoutItsBinding)$",
+    "why": "a code is stored under the DPoP key its authorization request bound it to"
+  },
+  {
+    "id": "srv-code-digest-length-prefix",
+    "file": "server/token.go",
+    "old": "return strconv.Itoa(len(part)) + \":\" + part",
+    "new": "return strconv.Itoa(len(part))[:0] + part",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestAuthorizationCodeHashSeparatesBindings$",
+    "why": "each part of a code's binding is length-prefixed, so no two bindings share a digest"
+  },
+  {
+    "id": "srv-code-verifier-syntax-before-store",
+    "file": "server/token.go",
+    "old": "challenge, pkceErr := pkce.Challenge(presented.codeVerifier, pkce.S256)\n\tif pkceErr != nil {",
+    "new": "challenge, pkceErr := pkce.Challenge(presented.codeVerifier, pkce.S256)\n\tif pkceErr != nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestMalformedCodeVerifierIsRefusedBeforeTheStore$",
+    "why": "a code_verifier RFC 7636 doesn't allow is refused before the store is asked for the code"
+  },
+  {
+    "id": "srv-code-lookup-reuse-stops",
+    "file": "server/token.go",
+    "old": "if err == nil || isCodeAlreadyRedeemed(err) || storeOutage(ctx, err) {",
+    "new": "if err == nil || storeOutage(ctx, err) {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCodeReuseWithoutItsBindingRevokesNothing$",
+    "why": "a reuse of a code found under its DPoP key still revokes what the code issued"
+  },
+  {
+    "id": "srv-code-lookup-outage-stops",
+    "file": "server/token.go",
+    "old": "if err == nil || isCodeAlreadyRedeemed(err) || storeOutage(ctx, err) {",
+    "new": "if err == nil || isCodeAlreadyRedeemed(err) {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCodeLookupOutageIsNotRetriedWithoutTheDPoPKey$",
+    "why": "a store that couldn't answer the lookup under the DPoP key isn't asked again without it"
+  },
+  {
     "id": "srv-code-reuse-audited",
     "file": "server/token.go",
     "old": "s.audit(ctx, AuditEventRevokeReusedAuthorizationCode, presentedBy, outcome, description)",

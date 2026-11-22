@@ -142,8 +142,11 @@ are things no constructor can check.
   MAC, or a server-side record. Never the raw handle in a plain cookie.
   [Step 10](../GETTING_STARTED.md#10-the-client-side-calling-a-fapi-20-authorization-server)
 - [ ] *(yours)* **Serve the redirect URI with `Referrer-Policy:
-  no-referrer`**, and no third-party content, so the authorization code
-  doesn't leak (RFC 9700 §4.2.4).
+  no-referrer`**, and no third-party content, and keep callback URLs out
+  of logs, so the authorization code doesn't leak (RFC 9700 §4.2.4):
+  under plain `ProfileFAPISecurity` the callback URL carries the code
+  and `state` unsigned.
+  [Step 4](../GETTING_STARTED.md#4-wire-dependencies-and-construct-the-server)
 - [ ] **`RequireAuthorizationResponseIss`**, and `MaxIDTokenLifetime`
   set to your provider's ID token lifetime if you know it.
 - [ ] *(yours)* **Seal stored tokens** with `client.TokenSetSealer` if you

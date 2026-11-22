@@ -3,7 +3,6 @@ package server_test
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/sha256"
 	"errors"
 	"slices"
 	"sync"
@@ -126,7 +125,7 @@ func exchangeForRefreshToken(t *testing.T, h harness, dpopKey *ecdsa.PrivateKey)
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
 	}
 	// The digest the server stores a code under (authorizationCodeHash).
-	return result.RefreshToken.Reveal(), grantrevocation.CodeGrantID(sha256.Sum256([]byte("fapigo authorization code\x00" + code)))
+	return result.RefreshToken.Reveal(), grantrevocation.CodeGrantID(server.AuthorizationCodeHash(code, testCodeChallenge, testRedirectURI))
 }
 
 // requireTokenOutcome fails unless err is nil when want is empty, or a

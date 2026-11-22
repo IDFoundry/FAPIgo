@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
-	"crypto/sha256"
 	"errors"
 	"net/url"
 	"testing"
@@ -127,7 +126,7 @@ func TestRefreshRefusesARevokedCodeGrant(t *testing.T) {
 		t.Fatalf("RefreshAccessToken before revocation: %v", err)
 	}
 	// The digest the server stores a code under (authorizationCodeHash).
-	codeHash := sha256.Sum256([]byte("fapigo authorization code\x00" + code))
+	codeHash := server.AuthorizationCodeHash(code, testCodeChallenge, testRedirectURI)
 	if err := h.revocation.Revoke(context.Background(), grantrevocation.CodeKey(testIssuer, grantrevocation.CodeGrantID(codeHash)), h.now.Add(time.Hour)); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}

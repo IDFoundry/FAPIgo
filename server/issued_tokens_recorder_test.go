@@ -163,7 +163,7 @@ func TestExchangeAuthorizationCodeRecordsBothTokensInOneWrite(t *testing.T) {
 func requireRecordedTokens(t *testing.T, h harness, store *recordingGrantStore, code string, result server.TokenResult) {
 	t.Helper()
 	got := store.recorded
-	wantCodeHash := sha256.Sum256([]byte("fapigo authorization code\x00" + code))
+	wantCodeHash := server.AuthorizationCodeHash(code, testCodeChallenge, testRedirectURI)
 	if got.codeHash != wantCodeHash || got.accessKey != accessTokenJTI(t, h, result.AccessToken.Reveal()) ||
 		got.refreshHash != sha256.Sum256([]byte(result.RefreshToken.Reveal())) {
 		t.Fatalf("RecordIssuedTokens recorded code %x, access key %q, refresh hash %x; want the exchange's code and tokens", got.codeHash, got.accessKey, got.refreshHash)

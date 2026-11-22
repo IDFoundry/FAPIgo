@@ -772,9 +772,14 @@ role-conditional fields.
 `storage.GrantStore` (server) are distinct, and none of them expose generic CRUD (`GetSession`,
 `GetCode`, `UpdateCode`, `DeleteCode`, ...) — every method is a named
 security operation. `GrantStore.RedeemAuthorizationCode` in particular
-must atomically look up and consume a code by its hash, in one step;
-`server` then checks client ID, expiry, redirect URI, PKCE verifier and
-sender-binding against what it returns. A store given the presenting
+must atomically look up and consume a code by its hash, in one step.
+The hash itself binds the code to its PKCE challenge, its redirect URI
+and the DPoP key its `dpop_jkt` names, if any (and an attested client's
+code to the client instance it was issued to), so a token request
+presenting anything else finds no code, neither spending it nor
+counting as its reuse; `server` then checks client ID, expiry, redirect
+URI, PKCE verifier and sender-binding against what the store returns.
+A store given the presenting
 client's ID (`AuthorizationCodeRedemption.ClientID`, and likewise
 `PollBackchannelAuthentication.ClientID` for CIBA) refuses another
 client's record without consuming it, so a leaked code or `auth_req_id`

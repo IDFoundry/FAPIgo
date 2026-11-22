@@ -35,6 +35,10 @@ func jwkThumbprintFor(key *ecdsa.PrivateKey) (jose.Thumbprint, error) {
 // the code_challenge baked into standardAuthParams/plainFormParameters.
 const testCodeVerifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 
+// testCodeChallenge is testCodeVerifier's S256 challenge: the
+// code_challenge the authorization requests of these tests push.
+const testCodeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+
 func createDPoPProof(t *testing.T, key *ecdsa.PrivateKey, now time.Time) string {
 	t.Helper()
 	tokenURL, err := url.Parse(testTokenEndpoint)

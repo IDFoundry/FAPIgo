@@ -61,7 +61,10 @@
 //     to eight times, until one interaction begun from it completes,
 //     after which it fails. Until then it is a bearer value; see BeginAuthorization. An authorization
 //     code is likewise single-use: a second ExchangeAuthorizationCode
-//     with the same code fails. A refresh token is deliberately not
+//     with the same code fails. Only an exchange presenting the
+//     code_verifier, redirect_uri and DPoP key the code was issued for
+//     finds it, so any other neither spends the code nor counts as its
+//     reuse, which revokes what it issued. A refresh token is deliberately not
 //     rotated — FAPI 2.0 Security Profile Final §5.3.2.1 says an
 //     authorization server "shall not use refresh token rotation except
 //     in extraordinary circumstances" — so it stays valid for repeated

@@ -34,7 +34,10 @@ const relyingPartyEntityType = "openid_relying_party"
 
 // AutomaticRegistrationConfig configures AutomaticClientRepository —
 // see its own doc comment for the mechanism this implements (OpenID
-// Federation 1.0 §12.1, "Automatic Registration").
+// Federation 1.0 §12.1, "Automatic Registration"). It is copied by
+// NewAutomaticClientRepository, the contents of its slices included;
+// mutating one after passing it to NewAutomaticClientRepository has no
+// effect.
 type AutomaticRegistrationConfig struct {
 	// AllowedScopes is the scope allowlist granted to every
 	// automatically-registered client, uniformly. This deliberately
@@ -459,7 +462,14 @@ type inflightResolution struct {
 // fapihttp.NewClient's client (HardenedForProduction): built by hand,
 // this repository can't check, while server.New checks the ones it
 // builds from server.Dependencies.FederationHTTP.
+//
+// NewAutomaticClientRepository copies cfg before validating it, every
+// slice it holds included, and the repository keeps only that copy, so
+// changing cfg or the contents of its slices afterwards changes no
+// client it registers.
 func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver *Resolver, fetcher *fapihttp.Client, cfg AutomaticRegistrationConfig, clock Clock) (*AutomaticClientRepository, error) {
+	// Copied before anything reads it, so what's validated is what's kept.
+	cfg = cfg.clone()
 	if underlying == nil {
 		return nil, fmt.Errorf("federation: underlying client repository is required")
 	}
@@ -469,39 +479,15 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	if fetcher == nil {
 		return nil, fmt.Errorf("federation: fetcher is required")
 	}
-	if len(cfg.AllowedScopes) == 0 {
-		return nil, fmt.Errorf("federation: config: allowed_scopes is required")
-	}
-	if cfg.MaxCacheAge <= 0 {
-		return nil, fmt.Errorf("federation: config: max_cache_age must be positive")
-	}
-	if cfg.FailureCacheAge < 0 {
-		return nil, fmt.Errorf("federation: config: failure_cache_age must not be negative")
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 	if cfg.FailureCacheAge == 0 {
 		cfg.FailureCacheAge = DefaultFailureCacheAge
 	}
-	if cfg.MaxConcurrentResolutions < 0 {
-		return nil, fmt.Errorf("federation: config: max_concurrent_resolutions must not be negative")
-	}
 	if cfg.MaxConcurrentResolutions == 0 {
 		cfg.MaxConcurrentResolutions = DefaultMaxConcurrentResolutions
 	}
-	if err := validateAllowedClientAuthMethods(cfg.AllowedClientAuthMethods); err != nil {
-		return nil, err
-	}
-	for _, alg := range cfg.ClientAssertionAlgorithms {
-		if !alg.IsValid() {
-			return nil, fmt.Errorf("federation: config: client_assertion_algorithms: invalid algorithm %v", alg)
-		}
-	}
-	if err := validateSubjectTypes(cfg.SubjectTypes, cfg.DefaultSubjectType); err != nil {
-		return nil, err
-	}
-	if err := validateAllowedResources(cfg.AllowedResources); err != nil {
-		return nil, err
-	}
-	cfg.AllowedResources = slices.Clone(cfg.AllowedResources)
 	if clock == nil {
 		return nil, fmt.Errorf("federation: clock is required")
 	}
@@ -511,6 +497,47 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 		failures: make(map[fapi.ClientID]failedResolution),
 		inflight: make(map[fapi.ClientID]*inflightResolution),
 	}, nil
+}
+
+// clone returns c with a copy of each of its slices, nil staying nil.
+// OnResolutionFailure, a function, is kept as it is.
+func (c AutomaticRegistrationConfig) clone() AutomaticRegistrationConfig {
+	c.AllowedScopes = slices.Clone(c.AllowedScopes)
+	c.AuthorizationDetailsTypes = slices.Clone(c.AuthorizationDetailsTypes)
+	c.AllowedResources = slices.Clone(c.AllowedResources)
+	c.AllowedClientAuthMethods = slices.Clone(c.AllowedClientAuthMethods)
+	c.ClientAssertionAlgorithms = slices.Clone(c.ClientAssertionAlgorithms)
+	c.SubjectTypes = slices.Clone(c.SubjectTypes)
+	return c
+}
+
+// validate checks c for NewAutomaticClientRepository, before its
+// defaults for a zero FailureCacheAge or MaxConcurrentResolutions apply.
+func (c AutomaticRegistrationConfig) validate() error {
+	if len(c.AllowedScopes) == 0 {
+		return fmt.Errorf("federation: config: allowed_scopes is required")
+	}
+	if c.MaxCacheAge <= 0 {
+		return fmt.Errorf("federation: config: max_cache_age must be positive")
+	}
+	if c.FailureCacheAge < 0 {
+		return fmt.Errorf("federation: config: failure_cache_age must not be negative")
+	}
+	if c.MaxConcurrentResolutions < 0 {
+		return fmt.Errorf("federation: config: max_concurrent_resolutions must not be negative")
+	}
+	if err := validateAllowedClientAuthMethods(c.AllowedClientAuthMethods); err != nil {
+		return err
+	}
+	for _, alg := range c.ClientAssertionAlgorithms {
+		if !alg.IsValid() {
+			return fmt.Errorf("federation: config: client_assertion_algorithms: invalid algorithm %v", alg)
+		}
+	}
+	if err := validateSubjectTypes(c.SubjectTypes, c.DefaultSubjectType); err != nil {
+		return err
+	}
+	return validateAllowedResources(c.AllowedResources)
 }
 
 // validateAllowedResources checks AutomaticRegistrationConfig.AllowedResources:

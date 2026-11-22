@@ -1,6 +1,7 @@
 package client
 
 import (
+	"slices"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -448,8 +449,9 @@ const (
 	TolerateAbsentAuthorizationResponseIss
 )
 
-// Config is this client's immutable configuration. It is copied by New;
-// mutating a Config after passing it to New has no effect.
+// Config is this client's immutable configuration. It is copied by New,
+// the contents of its slices included; mutating a Config after passing
+// it to New has no effect.
 type Config struct {
 	// Issuer is the authorization server this client talks to — the
 	// audience client assertions and request objects are addressed to,
@@ -627,6 +629,15 @@ type Config struct {
 	// produce, isn't taken as the server's. Requires Algorithms.UserInfo.
 	// False (the default) accepts plain JSON or a signed response.
 	RequireSignedUserInfo bool
+}
+
+// clone returns c with a copy of each of its slices, TrustedIDTokenAudiences
+// and Federation.AuthorityHints, nil staying nil, so the Client New
+// builds from it shares no backing array with the caller's Config.
+func (c Config) clone() Config {
+	c.TrustedIDTokenAudiences = slices.Clone(c.TrustedIDTokenAudiences)
+	c.Federation.AuthorityHints = slices.Clone(c.Federation.AuthorityHints)
+	return c
 }
 
 // FederationConfig configures this client's OpenID Federation 1.0

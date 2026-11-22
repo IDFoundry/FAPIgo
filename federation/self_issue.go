@@ -4,6 +4,8 @@ import (
 	"crypto"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -11,8 +13,9 @@ import (
 )
 
 // SelfIssueConfig configures a SelfIssuer's own Entity Identifier and
-// Trust Chain routing. It is copied by NewSelfIssuer; mutating a
-// SelfIssueConfig after passing it to NewSelfIssuer has no effect.
+// Trust Chain routing. It is copied by NewSelfIssuer, the contents of
+// its slices and map included; mutating a SelfIssueConfig after passing
+// it to NewSelfIssuer has no effect.
 type SelfIssueConfig struct {
 	// EntityID is this entity's own Entity Identifier (OpenID
 	// Federation 1.0 §1.2) — an https URL, conventionally the same
@@ -88,7 +91,15 @@ type SelfIssuer struct {
 }
 
 // NewSelfIssuer validates cfg and deps and returns a SelfIssuer.
+//
+// NewSelfIssuer copies cfg.AuthorityHints, cfg.TrustMarkIssuers (each
+// list in it too) and deps.JWKS before validating them, and the
+// SelfIssuer keeps only those copies, so changing the caller's
+// afterwards changes no Entity Configuration it signs.
 func NewSelfIssuer(cfg SelfIssueConfig, deps SelfIssueDependencies) (*SelfIssuer, error) {
+	// Copied before anything reads them, so what's validated is what's
+	// kept.
+	cfg, deps = cfg.clone(), deps.clone()
 	if cfg.EntityID == "" {
 		return nil, fmt.Errorf("federation: config: entity ID is required")
 	}
@@ -108,6 +119,24 @@ func NewSelfIssuer(cfg SelfIssueConfig, deps SelfIssueDependencies) (*SelfIssuer
 		return nil, fmt.Errorf("federation: dependencies: clock is required")
 	}
 	return &SelfIssuer{cfg: cfg, deps: deps}, nil
+}
+
+// clone returns c with a copy of AuthorityHints and of TrustMarkIssuers,
+// each of its lists included, nil staying nil.
+func (c SelfIssueConfig) clone() SelfIssueConfig {
+	c.AuthorityHints = slices.Clone(c.AuthorityHints)
+	c.TrustMarkIssuers = maps.Clone(c.TrustMarkIssuers)
+	for trustMarkType, issuers := range c.TrustMarkIssuers {
+		c.TrustMarkIssuers[trustMarkType] = slices.Clone(issuers)
+	}
+	return c
+}
+
+// clone returns d with a copy of JWKS, nil staying nil. Signer and Clock
+// are collaborators, kept as they are.
+func (d SelfIssueDependencies) clone() SelfIssueDependencies {
+	d.JWKS = slices.Clone(d.JWKS)
+	return d
 }
 
 // EntityConfiguration signs and returns this entity's own Entity

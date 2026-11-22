@@ -678,8 +678,10 @@ type AutomaticRegistrationConfig struct {
 	// AuthorizationDetailsTypes are the Rich Authorization Request types
 	// every automatically-registered client may request — see
 	// federation.AutomaticRegistrationConfig.AuthorizationDetailsTypes.
-	// Empty means none. Each must be registered in Config.RAR: New
-	// refuses one that isn't.
+	// The federation can narrow them, never widen them: by the RP's
+	// resolved authorization_details_types, and by a superior's metadata
+	// policy on it even when the RP leaves it out. Empty means none. Each
+	// must be registered in Config.RAR: New refuses one that isn't.
 	AuthorizationDetailsTypes []string
 
 	// AllowedResources confines every automatically-registered client to
@@ -728,14 +730,19 @@ type AutomaticRegistrationConfig struct {
 	// client to use the client_credentials grant — see
 	// federation.AutomaticRegistrationConfig.AllowsClientCredentialsGrant
 	// for why this is a config-level switch, never inferred from an RP's
-	// own metadata. Still also requires Config.ClientCredentialsGrant to
-	// be enabled server-wide.
+	// own metadata, and how the federation can still withhold it: a
+	// superior's metadata policy on grant_types (subset_of, or value)
+	// withholds it even from an RP that leaves grant_types out of its
+	// metadata, though an RP doing so under no such policy gets the grant.
+	// Still also requires Config.ClientCredentialsGrant to be enabled
+	// server-wide.
 	AllowsClientCredentialsGrant bool
 
 	// AllowsCIBA permits every automatically-registered client to use
 	// CIBA — see federation.AutomaticRegistrationConfig.AllowsCIBA for
 	// why this is a config-level switch, never inferred from an RP's own
-	// metadata.
+	// metadata. The federation can withhold it exactly as it can
+	// AllowsClientCredentialsGrant.
 	AllowsCIBA bool
 
 	// AllowedClientAuthMethods restricts which token_endpoint_auth_method

@@ -58,15 +58,29 @@ requires once trust anchors are set: build it with `fapihttp.New` over
 `fapihttp.NewClient`'s client, since the Entity Identifiers it fetches
 come from Relying Parties. Under `AssuranceProduction` `New` refuses one
 that isn't `HardenedForProduction`. Statically registered clients
-always take priority. What a client may do
-beyond the authorization code flow is your grant, never its own metadata's:
-`AllowedScopes`, `AuthorizationDetailsTypes`, `AllowsClientCredentialsGrant`,
-`AllowsCIBA` and `AllowedClientAuthMethods`. The federation can narrow
-those grants but never widen them: when the Relying Party's resolved
-metadata (after every superior's metadata policy) has `scope`, it gets
-only the `AllowedScopes` that also lists, and when it has `grant_types`
+always take priority.
+
+What a client may do beyond the authorization code flow is your grant,
+never its own metadata's: `AllowedScopes`, `AuthorizationDetailsTypes`,
+`AllowsClientCredentialsGrant`, `AllowsCIBA` and
+`AllowedClientAuthMethods`. The federation can narrow those grants but
+never widen them: when the Relying Party's resolved metadata (after every
+superior's metadata policy) has `scope`, it gets only the `AllowedScopes`
+that also lists; when it has `authorization_details_types`, only the
+`AuthorizationDetailsTypes` that lists; and when it has `grant_types`
 without `client_credentials` or `urn:openid:params:grant-type:ciba`, it
-doesn't get that grant. Its `subject_type` is
+doesn't get that grant. A superior's `subset_of` or `value` on
+`grant_types` or `authorization_details_types` withholds the grants or
+types it leaves out even from a Relying Party that leaves the parameter
+out of its metadata, which the policy's operators leave absent. A Relying
+Party leaving `grant_types` out under no such policy gets every grant you
+enable: Dynamic Client Registration's default for an omitted
+`grant_types`, `authorization_code` alone, isn't applied yet. To hold a
+branch of the federation to the authorization code flow, have its
+superior publish a `grant_types` policy, such as a `subset_of` of
+`authorization_code` and `refresh_token`.
+
+A Relying Party's `subject_type` is
 honoured within `AutomaticRegistration.SubjectTypes` (pairwise alone by
 default when `Config.Subjects.Default` is pairwise), and
 `EntityConfiguration` advertises that list as the `openid_provider`

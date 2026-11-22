@@ -33,3 +33,48 @@ func TestPermittedStrings(t *testing.T) {
 		}
 	}
 }
+
+// TestPermittedArrayStrings pins which policy shapes restrict the values
+// an array parameter may hold whether or not it is present, and to what:
+// subset_of and a value other than null, never an operator that only
+// adds to a parameter or checks it.
+func TestPermittedArrayStrings(t *testing.T) {
+	for _, tc := range []struct {
+		ops             string
+		want            []string
+		wantConstrained bool
+	}{
+		{`{}`, nil, false},
+		{`{"add":["a"]}`, nil, false},
+		{`{"default":["a"]}`, nil, false},
+		{`{"superset_of":["a"]}`, nil, false},
+		{`{"essential":true}`, nil, false},
+		{`{"value":null}`, nil, false},
+		{`{"subset_of":["a","b"]}`, []string{"a", "b"}, true},
+		{`{"subset_of":["a","b"],"superset_of":["a"]}`, []string{"a", "b"}, true},
+		{`{"subset_of":["a","b"],"value":null}`, []string{"a", "b"}, true},
+		{`{"subset_of":[]}`, []string{}, true},
+		{`{"subset_of":null}`, []string{}, true},
+		{`{"subset_of":["a",1,null,{"b":"c"}]}`, []string{"a"}, true},
+		{`{"value":["a"]}`, []string{"a"}, true},
+		{`{"value":[]}`, []string{}, true},
+		{`{"value":"a"}`, []string{}, true},
+		{`{"value":["a"],"subset_of":["a","b"]}`, []string{"a"}, true},
+		// ValidatePolicy refuses a value outside subset_of; what the two
+		// permit is still only what both name.
+		{`{"value":["b","c"],"subset_of":["a","b"]}`, []string{"b"}, true},
+	} {
+		var ops PolicyOperators
+		if err := json.Unmarshal([]byte(tc.ops), &ops); err != nil {
+			t.Fatal(err)
+		}
+		got, constrained, err := PermittedArrayStrings(ops)
+		// A constrained result permitting nothing is empty, not nil.
+		if err != nil || constrained != tc.wantConstrained || !slices.Equal(got, tc.want) || (constrained && got == nil) {
+			t.Errorf("PermittedArrayStrings(%s) = %#v, %v, %v; want %v, %v", tc.ops, got, constrained, err, tc.want, tc.wantConstrained)
+		}
+	}
+	if _, _, err := PermittedArrayStrings(PolicyOperators{"subset_of": json.RawMessage(`"a"`)}); err == nil {
+		t.Error(`PermittedArrayStrings({"subset_of":"a"}) = nil error, want an error`)
+	}
+}

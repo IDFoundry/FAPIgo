@@ -43,6 +43,11 @@ type automaticRegistrationFixture struct {
 	now                 time.Time
 	rpConfigCalls       *int32
 	rpMux               *http.ServeMux
+
+	// setTAPolicy, set by setupAutomaticRegistrationFixtureUnderIntermediate
+	// only, has the Trust Anchor sign and serve its Subordinate Statement
+	// about the Intermediate with another metadata policy from then on.
+	setTAPolicy func(intfed.MetadataPolicy)
 }
 
 // setupAutomaticRegistrationFixture builds the fixture. metadataFn, if
@@ -1365,6 +1370,12 @@ func TestAutomaticRegistrationRejectsCaseVariantMemberNames(t *testing.T) {
 			"Redirect_URIs":                   []string{"https://attacker.example/cb"},
 			"token_endpoint_auth_method":      "private_key_jwt",
 			"token_endpoint_auth_signing_alg": "ES256",
+		},
+		"authorization_details_types in another case": {
+			"redirect_uris":                   []string{cb},
+			"token_endpoint_auth_method":      "private_key_jwt",
+			"token_endpoint_auth_signing_alg": "ES256",
+			"Authorization_Details_Types":     []string{"payment"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -17,7 +17,14 @@ import (
 // whose every installation shares the client_id.
 func newBackchannelInstanceBindingHarness(t *testing.T, attesterKey *ecdsa.PrivateKey) harness {
 	t.Helper()
-	return newHarnessWithBackchannelOptions(t, memstore.NewBackchannelAuthenticationStore(), func(cfg *server.Config) {
+	return newBackchannelInstanceBindingHarnessWithStore(t, attesterKey, memstore.NewBackchannelAuthenticationStore())
+}
+
+// newBackchannelInstanceBindingHarnessWithStore is
+// newBackchannelInstanceBindingHarness over backchannel.
+func newBackchannelInstanceBindingHarnessWithStore(t *testing.T, attesterKey *ecdsa.PrivateKey, backchannel storage.BackchannelAuthenticationStore) harness {
+	t.Helper()
+	return newHarnessWithBackchannelOptions(t, backchannel, func(cfg *server.Config) {
 		cfg.AttestationBasedClientAuthentication = true
 		cfg.Algorithms.ClientAttestation = server.AlgorithmSet{fapi.ES256}
 		cfg.Algorithms.ClientAttestationPoP = server.AlgorithmSet{fapi.ES256}

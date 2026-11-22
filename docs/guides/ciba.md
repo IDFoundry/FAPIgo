@@ -211,6 +211,15 @@ characters (bidi controls such as U+202E, zero-width characters such
 as U+200B), which could reorder or hide part of it. Anything else is
 refused with `invalid_binding_message` (CIBA §13).
 
+The request's other core parameters are bounded as a pushed request's
+are: `login_hint` and `acr_values` at 4 KiB each, `scope` at the larger
+of 4 KiB and the client's registered `AllowedScopes` joined with single
+spaces, `id_token_hint` and `login_hint_token` at 16 KiB, `dpop_jkt` at
+128 bytes and `requested_expiry` at 32, and `acr_values` may name at
+most 32 values. A request over one of these bounds is refused with
+`invalid_request`, before its hint is checked or anything is filed or
+stored.
+
 ## Algorithms and TLS
 
 The signed request and client assertions are verified against

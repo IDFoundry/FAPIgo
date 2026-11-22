@@ -74,6 +74,9 @@ type AuthReqID struct {
 // String returns the auth_req_id's wire value.
 func (a AuthReqID) String() string { return a.value }
 
+// generateAuthReqID returns a new auth_req_id: authReqIDSize random
+// bytes in unpadded base64url, the one form isWellFormedAuthReqID
+// accepts.
 func generateAuthReqID(random io.Reader) (string, error) {
 	if random == nil {
 		random = rand.Reader
@@ -83,6 +86,25 @@ func generateAuthReqID(random io.Reader) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// isWellFormedAuthReqID reports whether authReqID has the form
+// generateAuthReqID gives every auth_req_id: 43 characters of the
+// base64url alphabet (A-Z, a-z, 0-9, "-" and "_"), a subset of those
+// CIBA Core §7.3 allows in one. A value of any other form names no
+// request this server made.
+func isWellFormedAuthReqID(authReqID string) bool {
+	if len(authReqID) != base64.RawURLEncoding.EncodedLen(authReqIDSize) {
+		return false
+	}
+	for i := range len(authReqID) {
+		switch c := authReqID[i]; {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '-', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // BackchannelAuthenticationHints are unauthenticated hints a CIBA

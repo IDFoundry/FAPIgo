@@ -15,6 +15,40 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.79.0
+
+### CIBA requests: core parameter size bounds, and at most 32 `acr_values` (server)
+
+**Affects:** a server with CIBA enabled whose clients send a
+backchannel authentication request with a core parameter longer than
+its new bound, or with `acr_values` naming more than 32 values.
+
+**Why:** the 16 KiB cap on the signed request was the only bound on
+most of a CIBA request's core parameters, so `acr_values` could carry
+about 12 KiB, or 5,993 one-character values. Every lookup of the
+request, and every listing of its user's inbox, splits `acr_values`
+again: about 100 KiB per request each time. The parameters a CIBA
+request shares with a pushed request now have the same bounds (see
+v0.69.0), and `acr_values` names at most 32 values. No storage
+interface changes.
+
+**What fails:** nothing at startup. `BeginBackchannelAuthentication`
+refuses with `invalid_request` a request whose:
+
+- `login_hint` or `acr_values` is longer than 4 KiB;
+- `id_token_hint` or `login_hint_token` is longer than 16 KiB;
+- `dpop_jkt` is longer than 128 bytes;
+- `requested_expiry` is longer than 32 bytes;
+- `acr_values` names more than 32 values.
+
+A string's length is that of its value, after JSON unescaping. The
+request is refused before its hint is checked or resolved, so nothing
+is filed in the inbox or stored. The bound on `scope` is unchanged.
+
+**What to change:** keep core parameters within the bounds. Send a
+short identifier as `login_hint`, and name in `acr_values` only the few
+values the client accepts, in order of preference.
+
 ## v0.78.0
 
 ### A client attestation status checker must check its own configuration (server, *production only*)

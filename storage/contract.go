@@ -2101,6 +2101,130 @@ func testInteractionLookupFailsOnceExpired(t *testing.T, factory func() (Transac
 	}
 }
 
+// TestPushedRequestLookupContract exercises factory()'s
+// PushedRequestLookup against the guarantees its documentation
+// promises, together with the TransactionStore it reads: a lookup
+// returns the ClientID and expiry CreatePAR stored, consumes nothing,
+// and still finds a request begun but not completed; an unknown,
+// completed or expired request isn't returned, with an error that
+// doesn't wrap ErrStoreUnavailable. factory must return a fresh, empty
+// TransactionStore each call, with the PushedRequestLookup built on the
+// same storage.
+func TestPushedRequestLookupContract(t *testing.T, factory func() (TransactionStore, PushedRequestLookup)) {
+	t.Helper()
+
+	t.Run("LookupReturnsStoredRequest", func(t *testing.T) { testPushedRequestLookupReturnsStoredRequest(t, factory) })
+	t.Run("LookupConsumesNothing", func(t *testing.T) { testPushedRequestLookupConsumesNothing(t, factory) })
+	t.Run("LookupUnknownReferenceFails", func(t *testing.T) { testPushedRequestLookupUnknownReferenceFails(t, factory) })
+	t.Run("LookupFailsAfterCompletion", func(t *testing.T) { testPushedRequestLookupFailsAfterCompletion(t, factory) })
+	t.Run("LookupFailsOnceExpired", func(t *testing.T) { testPushedRequestLookupFailsOnceExpired(t, factory) })
+}
+
+// pushForLookup pushes reference for client-1, expiring at expiresAt.
+func pushForLookup(t *testing.T, store TransactionStore, reference string, expiresAt time.Time) {
+	t.Helper()
+	if err := store.CreatePAR(context.Background(), NewPARRecord{
+		Reference: reference, ClientID: "client-1", Request: contractPayload, ExpiresAt: expiresAt,
+	}); err != nil {
+		t.Fatalf("CreatePAR: %v", err)
+	}
+}
+
+// beginAndCompleteForLookup begins an interaction for reference under
+// handle and, when complete is set, completes it.
+func beginAndCompleteForLookup(t *testing.T, store TransactionStore, reference, handle string, complete bool) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
+		Reference: reference, Handle: handle, HandleExpiresAt: time.Now().Add(time.Minute), Now: time.Now(),
+	}); err != nil {
+		t.Fatalf("BeginAuthorization(%q): %v", reference, err)
+	}
+	if !complete {
+		return
+	}
+	if _, err := store.CompleteAuthorization(ctx, CompleteAuthorizationTransaction{Handle: handle}); err != nil {
+		t.Fatalf("CompleteAuthorization(%q): %v", handle, err)
+	}
+}
+
+// wantPushedRequestUnusable checks lookup refuses reference at now,
+// with an error that doesn't wrap ErrStoreUnavailable: the server would
+// answer that with 500 server_error, not as the unusable request_uri it
+// is. what names the case in the failure.
+func wantPushedRequestUnusable(t *testing.T, lookup PushedRequestLookup, reference string, now time.Time, what string) {
+	t.Helper()
+	_, err := lookup.LookupPushedRequest(context.Background(), LookupPushedRequestTransaction{Reference: reference, Now: now})
+	switch {
+	case err == nil:
+		t.Errorf("LookupPushedRequest(%s) = nil error, want error", what)
+	case errors.Is(err, ErrStoreUnavailable):
+		t.Errorf("LookupPushedRequest(%s) = %v, which wraps ErrStoreUnavailable; an unusable request_uri isn't an outage", what, err)
+	}
+}
+
+func testPushedRequestLookupReturnsStoredRequest(t *testing.T, factory func() (TransactionStore, PushedRequestLookup)) {
+	store, lookup := factory()
+	expires := time.Now().Add(time.Minute).Truncate(time.Millisecond)
+	pushForLookup(t, store, "ref-p1", expires)
+	got, err := lookup.LookupPushedRequest(context.Background(), LookupPushedRequestTransaction{Reference: "ref-p1", Now: time.Now()})
+	if err != nil {
+		t.Fatalf("LookupPushedRequest: %v", err)
+	}
+	if got.ClientID != "client-1" {
+		t.Errorf("ClientID = %q, want client-1", got.ClientID)
+	}
+	if !got.ExpiresAt.Equal(expires) {
+		t.Errorf("ExpiresAt = %v, want %v", got.ExpiresAt, expires)
+	}
+}
+
+// testPushedRequestLookupConsumesNothing: lookups leave the reference to
+// be begun and completed as if they hadn't happened, and a reference
+// begun but not completed is still found, since it can be begun again
+// (FAPI 2.0 Security Profile 5.3.2.2 Note 3).
+func testPushedRequestLookupConsumesNothing(t *testing.T, factory func() (TransactionStore, PushedRequestLookup)) {
+	store, lookup := factory()
+	ctx := context.Background()
+	pushForLookup(t, store, "ref-p2", time.Now().Add(time.Hour))
+	lookUp := func(when string) {
+		t.Helper()
+		if _, err := lookup.LookupPushedRequest(ctx, LookupPushedRequestTransaction{Reference: "ref-p2", Now: time.Now()}); err != nil {
+			t.Fatalf("LookupPushedRequest %s: %v", when, err)
+		}
+	}
+	lookUp("before BeginAuthorization")
+	lookUp("a second time")
+	beginAndCompleteForLookup(t, store, "ref-p2", "handle-p2a", false)
+	lookUp("after BeginAuthorization, before completion")
+	beginAndCompleteForLookup(t, store, "ref-p2", "handle-p2b", true)
+}
+
+func testPushedRequestLookupUnknownReferenceFails(t *testing.T, factory func() (TransactionStore, PushedRequestLookup)) {
+	store, lookup := factory()
+	pushForLookup(t, store, "ref-p3", time.Now().Add(time.Hour))
+	wantPushedRequestUnusable(t, lookup, "never-pushed", time.Now(), "an unknown reference")
+}
+
+// testPushedRequestLookupFailsAfterCompletion: once an interaction for a
+// reference completes, BeginAuthorization can't begin it any more, so
+// the lookup doesn't find it.
+func testPushedRequestLookupFailsAfterCompletion(t *testing.T, factory func() (TransactionStore, PushedRequestLookup)) {
+	store, lookup := factory()
+	pushForLookup(t, store, "ref-p4", time.Now().Add(time.Hour))
+	beginAndCompleteForLookup(t, store, "ref-p4", "handle-p4", true)
+	wantPushedRequestUnusable(t, lookup, "ref-p4", time.Now(), "a reference whose interaction completed")
+}
+
+func testPushedRequestLookupFailsOnceExpired(t *testing.T, factory func() (TransactionStore, PushedRequestLookup)) {
+	store, lookup := factory()
+	expires := time.Now().Add(time.Minute)
+	pushForLookup(t, store, "ref-p5", expires)
+	for _, now := range []time.Time{expires, expires.Add(time.Second)} {
+		wantPushedRequestUnusable(t, lookup, "ref-p5", now, fmt.Sprintf("at %v, the reference expiring at %v", now, expires))
+	}
+}
+
 // TestGrantRegistryContract exercises factory()'s behavior against the
 // guarantees GrantRegistry's documentation promises: entries round-trip
 // unmodified, are listed only for their own subject and only until they

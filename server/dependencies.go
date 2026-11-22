@@ -37,6 +37,22 @@ type Dependencies struct {
 	// DeploymentHorizontallyScaled).
 	InteractionLookup storage.InteractionLookup
 
+	// PushedRequestLookup, if set, reads a pushed authorization request
+	// back from Transactions' storage without beginning an interaction
+	// for it, so BeginAuthorization refuses a request_uri that is
+	// unknown, expired, already used or presented with another client_id
+	// before it writes anything: give the lookup built on the same
+	// storage (memstore.NewPushedRequestLookup for a memstore
+	// TransactionStore). A TransactionStore wrapper that changes how
+	// references are keyed needs a lookup that keys them the same way,
+	// or every request_uri is refused. Nil leaves BeginAuthorization as
+	// it was: it claims an interaction slot in Replay for every
+	// request_uri it's given, and only then does Transactions refuse the
+	// unusable ones (see Replay). Under AssuranceProduction it must declare
+	// storage.StoreAssurance like Transactions (Durable, and
+	// CrossInstanceConsistent with DeploymentHorizontallyScaled).
+	PushedRequestLookup storage.PushedRequestLookup
+
 	// Grants persists issued authorization codes and refresh tokens. One
 	// that is also a storage.GrantRefreshTokenRevoker (memstore's is)
 	// lets RevokeGrant, and the reuse of an authorization code, revoke
@@ -63,7 +79,16 @@ type Dependencies struct {
 
 	// Replay detects reuse of a client assertion's, request object's,
 	// signed backchannel authentication request's, Client Attestation
-	// PoP's or DPoP proof's jti.
+	// PoP's or DPoP proof's jti. BeginAuthorization also counts there,
+	// in the namespace "server:authorization-interaction", the
+	// interactions each request_uri begins: one 32-byte record per
+	// interaction, kept Limits.PushedRequestLifetime plus twice
+	// Limits.MaxClockSkew. Those writes come before anyone has
+	// authenticated, so without PushedRequestLookup a request with any
+	// client_id and any request_uri of this server's form leaves one,
+	// whether or not the request_uri exists. Size the store for the
+	// authorization endpoint's request rate as well as for the jtis, and
+	// rate-limit the endpoint.
 	Replay storage.ReplayStore
 
 	// ClientKeys resolves a registered client's verification keys.

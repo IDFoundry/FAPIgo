@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -47,19 +48,32 @@ func (s *TransactionStore) CreatePAR(_ context.Context, record storage.NewPARRec
 	return nil
 }
 
+// beginnable returns the pushed request reference names, if an
+// interaction can be begun for it at now: it's stored, no interaction
+// for it has completed, and it hasn't expired. BeginAuthorization and
+// the PushedRequestLookup both ask it, so the lookup finds exactly what
+// BeginAuthorization would begin. The caller holds s.mu.
+func (s *TransactionStore) beginnable(reference string, now time.Time) (storage.NewPARRecord, error) {
+	if s.referenceCompleted[reference] {
+		return storage.NewPARRecord{}, fmt.Errorf("memstore: request_uri already consumed")
+	}
+	record, ok := s.byReference[reference]
+	if !ok {
+		return storage.NewPARRecord{}, fmt.Errorf("memstore: no such request_uri")
+	}
+	if !now.Before(record.ExpiresAt) {
+		return storage.NewPARRecord{}, fmt.Errorf("memstore: request_uri has expired")
+	}
+	return record, nil
+}
+
 // BeginAuthorization implements storage.TransactionStore.
 func (s *TransactionStore) BeginAuthorization(_ context.Context, txn storage.BeginAuthorizationTransaction) (storage.PushedAuthorizationRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.referenceCompleted[txn.Reference] {
-		return storage.PushedAuthorizationRequest{}, fmt.Errorf("memstore: request_uri already consumed")
-	}
-	record, ok := s.byReference[txn.Reference]
-	if !ok {
-		return storage.PushedAuthorizationRequest{}, fmt.Errorf("memstore: no such request_uri")
-	}
-	if !txn.Now.Before(record.ExpiresAt) {
-		return storage.PushedAuthorizationRequest{}, fmt.Errorf("memstore: request_uri has expired")
+	record, err := s.beginnable(txn.Reference, txn.Now)
+	if err != nil {
+		return storage.PushedAuthorizationRequest{}, err
 	}
 	s.byHandle[txn.Handle] = pendingInteraction{
 		reference: txn.Reference,
@@ -125,4 +139,28 @@ func (l interactionLookup) LookupAuthorization(_ context.Context, txn storage.Lo
 		ClientID: pending.interaction.ClientID, Request: cloneRawMessage(pending.interaction.Request),
 		ExpiresAt: pending.interaction.ExpiresAt,
 	}, nil
+}
+
+// NewPushedRequestLookup returns the storage.PushedRequestLookup reading
+// store's pushed requests: server.Dependencies.PushedRequestLookup, for
+// a server whose Dependencies.Transactions is store. It's a function,
+// not a method of TransactionStore, for the reason NewInteractionLookup
+// is: a wrapper embedding a TransactionStore doesn't inherit a lookup
+// that would read past its overrides.
+func NewPushedRequestLookup(store *TransactionStore) storage.PushedRequestLookup {
+	return pushedRequestLookup{store}
+}
+
+type pushedRequestLookup struct{ s *TransactionStore }
+
+// LookupPushedRequest implements storage.PushedRequestLookup.
+func (l pushedRequestLookup) LookupPushedRequest(_ context.Context, txn storage.LookupPushedRequestTransaction) (storage.PendingPushedRequest, error) {
+	s := l.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, err := s.beginnable(txn.Reference, txn.Now)
+	if err != nil {
+		return storage.PendingPushedRequest{}, err
+	}
+	return storage.PendingPushedRequest{ClientID: record.ClientID, ExpiresAt: record.ExpiresAt}, nil
 }

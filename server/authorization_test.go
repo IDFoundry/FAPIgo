@@ -128,7 +128,7 @@ func TestBeginAuthorizationRejectsMissingClientID(t *testing.T) {
 }
 
 func TestBeginAuthorizationRejectsClientIDMismatch(t *testing.T) {
-	h := newHarness(t, server.ProfileFAPISecurity, true)
+	h := withPushedRequestLookup(t, newHarness(t, server.ProfileFAPISecurity, true), readsTransactions)
 	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
 	})
@@ -150,20 +150,39 @@ func TestBeginAuthorizationRejectsClientIDMismatch(t *testing.T) {
 	if localErr.Error.Code() != server.ErrorInvalidRequestURI {
 		t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequestURI)
 	}
-	wantNoInteractionRecords(t, h.transactions)
+	wantNoInteractionRecords(t, h.transactions, h.replay.fakeReplayStore)
 }
 
-// wantNoInteractionRecords checks store minted no interaction: a
-// refused BeginAuthorization leaves nothing behind, so a request_uri
-// presented with the wrong client_id, or once expired, can't fill the
-// store however often it's presented.
-func wantNoInteractionRecords(t *testing.T, store *fakeTransactionStore) {
+// wantNoInteractionRecords checks a refused BeginAuthorization left
+// nothing behind: store minted no interaction and replay holds no
+// interaction slot, so a request_uri presented with the wrong
+// client_id, or once expired, can't fill either store however often
+// it's presented. The slots stay empty only with
+// Dependencies.PushedRequestLookup set.
+func wantNoInteractionRecords(t *testing.T, store *fakeTransactionStore, replay *fakeReplayStore) {
 	t.Helper()
 	store.mu.Lock()
-	defer store.mu.Unlock()
-	if n := len(store.byHandle); n != 0 {
-		t.Fatalf("a refused BeginAuthorization left %d interaction records, want 0", n)
+	interactions := len(store.byHandle)
+	store.mu.Unlock()
+	if interactions != 0 {
+		t.Fatalf("a refused BeginAuthorization left %d interaction records, want 0", interactions)
 	}
+	if slots := interactionSlotRecords(replay); slots != 0 {
+		t.Fatalf("a refused BeginAuthorization left %d interaction slots in the replay store, want 0", slots)
+	}
+}
+
+// interactionSlotRecords is how many interaction slots replay holds.
+func interactionSlotRecords(replay *fakeReplayStore) int {
+	replay.mu.Lock()
+	defer replay.mu.Unlock()
+	slots := 0
+	for key := range replay.seen {
+		if key.namespace == "server:authorization-interaction" {
+			slots++
+		}
+	}
+	return slots
 }
 
 // The store never sees a live request_uri reference or interaction
@@ -360,6 +379,7 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 	clock := &stepClock{now: time.Now()}
 	serverKeyManager := &fakeKeyManager{key: generateKey(t), keyID: "as-key-1"}
 	transactions := &fakeTransactionStore{}
+	replay := &fakeReplayStore{}
 
 	srv, err := server.New(server.Config{
 		Subjects:  server.PublicSubjects(),
@@ -387,10 +407,11 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 		},
 		Assurance: server.AssuranceDevelopment,
 	}, server.Dependencies{
-		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions: transactions,
-		Grants:       &fakeGrantStore{},
-		Replay:       &fakeReplayStore{},
+		Clients:             &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions:        transactions,
+		PushedRequestLookup: fakePushedRequestLookup{transactions},
+		Grants:              &fakeGrantStore{},
+		Replay:              replay,
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
@@ -436,7 +457,7 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 	if localErr.Error.Code() != server.ErrorInvalidRequestURI {
 		t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequestURI)
 	}
-	wantNoInteractionRecords(t, transactions)
+	wantNoInteractionRecords(t, transactions, replay)
 }
 
 // TestBuildAuthorizationErrorRedirect covers the escape hatch a caller

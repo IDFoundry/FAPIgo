@@ -262,7 +262,10 @@ func stubRegistryHarness(t *testing.T, registry *stubRegistry) harness {
 
 // TestListGrantsReadsEntries: entries are listed oldest first, with
 // their authorization details, and one written by another issuer, for
-// another subject or past its expiry is left out.
+// another subject or past its expiry is left out. (The older one is
+// issued a minute before, within the harness's 5-minute refresh token
+// lifetime: ListGrants leaves out an entry issued longer ago, see
+// TestListGrantsJudgesExpiryByTheCurrentRefreshLifetime.)
 func TestListGrantsReadsEntries(t *testing.T) {
 	registry := &stubRegistry{}
 	h := stubRegistryHarness(t, registry)
@@ -270,7 +273,7 @@ func TestListGrantsReadsEntries(t *testing.T) {
 	expired.ExpiresAt = h.now
 	registry.entries = []storage.GrantEntry{
 		registryEntry(t, h, "newer", testIssuer, "user-1", h.now, nil),
-		registryEntry(t, h, "older", testIssuer, "user-1", h.now.Add(-time.Hour), map[string]any{
+		registryEntry(t, h, "older", testIssuer, "user-1", h.now.Add(-time.Minute), map[string]any{
 			"authorization_details": []map[string]any{{"type": "payment", "amount": "SGD 5"}},
 		}),
 		registryEntry(t, h, "foreign", "https://other-as.example", "user-1", h.now, nil),

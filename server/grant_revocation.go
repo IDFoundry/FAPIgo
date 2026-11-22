@@ -93,9 +93,9 @@ func (s *Server) grantRevocationReader() (revocationReader, bool) {
 // its refresh tokens are revoked. Calling RevokeGrant again may not
 // remove that entry, since the store needn't report a refresh token it
 // has already revoked, but ListGrants doesn't list the entry while the
-// grant's record lasts, and the entry expires with its refresh token:
-// with refresh token lifetimes of up to 400 days, it's never listed
-// again.
+// grant's record lasts, the entry expires with its refresh token (with
+// refresh token lifetimes of up to 400 days, it's never listed again),
+// and RevokeListedGrant and RevokeSubjectGrants remove it.
 //
 // The record lasts at least 400 days, or as long as anything issued
 // from the grant can still be used under the current Limits, if that's
@@ -116,8 +116,9 @@ func (s *Server) grantRevocationReader() (revocationReader, bool) {
 // be redeemed again, and any other is refused for good unless a refresh
 // token lifetime over 400 days applies to it. With longer lifetimes, use
 // a GrantStore that implements the interface, or also revoke the
-// refresh token itself (RevokeListedGrant does), or call RevokeGrant
-// again once the longer lifetime applies.
+// refresh token itself (RevokeListedGrant does, and RevokeSubjectGrants
+// does for every grant of the user's revoked this way), or call
+// RevokeGrant again once the longer lifetime applies.
 //
 // Shortening a lifetime can't let anything outlive the record either: a
 // refresh token, code or CIBA decision issued under a longer lifetime

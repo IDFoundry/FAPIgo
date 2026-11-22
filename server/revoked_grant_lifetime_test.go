@@ -107,9 +107,16 @@ func (c *lifetimeChanges) stored(refreshToken string) bool {
 // none of user-1's grants then.
 func (c *lifetimeChanges) checkRefused(refreshToken string, offsets ...time.Duration) {
 	c.t.Helper()
+	c.checkRefusedUnder(24*time.Hour, refreshToken, offsets...)
+}
+
+// checkRefusedUnder is checkRefused with refreshLifetime as the server's
+// refresh token lifetime.
+func (c *lifetimeChanges) checkRefusedUnder(refreshLifetime time.Duration, refreshToken string, offsets ...time.Duration) {
+	c.t.Helper()
 	for _, offset := range offsets {
-		h := c.at(offset, 24*time.Hour)
-		checkRefreshRefused(c.t, h, refreshToken, fmt.Sprintf("%v on, under 24h", offset))
+		h := c.at(offset, refreshLifetime)
+		checkRefreshRefused(c.t, h, refreshToken, fmt.Sprintf("%v on, under %v", offset, refreshLifetime))
 		if n := len(listGrants(c.t, h, "user-1")); n != 0 {
 			c.t.Errorf("ListGrants %v on lists %d grants, want none", offset, n)
 		}
@@ -197,10 +204,13 @@ func TestRevokedGrantStaysRevokedOnAnInstanceWithALongerLifetime(t *testing.T) {
 // (RevokeToken) nor the application revoking the user's grants
 // (RevokeSubjectGrants) leaves a refresh token that 24h, restored, makes
 // redeemable again. RevokeToken finds the grant revoked and has nothing
-// to revoke, yet the token is gone from the GrantStore afterwards either
-// way, and its GrantRegistry entry with it: RevokeGrant removed both, or,
-// with a record-only GrantStore, the revocation of the token that
-// RevokeToken's refusal leaves behind did.
+// to revoke, and RevokeSubjectGrants no longer lists it, yet the token is
+// gone from the GrantStore afterwards either way, and its GrantRegistry
+// entry with it: RevokeGrant removed both, or, with a record-only
+// GrantStore, the revocation of the token that RevokeToken's refusal
+// leaves behind did, or RevokeSubjectGrants, which revokes the refresh
+// tokens of the user's grants revoked another way, without counting
+// them.
 func TestRevokedGrantLeavesNoRedeemableRefreshToken(t *testing.T) {
 	for _, kind := range grantStoreKinds {
 		t.Run(kind.name+"/RevokeToken", func(t *testing.T) { testRevokeTokenAfterRevokeGrant(t, kind) })
@@ -242,7 +252,14 @@ func testRevokeTokenAfterRevokeGrant(t *testing.T, kind grantStoreKind) {
 
 func testRevokeSubjectGrantsAfterRevokeGrant(t *testing.T, kind grantStoreKind) {
 	c := newLifetimeChanges(t, kind.of(memstore.NewGrantStore()))
-	refreshToken := exchangeWithGrantID(t, c.at(0, 24*time.Hour), "grant-1")
+	var deleted []string
+	c.h.deps.GrantRegistry = deleteRecordingRegistry{memstore.NewGrantRegistry(), &deleted}
+	issuing := c.at(0, 24*time.Hour)
+	refreshToken := exchangeWithGrantID(t, issuing, "grant-1")
+	listed := listGrants(t, issuing, "user-1")
+	if len(listed) != 1 {
+		t.Fatalf("ListGrants = %d grants, want 1", len(listed))
+	}
 	h := c.at(time.Minute, time.Hour)
 	if err := h.server.RevokeGrant(context.Background(), "grant-1"); err != nil {
 		t.Fatalf("RevokeGrant: %v", err)
@@ -250,7 +267,12 @@ func testRevokeSubjectGrantsAfterRevokeGrant(t *testing.T, kind grantStoreKind) 
 	if n, err := h.server.RevokeSubjectGrants(context.Background(), mustSubjectID(t, "user-1")); n != 0 || err != nil {
 		t.Fatalf("RevokeSubjectGrants after RevokeGrant = %d, %v; want 0, nil (the grant is no longer listed)", n, err)
 	}
-	c.checkStored(kind, refreshToken, "RevokeGrant and RevokeSubjectGrants")
+	if c.stored(refreshToken) {
+		t.Error("after RevokeGrant and RevokeSubjectGrants, the GrantStore still holds the refresh token")
+	}
+	if !slices.Contains(deleted, listed[0].ID) {
+		t.Errorf("after RevokeGrant and RevokeSubjectGrants, DeleteGrant calls = %v, want the grant's entry %q", deleted, listed[0].ID)
+	}
 	c.checkRefused(refreshToken, 3*time.Hour, 24*time.Hour-time.Second)
 }
 

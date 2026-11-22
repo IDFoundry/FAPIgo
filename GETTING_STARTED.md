@@ -957,13 +957,17 @@ while `RevokeGrant` ran, only the record refuses them: raising
 `Limits`, can't bring a revoked grant back unless a refresh token
 lifetime over 400 days applies. With longer lifetimes, withdraw grants
 with `RevokeListedGrant`, which revokes the refresh token itself, or
-call `RevokeGrant` again once the longer lifetime is in force. Either
-way, the revocation store keeps one record per revoked grant, and per
-reused code, for those 400 days at least.
+call `RevokeGrant` again once the longer lifetime is in force;
+`RevokeSubjectGrants` also revokes the refresh tokens of the user's
+grants already revoked that way. Either way, the revocation store keeps
+one record per revoked grant, and per reused code, for those 400 days
+at least.
 
 **Closing an account.** `srv.RevokeSubjectGrants(ctx, subject)` revokes
-every grant the registry lists for the user, and, with a CIBA inbox,
-`srv.DenyBackchannelInteractions(ctx, subject, reason)` denies the
+every grant the registry lists for the user, ending the refresh tokens
+of any already revoked another way too; if it reports a failure,
+calling it again finishes the job. With a CIBA inbox,
+`srv.DenyBackchannelInteractions(ctx, subject, reason)` also denies the
 requests still awaiting them. Neither sees a grant still in flight, an
 authorization code not yet exchanged or a CIBA approval not yet polled:
 refuse the subject at sign-in from then on, and call

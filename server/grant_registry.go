@@ -47,7 +47,9 @@ type ListedGrant struct {
 	Resources            []string
 
 	// IssuedAt is when the refresh token was issued, and ExpiresAt when
-	// it expires.
+	// it expires: its stored expiry, or, when Limits.RefreshTokenLifetime
+	// has been shortened since, IssuedAt plus the current lifetime, past
+	// which a refresh is refused all the same.
 	IssuedAt  time.Time
 	ExpiresAt time.Time
 }
@@ -158,113 +160,177 @@ func (s *Server) withdrawRefreshToken(ctx context.Context, refreshTokenHash [32]
 	return cause
 }
 
-// listedGrant pairs a ListedGrant with its decoded record, and the
-// registry entry both were read from.
+// listedGrant pairs a ListedGrant with its decoded record, the registry
+// entry both were read from, and the GrantStore key of the grant's
+// refresh token, which the entry's key was checked to be derived from.
 type listedGrant struct {
-	listed ListedGrant
-	record grantRegistryRecord
-	entry  storage.GrantEntry
+	listed           ListedGrant
+	record           grantRegistryRecord
+	entry            storage.GrantEntry
+	refreshTokenHash [32]byte
 }
 
+// grantListing is what listGrants read from Dependencies.GrantRegistry
+// for one subject, at now.
+type grantListing struct {
+	// grants are the subject's grants that are neither revoked nor past
+	// their refresh tokens' stored expiry, oldest first. ListGrants
+	// leaves out those whose refresh tokens were issued longer ago than
+	// the current Limits.RefreshTokenLifetime, which a refresh refuses,
+	// but RevokeListedGrant and RevokeSubjectGrants still revoke them: a
+	// longer lifetime applying again, raised back or on another instance,
+	// would make those refresh tokens redeemable.
+	grants []listedGrant
+
+	// revoked are the subject's grants revoked another way (RevokeGrant,
+	// RevokeToken, or the reuse of the authorization code they came
+	// from) whose entries the registry still records. ListGrants lists
+	// none of them, but the GrantStore may still hold their refresh
+	// tokens (see sweepRevokedGrants).
+	revoked []listedGrant
+
+	// unreadable joins the failures to read an entry (an undecodable
+	// record, or a revocation check that failed): one bad entry doesn't
+	// hide the others from a caller revoking them.
+	unreadable error
+
+	now time.Time
+}
+
+// grantEntryState is what listedGrantFrom finds a registry entry to be.
+type grantEntryState int
+
+const (
+	// grantEntryIgnored isn't one of the subject's grants at this
+	// server: an entry written by another issuer, for another subject,
+	// past its expiry, or naming another refresh token than its key's.
+	grantEntryIgnored grantEntryState = iota
+
+	// grantEntryLive is one of grantListing.grants.
+	grantEntryLive
+
+	// grantEntryRevoked is one of grantListing.revoked.
+	grantEntryRevoked
+)
+
 // ListGrants returns the grants subject authorized that a client still
-// holds a refresh token for, oldest first: for a "connected apps" page,
-// or to revoke them all when an account closes (RevokeListedGrant on
-// each). It needs Dependencies.GrantRegistry, which records a grant when
-// its refresh token is issued. A grant whose access tokens alone were
+// holds a refresh token for, oldest first: for a "connected apps" page.
+// To revoke them all when an account closes, use RevokeSubjectGrants. It
+// needs Dependencies.GrantRegistry, which records a grant when its
+// refresh token is issued. A grant whose access tokens alone were
 // issued, with no refresh token, isn't listed: they expire within
 // Limits.AccessTokenLifetime. A grant revoked another way (RevokeGrant,
 // RevokeToken, or the reuse of its authorization code) isn't listed
-// either, nor one whose refresh token has expired.
+// either, nor one whose refresh token has expired: past its stored
+// expiry, or issued longer ago than the current
+// Limits.RefreshTokenLifetime, as a refresh judges it. So where
+// instances run different Limits, during a rollout or on a canary, one
+// with a shorter lifetime doesn't list a grant whose refresh token an
+// instance with a longer one still redeems, and a page it serves can't
+// show or disconnect that grant: RevokeSubjectGrants revokes it all the
+// same, as RevokeListedGrant does with an ID listed before.
 //
 // ListGrants doesn't check who is asking: the application must make sure
 // the user is subject.
 func (s *Server) ListGrants(ctx context.Context, subject SubjectID) ([]ListedGrant, error) {
-	grants, unreadable, err := s.listGrants(ctx, subject)
+	l, err := s.listGrants(ctx, subject)
 	if err != nil {
 		return nil, err
 	}
-	if unreadable != nil {
-		return nil, unreadable
+	if l.unreadable != nil {
+		return nil, l.unreadable
 	}
-	out := make([]ListedGrant, len(grants))
-	for i, g := range grants {
-		out[i] = g.listed
+	out := make([]ListedGrant, 0, len(l.grants))
+	for _, g := range l.grants {
+		if issuedWithin(&g.record.IssuedAt, s.cfg.Limits.RefreshTokenLifetime, l.now) {
+			out = append(out, g.listed)
+		}
 	}
 	return out, nil
 }
 
-// listGrants returns subject's live grants, and, separately, the
-// entries it couldn't read (an undecodable record, or a revocation check
-// that failed) joined into unreadable: one bad entry doesn't hide the
-// others from a caller revoking them. err is for a listing that failed
-// as a whole.
-func (s *Server) listGrants(ctx context.Context, subject SubjectID) (grants []listedGrant, unreadable, err error) {
+// listGrants reads subject's grants from Dependencies.GrantRegistry (see
+// grantListing). err is for a listing that failed as a whole.
+func (s *Server) listGrants(ctx context.Context, subject SubjectID) (grantListing, error) {
 	if s.deps.GrantRegistry == nil {
-		return nil, nil, errors.New("server: list grants: Dependencies.GrantRegistry isn't set")
+		return grantListing{}, errors.New("server: list grants: Dependencies.GrantRegistry isn't set")
 	}
 	if subject.String() == "" {
-		return nil, nil, errors.New("server: list grants: subject is empty")
+		return grantListing{}, errors.New("server: list grants: subject is empty")
 	}
-	entries, err := s.deps.GrantRegistry.ListGrants(ctx, storage.GrantListing{SubjectKey: s.grantSubjectKey(subject.String()), Now: s.deps.Clock.Now()})
+	l := grantListing{now: s.deps.Clock.Now()}
+	entries, err := s.deps.GrantRegistry.ListGrants(ctx, storage.GrantListing{SubjectKey: s.grantSubjectKey(subject.String()), Now: l.now})
 	if err != nil {
-		return nil, nil, fmt.Errorf("server: list grants: %w", err)
+		return grantListing{}, fmt.Errorf("server: list grants: %w", err)
 	}
 	var bad []error
 	for _, entry := range entries {
-		g, ok, err := s.listedGrantFrom(ctx, subject, entry)
-		if err != nil {
+		g, state, err := s.listedGrantFrom(ctx, subject, entry, l.now)
+		switch {
+		case err != nil:
 			bad = append(bad, fmt.Errorf("server: list grants: entry %s: %w", entry.Key, err))
-			continue
-		}
-		if ok {
-			grants = append(grants, g)
+		case state == grantEntryLive:
+			l.grants = append(l.grants, g)
+		case state == grantEntryRevoked:
+			l.revoked = append(l.revoked, g)
 		}
 	}
-	slices.SortFunc(grants, func(a, b listedGrant) int {
+	slices.SortFunc(l.grants, func(a, b listedGrant) int {
 		return cmp.Or(a.listed.IssuedAt.Compare(b.listed.IssuedAt), cmp.Compare(a.listed.ID, b.listed.ID))
 	})
-	return grants, errors.Join(bad...), nil
+	l.unreadable = errors.Join(bad...)
+	return l, nil
 }
 
-// listedGrantFrom decodes entry, reporting false for one that isn't a
-// live grant of subject's at this server: written by another issuer,
-// expired, or revoked.
-func (s *Server) listedGrantFrom(ctx context.Context, subject SubjectID, entry storage.GrantEntry) (listedGrant, bool, error) {
+// listedGrantFrom decodes entry, read at now, and reports what it is to
+// subject (grantEntryState).
+func (s *Server) listedGrantFrom(ctx context.Context, subject SubjectID, entry storage.GrantEntry, now time.Time) (listedGrant, grantEntryState, error) {
 	var record grantRegistryRecord
 	if err := decodeRecord(entry.Record, &record.Version, &record); err != nil {
-		return listedGrant{}, false, fmt.Errorf("stored grant registry entry: %w", err)
+		return listedGrant{}, grantEntryIgnored, fmt.Errorf("stored grant registry entry: %w", err)
 	}
-	if !s.ownsRecord(record.Issuer) || record.Subject != subject.String() || !s.deps.Clock.Now().Before(entry.ExpiresAt) {
-		return listedGrant{}, false, nil
+	if !s.ownsRecord(record.Issuer) || record.Subject != subject.String() || !now.Before(entry.ExpiresAt) {
+		return listedGrant{}, grantEntryIgnored, nil
 	}
 	// The entry's key is derived from the refresh token it revokes: an
 	// entry naming another token's hash than its own key's, as an
 	// unsealed record a database writer forged could, isn't the grant
 	// it's listed as.
-	if hash, ok := refreshTokenHashOf(record.RefreshTokenHash); !ok || grantEntryKey(hash) != entry.Key {
-		return listedGrant{}, false, nil
+	hash, ok := refreshTokenHashOf(record.RefreshTokenHash)
+	if !ok || grantEntryKey(hash) != entry.Key {
+		return listedGrant{}, grantEntryIgnored, nil
 	}
+	g := listedGrant{record: record, entry: entry, refreshTokenHash: hash}
 	if revokedErr := s.checkGrantNotRevoked(ctx, grantRecord{GrantID: record.GrantID, CodeGrantID: record.CodeGrantID}); revokedErr != nil {
 		if revokedErr.Code() == ErrorInvalidGrant {
-			return listedGrant{}, false, nil
+			return g, grantEntryRevoked, nil
 		}
-		return listedGrant{}, false, revokedErr
+		return listedGrant{}, grantEntryIgnored, revokedErr
 	}
 	var details []json.RawMessage
 	if len(record.AuthorizationDetails) > 0 {
 		if err := json.Unmarshal(record.AuthorizationDetails, &details); err != nil {
-			return listedGrant{}, false, fmt.Errorf("stored grant registry entry's authorization details: %w", err)
+			return listedGrant{}, grantEntryIgnored, fmt.Errorf("stored grant registry entry's authorization details: %w", err)
 		}
 	}
-	return listedGrant{
-		listed: ListedGrant{
-			ID: entry.Key, GrantID: record.GrantID, ClientID: entry.ClientID, GrantType: record.GrantType,
-			Scope: slices.Clone(record.Scope), AuthorizationDetails: details, Resources: slices.Clone(record.Resources),
-			IssuedAt: record.IssuedAt, ExpiresAt: entry.ExpiresAt,
-		},
-		record: record,
-		entry:  entry,
-	}, true, nil
+	g.listed = ListedGrant{
+		ID: entry.Key, GrantID: record.GrantID, ClientID: entry.ClientID, GrantType: record.GrantType,
+		Scope: slices.Clone(record.Scope), AuthorizationDetails: details, Resources: slices.Clone(record.Resources),
+		IssuedAt: record.IssuedAt, ExpiresAt: s.refreshTokenExpiry(record.IssuedAt, entry.ExpiresAt),
+	}
+	return g, grantEntryLive, nil
+}
+
+// refreshTokenExpiry is when a refresh token issued at issuedAt, and
+// stored to expire at storedExpiry, stops being redeemable under the
+// current Limits: its stored expiry, or its issue time plus
+// Limits.RefreshTokenLifetime once the lifetime has been shortened since
+// (issuedWithin).
+func (s *Server) refreshTokenExpiry(issuedAt, storedExpiry time.Time) time.Time {
+	if byLifetime := issuedAt.Add(s.cfg.Limits.RefreshTokenLifetime); byLifetime.Before(storedExpiry) {
+		return byLifetime
+	}
+	return storedExpiry
 }
 
 // RevokeListedGrant revokes the grant id names (ListedGrant.ID), if it's
@@ -274,30 +340,51 @@ func (s *Server) listedGrantFrom(ctx context.Context, subject SubjectID, entry s
 // request (as the code's reuse does), whichever it has. A grant served
 // with neither (IssueRefreshToken without a GrantID) has its refresh
 // token revoked, and its access tokens expire within
-// Limits.AccessTokenLifetime.
+// Limits.AccessTokenLifetime. A grant ListGrants no longer lists only
+// because its refresh token was issued longer ago than the current
+// Limits.RefreshTokenLifetime is revoked all the same: a longer lifetime
+// applying again would make that refresh token redeemable.
+//
+// It also revokes the refresh tokens of subject's grants revoked another
+// way that the GrantStore may still hold, as RevokeSubjectGrants does:
+// best effort when id names a listed grant, and otherwise reporting a
+// failure to, as it reports an entry it couldn't read, rather than
+// ErrGrantNotListed, since id may name that grant. A grant whose
+// revocation here failed after RevokeGrant had recorded its GrantID as
+// revoked is then one of those, so calling RevokeListedGrant again with
+// the same id still finishes the job, reporting any failure to: once it
+// has, it answers ErrGrantNotListed, as it does for any grant revoked
+// another way, which a caller can treat as done, since it never
+// answers that when something failed.
 //
 // Taking subject as well as id means an ID from a form can only revoke a
 // grant of the subject the application has authenticated: the
 // application must still make sure the user is subject.
 func (s *Server) RevokeListedGrant(ctx context.Context, subject SubjectID, id string) error {
-	grants, unreadable, err := s.listGrants(ctx, subject)
+	l, err := s.listGrants(ctx, subject)
 	if err != nil {
 		return fmt.Errorf("server: revoke listed grant: %w", err)
 	}
-	i := slices.IndexFunc(grants, func(g listedGrant) bool { return g.listed.ID == id })
-	if i < 0 {
-		if unreadable != nil {
-			// It may be one of the entries that couldn't be read.
-			return fmt.Errorf("server: revoke listed grant: %w", unreadable)
-		}
-		return ErrGrantNotListed
+	if i := slices.IndexFunc(l.grants, func(g listedGrant) bool { return g.listed.ID == id }); i >= 0 {
+		revokeErr := s.revokeListed(ctx, l.grants[i])
+		_ = s.sweepRevokedGrants(ctx, l.revoked)
+		return revokeErr
 	}
-	return s.revokeListed(ctx, grants[i])
+	// id may name a grant revoked another way, or an entry that couldn't
+	// be read: a failure to revoke the first's refresh token, or to read
+	// the second, is reported rather than claiming it isn't listed.
+	if err := errors.Join(s.sweepRevokedGrants(ctx, l.revoked), l.unreadable); err != nil {
+		return fmt.Errorf("server: revoke listed grant: %w", err)
+	}
+	return ErrGrantNotListed
 }
 
 // revokeListed revokes g as RevokeListedGrant describes. The grant goes
 // before its refresh token, as in revokeRefreshToken, and the registry
-// entry after both, so a failure part way leaves it listed for a retry.
+// entry after both, so a failure part way leaves it listed for a retry,
+// or, once RevokeGrant has recorded its GrantID as revoked, recorded
+// among the revoked grants whose refresh tokens a retry revokes
+// (sweepRevokedGrants).
 //
 // The refresh token is revoked again once the entry is deleted: the
 // token's issuance may still be in flight, having recorded the entry
@@ -318,20 +405,44 @@ func (s *Server) revokeListed(ctx context.Context, g listedGrant) error {
 	if revokeErr := s.revokeCodeGrant(ctx, g.record.CodeGrantID); revokeErr != nil {
 		return fmt.Errorf("server: revoke listed grant: %w", revokeErr)
 	}
-	hash, ok := refreshTokenHashOf(g.record.RefreshTokenHash)
-	if !ok {
-		return errors.New("server: revoke listed grant: stored grant registry entry has no refresh token hash")
-	}
-	if err := s.deps.Grants.RevokeRefreshToken(ctx, hash); err != nil {
+	if err := s.deps.Grants.RevokeRefreshToken(ctx, g.refreshTokenHash); err != nil {
 		return fmt.Errorf("server: revoke listed grant: %w", err)
 	}
 	if err := s.deps.GrantRegistry.DeleteGrant(ctx, g.listed.ID); err != nil {
 		return fmt.Errorf("server: revoke listed grant: %w", err)
 	}
-	if err := s.deps.Grants.RevokeRefreshToken(ctx, hash); err != nil {
+	if err := s.deps.Grants.RevokeRefreshToken(ctx, g.refreshTokenHash); err != nil {
 		return fmt.Errorf("server: revoke listed grant: %w", s.relistGrant(ctx, g, err))
 	}
 	return nil
+}
+
+// sweepRevokedGrants revokes the refresh token of each of revoked,
+// subject's grants revoked another way whose GrantRegistry entries are
+// still recorded (grantListing.revoked), then deletes its entry, and
+// returns the failures joined. Each grant's revocation record refuses
+// its refresh token already, but a GrantStore that isn't a
+// storage.GrantRefreshTokenRevoker still holds the token after
+// RevokeGrant, as does one that failed to revoke it, and a refresh token
+// lifetime longer than the record applying later would make the token
+// redeemable again (see RevokeGrant); revoking it ends it for good. The
+// entry is how the token is found, so it's deleted only once the token
+// is revoked: a failure leaves it recorded for the next call. Most
+// revocations delete the entry themselves (RevokeToken, and RevokeGrant
+// with a GrantRefreshTokenRevoker), so this finds those they couldn't,
+// and those RevokeGrant leaves with any other GrantStore.
+func (s *Server) sweepRevokedGrants(ctx context.Context, revoked []listedGrant) error {
+	var failures []error
+	for _, g := range revoked {
+		if err := s.deps.Grants.RevokeRefreshToken(ctx, g.refreshTokenHash); err != nil {
+			failures = append(failures, fmt.Errorf("server: revoke the refresh token of revoked grant %s: %w", g.entry.Key, err))
+			continue
+		}
+		if err := s.deps.GrantRegistry.DeleteGrant(ctx, g.entry.Key); err != nil {
+			failures = append(failures, fmt.Errorf("server: delete the registry entry of revoked grant %s: %w", g.entry.Key, err))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // relistGrant records g's registry entry again, as it was listed, and
@@ -367,13 +478,27 @@ func (s *Server) forgetRevokedRefreshToken(ctx context.Context, refreshTokenHash
 	return s.deps.GrantRegistry.DeleteGrant(ctx, grantEntryKey(refreshTokenHash))
 }
 
-// RevokeSubjectGrants revokes every grant ListGrants lists for subject,
-// as RevokeListedGrant revokes one, and returns how many it revoked: for
+// RevokeSubjectGrants revokes each of subject's grants RevokeListedGrant
+// would revoke, as it revokes one — every grant ListGrants lists, and
+// any it no longer lists only because of the current
+// Limits.RefreshTokenLifetime — and returns how many it revoked: for
 // ending a user's access when their account closes, or after it's
-// compromised. A grant it fails to revoke, or an entry it can't read,
-// doesn't stop it: it revokes every other grant, then returns how many
-// it revoked with every failure joined. What failed is still listed, so
-// calling it again finishes the job.
+// compromised. It also revokes the refresh tokens of subject's grants
+// revoked another way (RevokeGrant, RevokeToken, or the reuse of an
+// authorization code), and removes their entries, without counting
+// them: such a grant's revocation record refuses its refresh token, but
+// a GrantStore that isn't a storage.GrantRefreshTokenRevoker still holds
+// the token after RevokeGrant, as does one that failed to revoke it,
+// and the record lapses in time (see RevokeGrant).
+//
+// A grant it fails to revoke, or an entry it can't read, doesn't stop
+// it: it revokes every other grant, then returns how many it revoked
+// with every failure joined. What failed is still in the GrantRegistry,
+// so calling it again finishes the job: a grant whose revocation failed
+// is still listed, or, if RevokeGrant had recorded its GrantID as
+// revoked before failing to revoke its refresh tokens, is one of the
+// grants revoked another way, whose refresh token the next call revokes,
+// reporting a failure to.
 //
 // A grant whose refresh token isn't issued yet isn't listed: an
 // authorization code not yet exchanged, or an approved CIBA request not
@@ -396,19 +521,20 @@ func (s *Server) forgetRevokedRefreshToken(ctx context.Context, refreshTokenHash
 // RevokeSubjectGrants doesn't check who is asking: the application must
 // make sure the request is subject's own, or an administrator's.
 func (s *Server) RevokeSubjectGrants(ctx context.Context, subject SubjectID) (int, error) {
-	grants, unreadable, err := s.listGrants(ctx, subject)
+	l, err := s.listGrants(ctx, subject)
 	if err != nil {
 		return 0, fmt.Errorf("server: revoke subject grants: %w", err)
 	}
 	revoked := 0
-	failures := []error{unreadable}
-	for _, g := range grants {
+	failures := []error{l.unreadable}
+	for _, g := range l.grants {
 		if err := s.revokeListed(ctx, g); err != nil {
 			failures = append(failures, err)
 			continue
 		}
 		revoked++
 	}
+	failures = append(failures, s.sweepRevokedGrants(ctx, l.revoked))
 	if err := errors.Join(failures...); err != nil {
 		return revoked, fmt.Errorf("server: revoke subject grants: %w", err)
 	}

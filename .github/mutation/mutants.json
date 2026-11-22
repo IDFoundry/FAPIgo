@@ -180,6 +180,42 @@
     "why": "CIBA refuses a signed-request algorithm the server hasn't enabled"
   },
   {
+    "id": "srv-ciba-parameter-sizes",
+    "file": "server/request_parameter_sizes.go",
+    "old": "checkParameterSizes(params, backchannelParameterSizes)",
+    "new": "checkParameterSizes(params, nil)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBeginBackchannelAuthenticationBoundsCoreParameterSizes$",
+    "why": "a CIBA request's core parameters have a pushed request's size bounds"
+  },
+  {
+    "id": "srv-ciba-acr-values-count",
+    "file": "server/request_parameter_sizes.go",
+    "old": "if count > maxACRValues {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBeginBackchannelAuthenticationBoundsCoreParameterSizes$",
+    "why": "a CIBA request's acr_values names at most 32 values"
+  },
+  {
+    "id": "srv-ciba-acr-values-count-boundary",
+    "file": "server/request_parameter_sizes.go",
+    "old": "if count > maxACRValues {",
+    "new": "if count > maxACRValues+1 {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBeginBackchannelAuthenticationBoundsCoreParameterSizes$",
+    "why": "a CIBA request naming 33 acr values is refused"
+  },
+  {
     "id": "srv-idtoken-enc-content-alg",
     "file": "server/idtoken_encryption.go",
     "old": "if !s.cfg.Algorithms.IDTokenEncryptionContentEncryption.Contains(contentEncryption) {",

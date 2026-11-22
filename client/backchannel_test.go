@@ -203,6 +203,13 @@ func (a *fakeCIBAAS) handleToken(w http.ResponseWriter, r *http.Request) {
 // fakeCIBAAS-backed httptest.Server.
 func newTestClientWithCIBA(t *testing.T) (*client.Client, *fakeCIBAAS, *httptest.Server) {
 	t.Helper()
+	return newTestClientWithCIBAWith(t, nil)
+}
+
+// newTestClientWithCIBAWith is newTestClientWithCIBA with mutate applied
+// to the dependencies before client.New.
+func newTestClientWithCIBAWith(t *testing.T, mutate func(*client.Dependencies)) (*client.Client, *fakeCIBAAS, *httptest.Server) {
+	t.Helper()
 	as := newFakeCIBAAS(t)
 	ts := httptest.NewServer(as.handler())
 	t.Cleanup(ts.Close)
@@ -228,6 +235,9 @@ func newTestClientWithCIBA(t *testing.T) (*client.Client, *fakeCIBAAS, *httptest
 	deps.IssuerKeys = &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{
 		keys.IDTokenVerification: &as.idTokenKey.PublicKey,
 	}}
+	if mutate != nil {
+		mutate(&deps)
+	}
 
 	c, err := client.New(cfg, deps)
 	if err != nil {

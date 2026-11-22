@@ -58,17 +58,24 @@ type IssuerKey struct {
 	PublicKey crypto.PublicKey
 }
 
-// IssuerKeySet is the set of keys ResolveIssuerKeys returned.
-// Ordinarily this holds exactly one key (selected by KeyID), but an
-// implementation may return more than one when the issuer is
-// mid-rotation.
+// IssuerKeySet is the set of keys ResolveIssuerKeys returned, in the
+// order a verifier should try them. For a request naming a KeyID it
+// ordinarily holds the one key with that ID, or a few while the issuer
+// rotates keys under one ID. For a request naming none (a JWS whose
+// header has no "kid") it holds every key of the algorithm:
+// JWKSIssuerKeySource returns as many as the issuer's JWK Set lists.
+// This module's verifiers that take an IssuerKeySource try them in
+// order up to a bound, and never a key past it: package client tries
+// at most eight, and resource.JWTAccessTokens at most its
+// MaxKeyCandidates.
 type IssuerKeySet struct {
 	Keys []IssuerKey
 }
 
 // IssuerKeySource resolves an authorization server's public
-// verification keys — used by resource to verify access tokens and, in
-// future, by client to verify JARM responses and ID tokens.
+// verification keys — used by client to verify JARM responses, ID
+// tokens and signed UserInfo responses, and by resource to verify JWT
+// access tokens.
 // Implementations should prefer a cached or administratively
 // pre-resolved key set over a live JWKS fetch in the request-handling
 // path; where a live fetch is unavoidable it must apply the same SSRF,

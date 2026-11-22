@@ -619,29 +619,20 @@ func (c *Client) validateSignedIDToken(ctx context.Context, raw, accessToken, no
 	if algErr := checkSignedWith("ID token", parsed.Algorithm(), c.cfg.Algorithms.IDToken, "IDToken", "id_token_signed_response_alg"); algErr != nil {
 		return token.ValidatedIDToken{}, algErr
 	}
-	candidates, idErr := c.resolveIssuerKeyCandidates(ctx, keys.IDTokenVerification, c.cfg.Algorithms.IDToken, parsed.KeyID())
-	if idErr != nil {
-		return token.ValidatedIDToken{}, idErr
+	policy := token.IDTokenValidatePolicy{
+		ExpectedIssuer: c.cfg.Issuer.String(), ExpectedAudience: c.cfg.ClientID.String(),
+		TrustedAudiences: c.cfg.TrustedIDTokenAudiences,
+		Algorithm:        c.cfg.Algorithms.IDToken, ExpectedNonce: nonce,
+		AccessToken: accessToken,
+		Now:         c.deps.Clock.Now(), MaxLifetime: c.cfg.Limits.MaxIDTokenLifetime, MaxClockSkew: c.cfg.Limits.MaxClockSkew,
 	}
-
-	var (
-		validated token.ValidatedIDToken
-		verifyErr error
-	)
-	for _, candidate := range candidates {
-		validated, verifyErr = parsed.Validate(candidate.PublicKey, token.IDTokenValidatePolicy{
-			ExpectedIssuer: c.cfg.Issuer.String(), ExpectedAudience: c.cfg.ClientID.String(),
-			TrustedAudiences: c.cfg.TrustedIDTokenAudiences,
-			Algorithm:        c.cfg.Algorithms.IDToken, ExpectedNonce: nonce,
-			AccessToken: accessToken,
-			Now:         c.deps.Clock.Now(), MaxLifetime: c.cfg.Limits.MaxIDTokenLifetime, MaxClockSkew: c.cfg.Limits.MaxClockSkew,
-		})
-		if verifyErr == nil {
-			break
-		}
-	}
+	var validated token.ValidatedIDToken
+	verifyErr := c.verifyIssuerSigned(ctx, "ID token", keys.IDTokenVerification, c.cfg.Algorithms.IDToken, parsed.KeyID(), func(pub crypto.PublicKey) (err error) {
+		validated, err = parsed.Validate(pub, policy)
+		return err
+	})
 	if verifyErr != nil {
-		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "ID token verification failed", verifyErr)
+		return token.ValidatedIDToken{}, verifyErr
 	}
 	return validated, nil
 }
@@ -659,29 +650,6 @@ func checkSignedWith(what string, signed, configured fapi.SignatureAlgorithm, fi
 		return nil
 	}
 	return newError(ErrorInvalidResponse, fmt.Sprintf("%s is signed with %s, but Config.Algorithms.%s is %s: set it to the %s this client is registered with", what, signed, field, configured, registration), nil)
-}
-
-// resolveIssuerKeyCandidates resolves the authorization server's
-// candidate verification keys for purpose/algorithm/keyID — shared by
-// every check that verifies something the issuer signed (an ID token,
-// and, via VerifyIssuerJWS, any other issuer-signed artifact a caller
-// asks about), so "resolution failed" and "no matching key" error
-// handling lives in exactly one place rather than being re-derived per
-// caller.
-func (c *Client) resolveIssuerKeyCandidates(ctx context.Context, purpose keys.IssuerVerificationPurpose, algorithm fapi.SignatureAlgorithm, keyID string) ([]keys.IssuerKey, *Error) {
-	if c.deps.IssuerKeys == nil {
-		return nil, newError(ErrorInternal, "no issuer keys configured (Dependencies.IssuerKeys is nil, which Config.OAuthOnly permits only when nothing issuer-signed is verified)", nil)
-	}
-	candidates, err := c.deps.IssuerKeys.ResolveIssuerKeys(ctx, keys.IssuerKeyRequest{
-		Issuer: c.cfg.Issuer.String(), Purpose: purpose, Algorithm: algorithm, KeyID: keyID,
-	})
-	if err != nil {
-		return nil, newError(ErrorInternal, "failed to resolve issuer keys", err)
-	}
-	if len(candidates.Keys) == 0 {
-		return nil, newError(ErrorInvalidResponse, "no matching issuer key", nil)
-	}
-	return candidates.Keys, nil
 }
 
 type rawTokenResponse struct {

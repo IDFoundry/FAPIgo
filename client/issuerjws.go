@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto"
 	"errors"
 
 	"github.com/idfoundry/fapigo/internal/jose"
@@ -68,16 +69,11 @@ func (c *Client) verifyIssuerJWS(ctx context.Context, compactJWS string) (jose.C
 	if algErr := checkSignedWith("JWS", parsed.Header.Algorithm, c.cfg.Algorithms.UserInfo, "UserInfo", "userinfo_signed_response_alg"); algErr != nil {
 		return jose.Compact{}, algErr
 	}
-	candidates, idErr := c.resolveIssuerKeyCandidates(ctx, keys.UserInfoVerification, c.cfg.Algorithms.UserInfo, parsed.Header.KeyID)
-	if idErr != nil {
-		return jose.Compact{}, idErr
+	verifyErr := c.verifyIssuerSigned(ctx, "JWS", keys.UserInfoVerification, c.cfg.Algorithms.UserInfo, parsed.Header.KeyID, func(pub crypto.PublicKey) error {
+		return parsed.Verify(pub, c.cfg.Algorithms.UserInfo)
+	})
+	if verifyErr != nil {
+		return jose.Compact{}, verifyErr
 	}
-
-	var verifyErr error
-	for _, candidate := range candidates {
-		if verifyErr = parsed.Verify(candidate.PublicKey, c.cfg.Algorithms.UserInfo); verifyErr == nil {
-			return parsed, nil
-		}
-	}
-	return jose.Compact{}, newError(ErrorInvalidResponse, "JWS verification failed", verifyErr)
+	return parsed, nil
 }

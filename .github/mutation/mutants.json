@@ -542,7 +542,7 @@
   {
     "id": "client-jarm-verify",
     "file": "client/authorization_response.go",
-    "old": "\tif verifyErr != nil {\n\t\treturn nil, \"\", newError(ErrorInvalidResponse, \"authorization response verification failed\", verifyErr)\n\t}",
+    "old": "\tif verifyErr != nil {\n\t\treturn nil, \"\", verifyErr\n\t}",
     "new": "\tif verifyErr != nil {\n\t\tp := map[string]json.RawMessage{}\n\t\tfor _, k := range []string{\"code\", \"state\", \"error\", \"error_description\", \"iss\"} {\n\t\t\tif v, ok := resp.Parameter(k); ok {\n\t\t\t\tp[k] = v\n\t\t\t}\n\t\t}\n\t\treturn p, responseModeJARM, nil\n\t}",
     "module": "root",
     "packages": [
@@ -550,6 +550,54 @@
     ],
     "run": "^TestHandleAuthorizationResponseRejectsUnverifiableJARM$",
     "why": "a JARM response that fails verification (key, iss, aud, exp) is refused"
+  },
+  {
+    "id": "client-issuer-key-candidate-cap",
+    "file": "client/issuer_key_candidates.go",
+    "old": "return set.Keys[:min(len(set.Keys), maxIssuerKeyCandidates)], nil",
+    "new": "return set.Keys, nil",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^(TestIssuerKeyCandidatesAreCapped|TestResolveIssuerKeyCandidatesKeepsTheFirstEight)$",
+    "why": "a JWS the issuer signed is tried against at most the first eight of its keys"
+  },
+  {
+    "id": "client-issuer-key-candidate-cap-boundary",
+    "file": "client/issuer_key_candidates.go",
+    "old": "const maxIssuerKeyCandidates = 8",
+    "new": "const maxIssuerKeyCandidates = 7",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestIssuerKeyCandidatesAreCapped$",
+    "why": "the issuer's eighth key for a JWS is still tried"
+  },
+  {
+    "id": "client-issuer-key-candidates-context",
+    "file": "client/issuer_key_candidates.go",
+    "old": "if err := ctx.Err(); err != nil {\n\t\t\treturn newError(ErrorInternal,",
+    "new": "if err := ctx.Err(); err != nil && false {\n\t\t\treturn newError(ErrorInternal,",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^(TestIssuerKeyCandidatesStopWhenTheContextEnds|TestVerifyIssuerSignedStopsOnceTheContextIsDone)$",
+    "why": "the client tries no more of the issuer's keys once the context is done"
+  },
+  {
+    "id": "client-issuer-signed-fail-closed",
+    "file": "client/issuer_key_candidates.go",
+    "old": "return newError(ErrorInvalidResponse, what+\" verification failed\", verifyErr)",
+    "new": "return nil",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^(TestHandleAuthorizationResponseRejectsUnverifiableJARM|TestValidateSignedIDTokenRejectsSignatureVerificationFailure|TestVerifyIssuerJWSRejectsSignatureVerificationFailure|TestIssuerKeyCandidatesAreCapped)$",
+    "why": "a JARM response, ID token or issuer JWS that none of the issuer's candidate keys verifies is refused"
   },
   {
     "id": "client-ciba-token-type",

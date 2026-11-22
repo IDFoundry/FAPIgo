@@ -150,9 +150,10 @@ func TestVerifyIssuerJWSRejectsSignatureVerificationFailure(t *testing.T) {
 }
 
 // TestVerifyIssuerJWSTriesEveryCandidateKey confirms VerifyIssuerJWS
-// tries every candidate the issuer advertises rather than only the
-// first — the same multi-candidate tolerance validateSignedIDToken
-// applies during key rotation.
+// tries each candidate the issuer advertises, up to
+// maxIssuerKeyCandidates, rather than only the first — the same
+// multi-candidate tolerance validateSignedIDToken applies during key
+// rotation.
 func TestVerifyIssuerJWSTriesEveryCandidateKey(t *testing.T) {
 	wrongKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

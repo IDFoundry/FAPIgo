@@ -152,11 +152,17 @@ func (s *Server) confirmGrantRecorded(ctx context.Context, subject string, refre
 // withdrawRefreshToken revokes the refresh token just stored under
 // refreshTokenHash, which won't be issued, and returns cause: a failure
 // to revoke it is joined to cause, so the token is never issued
-// unlisted either way.
+// unlisted either way. Once the token is revoked, it deletes the token's
+// GrantRegistry entry too (forgetRevokedRefreshToken), best effort: the
+// issuance may have failed on an outage, its grant not revoked, and the
+// entry would list that grant, with no refresh token behind it, until
+// the entry expires. A token it fails to revoke keeps its entry, for
+// RevokeListedGrant or RevokeSubjectGrants to revoke the token by.
 func (s *Server) withdrawRefreshToken(ctx context.Context, refreshTokenHash [32]byte, cause error) error {
 	if err := s.deps.Grants.RevokeRefreshToken(ctx, refreshTokenHash); err != nil {
 		return errors.Join(cause, fmt.Errorf("withdraw the refresh token: %w", err))
 	}
+	_ = s.forgetRevokedRefreshToken(ctx, refreshTokenHash)
 	return cause
 }
 

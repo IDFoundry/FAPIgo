@@ -43,9 +43,12 @@ are things no constructor can check.
   access tokens, and `RevokeGrant` refuses.
   [Step 2](../GETTING_STARTED.md#2-build-a-config)
 - [ ] *(yours)* **A revocation store sized for revoked grants,** each
-  kept at least 400 days. With a `Limits.RefreshTokenLifetime` over
-  that, withdraw grants with `RevokeListedGrant`, or through a
-  `Dependencies.Grants` that implements
+  kept at least 400 days, including the grant of every refresh token
+  revoked at the revocation endpoint or with `RevokeListedGrant` or
+  `RevokeSubjectGrants`, so with clients that revoke their refresh token
+  at every logout, every logout adds records kept that long. With a
+  `Limits.RefreshTokenLifetime` over that, withdraw grants with
+  `RevokeListedGrant`, or through a `Dependencies.Grants` that implements
   `storage.GrantRefreshTokenRevoker`, so their refresh tokens are
   revoked too, not only refused while the grant's record lasts.
   [Step 5](../GETTING_STARTED.md#5-the-one-piece-thats-genuinely-yours-the-login-flow)

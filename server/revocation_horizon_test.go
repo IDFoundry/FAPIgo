@@ -78,6 +78,17 @@ func rebuild(t *testing.T, h harness, mutate func(*server.Config), deps server.D
 // grantID and redeems the code, returning the refresh token.
 func exchangeWithGrantID(t *testing.T, h harness, grantID string) string {
 	t.Helper()
+	tokens, err := exchangeGrant(t, h, grantID)
+	if err != nil {
+		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	}
+	return tokens.RefreshToken.Reveal()
+}
+
+// exchangeGrant is exchangeWithGrantID, returning the code exchange's
+// result and error.
+func exchangeGrant(t *testing.T, h harness, grantID string) (server.TokenResult, error) {
+	t.Helper()
 	handle := beginInteractionRequestingScope(t, h, "openid accounts offline_access")
 	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
 		Handle: handle, Result: authorizeWithGrantID(t, h.now, grantID, "openid", "accounts", "offline_access"),
@@ -90,14 +101,10 @@ func exchangeWithGrantID(t *testing.T, h harness, grantID string) string {
 		t.Fatalf("CompleteAuthorization = %T, want a redirect", result)
 	}
 	dest := redirect.Destination().URL()
-	tokens, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+	return h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
 		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), dest.Query().Get("code"), testRedirectURI, testCodeVerifier)},
 		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
-	if err != nil {
-		t.Fatalf("ExchangeAuthorizationCode: %v", err)
-	}
-	return tokens.RefreshToken.Reveal()
 }
 
 // TestRevokedGrantStaysRevokedAfterRefreshLifetimeShortened is the review's

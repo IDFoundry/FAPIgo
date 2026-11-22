@@ -20,7 +20,9 @@ import (
 // storage.IssuedTokensRecorder, logging the calls a code exchange makes
 // after redeeming the code. beforeCreateRefreshToken, if set, runs at the
 // start of CreateRefreshToken, outside every lock — the point between
-// redeeming a code and recording what it issued.
+// redeeming a code and recording what it issued — and
+// beforeRecordIssuedTokens at the start of RecordIssuedTokens, once both
+// tokens are issued but before they're recorded.
 type recordingGrantStore struct {
 	*fakeGrantStore
 
@@ -35,6 +37,7 @@ type recordingGrantStore struct {
 	}
 
 	beforeCreateRefreshToken func()
+	beforeRecordIssuedTokens func()
 	// failCreateRefreshToken, if set, is what CreateRefreshToken returns.
 	failCreateRefreshToken error
 }
@@ -74,6 +77,10 @@ func (r *recordingGrantStore) RecordIssuedRefreshToken(ctx context.Context, code
 }
 
 func (r *recordingGrantStore) RecordIssuedTokens(ctx context.Context, codeHash [32]byte, accessKey string, accessExpiresAt time.Time, refreshHash [32]byte, refreshExpiresAt time.Time) error {
+	if hook := r.beforeRecordIssuedTokens; hook != nil {
+		r.beforeRecordIssuedTokens = nil
+		hook()
+	}
 	r.log("RecordIssuedTokens")
 	r.mu.Lock()
 	r.recorded.codeHash, r.recorded.accessKey, r.recorded.accessExpiresAt = codeHash, accessKey, accessExpiresAt
@@ -203,10 +210,13 @@ func TestCodeReuseRevokesTokensRecordedInOneWrite(t *testing.T) {
 // TestCodeReuseBeforeTheRecordStillEndsTheTokens: a reuse that reads the
 // code after it was redeemed but before RecordIssuedTokens has recorded
 // what it issued finds no token keys to revoke — as a reuse before
-// RecordIssuedAccessToken does in the two-call form — yet both tokens
-// the first exchange then returns are refused: the reuse revokes the
-// code's grant, which each token carries. Without the reuse, the same
-// tokens work.
+// RecordIssuedAccessToken does in the two-call form — yet the first
+// exchange issues nothing usable. The reuse revokes the code's grant: one
+// before the refresh token is stored is found when the exchange checks
+// the grant again once it has stored the token, so the exchange
+// withdraws it and fails; one after that check lets the exchange return
+// both tokens, and each is refused for the grant it carries. Without the
+// reuse, the tokens work.
 func TestCodeReuseBeforeTheRecordStillEndsTheTokens(t *testing.T) {
 	t.Run("NoReuse", func(t *testing.T) {
 		verifyErr, refreshErr := useTokensAfterExchange(t, false)
@@ -214,27 +224,56 @@ func TestCodeReuseBeforeTheRecordStillEndsTheTokens(t *testing.T) {
 			t.Fatalf("Verify = %v, RefreshAccessToken = %v, want both to succeed", verifyErr, refreshErr)
 		}
 	})
-	t.Run("ReuseMidExchange", func(t *testing.T) {
+	t.Run("ReuseMidExchange", testReuseMidExchange)
+	t.Run("ReuseOnceTheTokensAreIssued", func(t *testing.T) {
 		verifyErr, refreshErr := useTokensAfterExchange(t, true)
-		requireInvalidToken(t, verifyErr, "access token issued after the reuse")
+		requireInvalidToken(t, verifyErr, "access token issued before the reuse")
 		if refreshErr == nil {
-			t.Fatal("RefreshAccessToken with a refresh token issued after the reuse = nil error, want the grant refused")
+			t.Fatal("RefreshAccessToken with a refresh token issued before the reuse = nil error, want the grant refused")
 		}
 	})
 }
 
+// testReuseMidExchange reuses a code mid-exchange, between its
+// redemption and RecordIssuedTokens, and checks the exchange fails with
+// server_error, recording nothing, and withdraws the refresh token it
+// stored.
+func testReuseMidExchange(t *testing.T) {
+	h, store := newRecordingHarness(t)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts", "offline_access"})
+	var reuseErr error
+	store.beforeCreateRefreshToken = func() {
+		_, reuseErr = exchangeCode(t, h, code, generateKey(t))
+	}
+	_, err := exchangeCode(t, h, code, generateKey(t))
+	if reuseErr == nil {
+		t.Fatal("ExchangeAuthorizationCode reusing the code mid-exchange = nil error, want error")
+	}
+	if err == nil || serverErrorCode(t, err) != server.ErrorServerError {
+		t.Fatalf("ExchangeAuthorizationCode with its code reused mid-exchange = %v, want server_error, issuing nothing", err)
+	}
+	if got := store.loggedCalls(); !slices.Equal(got, []string{"CreateRefreshToken"}) {
+		t.Fatalf("grant store calls = %v, want the refresh token stored, and nothing recorded", got)
+	}
+	h.grants.mu.Lock()
+	defer h.grants.mu.Unlock()
+	if len(h.grants.refreshTokens) != 1 || !h.grants.refreshRevoked[h.grants.refreshTokens[0].TokenHash] {
+		t.Errorf("%d refresh tokens stored, revoked: %v; want the one stored as its code was reused, withdrawn", len(h.grants.refreshTokens), h.grants.refreshRevoked)
+	}
+}
+
 // useTokensAfterExchange exchanges a code with "offline_access" over a
-// recordingGrantStore — reusing the code mid-exchange, between its
-// redemption and RecordIssuedTokens, when reuse is set — and then uses
-// both tokens: the access token at a resource server, the refresh token
-// to refresh.
+// recordingGrantStore — reusing the code once both tokens are issued,
+// before RecordIssuedTokens records them, when reuse is set — and then
+// uses both tokens: the access token at a resource server, the refresh
+// token to refresh.
 func useTokensAfterExchange(t *testing.T, reuse bool) (verifyErr, refreshErr error) {
 	t.Helper()
 	h, store := newRecordingHarness(t)
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts", "offline_access"})
 	var reuseErr error
 	if reuse {
-		store.beforeCreateRefreshToken = func() {
+		store.beforeRecordIssuedTokens = func() {
 			_, reuseErr = exchangeCode(t, h, code, generateKey(t))
 		}
 	}
@@ -244,7 +283,7 @@ func useTokensAfterExchange(t *testing.T, reuse bool) (verifyErr, refreshErr err
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
 	}
 	if reuse && reuseErr == nil {
-		t.Fatal("ExchangeAuthorizationCode reusing the code mid-exchange = nil error, want error")
+		t.Fatal("ExchangeAuthorizationCode reusing the code once the tokens were issued = nil error, want error")
 	}
 	if got := store.loggedCalls(); !slices.Equal(got, []string{"CreateRefreshToken", "RecordIssuedTokens"}) {
 		t.Fatalf("grant store calls = %v, want the refresh token issued, then both tokens recorded", got)

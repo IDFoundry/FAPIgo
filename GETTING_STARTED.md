@@ -944,15 +944,20 @@ request.
 
 **How long a revoked grant stays revoked.** `srv.RevokeGrant` records
 the grant as revoked for at least 400 days, longer when the current
-`Limits` let something issued from it be used for longer, and a reused
-authorization code's grant is recorded the same way. When
-`Dependencies.Grants` implements `storage.GrantRefreshTokenRevoker`
-(`memstore`'s does), the grant's refresh tokens are revoked in the store
-too, so nothing can redeem them again, whatever lifetimes apply later;
-if that fails, `RevokeGrant` says the grant is revoked but its refresh
-tokens couldn't all be revoked, and calling it again revokes the rest.
-Otherwise, and for a refresh token stored before the store had it, or
-while `RevokeGrant` ran, only the record refuses them: raising
+`Limits` let something issued from it be used for longer. A reused
+authorization code's grant is recorded the same way, as is the code or
+CIBA grant of a refresh token revoked at the revocation endpoint or
+through the registry. When `Dependencies.Grants` implements
+`storage.GrantRefreshTokenRevoker` (`memstore`'s does), the grant's
+refresh tokens are revoked in the store too, so nothing can redeem them
+again, whatever lifetimes apply later; if that fails, `RevokeGrant` says
+the grant is revoked but its refresh tokens couldn't all be revoked, and
+calling it again revokes the rest. Otherwise, and for a refresh token
+stored before the store had it, only the record refuses them (one
+issued while `RevokeGrant` runs isn't left to the record alone unless
+the grant's others are: the issuance checks the grant's revocation
+again once it has stored the token, and withdraws it instead if the
+record is there by then): raising
 `Limits.RefreshTokenLifetime` later, or running instances with longer
 `Limits`, can't bring a revoked grant back unless a refresh token
 lifetime over 400 days applies. With longer lifetimes, withdraw grants
@@ -960,8 +965,8 @@ with `RevokeListedGrant`, which revokes the refresh token itself, or
 call `RevokeGrant` again once the longer lifetime is in force;
 `RevokeSubjectGrants` also revokes the refresh tokens of the user's
 grants already revoked that way. Either way, the revocation store keeps
-one record per revoked grant, and per reused code, for those 400 days
-at least.
+these records for those 400 days at least, one for every revoked grant,
+reused code and refresh token revoked.
 
 **Closing an account.** `srv.RevokeSubjectGrants(ctx, subject)` revokes
 every grant the registry lists for the user, ending the refresh tokens

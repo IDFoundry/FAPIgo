@@ -17,8 +17,9 @@ import (
 // distinct kids — the old and new key both published until clients
 // switch — needs more than one; a key set listing many keys for one
 // algorithm costs a signature verification each, so the rest are never
-// tried. resource.JWTAccessTokens.MaxKeyCandidates and the client's
-// issuer-key lookup try several the same way.
+// tried. An authorization server's keys are tried the same way, up to a
+// bound of their own: at most eight by package client, and at most
+// MaxKeyCandidates by resource.JWTAccessTokens.
 const maxKeyCandidates = 8
 
 // resolveClientKeys returns the verification keys matching kid/alg

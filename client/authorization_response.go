@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto"
 	"crypto/subtle"
 	"encoding/json"
 	"time"
@@ -342,33 +343,18 @@ func (c *Client) parseCallbackParams(ctx context.Context, cb AuthorizationCallba
 	if algErr := checkSignedWith("authorization response", resp.Algorithm(), c.cfg.Algorithms.JARM, "JARM", "authorization_signed_response_alg"); algErr != nil {
 		return nil, "", algErr
 	}
-	candidates, err := c.deps.IssuerKeys.ResolveIssuerKeys(ctx, keys.IssuerKeyRequest{
-		Issuer: c.cfg.Issuer.String(), Purpose: keys.JARMVerification,
-		Algorithm: c.cfg.Algorithms.JARM, KeyID: resp.KeyID(),
+	policy := jarm.VerifyPolicy{
+		ExpectedIssuer: c.cfg.Issuer.String(), ExpectedAudience: c.cfg.ClientID.String(),
+		Algorithm: c.cfg.Algorithms.JARM, Now: c.deps.Clock.Now(),
+		MaxLifetime: c.cfg.Limits.MaxJARMResponseLifetime, MaxClockSkew: c.cfg.Limits.MaxClockSkew,
+	}
+	var verified jarm.VerifiedResponse
+	verifyErr := c.verifyIssuerSigned(ctx, "authorization response", keys.JARMVerification, c.cfg.Algorithms.JARM, resp.KeyID(), func(pub crypto.PublicKey) (err error) {
+		verified, err = resp.Verify(pub, policy)
+		return err
 	})
-	if err != nil {
-		return nil, "", newError(ErrorInternal, "failed to resolve issuer keys", err)
-	}
-	if len(candidates.Keys) == 0 {
-		return nil, "", newError(ErrorInvalidResponse, "no matching issuer key for authorization response", nil)
-	}
-
-	var (
-		verified  jarm.VerifiedResponse
-		verifyErr error
-	)
-	for _, candidate := range candidates.Keys {
-		verified, verifyErr = resp.Verify(candidate.PublicKey, jarm.VerifyPolicy{
-			ExpectedIssuer: c.cfg.Issuer.String(), ExpectedAudience: c.cfg.ClientID.String(),
-			Algorithm: c.cfg.Algorithms.JARM, Now: c.deps.Clock.Now(),
-			MaxLifetime: c.cfg.Limits.MaxJARMResponseLifetime, MaxClockSkew: c.cfg.Limits.MaxClockSkew,
-		})
-		if verifyErr == nil {
-			break
-		}
-	}
 	if verifyErr != nil {
-		return nil, "", newError(ErrorInvalidResponse, "authorization response verification failed", verifyErr)
+		return nil, "", verifyErr
 	}
 
 	return verified.Parameters, responseModeJARM, nil

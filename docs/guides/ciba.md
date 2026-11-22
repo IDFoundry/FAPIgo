@@ -135,7 +135,11 @@ func backchannelAuthentication(w http.ResponseWriter, r *http.Request) {
    `access_denied`) against the handle, once, and refuses one made after
    the request expired (`expired_token`). `server.InteractionNeeded`
    answers a redirect's `prompt=none` only; CIBA refuses it. For a ping
-   client it then calls `Dependencies.BackchannelNotifier`.
+   client it then calls `Dependencies.BackchannelNotifier`, once the
+   decision is recorded, out of the user's inbox and audited, and waits
+   for it: a client whose notification endpoint doesn't answer holds
+   the call for the notifier's timeout (`backchannelhttp`'s
+   `Config.Timeout`), so keep that to a few seconds.
 3. **`ExchangeBackchannelAuthentication`** serves the token endpoint's
    CIBA grant (`TokenEndpointRequest.BackchannelTokenExchange()`):
    `authorization_pending` until a decision, `slow_down` for a poll
@@ -193,7 +197,16 @@ does (`server.ErrUnknownUserID`), so it can stand in for it.
 `srv.DenyBackchannelInteractions(ctx, subject, reason)` denies every
 request awaiting a user at once, when their account closes, say: each
 client gets `access_denied`, a ping client is notified, and the inbox
-empties.
+empties. Every denial is recorded before any client is notified, so a
+client whose endpoint doesn't answer can't hold up the others; the
+notifications then go out eight at a time, each taking up to the
+notifier's timeout, and the call returns once they're done. Run it on a
+context that isn't tied to an interactive request's deadline, such as
+`context.WithoutCancel(r.Context())` or a background job's: with a
+store that honours it, a context that ends early leaves the remaining
+requests pending. To empty an inbox for good, have
+`BackchannelSubjects` stop resolving the user's hints first, then call
+it again until `ListBackchannelInteractions` lists nothing.
 
 **How much an inbox holds.** Any registered CIBA client can name a user
 whose hint it knows, so the inbox is capped. A user may have at most

@@ -56,6 +56,14 @@ type BackchannelNotifier interface {
 	// this server therefore treats any error
 	// Notify returns as best-effort informational only: it is never
 	// allowed to fail the decision that triggered it.
+	//
+	// Notify is called once the decision is recorded, and the caller
+	// waits for it: CompleteBackchannelAuthentication for its one
+	// notification, DenyBackchannelInteractions for several sent at
+	// once. So Notify must be safe for concurrent use, and must bound
+	// how long it takes, as backchannelhttp.Notifier does with its
+	// Config.Timeout: otherwise a client's notification endpoint that
+	// doesn't answer holds the caller until ctx ends.
 	Notify(ctx context.Context, notification BackchannelNotification) error
 }
 

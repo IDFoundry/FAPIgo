@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"strings"
+	"sync"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/storage"
@@ -46,9 +47,42 @@ type CompleteBackchannelAuthenticationRequest struct {
 // to redirect to. A non-nil return is always a *Error (satisfying this
 // package's usual errors.As(err, &serverErr) pattern), never a bare
 // error from a dependency.
+//
+// A client registered for ping delivery is then notified, through
+// Dependencies.BackchannelNotifier, and the call returns once the
+// notification has been sent or has failed: a client whose notification
+// endpoint doesn't answer holds it for as long as the notifier allows,
+// backchannelhttp's Config.Timeout. Everything else is done first: the
+// decision is recorded, the request leaves its user's inbox and the
+// decision is audited, so a notification cut short, by ctx ending or
+// otherwise, loses only the notification, and the client can poll
+// instead (CIBA Core §10.1).
 func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req CompleteBackchannelAuthenticationRequest) error {
+	decided, err := s.recordBackchannelDecision(ctx, req)
+	if err != nil {
+		return err
+	}
+	// Ping notification dispatch is unconditional on Status — a client
+	// registered for ping delivery needs to know "go poll now"
+	// regardless of whether the decision was Approved, Denied or
+	// AuthenticationFailed, and best-effort: a ping client may also poll
+	// the token endpoint (CIBA §10.1), so a missed or failed notification
+	// doesn't leave it stuck, and its error is never allowed to fail this
+	// call
+	// (mirrors the existing _ = s.deps.Revocation.Revoke(...) precedent
+	// in server/token.go).
+	s.notifyBackchannelPing(ctx, decided)
+	return nil
+}
+
+// recordBackchannelDecision is CompleteBackchannelAuthentication short
+// of the ping notification: it records req's decision, takes the request
+// out of its user's inbox and audits the decision, then returns what the
+// store returned for it, which notifyBackchannelPing needs. A decision
+// it refuses is an *Error, already audited.
+func (s *Server) recordBackchannelDecision(ctx context.Context, req CompleteBackchannelAuthenticationRequest) (storage.DecidedBackchannelAuthentication, *Error) {
 	if s.deps.Backchannel == nil {
-		return newError(ErrorServerError, 500, "backchannel authentication is not configured", nil)
+		return storage.DecidedBackchannelAuthentication{}, newError(ErrorServerError, 500, "backchannel authentication is not configured", nil)
 	}
 	handleHash := backchannelHandleHash(req.Handle)
 	decision := storage.DecideBackchannelAuthentication{
@@ -63,24 +97,24 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 	if lookupErr != nil {
 		wrapped := storeFailure(ctx, lookupErr, "failed to look up the backchannel authentication request", newError(ErrorInvalidRequest, 400, invalidBackchannelHandleMessage, lookupErr))
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
-		return wrapped
+		return storage.DecidedBackchannelAuthentication{}, wrapped
 	}
 	request, decodeErr := s.decodeOwnRequestRecord(pending.Request)
 	if decodeErr != nil {
 		wrapped := recordFailure(decodeErr, newError(ErrorInvalidRequest, 400, invalidBackchannelHandleMessage, nil), "backchannel authentication request")
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
-		return wrapped
+		return storage.DecidedBackchannelAuthentication{}, wrapped
 	}
 	if request.ExpiresAt != nil && !s.deps.Clock.Now().Before(*request.ExpiresAt) {
 		wrapped := newError(ErrorExpiredToken, 400, "backchannel authentication request has expired", nil)
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
-		return wrapped
+		return storage.DecidedBackchannelAuthentication{}, wrapped
 	}
 
 	switch result := req.Result.(type) {
 	case authorizeResult:
 		if failErr := s.approveBackchannelAuthentication(ctx, pending.ClientID, request, result, &decision); failErr != nil {
-			return failErr
+			return storage.DecidedBackchannelAuthentication{}, failErr
 		}
 	case denyResult:
 		decision.Status = storage.BackchannelAuthenticationDenied
@@ -95,30 +129,44 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 	default:
 		err := newError(ErrorServerError, 500, "unrecognized interaction result", nil)
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
-		return err
+		return storage.DecidedBackchannelAuthentication{}, err
 	}
 
 	decided, err := s.deps.Backchannel.DecideBackchannelAuthentication(ctx, decision)
 	if err != nil {
 		wrapped := storeFailure(ctx, err, "failed to record the backchannel authentication decision", newError(ErrorInvalidRequest, 400, invalidBackchannelHandleMessage, err))
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
-		return wrapped
+		return storage.DecidedBackchannelAuthentication{}, wrapped
 	}
 
-	// Ping notification dispatch is unconditional on Status — a client
-	// registered for ping delivery needs to know "go poll now"
-	// regardless of whether the decision was Approved, Denied or
-	// AuthenticationFailed, and best-effort: a ping client may also poll
-	// the token endpoint (CIBA §10.1), so a missed or failed notification
-	// doesn't leave it stuck, and its error is never allowed to fail this
-	// call
-	// (mirrors the existing _ = s.deps.Revocation.Revoke(...) precedent
-	// in server/token.go).
-	s.notifyBackchannelPing(ctx, decided)
+	// Both before the ping, which can take as long as the notifier
+	// allows: the decided request leaves its user's inbox at once, and
+	// its audit event can't be lost to a ctx that a client's unanswering
+	// notification endpoint has run out.
 	s.unfileBackchannelRequest(ctx, handleHash)
-
 	s.audit(ctx, AuditEventCompleteBackchannelAuthentication, decided.ClientID, AuditOutcomeSuccess, "")
-	return nil
+	return decided, nil
+}
+
+// backchannelAuthenticationFailure is why result's authentication fails
+// request, or "" when it doesn't. Each of these is a failed
+// authentication: an essential "acr" request with values the
+// authentication doesn't meet (OIDC Core §5.5.1.1); a user other than
+// the one an id_token_hint or "sub" value named (OIDC Core §5.5.1),
+// which clientSub, the authenticated user's sub at the request's
+// client, is checked against; and a user other than the one
+// Dependencies.BackchannelSubjects bound the request to through its
+// hint.
+func backchannelAuthenticationFailure(request requestRecord, result authorizeResult, clientSub string) string {
+	switch {
+	case !meetsEssentialACR(request.EssentialACRValues, result.auth.acr):
+		return "the user's authentication doesn't meet the requested essential acr"
+	case !meetsRequiredSubject(request.RequiredSubject, clientSub):
+		return "the authenticated user isn't the one the request named"
+	case request.ResolvedSubject != "" && result.subject.id.value != request.ResolvedSubject:
+		return "the authenticated user isn't the one the request's hint named"
+	}
+	return ""
 }
 
 // approveBackchannelAuthentication records an Authorize for the pending
@@ -147,28 +195,10 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		return subErr
 	}
 
-	// OIDC Core §5.5.1.1: an essential "acr" request with values that
-	// the authentication doesn't meet is a failed authentication, so
-	// record it as one and issue nothing.
-	if !meetsEssentialACR(request.EssentialACRValues, result.auth.acr) {
+	// A failed authentication is recorded as one, and nothing is issued.
+	if reason := backchannelAuthenticationFailure(request, result, clientSub); reason != "" {
 		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
-		decision.Reason = "the user's authentication doesn't meet the requested essential acr"
-		return nil
-	}
-
-	// OIDC Core §5.5.1: the user an id_token_hint or "sub" value
-	// named must be the one authenticated; anyone else is a failed
-	// authentication.
-	if !meetsRequiredSubject(request.RequiredSubject, clientSub) {
-		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
-		decision.Reason = "the authenticated user isn't the one the request named"
-		return nil
-	}
-	// Dependencies.BackchannelSubjects bound the request to the user its
-	// hint names: anyone else is a failed authentication too.
-	if request.ResolvedSubject != "" && result.subject.id.value != request.ResolvedSubject {
-		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
-		decision.Reason = "the authenticated user isn't the one the request's hint named"
+		decision.Reason = reason
 		return nil
 	}
 
@@ -259,6 +289,50 @@ func grantedBackchannelScopeError(request requestRecord, granted []string) *Erro
 		return newError(ErrorInvalidRequest, 400, `granted scope must keep "openid", which a CIBA token response's ID token requires`, nil)
 	}
 	return nil
+}
+
+// maxConcurrentBackchannelPings bounds how many ping notifications
+// notifyBackchannelPings sends at once: as many as one client may have
+// requests pending for one end user under the default
+// Limits.MaxPendingBackchannelAuthenticationRequestsPerClient, so that
+// one client's requests don't wait on each other, while a bulk denial
+// still opens only so many connections at a time to endpoints its
+// clients registered.
+const maxConcurrentBackchannelPings = 8
+
+// notifyBackchannelPings notifies the ping clients among decided, as
+// notifyBackchannelPing notifies one, sending up to
+// maxConcurrentBackchannelPings notifications at once, and returns once
+// each has been sent or has failed: ctx and the client repository's own
+// limits bound the lookup of its client, and ctx and the notifier's own
+// timeout the notification itself, so nothing is left sending after it
+// returns. A notifier that panics doesn't take the process down from a
+// goroutine of this package's: once the other notifications are done,
+// its panic is raised again here, in the caller's goroutine, where a
+// single decision's notification would have raised it.
+func (s *Server) notifyBackchannelPings(ctx context.Context, decided []storage.DecidedBackchannelAuthentication) {
+	var (
+		wg       sync.WaitGroup
+		first    sync.Once
+		panicked any
+	)
+	slots := make(chan struct{}, maxConcurrentBackchannelPings)
+	for _, d := range decided {
+		slots <- struct{}{}
+		wg.Go(func() {
+			defer func() {
+				<-slots
+				if r := recover(); r != nil {
+					first.Do(func() { panicked = r })
+				}
+			}()
+			s.notifyBackchannelPing(ctx, d)
+		})
+	}
+	wg.Wait()
+	if panicked != nil {
+		panic(panicked)
+	}
 }
 
 // notifyBackchannelPing tells a ping client its request was decided,

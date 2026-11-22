@@ -532,6 +532,66 @@
     "why": "a CIBA inbox listing whose context ended fails, rather than returning part of the inbox"
   },
   {
+    "id": "srv-ciba-decision-before-ping",
+    "file": "server/complete_backchannel_authentication.go",
+    "old": "s.unfileBackchannelRequest(ctx, handleHash)\n\ts.audit(ctx, AuditEventCompleteBackchannelAuthentication, decided.ClientID, AuditOutcomeSuccess, \"\")",
+    "new": "s.notifyBackchannelPing(ctx, decided)\n\ts.unfileBackchannelRequest(ctx, handleHash)\n\ts.audit(ctx, AuditEventCompleteBackchannelAuthentication, decided.ClientID, AuditOutcomeSuccess, \"\")",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCompleteBackchannelAuthenticationPingsOnceDecided$",
+    "why": "a CIBA ping client is notified only once its request is out of the inbox and its decision audited"
+  },
+  {
+    "id": "srv-ciba-deny-all-before-pings",
+    "file": "server/backchannel_inbox.go",
+    "old": "decided = append(decided, denial)",
+    "new": "decided = append(decided, denial)\n\t\t\ts.notifyBackchannelPing(ctx, denial)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestDenyBackchannelInteractionsPingsEightAtATime|TestDenyBackchannelInteractionsOnADeadline)$",
+    "why": "a bulk CIBA denial records every denial before it notifies any ping client"
+  },
+  {
+    "id": "srv-ciba-ping-concurrency-bound",
+    "file": "server/complete_backchannel_authentication.go",
+    "old": "slots := make(chan struct{}, maxConcurrentBackchannelPings)",
+    "new": "slots := make(chan struct{}, len(decided))",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestDenyBackchannelInteractionsPingsEightAtATime$",
+    "why": "a bulk CIBA denial sends at most eight ping notifications at once"
+  },
+  {
+    "id": "srv-ciba-pings-concurrent",
+    "file": "server/complete_backchannel_authentication.go",
+    "old": "const maxConcurrentBackchannelPings = 8",
+    "new": "const maxConcurrentBackchannelPings = 1",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestDenyBackchannelInteractionsPingsEightAtATime|TestDenyBackchannelInteractionsOnADeadline)$",
+    "why": "a bulk CIBA denial sends its ping notifications together, so one stalling endpoint doesn't hold up the rest"
+  },
+  {
+    "id": "srv-ciba-ping-panic-contained",
+    "file": "server/complete_backchannel_authentication.go",
+    "old": "if r := recover(); r != nil {",
+    "new": "if r := any(nil); r != nil {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestDenyBackchannelInteractionsRaisesANotifierPanic$",
+    "why": "a notifier's panic during a bulk CIBA denial reaches the caller, not crashing the process from a server goroutine"
+  },
+  {
     "id": "srv-access-token-size-cap",
     "file": "server/accesstoken.go",
     "old": "s.cfg.Limits.MaxAccessTokenBytes(); size > limit {",

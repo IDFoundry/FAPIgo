@@ -73,6 +73,16 @@ const (
 	// VerifyTokenRequestDPoP call. Its ClientID is always "": the
 	// request has no authenticated client.
 	AuditEventVerifyTokenRequestDPoP
+
+	// AuditEventRevokeReusedAuthorizationCode records the revocation of
+	// what an authorization code issued, when the client it was issued
+	// to presents it again, with the code_verifier, redirect_uri and
+	// DPoP key it was issued for, after redeeming it (RFC 6749 §4.1.2).
+	// The ExchangeAuthorizationCode call presenting it still records its
+	// own failed AuditEventExchangeAuthorizationCode. Outcome is
+	// AuditOutcomeFailure when a revocation couldn't be written, so
+	// something issued from the code may still be accepted.
+	AuditEventRevokeReusedAuthorizationCode
 )
 
 // AuditOutcome is a closed set of outcomes for an AuditEvent.

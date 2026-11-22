@@ -135,11 +135,17 @@ func (e *AuthorizationCodeAlreadyRedeemedError) Error() string {
 // code value, domain-separated so it never equals a refresh token's
 // digest (NewRefreshToken.TokenHash) of the same value — matching
 // ReplayStore's digest-only philosophy — never the code itself; the raw value exists only long enough to be hashed
-// here and returned to the client in the redirect response. For a code
-// issued to a client authenticated by Client Attestation, the digest
-// also covers the client instance it was issued to, so another
-// instance of the same client presenting the code finds none; a store
-// just keys the record by it either way.
+// here and returned to the client in the redirect response. The digest
+// also covers the code's PKCE challenge, its redirect URI and the DPoP
+// key it is bound to, if any, and, for a code issued to a client
+// authenticated by Client Attestation, the client instance it was
+// issued to, so a token request presenting the code with another
+// code_verifier, redirect_uri or DPoP key, or from another instance of
+// the same client, finds none. A store just keys the record by it
+// either way. The server may look for a code under two digests, with
+// the presented DPoP key and without, since it can't tell which the
+// code is bound to: a CodeHash the store doesn't know is only an error
+// (see RedeemAuthorizationCode), changing nothing.
 type NewAuthorizationCode struct {
 	CodeHash [32]byte
 

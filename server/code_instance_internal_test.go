@@ -10,26 +10,53 @@ import (
 
 // TestAuthorizationCodeHash covers the digest a code is stored under:
 // never the plain SHA-256 a refresh token with the same value is stored
-// under, and one per client instance for a client authenticated by
-// Client Attestation, so another instance of the same client finds no
-// code.
+// under, and the SHA-256 of the prefix, each part of the binding
+// length-prefixed, and the code.
 func TestAuthorizationCodeHash(t *testing.T) {
 	const code = "code-value"
-	if authorizationCodeHash(code, "") == sha256.Sum256([]byte(code)) {
-		t.Error("authorizationCodeHash without an instance is a refresh token's digest of the same value")
+	bound := codeBinding{codeChallenge: "challenge", redirectURI: "https://rp.example/cb"}
+	for _, binding := range []codeBinding{{}, bound, {instanceKey: "instance-a", codeChallenge: "challenge", dpopJKT: "jkt"}} {
+		if authorizationCodeHash(code, binding) == sha256.Sum256([]byte(code)) {
+			t.Errorf("authorizationCodeHash(%+v) is a refresh token's digest of the same value", binding)
+		}
 	}
-	if got, want := authorizationCodeHash(code, ""), sha256.Sum256([]byte(codeHashPrefix+code)); got != want {
-		t.Error("authorizationCodeHash without an instance isn't the SHA-256 of the prefixed code")
+	got := authorizationCodeHash(code, bound)
+	if got != sha256.Sum256([]byte(codeHashPrefix+"0:"+"9:challenge"+"21:https://rp.example/cb"+"0:"+code)) {
+		t.Error("authorizationCodeHash isn't the SHA-256 of the prefix, the length-prefixed binding and the code")
 	}
-	if authorizationCodeHash(code, "instance-a") == sha256.Sum256([]byte(code)) {
-		t.Error("authorizationCodeHash with an instance is a refresh token's digest of the same value")
-	}
-	a, b := authorizationCodeHash(code, "instance-a"), authorizationCodeHash(code, "instance-b")
-	if a == b || a == authorizationCodeHash(code, "") {
-		t.Error("authorizationCodeHash doesn't separate instances")
-	}
-	if a != authorizationCodeHash(code, "instance-a") {
+	if authorizationCodeHash(code, bound) != got {
 		t.Error("authorizationCodeHash isn't deterministic")
+	}
+}
+
+// TestAuthorizationCodeHashSeparatesBindings covers one digest per
+// client instance (for a client authenticated by Client Attestation),
+// PKCE challenge, redirect URI and DPoP key, so a token request
+// presenting another finds no code, and per split of the same text
+// between the parts, or between the last part and the code: a
+// code_challenge or redirect_uri is the client's to choose.
+func TestAuthorizationCodeHashSeparatesBindings(t *testing.T) {
+	type presented struct {
+		code    string
+		binding codeBinding
+	}
+	const code = "code-value"
+	issued := presented{code, codeBinding{instanceKey: "instance-a", codeChallenge: "challenge", redirectURI: "https://rp.example/cb", dpopJKT: "jkt"}}
+	for name, other := range map[string]presented{
+		"another instance":            {code, codeBinding{instanceKey: "instance-b", codeChallenge: "challenge", redirectURI: "https://rp.example/cb", dpopJKT: "jkt"}},
+		"no instance":                 {code, codeBinding{codeChallenge: "challenge", redirectURI: "https://rp.example/cb", dpopJKT: "jkt"}},
+		"another challenge":           {code, codeBinding{instanceKey: "instance-a", codeChallenge: "challengf", redirectURI: "https://rp.example/cb", dpopJKT: "jkt"}},
+		"another redirect URI":        {code, codeBinding{instanceKey: "instance-a", codeChallenge: "challenge", redirectURI: "https://rp.example/cc", dpopJKT: "jkt"}},
+		"another DPoP key":            {code, codeBinding{instanceKey: "instance-a", codeChallenge: "challenge", redirectURI: "https://rp.example/cb", dpopJKT: "jku"}},
+		"no DPoP key":                 {code, codeBinding{instanceKey: "instance-a", codeChallenge: "challenge", redirectURI: "https://rp.example/cb"}},
+		"instance into challenge":     {code, codeBinding{instanceKey: "instance-", codeChallenge: "achallenge", redirectURI: "https://rp.example/cb", dpopJKT: "jkt"}},
+		"challenge into redirect URI": {code, codeBinding{instanceKey: "instance-a", codeChallenge: "challeng", redirectURI: "ehttps://rp.example/cb", dpopJKT: "jkt"}},
+		"redirect URI into DPoP key":  {code, codeBinding{instanceKey: "instance-a", codeChallenge: "challenge", redirectURI: "https://rp.example/c", dpopJKT: "bjkt"}},
+		"DPoP key into code":          {"t" + code, codeBinding{instanceKey: "instance-a", codeChallenge: "challenge", redirectURI: "https://rp.example/cb", dpopJKT: "jk"}},
+	} {
+		if authorizationCodeHash(other.code, other.binding) == authorizationCodeHash(issued.code, issued.binding) {
+			t.Errorf("authorizationCodeHash doesn't separate %s", name)
+		}
 	}
 }
 

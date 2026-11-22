@@ -207,8 +207,14 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "failed to encode authorization code grant", err)), nil
 	}
 
+	// Stored under a digest of everything the token request must present
+	// with the code: one presenting anything else finds no code, and
+	// neither spends it nor revokes what it issued.
+	codeHash := authorizationCodeHash(code, codeBinding{
+		instanceKey: request.ClientInstanceKey, codeChallenge: codeChallenge, redirectURI: redirectURI, dpopJKT: dpopJKT,
+	})
 	if err := s.deps.Grants.CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{
-		CodeHash:  authorizationCodeHash(code, request.ClientInstanceKey),
+		CodeHash:  codeHash,
 		ClientID:  clientID,
 		Grant:     grant,
 		ExpiresAt: now.Add(s.cfg.Limits.AuthorizationCodeLifetime),

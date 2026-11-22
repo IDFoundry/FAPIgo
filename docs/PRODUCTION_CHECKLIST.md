@@ -39,7 +39,8 @@ are things no constructor can check.
   [Step 4](../GETTING_STARTED.md#4-wire-dependencies-and-construct-the-server)
 - [ ] **A revocation choice:** a revocation store the resource servers
   share, or `server.NoRevocation{}` with short access token lifetimes,
-  knowing that code reuse and `RevokeGrant` then revoke nothing.
+  knowing that a reused code then revokes its refresh token but not its
+  access tokens, and `RevokeGrant` refuses.
   [Step 2](../GETTING_STARTED.md#2-build-a-config)
 - [ ] *(yours)* **A revocation store sized for revoked grants,** each
   kept at least 400 days. With a `Limits.RefreshTokenLifetime` over
@@ -141,8 +142,11 @@ are things no constructor can check.
   MAC, or a server-side record. Never the raw handle in a plain cookie.
   [Step 10](../GETTING_STARTED.md#10-the-client-side-calling-a-fapi-20-authorization-server)
 - [ ] *(yours)* **Serve the redirect URI with `Referrer-Policy:
-  no-referrer`**, and no third-party content, so the authorization code
-  doesn't leak (RFC 9700 §4.2.4).
+  no-referrer`**, and no third-party content, and keep callback URLs out
+  of logs, so the authorization code doesn't leak (RFC 9700 §4.2.4):
+  under plain `ProfileFAPISecurity` the callback URL carries the code
+  and `state` unsigned.
+  [Step 4](../GETTING_STARTED.md#4-wire-dependencies-and-construct-the-server)
 - [ ] **`RequireAuthorizationResponseIss`**, and `MaxIDTokenLifetime`
   set to your provider's ID token lifetime if you know it.
 - [ ] *(yours)* **Seal stored tokens** with `client.TokenSetSealer` if you

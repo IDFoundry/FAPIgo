@@ -141,9 +141,10 @@ requires `Dependencies.Clock` to be `server.SystemClock{}` (or a clock
 declaring `server.ClockAssurance`) reading the real time. Those are what bound a leaked
 token when nothing else does, so keep them short, and shorter still with
 `Dependencies.Revocation: server.NoRevocation{}`: then a reused
-authorization code no longer revokes what it issued, `RevokeGrant`
-refuses, `RevokeToken` removes a refresh token but not the access tokens
-issued from it, and a stolen access token works until it expires.
+authorization code revokes the refresh token it issued but not its
+access tokens, `RevokeGrant` refuses, `RevokeToken` removes a refresh
+token but not the access tokens issued from it, and a stolen access
+token works until it expires.
 
 `AssuranceProduction` also requires `Dependencies.Nonces`: a DPoP nonce
 store (step 4), or `server.NoDPoPNonces{}` to explicitly decline.
@@ -555,6 +556,35 @@ that issues opaque tokens and a resource server that only knows how to
 verify JWTs, and every verification will fail with no compile-time
 signal that they were ever mismatched. `cmd/conformance-as/wiring.go`
 shows both sides wired consistently, switched on one runtime flag.
+
+**A reused authorization code revokes what it issued** (RFC 6749
+§4.1.2): its refresh token, even with `server.NoRevocation{}`; its
+first access token, through `Revocation`; and, when `Revocation` can
+also be read (it implements `IsRevoked`, as `memstore`'s and
+`sqlstore`'s revocation stores do), every access token from the code's
+grant, those refreshed from its refresh token included. A reuse is the
+client the code was issued to presenting it again with the
+`code_verifier` of its PKCE challenge, its `redirect_uri` and the DPoP
+key its `dpop_jkt` names, if any (and, for a client authenticated by
+attestation, from the same instance). The code is stored under a digest
+of all of them, so a presentation without one of them finds no code,
+neither spending it nor revoking anything, and another client's is
+refused without revoking anything either. Each reuse is audited as
+`server.AuditEventRevokeReusedAuthorizationCode`, with
+`AuditOutcomeFailure` when a revocation couldn't be written.
+
+That is what keeps a leaked authorization response from ending a
+user's grant. Under plain `ProfileFAPISecurity` the response's `code`,
+`state` and `iss` travel unsigned in the callback URL's query, which
+access logs, browser history and `Referer` headers can keep. Whoever
+reads one can deliver the code to the client's callback in a sign-in of
+their own, and a web client authenticates, sends its redirect URI and
+signs its DPoP proofs alike for every user: only that sign-in's
+`code_verifier` differs, so the code is refused without being spent or
+revoking anything. Under `ProfileFAPISecurityWithMessageSigning` the
+response, `state` included, is signed, and the client refuses such a
+delivery before any token request. Either way, keep callback URLs out
+of logs, and serve the redirect URI with `Referrer-Policy: no-referrer`.
 
 ### Durable storage: the `sqlstore` module
 

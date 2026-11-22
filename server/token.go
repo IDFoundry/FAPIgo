@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,7 +178,7 @@ func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCod
 		return newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this authorization code", nil)
 	}
 	if err := pkce.Verify(grant.CodeChallenge, pkce.S256, codeVerifier); err != nil {
-		return newError(ErrorInvalidGrant, 400, "code_verifier does not match code_challenge", err)
+		return newError(ErrorInvalidGrant, 400, codeVerifierMismatchDescription, err)
 	}
 	return nil
 }
@@ -188,10 +189,16 @@ func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCod
 // access token bound to the client's DPoP key or mTLS certificate (its
 // registered SenderConstrain), plus an ID token when the granted
 // scope included "openid" and a refresh token when it included
-// "offline_access". A client authenticated by Client Attestation
-// redeems a code only from the client instance (Client Instance Key)
-// that pushed its authorization request: to any other instance of the
-// client the code is unknown, neither spent nor treated as reused.
+// "offline_access".
+//
+// A code is found only with the code_verifier of its PKCE challenge,
+// its redirect_uri, the DPoP key its dpop_jkt names, if any, and, for a
+// client authenticated by Client Attestation, from the client instance
+// (Client Instance Key) that pushed its authorization request. To a
+// token request presenting anything else the code is unknown, neither
+// spent nor treated as reused, so a reuse revokes what the code issued
+// (RFC 6749 §4.1.2) only when it comes from the code's own client
+// presenting all of them.
 func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req AuthorizationCodeExchangeRequest) (_ TokenResult, retErr error) {
 	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
 	params, err := formParametersToMap(formParams)
@@ -212,7 +219,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", authErr)
 	}
 
-	code, redirectURI, codeVerifier, details, paramErr := s.codeExchangeParameters(params)
+	code, presented, details, paramErr := s.codeExchangeParameters(params)
 	if paramErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), paramErr)
 	}
@@ -224,39 +231,15 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	// The proof's nonce, if any, is spent from here: see
 	// attachNextDPoPNonceOnFailure.
 	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
+	presented.thumbprint, presented.instanceKey = thumbprint, authn.InstanceKey
 
-	// Keyed by the presenting client instance too, for a client
-	// authenticated by Client Attestation: another instance's code is
-	// unknown here, so it's neither spent nor treated as reused.
-	codeHash := authorizationCodeHash(code, authn.InstanceKey)
-	redeemed, err := s.deps.Grants.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{
-		CodeHash: codeHash,
-		ClientID: client.ID(),
-	})
+	redeemed, codeHash, err := s.redeemAuthorizationCode(ctx, client, code, presented)
 	if err != nil {
-		// RFC 6749 §4.1.2: "If an authorization code is used more than
-		// once, the authorization server MUST deny the request and
-		// SHOULD revoke (when possible) all tokens previously issued
-		// based on that authorization code." The deny-the-request half
-		// is unconditional (below, same as always); the revoke half
-		// only has something to act on if RecordIssuedAccessToken/
-		// RecordIssuedRefreshToken were actually called for the
-		// original redemption — see AuthorizationCodeAlreadyRedeemedError's
-		// own doc comment for when that's the case. Only the client the
-		// code was issued to triggers the revocation: another client
-		// holding a leaked code must not be able to end its tokens —
-		// nor, for an attested client, another instance of it, which
-		// never finds the code (authorizationCodeHash).
-		invalidErr := newError(ErrorInvalidGrant, 400, codeUnknownDescription, err)
-		if s.revokeTokensForReusedCode(ctx, err, client.ID(), codeHash) {
-			s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeFailure, "code reused by another client")
-			return TokenResult{}, invalidErr
-		}
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), storeFailure(ctx, err, "failed to redeem the authorization code", invalidErr))
+		return s.codeRedemptionFailed(ctx, client.ID(), err, codeHash)
 	}
 
 	now := s.deps.Clock.Now()
-	grant, grantErr := s.redeemedCodeGrant(ctx, client, redeemed, codeHash, codeExchange{redirectURI: redirectURI, thumbprint: thumbprint, codeVerifier: codeVerifier, instanceKey: authn.InstanceKey}, now)
+	grant, grantErr := s.redeemedCodeGrant(ctx, client, redeemed, codeHash, presented, now)
 	if grantErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), grantErr)
 	}
@@ -301,50 +284,155 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 const codeUnknownDescription = "code is invalid, expired, or already used"
 
 // codeExchange is what the token request presented with an
-// authorization code, for redeemedCodeGrant to check it against.
-// instanceKey is the presenting client's Client Instance Key thumbprint,
-// empty unless it authenticated by Client Attestation.
+// authorization code: its redirect_uri, its code_verifier and that
+// verifier's S256 challenge, the thumbprint of its DPoP key or mTLS
+// certificate, and the presenting client's Client Instance Key
+// thumbprint (instanceKey), empty unless it authenticated by Client
+// Attestation. The code is looked for under the digest these bind it to
+// (binding), and redeemedCodeGrant checks the record against them.
 type codeExchange struct {
-	redirectURI, thumbprint, codeVerifier, instanceKey string
+	redirectURI, codeVerifier, codeChallenge, thumbprint, instanceKey string
 }
 
-// codeHashPrefix and attestedCodeHashPrefix separate the digest an
-// authorization code is stored under from the plain SHA-256 a refresh
-// token is (issueRefreshToken), and an attested client instance's code
-// from any other.
-const (
-	codeHashPrefix         = "fapigo authorization code\x00"
-	attestedCodeHashPrefix = "fapigo attested authorization code\x00"
-)
+// binding is what a code presented as e is looked for under, with
+// dpopJKT the DPoP key thumbprint the code would be bound to: the
+// presented proof's, or "" for a code bound to none.
+func (e codeExchange) binding(dpopJKT string) codeBinding {
+	return codeBinding{instanceKey: e.instanceKey, codeChallenge: e.codeChallenge, redirectURI: e.redirectURI, dpopJKT: dpopJKT}
+}
+
+// codeBinding is what an authorization code's digest binds the code to
+// (authorizationCodeHash): what a token request must present with the
+// code for the store to find it at all.
+type codeBinding struct {
+	// instanceKey is the thumbprint of the Client Instance Key that
+	// pushed the code's authorization request, for a client
+	// authenticated by Client Attestation; empty for any other.
+	instanceKey string
+
+	// codeChallenge is the code's PKCE challenge: the authorization
+	// request's code_challenge when the code is issued, the S256
+	// challenge of the code_verifier when it is presented.
+	codeChallenge string
+
+	// redirectURI is the authorization request's redirect_uri, which the
+	// token request repeats exactly (RFC 6749 §4.1.3).
+	redirectURI string
+
+	// dpopJKT is the thumbprint of the DPoP key the code is bound to
+	// (RFC 9449 §10: the authorization request's dpop_jkt, or the key of
+	// the DPoP proof sent to PAR), empty for a code bound to none.
+	dpopJKT string
+}
+
+// codeHashPrefix starts the string an authorization code's digest is
+// taken over (authorizationCodeHash), separating that digest from the
+// plain SHA-256 a refresh token is stored under (issueRefreshToken).
+const codeHashPrefix = "fapigo authorization code\x00"
 
 // authorizationCodeHash is the digest an authorization code is stored
 // and redeemed under (storage.NewAuthorizationCode.CodeHash): the
-// SHA-256 of the code after codeHashPrefix, or, for a code issued to a
-// client authenticated by Client Attestation, the SHA-256 of the code
-// bound to the thumbprint of the Client Instance Key that pushed its
-// authorization request.
+// SHA-256 of codeHashPrefix, each part of binding length-prefixed, and
+// the code. The prefix keeps it from being a refresh token's digest
+// (the plain SHA-256 of the token, unprefixed so the refresh tokens
+// already stored stay valid) of the same value, so a store keeping
+// codes and refresh tokens in one table keyed by digest can't return
+// one for the other; the record's own grantRecord.Kind refuses it as
+// well. The length prefixes keep any two bindings apart, whatever their
+// parts hold: a code_challenge or redirect_uri is the client's to
+// choose.
 //
-// Neither is ever a refresh token's digest (the plain SHA-256 of the
-// token, unprefixed so the refresh tokens already stored stay valid),
-// whatever the two values, so a store keeping codes and refresh tokens
-// in one table keyed by digest can't return one for the other; the
-// record's own grantRecord.Kind refuses it as well.
-//
-// Every installation of a wallet app shares one client_id, so client_id
-// alone can't keep one installation from presenting a code another's
-// user authorized — and the store spends a code, or reports it reused,
-// before the exchange can check its PKCE verifier. Keyed by the
-// instance, a code presented by another instance is simply unknown to
-// the store: it isn't consumed, so the user's own exchange still
+// The store spends a code, or reports it reused, before the exchange
+// can check what the token request presented with it, and a reuse by
+// the code's own client revokes everything issued from it (RFC 6749
+// §4.1.2). Bound to its PKCE challenge, redirect URI and DPoP key, and
+// to the client instance for a client authenticated by Client
+// Attestation, a code presented with another code_verifier,
+// redirect_uri or DPoP key, or by another instance, is simply unknown
+// to the store: it isn't consumed, so the user's own exchange still
 // succeeds, and isn't treated as reused, so the tokens already issued
-// from it aren't revoked. Only the instance it was issued to can do
-// either. instanceKey is a base64url thumbprint and code a base64url
-// value, neither containing the NUL that separates them.
-func authorizationCodeHash(code, instanceKey string) [32]byte {
-	if instanceKey == "" {
-		return sha256.Sum256([]byte(codeHashPrefix + code))
+// from it aren't revoked.
+//
+// PKCE is what matters most here. A web client authenticates, sends its
+// redirect URI and signs DPoP proofs alike for all of its users, so a
+// code read from a leaked authorization response and delivered to the
+// client in a sign-in of the attacker's own reaches the token endpoint
+// as the user's own exchange would: only that sign-in's code_verifier
+// is different. And every installation of a wallet app shares one
+// client_id, so client_id alone can't keep one installation from
+// presenting a code another's user authorized.
+func authorizationCodeHash(code string, binding codeBinding) [32]byte {
+	return sha256.Sum256([]byte(codeHashPrefix +
+		lengthPrefixed(binding.instanceKey) + lengthPrefixed(binding.codeChallenge) +
+		lengthPrefixed(binding.redirectURI) + lengthPrefixed(binding.dpopJKT) + code))
+}
+
+// lengthPrefixed is part after its length in bytes and a colon: a
+// sequence of such strings splits into its parts one way only.
+func lengthPrefixed(part string) string {
+	return strconv.Itoa(len(part)) + ":" + part
+}
+
+// redeemAuthorizationCode redeems the authorization code code for
+// client, presented as presented describes, and returns it and the
+// digest it is stored under. A code with a dpop_jkt is stored under
+// that DPoP key (authorizationCodeHash), so for a DPoP-bound client it
+// is looked for under the presented proof's key first, then under none,
+// without the dpop_jkt it may not have. A miss leaves the store
+// unchanged, so the second lookup redeems as if it were the only one.
+// The first lookup's answer stands when it found the code, redeemed or
+// already redeemed, or when the store couldn't answer: had it
+// recovered, the second would miss a code stored under the DPoP key,
+// and answer it as unknown.
+func (s *Server) redeemAuthorizationCode(ctx context.Context, client storage.RegisteredClient, code string, presented codeExchange) (storage.RedeemedAuthorizationCode, [32]byte, error) {
+	redeem := func(dpopJKT string) (storage.RedeemedAuthorizationCode, [32]byte, error) {
+		hash := authorizationCodeHash(code, presented.binding(dpopJKT))
+		redeemed, err := s.deps.Grants.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{
+			CodeHash: hash,
+			ClientID: client.ID(),
+		})
+		return redeemed, hash, err
 	}
-	return sha256.Sum256([]byte(attestedCodeHashPrefix + instanceKey + "\x00" + code))
+	if client.SenderConstrain() != storage.SenderConstrainMTLS {
+		redeemed, hash, err := redeem(presented.thumbprint)
+		if err == nil || isCodeAlreadyRedeemed(err) || storeOutage(ctx, err) {
+			return redeemed, hash, err
+		}
+	}
+	return redeem("")
+}
+
+// isCodeAlreadyRedeemed reports whether err is the
+// storage.AuthorizationCodeAlreadyRedeemedError RedeemAuthorizationCode
+// returns for a code it found already redeemed.
+func isCodeAlreadyRedeemed(err error) bool {
+	var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
+	return errors.As(err, &alreadyRedeemed)
+}
+
+// codeRedemptionFailed answers an exchange whose code the store
+// couldn't redeem (err, for the code stored under codeHash), presented
+// by clientID. RFC 6749 §4.1.2: "If an authorization code is used more
+// than once, the authorization server MUST deny the request and SHOULD
+// revoke (when possible) all tokens previously issued based on that
+// authorization code." The request is always denied: invalid_grant, or
+// server_error when the store couldn't answer (storeFailure). The
+// revocation (revokeTokensForReusedCode) only has something to act on
+// if RecordIssuedAccessToken/RecordIssuedRefreshToken were actually
+// called for the original redemption — see
+// AuthorizationCodeAlreadyRedeemedError's own doc comment for when
+// that's the case. Only the client the code was issued to triggers it:
+// another client holding a leaked code must not be able to end its
+// tokens, nor anyone without the code's code_verifier, redirect_uri and
+// DPoP key, or, for an attested client, another instance of it: none
+// of them finds the code (authorizationCodeHash).
+func (s *Server) codeRedemptionFailed(ctx context.Context, clientID fapi.ClientID, err error, codeHash [32]byte) (TokenResult, error) {
+	invalidErr := newError(ErrorInvalidGrant, 400, codeUnknownDescription, err)
+	if s.revokeTokensForReusedCode(ctx, err, clientID, codeHash) {
+		s.audit(ctx, AuditEventExchangeAuthorizationCode, clientID, AuditOutcomeFailure, "code reused by another client")
+		return TokenResult{}, invalidErr
+	}
+	return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, clientID, storeFailure(ctx, err, "failed to redeem the authorization code", invalidErr))
 }
 
 // redeemedCodeGrant decodes the grant of redeemed, the authorization
@@ -408,22 +496,23 @@ func checkCodeInstance(grant grantRecord, instanceKey string) *Error {
 	return nil
 }
 
-// codeExchangeParameters returns the code, redirect_uri and
-// code_verifier an authorization code token request must carry, and the
+// codeExchangeParameters returns the code an authorization code token
+// request must carry, what it presented with it (its redirect_uri, and
+// its code_verifier with that verifier's S256 challenge), and the
 // authorization_details it may (tokenRequestAuthorizationDetails) —
 // checked here, before the code is redeemed, so a malformed one doesn't
 // spend it.
-func (s *Server) codeExchangeParameters(params map[string]string) (code, redirectURI, codeVerifier string, details requestedAuthorizationDetails, err *Error) {
+func (s *Server) codeExchangeParameters(params map[string]string) (code string, presented codeExchange, details requestedAuthorizationDetails, err *Error) {
 	code = params["code"]
 	if code == "" {
-		return "", "", "", details, newError(ErrorInvalidRequest, 400, "code is required", nil)
+		return "", codeExchange{}, details, newError(ErrorInvalidRequest, 400, "code is required", nil)
 	}
-	redirectURI = params["redirect_uri"]
-	if redirectURI == "" {
-		return "", "", "", details, newError(ErrorInvalidRequest, 400, "redirect_uri is required", nil)
+	presented.redirectURI = params["redirect_uri"]
+	if presented.redirectURI == "" {
+		return "", codeExchange{}, details, newError(ErrorInvalidRequest, 400, "redirect_uri is required", nil)
 	}
-	codeVerifier = params["code_verifier"]
-	if codeVerifier == "" {
+	presented.codeVerifier = params["code_verifier"]
+	if presented.codeVerifier == "" {
 		// invalid_grant, not invalid_request: RFC 7636 §4.6 treats a
 		// code_verifier problem as a grant-validity failure, not a
 		// malformed-request one — a missing verifier is judged the same
@@ -431,14 +520,27 @@ func (s *Server) codeExchangeParameters(params map[string]string) (code, redirec
 		// covering the case where PKCE was required for the
 		// authorization but the token request omits the verifier
 		// entirely.
-		return "", "", "", details, newError(ErrorInvalidGrant, 400, "code_verifier is required", nil)
+		return "", codeExchange{}, details, newError(ErrorInvalidGrant, 400, "code_verifier is required", nil)
 	}
+	// The code is stored under its challenge (authorizationCodeHash), so
+	// a verifier RFC 7636 §4.1 doesn't allow, which has none, matches no
+	// code: refused as one that doesn't match, without asking the store.
+	challenge, pkceErr := pkce.Challenge(presented.codeVerifier, pkce.S256)
+	if pkceErr != nil {
+		return "", codeExchange{}, details, newError(ErrorInvalidGrant, 400, codeVerifierMismatchDescription, pkceErr)
+	}
+	presented.codeChallenge = challenge
 	details, err = s.tokenRequestAuthorizationDetails(params)
 	if err != nil {
-		return "", "", "", details, err
+		return "", codeExchange{}, details, err
 	}
-	return code, redirectURI, codeVerifier, details, nil
+	return code, presented, details, nil
 }
+
+// codeVerifierMismatchDescription is the error_description of the
+// invalid_grant for a code_verifier that doesn't match the code's
+// challenge, or can't match any (RFC 7636 §4.6).
+const codeVerifierMismatchDescription = "code_verifier does not match code_challenge"
 
 // revokeTokensForReusedCode best-effort revokes whatever was already
 // issued for a reused authorization code — RFC 6749 §4.1.2's "SHOULD
@@ -451,7 +553,29 @@ func (s *Server) codeExchangeParameters(params map[string]string) (code, redirec
 // It revokes only when presentedBy is the client the code was issued to,
 // or the store didn't say which client that was (an empty ClientID),
 // and reports true when it declined because another client presented
-// the code.
+// the code. A revocation is audited on its own, as
+// AuditEventRevokeReusedAuthorizationCode: a failure when one of its
+// writes failed (revokeReusedCodeTokens), so something issued from the
+// code may still be accepted.
+func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, presentedBy fapi.ClientID, codeHash [32]byte) (crossClient bool) {
+	var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
+	if !errors.As(err, &alreadyRedeemed) {
+		return false
+	}
+	if alreadyRedeemed.ClientID != "" && alreadyRedeemed.ClientID != presentedBy {
+		return true
+	}
+	outcome, description := AuditOutcomeSuccess, ""
+	if s.revokeReusedCodeTokens(ctx, alreadyRedeemed, codeHash) != nil {
+		outcome, description = AuditOutcomeFailure, "the tokens issued from the code could not all be revoked"
+	}
+	s.audit(ctx, AuditEventRevokeReusedAuthorizationCode, presentedBy, outcome, description)
+	return false
+}
+
+// revokeReusedCodeTokens revokes what reused, the reuse of the code
+// stored under codeHash, says the code's first redemption issued, and
+// returns the failures of the revocations it wrote, joined.
 //
 // Besides the first access token and refresh token the store recorded,
 // it revokes the code's grant (grantrevocation.CodeGrantID of codeHash),
@@ -461,32 +585,31 @@ func (s *Server) codeExchangeParameters(params map[string]string) (code, redirec
 // record lasts as long as RevokeGrant's (grantRevocationRecordLifetime),
 // and a GrantStore that can find the code's refresh token by its grant
 // (storage.GrantRefreshTokenRevoker) then revokes it, even when the
-// store didn't record it against the code.
-func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, presentedBy fapi.ClientID, codeHash [32]byte) (crossClient bool) {
-	var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
-	if !errors.As(err, &alreadyRedeemed) {
-		return false
-	}
-	if alreadyRedeemed.ClientID != "" && alreadyRedeemed.ClientID != presentedBy {
-		return true
-	}
-	if alreadyRedeemed.IssuedAccessTokenKey != "" {
+// store didn't record it against the code. A revoked refresh token's
+// GrantRegistry entry is removed as well; failing to remove it isn't a
+// failed revocation, since the token stays revoked.
+func (s *Server) revokeReusedCodeTokens(ctx context.Context, reused *storage.AuthorizationCodeAlreadyRedeemedError, codeHash [32]byte) error {
+	var failures []error
+	if reused.IssuedAccessTokenKey != "" {
 		// Resource servers accept the token until exp+MaxClockSkew by
 		// their own clocks, which may lag this one's by another
 		// MaxClockSkew: the record must outlast both.
-		_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenKey, s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew)))
+		failures = append(failures, s.deps.Revocation.Revoke(ctx, reused.IssuedAccessTokenKey, s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew))))
 	}
-	if alreadyRedeemed.IssuedRefreshTokenHash != nil {
-		if s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash) == nil {
-			_ = s.forgetRevokedRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)
+	if reused.IssuedRefreshTokenHash != nil {
+		revokeErr := s.deps.Grants.RevokeRefreshToken(ctx, *reused.IssuedRefreshTokenHash)
+		if revokeErr == nil {
+			_ = s.forgetRevokedRefreshToken(ctx, *reused.IssuedRefreshTokenHash)
 		}
+		failures = append(failures, revokeErr)
 	}
 	if _, ok := s.grantRevocationReader(); ok {
 		key := grantrevocation.CodeKey(s.cfg.Issuer.String(), grantrevocation.CodeGrantID(codeHash))
-		_ = s.deps.Revocation.Revoke(ctx, key, s.deps.Clock.Now().Add(s.grantRevocationRecordLifetime()))
-		_, _ = s.revokeGrantRefreshTokens(ctx, key)
+		failures = append(failures, s.deps.Revocation.Revoke(ctx, key, s.deps.Clock.Now().Add(s.grantRevocationRecordLifetime())))
+		revokeErr, _ := s.revokeGrantRefreshTokens(ctx, key)
+		failures = append(failures, revokeErr)
 	}
-	return false
+	return errors.Join(failures...)
 }
 
 // issueCodeExchangeTokens issues the code exchange's access token, ID

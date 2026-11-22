@@ -48,6 +48,51 @@ func checkKeepsNothingOf(t *testing.T, repo *federation.AutomaticClientRepositor
 	}
 }
 
+// newFixtureRepository is an AutomaticClientRepository with cfg that
+// registers clients through f's Trust Anchor, at f's time, and has none
+// statically registered.
+func newFixtureRepository(t *testing.T, f *automaticRegistrationFixture, cfg federation.AutomaticRegistrationConfig) *federation.AutomaticClientRepository {
+	t.Helper()
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	return repo
+}
+
+// newAutomaticKeySource is repo's AutomaticClientKeySource, with no
+// client's keys statically registered.
+func newAutomaticKeySource(t *testing.T, repo *federation.AutomaticClientRepository) *federation.AutomaticClientKeySource {
+	t.Helper()
+	src, err := federation.NewAutomaticClientKeySource(alwaysFailsKeySource{}, repo)
+	if err != nil {
+		t.Fatalf("NewAutomaticClientKeySource: %v", err)
+	}
+	return src
+}
+
+// checkRefusesOverlongClientID fails t unless id, a well-formed Entity
+// Identifier too long for automatic registration, is an unknown client to
+// repo and src alike, and repo's error quotes only a prefix of it.
+func checkRefusesOverlongClientID(t *testing.T, repo *federation.AutomaticClientRepository, src *federation.AutomaticClientKeySource, id fapi.ClientID) {
+	t.Helper()
+	n := len(id)
+	if err := federation.ValidEntityID(string(id)); err != nil {
+		t.Fatalf("ValidEntityID(%d-byte id) = %v, want it well-formed", n, err)
+	}
+	_, err := repo.ResolveClient(context.Background(), id)
+	if err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
+		t.Fatalf("ResolveClient(%d-byte id) = %.200v, want an unknown client's error", n, err)
+	}
+	if len(err.Error()) > 512 {
+		t.Errorf("ResolveClient(%d-byte id) error is %d bytes, want only a prefix of the id quoted", n, len(err.Error()))
+	}
+	_, err = src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{ClientID: id, Algorithm: fapi.ES256})
+	if err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
+		t.Fatalf("ResolveVerificationKeys(%d-byte id) = %.200v, want an unknown client's error", n, err)
+	}
+}
+
 // TestAutomaticClientRepositoryRefusesAnOverlongClientID: a client_id
 // longer than any Entity Identifier automatic registration resolves is an
 // unknown client, as one that isn't an Entity Identifier is, whichever way
@@ -63,14 +108,8 @@ func TestAutomaticClientRepositoryRefusesAnOverlongClientID(t *testing.T) {
 	var failures resolutionFailures
 	cfg := validAutomaticRegistrationConfig()
 	cfg.OnResolutionFailure = failures.record
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
-	if err != nil {
-		t.Fatalf("NewAutomaticClientRepository: %v", err)
-	}
-	src, err := federation.NewAutomaticClientKeySource(alwaysFailsKeySource{}, repo)
-	if err != nil {
-		t.Fatalf("NewAutomaticClientKeySource: %v", err)
-	}
+	repo := newFixtureRepository(t, f, cfg)
+	src := newAutomaticKeySource(t, repo)
 	// entityID is a well-formed Entity Identifier of n bytes on the RP's
 	// host, which answers 404 for it.
 	entityID := func(n int) fapi.ClientID {
@@ -78,21 +117,7 @@ func TestAutomaticClientRepositoryRefusesAnOverlongClientID(t *testing.T) {
 	}
 
 	for _, n := range []int{federation.MaxEntityIDBytes + 1, 1 << 20} {
-		id := entityID(n)
-		if err := federation.ValidEntityID(string(id)); err != nil {
-			t.Fatalf("ValidEntityID(%d-byte id) = %v, want it well-formed", n, err)
-		}
-		_, err := repo.ResolveClient(context.Background(), id)
-		if err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
-			t.Fatalf("ResolveClient(%d-byte id) = %.200v, want an unknown client's error", n, err)
-		}
-		if len(err.Error()) > 512 {
-			t.Errorf("ResolveClient(%d-byte id) error is %d bytes, want only a prefix of the id quoted", n, len(err.Error()))
-		}
-		_, err = src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{ClientID: id, Algorithm: fapi.ES256})
-		if err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
-			t.Fatalf("ResolveVerificationKeys(%d-byte id) = %.200v, want an unknown client's error", n, err)
-		}
+		checkRefusesOverlongClientID(t, repo, src, entityID(n))
 	}
 	if n := fetched.Load(); n != 0 {
 		t.Errorf("overlong client_ids were fetched %d times, want 0", n)
@@ -105,7 +130,7 @@ func TestAutomaticClientRepositoryRefusesAnOverlongClientID(t *testing.T) {
 	}
 
 	id := entityID(federation.MaxEntityIDBytes)
-	_, err = repo.ResolveClient(context.Background(), id)
+	_, err := repo.ResolveClient(context.Background(), id)
 	if err == nil || errors.Is(err, storage.ErrStoreUnavailable) {
 		t.Fatalf("ResolveClient(unresolvable id at the limit) = %.200v, want its resolution's error", err)
 	}
@@ -120,6 +145,35 @@ func TestAutomaticClientRepositoryRefusesAnOverlongClientID(t *testing.T) {
 	}
 }
 
+// checkFailureReported fails t unless repo refuses id, a client_id read
+// from body, and reports that failure to OnResolutionFailure (recorded in
+// failures) once, by a client_id not sharing body's memory.
+func checkFailureReported(t *testing.T, repo *federation.AutomaticClientRepository, failures *resolutionFailures, id fapi.ClientID, body string) {
+	t.Helper()
+	if _, err := repo.ResolveClient(context.Background(), id); err == nil {
+		t.Fatal("ResolveClient(unresolvable client_id) = nil error, want error")
+	}
+	if len(failures.ids) != 1 {
+		t.Fatalf("OnResolutionFailure called %d times, want 1", len(failures.ids))
+	}
+	if sharesMemory(string(failures.ids[0]), body) {
+		t.Error("OnResolutionFailure's client_id shares the memory of the request body it came in")
+	}
+}
+
+// checkFailureRemembered fails t unless repo, having reported id's failure
+// once already (recorded in failures), refuses id again without reporting
+// it again.
+func checkFailureRemembered(t *testing.T, repo *federation.AutomaticClientRepository, failures *resolutionFailures, id fapi.ClientID) {
+	t.Helper()
+	if _, err := repo.ResolveClient(context.Background(), id); err == nil {
+		t.Fatal("ResolveClient(remembered failure) = nil error, want error")
+	}
+	if len(failures.ids) != 1 {
+		t.Fatalf("OnResolutionFailure called %d times, want once: the failure wasn't remembered", len(failures.ids))
+	}
+}
+
 // TestAutomaticClientRepositoryKeepsItsOwnCopyOfAClientID: a client_id
 // read from a form shares the memory of the whole request body, so
 // nothing the repository keeps for it — the key of a resolution in
@@ -128,17 +182,9 @@ func TestAutomaticClientRepositoryRefusesAnOverlongClientID(t *testing.T) {
 // OnResolutionFailure may be the caller's string.
 func TestAutomaticClientRepositoryKeepsItsOwnCopyOfAClientID(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
-	newRepository := func(t *testing.T, cfg federation.AutomaticRegistrationConfig) *federation.AutomaticClientRepository {
-		t.Helper()
-		repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
-		if err != nil {
-			t.Fatalf("NewAutomaticClientRepository: %v", err)
-		}
-		return repo
-	}
 
 	t.Run("registered", func(t *testing.T) {
-		repo := newRepository(t, validAutomaticRegistrationConfig())
+		repo := newFixtureRepository(t, f, validAutomaticRegistrationConfig())
 		id, body := inRequestBody(f.rpID)
 		if _, err := repo.ResolveClient(context.Background(), id); err != nil {
 			t.Fatalf("ResolveClient: %v", err)
@@ -150,11 +196,8 @@ func TestAutomaticClientRepositoryKeepsItsOwnCopyOfAClientID(t *testing.T) {
 	})
 
 	t.Run("keys resolved", func(t *testing.T) {
-		repo := newRepository(t, validAutomaticRegistrationConfig())
-		src, err := federation.NewAutomaticClientKeySource(alwaysFailsKeySource{}, repo)
-		if err != nil {
-			t.Fatalf("NewAutomaticClientKeySource: %v", err)
-		}
+		repo := newFixtureRepository(t, f, validAutomaticRegistrationConfig())
+		src := newAutomaticKeySource(t, repo)
 		id, body := inRequestBody(f.rpID)
 		if _, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{ClientID: id, Algorithm: fapi.ES256}); err != nil {
 			t.Fatalf("ResolveVerificationKeys: %v", err)
@@ -166,26 +209,13 @@ func TestAutomaticClientRepositoryKeepsItsOwnCopyOfAClientID(t *testing.T) {
 		var failures resolutionFailures
 		cfg := validAutomaticRegistrationConfig()
 		cfg.OnResolutionFailure = failures.record
-		repo := newRepository(t, cfg)
+		repo := newFixtureRepository(t, f, cfg)
 		id, body := inRequestBody(f.rpID + "/unregistered") // the RP's host answers 404
-		if _, err := repo.ResolveClient(context.Background(), id); err == nil {
-			t.Fatal("ResolveClient(unresolvable client_id) = nil error, want error")
-		}
-		if len(failures.ids) != 1 {
-			t.Fatalf("OnResolutionFailure called %d times, want 1", len(failures.ids))
-		}
-		if sharesMemory(string(failures.ids[0]), body) {
-			t.Error("OnResolutionFailure's client_id shares the memory of the request body it came in")
-		}
+		checkFailureReported(t, repo, &failures, id, body)
 		// Named again, the failure is answered from the cache, which
 		// still keys it by its own copy.
 		again, againBody := inRequestBody(f.rpID + "/unregistered")
-		if _, err := repo.ResolveClient(context.Background(), again); err == nil {
-			t.Fatal("ResolveClient(remembered failure) = nil error, want error")
-		}
-		if len(failures.ids) != 1 {
-			t.Fatalf("OnResolutionFailure called %d times, want once: the failure wasn't remembered", len(failures.ids))
-		}
+		checkFailureRemembered(t, repo, &failures, again)
 		checkKeepsNothingOf(t, repo, body)
 		checkKeepsNothingOf(t, repo, againBody)
 	})

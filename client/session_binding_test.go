@@ -19,43 +19,48 @@ func TestCallbackMustBeBoundToItsSession(t *testing.T) {
 		if messageSigned {
 			name = "JARM"
 		}
-		t.Run(name, func(t *testing.T) {
-			c, as, _ := newTestClient(t, messageSigned)
-			ctx := context.Background()
-			scope := []string{"openid", "accounts"}
+		t.Run(name, func(t *testing.T) { checkCallbackBoundToItsSession(t, messageSigned) })
+	}
+}
 
-			// The fake AS issues its ID token with the most recent PAR's
-			// nonce, so the flow the test completes is begun last.
-			other, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: scope})
-			if err != nil {
-				t.Fatalf("BeginAuthorization: %v", err)
-			}
-			mine, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: scope})
-			if err != nil {
-				t.Fatalf("BeginAuthorization: %v", err)
-			}
-			callback := as.callbackFor(t, mine.Handle().String(), "auth-code-123", "")
+// checkCallbackBoundToItsSession is TestCallbackMustBeBoundToItsSession
+// for one response mode.
+func checkCallbackBoundToItsSession(t *testing.T, messageSigned bool) {
+	t.Helper()
+	c, as, _ := newTestClient(t, messageSigned)
+	ctx := context.Background()
+	scope := []string{"openid", "accounts"}
 
-			for label, session := range map[string]client.SessionHandle{
-				"no session":             {},
-				"another flow's session": other.Handle(),
-			} {
-				_, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: callback, Session: session})
-				if code := clientErrorCode(t, err); code != client.ErrorInvalidRequest {
-					t.Fatalf("%s: error code = %q, want %q", label, code, client.ErrorInvalidRequest)
-				}
-			}
+	// The fake AS issues its ID token with the most recent PAR's
+	// nonce, so the flow the test completes is begun last.
+	other, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: scope})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	mine, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: scope})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	callback := as.callbackFor(t, as.lastState, "auth-code-123", "")
 
-			// Neither rejection consumed the session: its own browser
-			// still completes it.
-			result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: callback, Session: mine.Handle()})
-			if err != nil {
-				t.Fatalf("CompleteAuthorization (own session): %v", err)
-			}
-			if _, ok := result.(client.CompletionSuccess); !ok {
-				t.Fatalf("result = %T, want client.CompletionSuccess", result)
-			}
-		})
+	for label, session := range map[string]client.SessionHandle{
+		"no session":             {},
+		"another flow's session": other.Handle(),
+	} {
+		_, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: callback, Session: session})
+		if code := clientErrorCode(t, err); code != client.ErrorInvalidRequest {
+			t.Fatalf("%s: error code = %q, want %q", label, code, client.ErrorInvalidRequest)
+		}
+	}
+
+	// Neither rejection consumed the session: its own browser
+	// still completes it.
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: callback, Session: mine.Handle()})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization (own session): %v", err)
+	}
+	if _, ok := result.(client.CompletionSuccess); !ok {
+		t.Fatalf("result = %T, want client.CompletionSuccess", result)
 	}
 }
 
@@ -91,7 +96,7 @@ func TestParseSessionHandle(t *testing.T) {
 func TestCallbackMustReachTheClientThatBeganIt(t *testing.T) {
 	shared := newFakeSessionStore()
 	useShared := func(_ *client.Config, deps *client.Dependencies) { deps.Sessions = shared }
-	began, _, _ := newTestClientWith(t, false, useShared)
+	began, beganAS, _ := newTestClientWith(t, false, useShared)
 	const otherIssuer = "https://other-as.example"
 	other, _, _ := newTestClientWith(t, false, func(cfg *client.Config, deps *client.Dependencies) {
 		useShared(cfg, deps)
@@ -108,7 +113,7 @@ func TestCallbackMustReachTheClientThatBeganIt(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	// A callback that looks right to the other client: its own issuer.
-	callback := url.Values{"state": {session.Handle().String()}, "code": {"auth-code-123"}, "iss": {otherIssuer}}.Encode()
+	callback := url.Values{"state": {beganAS.lastState}, "code": {"auth-code-123"}, "iss": {otherIssuer}}.Encode()
 	_, err = other.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: callback, Session: session.Handle()})
 	if code := clientErrorCode(t, err); code != client.ErrorInvalidRequest {
 		t.Fatalf("error code = %q, want %q", code, client.ErrorInvalidRequest)

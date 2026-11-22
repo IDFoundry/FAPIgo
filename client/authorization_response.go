@@ -28,9 +28,10 @@ type AuthorizationCallback struct {
 	// Session is the SessionHandle BeginAuthorization returned for this
 	// attempt, recovered from wherever the caller bound it to the user
 	// agent (see SessionHandle) — never from the callback itself.
-	// Required — a callback whose "state" doesn't match it is rejected
-	// before its session is consumed, so a callback URL delivered to a
-	// different browser can't complete someone else's flow — unless
+	// Required — a callback whose "state" isn't the one BeginAuthorization
+	// derived from it is rejected before its session is consumed, so a
+	// callback URL delivered to a different browser, or read on its way
+	// and replayed from one, can't complete someone else's flow — unless
 	// Config.CallbackBinding is CallbackBindingDeviceLocalStore, for a
 	// native app whose session store is its own on-device storage: see
 	// that constant.
@@ -112,13 +113,26 @@ func (CallbackDenied) callbackResult() {}
 // before anything else derived from params is trusted, including an
 // "error" code, since "clients MUST NOT assume that the error
 // originates from the intended authorization server" until iss itself
-// checks out — correlation state (via SessionStore.Consume, which also
-// prevents the same callback being processed twice), issuer, JARM
-// signature and claims when Config.Profile requires one, response-mode
-// consistency with what this session requested, and authorization-code
-// or error-response presence.
+// checks out — the callback's binding to cb.Session (see
+// AuthorizationCallback.Session), correlation state (via
+// SessionStore.Consume, which also prevents the same callback being
+// processed twice), issuer, JARM signature and claims when
+// Config.Profile requires one, response-mode consistency with what this
+// session requested, and authorization-code or error-response presence.
+// A JARM response with no Session, or whose "state" isn't the Session's,
+// is refused before any issuer key is resolved for it.
+//
+// It needs the authorization code flow configured, as BeginAuthorization
+// does: on a client missing either Endpoints.Authorization or
+// Dependencies.Sessions, such as one for CIBA or client credentials only
+// (with or without a session store), it returns ErrorInvalidRequest
+// before reading cb. An application running a Client per issuer routes
+// each callback to the Client that began its flow by a value it kept
+// with the session itself, such as the provider named by
+// client/sessioncookie's sealed value, never by the callback's own "iss"
+// or path, which whoever sends the callback chooses.
 func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb AuthorizationCallback) (CallbackResult, error) {
-	if err := c.checkTrustChain(); err != nil {
+	if err := c.checkAuthorizationCodeFlow(); err != nil {
 		return nil, err
 	}
 	params, respMode, err := c.parseCallbackParams(ctx, cb)
@@ -199,23 +213,11 @@ func (c *Client) checkAuthorizationResponseIss(params map[string]json.RawMessage
 // expected a response in respMode.
 func (c *Client) consumeCallbackSession(ctx context.Context, cb AuthorizationCallback, params map[string]json.RawMessage, respMode string) (sessionRecord, *Error) {
 	state, _ := paramString(params, "state")
-	if state == "" {
-		return sessionRecord{}, newError(ErrorInvalidRequest, "callback is missing state", nil)
-	}
 	// Bind the callback to the user agent that began the flow (RFC 9700
 	// §4.7) before consuming anything: a mismatch leaves the session
 	// intact for its rightful browser.
-	session := cb.Session.value
-	if session == "" && c.cfg.CallbackBinding == CallbackBindingDeviceLocalStore {
-		// The store holds only this app's sessions: one found by the
-		// callback's state is this app's.
-		session = state
-	}
-	if session == "" {
-		return sessionRecord{}, newError(ErrorInvalidRequest, "callback is not bound to a session: pass the SessionHandle kept with this user agent as AuthorizationCallback.Session (client/sessioncookie keeps it for a browser)", nil)
-	}
-	if subtle.ConstantTimeCompare([]byte(state), []byte(session)) != 1 {
-		return sessionRecord{}, newError(ErrorInvalidRequest, "callback state does not match this user agent's session", nil)
+	if bindErr := c.checkCallbackBinding(cb, state); bindErr != nil {
+		return sessionRecord{}, bindErr
 	}
 
 	consumed, consumeErr := c.deps.Sessions.Consume(ctx, storage.SessionConsumption{State: state})
@@ -257,6 +259,31 @@ func (c *Client) consumeCallbackSession(ctx context.Context, cb AuthorizationCal
 	return record, nil
 }
 
+// checkCallbackBinding refuses a callback whose "state" is state unless
+// it is bound to the user agent that began its flow (RFC 9700 §4.7):
+// state must be the one BeginAuthorization derived from cb.Session, the
+// handle that user agent kept (stateForHandle), compared in constant
+// time. Under CallbackBindingDeviceLocalStore a callback may come
+// without a Session: the store holds only this app's sessions, so one
+// found by the callback's state is this app's. It reads and changes
+// nothing, so a refused callback leaves the session for its rightful
+// user agent.
+func (c *Client) checkCallbackBinding(cb AuthorizationCallback, state string) *Error {
+	if state == "" {
+		return newError(ErrorInvalidRequest, "callback is missing state", nil)
+	}
+	if cb.Session.value == "" {
+		if c.cfg.CallbackBinding == CallbackBindingDeviceLocalStore {
+			return nil
+		}
+		return newError(ErrorInvalidRequest, "callback is not bound to a session: pass the SessionHandle kept with this user agent as AuthorizationCallback.Session (client/sessioncookie keeps it for a browser)", nil)
+	}
+	if subtle.ConstantTimeCompare([]byte(state), []byte(stateForHandle(cb.Session.value))) != 1 {
+		return newError(ErrorInvalidRequest, "callback state does not match this user agent's session", nil)
+	}
+	return nil
+}
+
 // callbackDenied returns the authorization server's error response, if
 // params is one (ok), and an error if its error code is malformed.
 func callbackDenied(params map[string]json.RawMessage) (CallbackResult, bool, *Error) {
@@ -279,7 +306,8 @@ func callbackDenied(params map[string]json.RawMessage) (CallbackResult, bool, *E
 // from a verified JARM response's claims (message-signing mode) —
 // selecting which by Config.Profile, never by which shape cb happens to
 // contain, so a plain-mode response can't be substituted for a
-// message-signed one.
+// message-signed one. A JARM response cb's Session can't accept is
+// refused before any issuer key is resolved for it.
 func (c *Client) parseCallbackParams(ctx context.Context, cb AuthorizationCallback) (map[string]json.RawMessage, string, *Error) {
 	form, err := par.DecodeForm([]byte(cb.RawQuery))
 	if err != nil {
@@ -287,28 +315,28 @@ func (c *Client) parseCallbackParams(ctx context.Context, cb AuthorizationCallba
 	}
 
 	if c.cfg.Profile != ProfileFAPISecurityWithMessageSigning {
-		params := make(map[string]json.RawMessage, len(form))
-		for k, v := range form {
-			// json.Marshal would replace invalid UTF-8 with U+FFFD, so two
-			// different values (two codes, say) would read back as one.
-			// Refused instead, as this client's JOSE and UserInfo decoding
-			// refuses what it can't represent losslessly.
-			if !utf8.ValidString(k) || !utf8.ValidString(v) {
-				return nil, "", newError(ErrorInvalidRequest, "callback query contains a parameter that isn't valid UTF-8", nil)
-			}
-			encoded, _ := json.Marshal(v)
-			params[k] = encoded
-		}
-		return params, responseModePlain, nil
+		return plainCallbackParams(form)
 	}
 
-	responseJWT, ok := form["response"]
-	if !ok || responseJWT == "" {
+	responseJWT := form["response"]
+	if responseJWT == "" {
 		return nil, "", newError(ErrorInvalidResponse, "callback is missing a signed response", nil)
 	}
 	resp, err := jarm.Parse(responseJWT)
 	if err != nil {
 		return nil, "", newError(ErrorInvalidResponse, "malformed authorization response", err)
+	}
+	// Refuse a response cb's Session can't accept (no Session where one
+	// is required, or a state that isn't the Session's) before resolving
+	// a key or checking a signature for it, so a forged one costs no
+	// verification. Its state is unverified here, but it only ever
+	// refuses: the signature covers it, so a response refused here would
+	// fail verification, or the same check of its verified state in
+	// consumeCallbackSession, anyway.
+	rawState, _ := resp.Parameter("state")
+	unverifiedState, _ := decodeJSONString(rawState)
+	if bindErr := c.checkCallbackBinding(cb, unverifiedState); bindErr != nil {
+		return nil, "", bindErr
 	}
 
 	if algErr := checkSignedWith("authorization response", resp.Algorithm(), c.cfg.Algorithms.JARM, "JARM", "authorization_signed_response_alg"); algErr != nil {
@@ -346,11 +374,36 @@ func (c *Client) parseCallbackParams(ctx context.Context, cb AuthorizationCallba
 	return verified.Parameters, responseModeJARM, nil
 }
 
+// plainCallbackParams is parseCallbackParams for a plain-mode response:
+// the callback query's own parameters, from its decoded form, each as
+// the JSON string it is.
+func plainCallbackParams(form map[string]string) (map[string]json.RawMessage, string, *Error) {
+	params := make(map[string]json.RawMessage, len(form))
+	for k, v := range form {
+		// json.Marshal would replace invalid UTF-8 with U+FFFD, so two
+		// different values (two codes, say) would read back as one.
+		// Refused instead, as this client's JOSE and UserInfo decoding
+		// refuses what it can't represent losslessly.
+		if !utf8.ValidString(k) || !utf8.ValidString(v) {
+			return nil, "", newError(ErrorInvalidRequest, "callback query contains a parameter that isn't valid UTF-8", nil)
+		}
+		encoded, _ := json.Marshal(v)
+		params[k] = encoded
+	}
+	return params, responseModePlain, nil
+}
+
 func paramString(params map[string]json.RawMessage, key string) (string, bool) {
 	raw, ok := params[key]
 	if !ok {
 		return "", false
 	}
+	return decodeJSONString(raw)
+}
+
+// decodeJSONString decodes raw as a JSON string, reporting whether it is
+// one.
+func decodeJSONString(raw json.RawMessage) (string, bool) {
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return "", false

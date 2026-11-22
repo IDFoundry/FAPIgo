@@ -109,26 +109,12 @@ func TestExchangeCodeRepeatsResources(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, as, _ := newTestClient(t, false)
-			ctx := context.Background()
-			session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}, Resource: resources})
-			if err != nil {
-				t.Fatalf("BeginAuthorization: %v", err)
-			}
-			result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{
-				RawQuery: as.callbackFor(t, session.Handle().String(), "auth-code-123", ""), Session: session.Handle(),
-			})
-			if err != nil {
-				t.Fatalf("CompleteAuthorization: %v", err)
-			}
+			tokens := completeFlow(t, c, as, client.BeginAuthorizationRequest{Scope: []string{"openid"}, Resource: resources}, "auth-code-123")
 			if got := as.lastTokenForm["resource"]; !slices.Equal(got, resources) {
 				t.Errorf("token request resource = %q, want %q", got, resources)
 			}
-			success, ok := result.(client.CompletionSuccess)
-			if !ok {
-				t.Fatalf("result = %T, want success", result)
-			}
-			if !slices.Equal(success.Tokens.Resource, resources) {
-				t.Errorf("TokenSet.Resource = %q, want %q", success.Tokens.Resource, resources)
+			if !slices.Equal(tokens.Resource, resources) {
+				t.Errorf("TokenSet.Resource = %q, want %q", tokens.Resource, resources)
 			}
 		})
 	}

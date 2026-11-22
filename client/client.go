@@ -624,9 +624,9 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 }
 
 // validateProductionDependencies applies AssuranceProduction's checks to
-// deps: the sessions store's capabilities (and, under
-// CallbackBindingDeviceLocalStore, that the client is a native app and
-// the store isn't shared), crypto/rand as the random
+// deps: the sessions store's capabilities, under
+// CallbackBindingDeviceLocalStore that the client is a native app and the
+// store, if any, isn't shared, crypto/rand as the random
 // source, the custody of the keys deps.Keys and deps.Decryption hold, the
 // issuer key source's hardening, and deps.HTTP's. It reports every one that falls
 // short, joined (errors.Join), rather than only the first, so a
@@ -635,8 +635,8 @@ func validateProductionDependencies(cfg Config, deps Dependencies) error {
 	var errs []error
 	if deps.Sessions != nil {
 		errs = append(errs, checkStoreAssurance("sessions", deps.Sessions))
-		errs = append(errs, checkDeviceLocalSessions(cfg, deps.Sessions))
 	}
+	errs = append(errs, checkDeviceLocalSessions(cfg, deps.Sessions))
 	errs = append(errs, checkRandom(deps.Random), checkClock(deps.Clock, cfg.Limits.MaxClockSkew))
 	if deps.Keys != nil {
 		errs = append(errs, checkKeyCustody("keys", deps.Keys))
@@ -754,7 +754,9 @@ func authenticatesWithCertificate(method storage.ClientAuthMethod) bool {
 // needs. A web client's https redirect means a server-side store holding
 // many user agents' sessions, single-instance or not, where finding a
 // session by the callback's state alone brings login CSRF back (RFC 9700
-// §4.7).
+// §4.7). A client with no redirect URI (no authorization code flow, and
+// perhaps no sessions store: sessions may be nil) isn't a native app
+// either, and is refused too.
 func checkDeviceLocalSessions(cfg Config, sessions any) error {
 	if cfg.CallbackBinding != CallbackBindingDeviceLocalStore {
 		return nil

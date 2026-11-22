@@ -20,11 +20,10 @@ func TestCallbackWithoutSessionForADeviceLocalStore(t *testing.T) {
 				cfg.CallbackBinding = client.CallbackBindingDeviceLocalStore
 			})
 			ctx := context.Background()
-			session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
-			if err != nil {
+			if _, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}}); err != nil {
 				t.Fatalf("BeginAuthorization: %v", err)
 			}
-			rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
+			rawQuery := as.callbackFor(t, as.lastState, "auth-code-123", "")
 			result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
 			if err != nil {
 				t.Fatalf("CompleteAuthorization(no Session): %v", err)
@@ -44,11 +43,10 @@ func TestCallbackWithoutSessionStillRefused(t *testing.T) {
 	ctx := context.Background()
 	t.Run("the default binding", func(t *testing.T) {
 		c, as, _ := newTestClient(t, false)
-		session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
-		if err != nil {
+		if _, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
 			t.Fatal(err)
 		}
-		_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: as.callbackFor(t, session.Handle().String(), "c", "")})
+		_, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: as.callbackFor(t, as.lastState, "c", "")})
 		if code := clientErrorCode(t, err); code != client.ErrorInvalidRequest {
 			t.Errorf("error code = %q, want %q", code, client.ErrorInvalidRequest)
 		}
@@ -70,15 +68,15 @@ func TestCallbackWithoutSessionStillRefused(t *testing.T) {
 	})
 	t.Run("a handle that doesn't match", func(t *testing.T) {
 		c, as := declaring(t)
-		first, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
-		if err != nil {
+		if _, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
 			t.Fatal(err)
 		}
+		firstState := as.lastState
 		second, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: as.callbackFor(t, first.Handle().String(), "c", ""), Session: second.Handle()})
+		_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: as.callbackFor(t, firstState, "c", ""), Session: second.Handle()})
 		if code := clientErrorCode(t, err); code != client.ErrorInvalidRequest {
 			t.Errorf("error code = %q, want %q", code, client.ErrorInvalidRequest)
 		}
@@ -98,11 +96,10 @@ func TestNewRefusesAnUnknownCallbackBinding(t *testing.T) {
 // doesn't advertise turning the binding off.
 func TestMissingSessionErrorPointsAtTheHandle(t *testing.T) {
 	c, as, _ := newTestClient(t, false)
-	session, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}})
-	if err != nil {
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.CompleteAuthorization(context.Background(), client.AuthorizationCallback{RawQuery: as.callbackFor(t, session.Handle().String(), "c", "")})
+	_, err := c.CompleteAuthorization(context.Background(), client.AuthorizationCallback{RawQuery: as.callbackFor(t, as.lastState, "c", "")})
 	if err == nil || !strings.Contains(err.Error(), "sessioncookie") || strings.Contains(err.Error(), "DeviceLocal") {
 		t.Errorf("error = %v, want it to point at the handle and sessioncookie, not the device-local binding", err)
 	}

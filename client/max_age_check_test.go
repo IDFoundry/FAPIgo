@@ -36,20 +36,7 @@ func TestCompleteAuthorizationChecksAuthTimeAgainstMaxAge(t *testing.T) {
 		{name: "no max_age, auth_time a year ahead", hasMaxAge: false, authAgo: -365 * 24 * time.Hour, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c, as, _ := newTestClient(t, false)
-			if tc.authAgo != 0 {
-				as.idTokenAuthTime = time.Now().Add(-tc.authAgo)
-			}
-			ctx := context.Background()
-			session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{
-				Scope: []string{"openid", "accounts"}, MaxAge: tc.maxAge, HasMaxAge: tc.hasMaxAge,
-			})
-			if err != nil {
-				t.Fatalf("BeginAuthorization: %v", err)
-			}
-			_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{
-				RawQuery: as.callbackFor(t, session.Handle().String(), "auth-code-123", ""), Session: session.Handle(),
-			})
+			err := completeWithAuthTime(t, tc.hasMaxAge, tc.maxAge, tc.authAgo)
 			if !tc.wantErr {
 				if err != nil {
 					t.Fatalf("CompleteAuthorization: %v", err)
@@ -62,6 +49,29 @@ func TestCompleteAuthorizationChecksAuthTimeAgainstMaxAge(t *testing.T) {
 			}
 		})
 	}
+}
+
+// completeWithAuthTime completes an authorization requesting maxAge
+// when hasMaxAge, whose ID token's auth_time is authAgo ago (none when
+// zero, in the future when negative), and returns CompleteAuthorization's
+// error.
+func completeWithAuthTime(t *testing.T, hasMaxAge bool, maxAge, authAgo time.Duration) error {
+	t.Helper()
+	c, as, _ := newTestClient(t, false)
+	if authAgo != 0 {
+		as.idTokenAuthTime = time.Now().Add(-authAgo)
+	}
+	ctx := context.Background()
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{
+		Scope: []string{"openid", "accounts"}, MaxAge: maxAge, HasMaxAge: hasMaxAge,
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{
+		RawQuery: as.callbackFor(t, as.lastState, "auth-code-123", ""), Session: session.Handle(),
+	})
+	return err
 }
 
 // recordDroppingSessionStore is a SessionStore that doesn't persist
@@ -90,7 +100,7 @@ func TestHandleAuthorizationResponseRefusesSessionWithoutRecord(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	_, err = c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{
-		RawQuery: as.callbackFor(t, session.Handle().String(), "auth-code-123", ""), Session: session.Handle(),
+		RawQuery: as.callbackFor(t, as.lastState, "auth-code-123", ""), Session: session.Handle(),
 	})
 	var cerr *client.Error
 	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInternal {

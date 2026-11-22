@@ -104,7 +104,7 @@ func TestExchangeCodeRefusesAnotherClientsResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := clientA.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{
-		RawQuery: asA.callbackFor(t, session.Handle().String(), "code-for-a", ""),
+		RawQuery: asA.callbackFor(t, asA.lastState, "code-for-a", ""),
 		Session:  session.Handle(),
 	})
 	if err != nil {
@@ -142,7 +142,7 @@ func TestExchangeCodeRefusesAnotherClientIDsResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := clientA.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{
-		RawQuery: asA.callbackFor(t, session.Handle().String(), "code", ""),
+		RawQuery: asA.callbackFor(t, asA.lastState, "code", ""),
 		Session:  session.Handle(),
 	})
 	if err != nil {
@@ -167,7 +167,7 @@ func TestRevokeTokenThroughAnotherIssuersClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := clientA.CompleteAuthorization(ctx, client.AuthorizationCallback{
-		RawQuery: asA.callbackFor(t, session.Handle().String(), "code", ""), Session: session.Handle(),
+		RawQuery: asA.callbackFor(t, asA.lastState, "code", ""), Session: session.Handle(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -247,7 +247,7 @@ func TestMisroutedCallbackLeavesTheSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	cb := client.AuthorizationCallback{
-		RawQuery: asA.callbackFor(t, session.Handle().String(), "code", ""),
+		RawQuery: asA.callbackFor(t, asA.lastState, "code", ""),
 		Session:  session.Handle(),
 	}
 	if _, err := clientB.HandleAuthorizationResponse(ctx, cb); err == nil {
@@ -278,7 +278,7 @@ func TestCallbackRefusedByAnotherClientAtTheSameIssuer(t *testing.T) {
 		t.Fatal(err)
 	}
 	cb := client.AuthorizationCallback{
-		RawQuery: asA.callbackFor(t, session.Handle().String(), "code", ""),
+		RawQuery: asA.callbackFor(t, asA.lastState, "code", ""),
 		Session:  session.Handle(),
 	}
 	var cerr *client.Error

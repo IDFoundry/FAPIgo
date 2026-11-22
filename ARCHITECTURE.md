@@ -170,17 +170,22 @@ constructed by `HandleAuthorizationResponse`, and is redeemed only by the
 client that validated it; a `BackchannelAuthenticationSession` is polled
 only by the client that began it.
 
-`BeginAuthorization` internally: generates `state`/`nonce`/PKCE, builds
-and signs the request object when required, authenticates to and calls
-the PAR endpoint ([RFC 9126][par]), receives `request_uri`, builds the
-browser URL, and persists correlation state.
+`BeginAuthorization` internally: generates the session handle, `state`
+(a one-way digest of the handle, never the handle itself)/`nonce`/PKCE,
+builds and signs the request object when required, authenticates to and
+calls the PAR endpoint ([RFC 9126][par]), receives `request_uri`, builds
+the browser URL, and persists correlation state under `state`.
 
 `HandleAuthorizationResponse` internally validates: that the callback
 belongs to the user agent that began the flow — the caller passes back
-the `SessionHandle` it bound to that browser (an HttpOnly cookie;
-`client/sessioncookie` sets and reads one), and a
-callback whose `state` doesn't match it is rejected before anything is
-consumed, closing login CSRF ([RFC 9700 §4.7][bcp]); a native app whose
+the `SessionHandle` it bound to that browser where only the application
+can have put it (`client/sessioncookie` seals it into a cookie; a MAC'd
+cookie or a server-side record also does, a plain cookie doesn't), and a
+callback whose `state` isn't the digest of it is rejected before anything
+is consumed (under Message Signing, before any issuer key is resolved),
+closing login CSRF ([RFC 9700 §4.7][bcp]); since the authorization
+response carries only the digest, reading it doesn't yield the handle,
+so it can't be completed in another browser; a native app whose
 session store is its own on-device storage has that binding already,
 and with `Config.CallbackBinding` set to `CallbackBindingDeviceLocalStore`
 completes from the callback alone, `state` taken from the verified

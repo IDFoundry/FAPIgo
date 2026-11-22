@@ -91,7 +91,7 @@ func TestCompleteAuthorizationChecksEssentialACR(t *testing.T) {
 				t.Fatalf("BeginAuthorization: %v", err)
 			}
 			result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{
-				RawQuery: as.callbackFor(t, session.Handle().String(), "auth-code-123", ""), Session: session.Handle(),
+				RawQuery: as.callbackFor(t, as.lastState, "auth-code-123", ""), Session: session.Handle(),
 			})
 			if tc.wantErr {
 				var cerr *client.Error

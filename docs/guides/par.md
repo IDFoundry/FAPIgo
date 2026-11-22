@@ -26,9 +26,12 @@ DPoP key commitment when the client is DPoP-bound), authenticates as the
 client, pushes it, and returns the authorization URL that carries only
 the `request_uri`. Under the FAPI 2.0 Message Signing profile it pushes
 a signed request object (JAR, [RFC 9101]) instead of plain parameters.
-Keep the session's handle with the user agent (`client/sessioncookie`
-does this for a browser), and pass the callback to
-`CompleteAuthorization`.
+Keep the session's handle with the user agent where only your
+application can have put it (`client/sessioncookie` seals it into a
+cookie for a browser; never keep it as a plain cookie value), and pass
+the callback to `CompleteAuthorization`. The `state` it pushes is a
+one-way digest of the handle, so the authorization response doesn't
+reveal it.
 
 ## Authorization server: the endpoint and the authorization step
 

@@ -234,11 +234,19 @@ const authorizationDetailsParameter = "authorization_details"
 const errPushedAuthorizationRequestFailed = "pushed authorization request failed"
 
 // BeginAuthorization starts a new authorization attempt: it generates
-// state, nonce and a PKCE verifier, builds and signs a request object
-// when Config.Profile or Config.PushedRequestEncoding requires one,
-// authenticates to and calls the
-// pushed-authorization-request endpoint (RFC 9126), and persists
-// correlation state for the eventual callback.
+// the session handle, the "state" it derives from it, a nonce and a PKCE
+// verifier, builds and signs a request object when Config.Profile or
+// Config.PushedRequestEncoding requires one, authenticates to and calls
+// the pushed-authorization-request endpoint (RFC 9126), and persists
+// correlation state for the eventual callback under that state. The
+// handle, which the returned session's Handle gives, is never sent:
+// "state" is a one-way digest of it (see SessionHandle).
+//
+// It needs the authorization code flow configured: Endpoints.Authorization,
+// and with it Dependencies.Sessions. A client missing either gets
+// ErrorInvalidRequest, before anything is sent or stored: one built for
+// CIBA or client credentials only, with or without a session store, or
+// by NewFromDiscovery without a RedirectURI.
 //
 // Call it only from a request the user made on purpose and that is
 // protected against cross-site request forgery: a POST guarded by a
@@ -248,17 +256,21 @@ const errPushedAuthorizationRequestFailed = "pushed authorization request failed
 // already signed in at the authorization server (who may have consented
 // before) can then end up granting access without meaning to.
 func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationRequest) (AuthorizationSession, error) {
-	if err := c.checkTrustChain(); err != nil {
+	if err := c.checkAuthorizationCodeFlow(); err != nil {
 		return AuthorizationSession{}, err
 	}
 	redirectURI, reqErr := c.checkBeginRequest(req)
 	if reqErr != nil {
 		return AuthorizationSession{}, reqErr
 	}
-	state, err := generateRandomToken(c.deps.Random)
+	handle, err := generateRandomToken(c.deps.Random)
 	if err != nil {
-		return AuthorizationSession{}, newError(ErrorInternal, "failed to generate state", err)
+		return AuthorizationSession{}, newError(ErrorInternal, "failed to generate session handle", err)
 	}
+	// The authorization server echoes state back in a response others
+	// may read first: it carries a digest of the handle, never the
+	// handle that binds the session to this user agent.
+	state := stateForHandle(handle)
 	nonce, err := generateRandomToken(c.deps.Random)
 	if err != nil {
 		return AuthorizationSession{}, newError(ErrorInternal, "failed to generate nonce", err)
@@ -338,7 +350,26 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		"request_uri": {result.RequestURI},
 	})
 
-	return AuthorizationSession{url: browserURL, handle: SessionHandle{value: state}, expiresAt: now.Add(c.cfg.Limits.SessionLifetime)}, nil
+	return AuthorizationSession{url: browserURL, handle: SessionHandle{value: handle}, expiresAt: now.Add(c.cfg.Limits.SessionLifetime)}, nil
+}
+
+// checkAuthorizationCodeFlow is BeginAuthorization's and
+// HandleAuthorizationResponse's first check: the Trust Chain
+// (checkTrustChain), then that this client has the authorization code
+// flow at all — Endpoints.Authorization, and Dependencies.Sessions, which
+// New requires with it. The call is refused when either is missing,
+// before anything is sent or stored: a client New accepted for CIBA or
+// client credentials only has no Endpoints.Authorization, and perhaps no
+// session store to begin or consume a session in, which the call would
+// otherwise fail on.
+func (c *Client) checkAuthorizationCodeFlow() error {
+	if err := c.checkTrustChain(); err != nil {
+		return err
+	}
+	if c.cfg.Endpoints.Authorization.IsZero() || c.deps.Sessions == nil {
+		return newError(ErrorInvalidRequest, "the authorization code flow is not configured: it needs endpoints.authorization and sessions", nil)
+	}
+	return nil
 }
 
 // dpopKeyThumbprint returns the JWK SHA-256 thumbprint (RFC 7638) of

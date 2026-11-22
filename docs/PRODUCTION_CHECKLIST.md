@@ -135,8 +135,10 @@ are things no constructor can check.
   `storage.TestSessionStoreContract` (`sqlstore`'s `Sessions()` does;
   for a native app with `CallbackBindingDeviceLocalStore`, on SQLite),
   and durable keys declaring `keys.KeyCustodyAssurance`.
-- [ ] *(yours)* **Bind each authorization to the browser** that began it
-  (`client/sessioncookie`), against login CSRF.
+- [ ] *(yours)* **Bind each authorization to the browser** that began it,
+  against login CSRF, where only your application can have put the
+  handle: `client/sessioncookie`'s sealed `__Host-` cookie, a cookie you
+  MAC, or a server-side record. Never the raw handle in a plain cookie.
   [Step 10](../GETTING_STARTED.md#10-the-client-side-calling-a-fapi-20-authorization-server)
 - [ ] *(yours)* **Serve the redirect URI with `Referrer-Policy:
   no-referrer`**, and no third-party content, so the authorization code

@@ -672,11 +672,12 @@ type CallbackBinding uint8
 const (
 	// CallbackBindingSessionHandle requires AuthorizationCallback.Session:
 	// the SessionHandle the application kept with the user agent that
-	// began the flow (a cookie; client/sessioncookie). A callback whose
-	// state doesn't match it is refused. The zero value, and the only
-	// right choice wherever Dependencies.Sessions holds more than one
-	// user agent's sessions — any server-side store — since an attacker's
-	// own session is found there by its state too.
+	// began the flow (client/sessioncookie's sealed cookie, a MAC'd
+	// cookie or a server-side record; see SessionHandle). A callback
+	// whose state isn't the one derived from it is refused. The zero
+	// value, and the only right choice wherever Dependencies.Sessions
+	// holds more than one user agent's sessions — any server-side store —
+	// since an attacker's own session is found there by its state too.
 	CallbackBindingSessionHandle CallbackBinding = iota
 
 	// CallbackBindingDeviceLocalStore is for a native app whose
@@ -694,9 +695,10 @@ const (
 	// store a server shares between users: it would bring login CSRF
 	// back. AssuranceProduction accepts it only for a native app: a
 	// Config.RedirectURI that is loopback http to 127.0.0.1 or [::1], or
-	// a private-use URI scheme, never https, and a Dependencies.Sessions
-	// that doesn't declare CrossInstanceConsistent, which only a shared
-	// store needs.
+	// a private-use URI scheme, never https or empty (a client without
+	// the authorization code flow, whether or not it has
+	// Dependencies.Sessions), and a Dependencies.Sessions that doesn't
+	// declare CrossInstanceConsistent, which only a shared store needs.
 	CallbackBindingDeviceLocalStore
 )
 

@@ -19,7 +19,7 @@ func TestOmittedScopeIsTheRequestedOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-123", "")
 	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)

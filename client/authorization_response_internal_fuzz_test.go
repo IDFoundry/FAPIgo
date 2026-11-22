@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -12,9 +14,13 @@ import (
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
-// callbackFuzzState is the state of the session the plain-mode callback
-// fuzz target and its regression test bind their callbacks to.
-const callbackFuzzState = "c3RhdGVzdGF0ZXN0YXRlc3RhdGVzdGF0ZXN0YXRlc3Q"
+// callbackFuzzHandle is the SessionHandle of the session the plain-mode
+// callback fuzz target and its regression test bind their callbacks to,
+// and callbackFuzzState the state its authorization request carried,
+// which the session is stored under.
+const callbackFuzzHandle = "c3RhdGVzdGF0ZXN0YXRlc3RhdGVzdGF0ZXN0YXRlc3Q"
+
+var callbackFuzzState = stateForHandle(callbackFuzzHandle)
 
 // plainCallbackClient is a Client in plain (non-JARM) response mode with
 // one session, for callbackFuzzState, waiting for its callback.
@@ -22,6 +28,11 @@ func plainCallbackClient(t *testing.T, iss fapi.URL, requireIss, deviceLocal boo
 	t.Helper()
 	c := &Client{}
 	c.cfg.Issuer, c.cfg.ClientID = iss, fapi.ClientID("client-a")
+	authorize, err := fapi.ParseEndpointURL(iss.String() + "/authorize")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.cfg.Endpoints.Authorization = authorize
 	c.cfg.Profile = ProfileFAPISecurity
 	c.cfg.AuthorizationResponseIssPolicy = TolerateAbsentAuthorizationResponseIss
 	if requireIss {
@@ -45,7 +56,8 @@ func plainCallbackClient(t *testing.T, iss fapi.URL, requireIss, deviceLocal boo
 // with and without a SessionHandle, and with either callback binding.
 // Unexported state (the session record), so this file lives in package
 // client. Its oracle: an accepted callback has exactly one state, equal
-// to the bound session's; an iss, when present, equal to the issuer;
+// to the bound session's (its handle's digest, never the handle
+// itself); an iss, when present, equal to the issuer;
 // an iss at all under RequireAuthorizationResponseIss; a code exactly as
 // the query carries it (never a lossy re-reading); and replaying it is
 // refused.
@@ -53,8 +65,9 @@ func FuzzHandleAuthorizationResponsePlain(f *testing.F) {
 	f.Add("code=abc&state="+callbackFuzzState+"&iss=https%3A%2F%2Fas.example", true, true, false)
 	f.Add("error=access_denied&state="+callbackFuzzState, false, true, true)
 	f.Add("code=abc&state="+callbackFuzzState+"&state="+callbackFuzzState, true, false, false)
-	f.Add("code=abc&state=%63"+callbackFuzzState[1:], true, false, false)
+	f.Add("code=abc&state="+fmt.Sprintf("%%%02X", callbackFuzzState[0])+callbackFuzzState[1:], true, false, false)
 	f.Add("code=abc%80&state="+callbackFuzzState+"&iss=https%3A%2F%2Fas.example", true, true, false)
+	f.Add("code=abc&state="+callbackFuzzHandle+"&iss=https%3A%2F%2Fas.example", true, true, false)
 	f.Fuzz(func(t *testing.T, rawQuery string, requireIss, passHandle, deviceLocal bool) {
 		iss, err := fapi.ParseIssuerURL("https://as.example")
 		if err != nil {
@@ -63,7 +76,7 @@ func FuzzHandleAuthorizationResponsePlain(f *testing.F) {
 		c := plainCallbackClient(t, iss, requireIss, deviceLocal)
 		cb := AuthorizationCallback{RawQuery: rawQuery}
 		if passHandle {
-			cb.Session = SessionHandle{value: callbackFuzzState}
+			cb.Session = SessionHandle{value: callbackFuzzHandle}
 		}
 		res, err := c.HandleAuthorizationResponse(context.Background(), cb)
 		if err != nil {
@@ -98,14 +111,49 @@ func checkAcceptedPlainCallback(t *testing.T, rawQuery, issuer string, requireIs
 	}
 }
 
+// TestAuthorizationCodeFlowNeedsASessionStore: a Client with an
+// authorization endpoint but no session store, which New never builds,
+// refuses to begin a flow or take a callback rather than panicking on
+// the store it lacks.
+func TestAuthorizationCodeFlowNeedsASessionStore(t *testing.T) {
+	iss, err := fapi.ParseIssuerURL("https://as.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := plainCallbackClient(t, iss, false, false)
+	c.deps.Sessions = nil
+	defer func() {
+		if p := recover(); p != nil {
+			t.Fatalf("panicked: %v", p)
+		}
+	}()
+	_, callbackErr := c.HandleAuthorizationResponse(context.Background(), AuthorizationCallback{
+		RawQuery: "code=abc&state=" + callbackFuzzState, Session: SessionHandle{value: callbackFuzzHandle},
+	})
+	_, beginErr := c.BeginAuthorization(context.Background(), BeginAuthorizationRequest{Scope: []string{"openid"}})
+	for name, err := range map[string]error{"HandleAuthorizationResponse": callbackErr, "BeginAuthorization": beginErr} {
+		var cerr *Error
+		if !errors.As(err, &cerr) || cerr.Code() != ErrorInvalidRequest || !strings.HasPrefix(cerr.PublicDescription(), "the authorization code flow is not configured") {
+			t.Errorf("%s = %v, want ErrorInvalidRequest: the authorization code flow is not configured", name, err)
+		}
+	}
+}
+
 // TestHandleAuthorizationResponseRefusesInvalidUTF8: a plain-mode
 // callback parameter that isn't valid UTF-8 is refused with
 // ErrorInvalidRequest, not decoded lossily (U+FFFD) and sent on, which
-// would read different codes back as one.
+// would read different codes back as one. The same callback in valid
+// UTF-8 is accepted, so the client fixture reaches the check.
 func TestHandleAuthorizationResponseRefusesInvalidUTF8(t *testing.T) {
 	iss, err := fapi.ParseIssuerURL("https://as.example")
 	if err != nil {
 		t.Fatal(err)
+	}
+	const valid = "code=abc&iss=https%3A%2F%2Fas.example&state="
+	if _, err := plainCallbackClient(t, iss, true, false).HandleAuthorizationResponse(context.Background(), AuthorizationCallback{
+		RawQuery: valid + callbackFuzzState, Session: SessionHandle{value: callbackFuzzHandle},
+	}); err != nil {
+		t.Fatalf("HandleAuthorizationResponse(valid UTF-8) = %v, want it accepted", err)
 	}
 	for _, query := range []string{
 		"code=abc%80&state=" + callbackFuzzState + "&iss=https%3A%2F%2Fas.example",
@@ -115,11 +163,11 @@ func TestHandleAuthorizationResponseRefusesInvalidUTF8(t *testing.T) {
 	} {
 		c := plainCallbackClient(t, iss, true, false)
 		res, err := c.HandleAuthorizationResponse(context.Background(), AuthorizationCallback{
-			RawQuery: query, Session: SessionHandle{value: callbackFuzzState},
+			RawQuery: query, Session: SessionHandle{value: callbackFuzzHandle},
 		})
 		var cerr *Error
-		if !errors.As(err, &cerr) || cerr.Code() != ErrorInvalidRequest {
-			t.Errorf("HandleAuthorizationResponse(%q) = %v, %v, want ErrorInvalidRequest", query, res, err)
+		if !errors.As(err, &cerr) || cerr.Code() != ErrorInvalidRequest || cerr.PublicDescription() != "callback query contains a parameter that isn't valid UTF-8" {
+			t.Errorf("HandleAuthorizationResponse(%q) = %v, %v, want ErrorInvalidRequest for the invalid UTF-8", query, res, err)
 		}
 	}
 }

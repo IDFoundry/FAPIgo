@@ -57,6 +57,10 @@ type fakeAS struct {
 	lastTokenForm      url.Values
 	lastTokenDPoPProof string
 	lastNonce          string
+	// lastState is the "state" the most recent pushed authorization
+	// request carried, as a plain parameter or in its request object:
+	// what a callback for that flow echoes back.
+	lastState string
 
 	// challengeDPoPNonce, if non-empty, makes handleToken reject every
 	// token request whose DPoP proof doesn't carry this exact "nonce"
@@ -175,13 +179,14 @@ func (a *fakeAS) handlePAR(w http.ResponseWriter, r *http.Request) {
 
 // recordPARParameters checks the pushed request carries its parameters
 // the way this fake AS expects (a signed request object, or plain form
-// parameters) and records the nonce it was sent.
+// parameters) and records the nonce and state it was sent.
 func (a *fakeAS) recordPARParameters(form url.Values) {
 	if !a.messageSigned && !a.requestObjectPAR {
 		if form.Get("code_challenge") == "" {
 			a.t.Errorf("PAR: missing code_challenge under baseline profile")
 		}
 		a.lastNonce = form.Get("nonce")
+		a.lastState = form.Get("state")
 		return
 	}
 	requestJWT := form.Get("request")
@@ -197,12 +202,16 @@ func (a *fakeAS) recordPARParameters(form url.Values) {
 	if nonceRaw, ok := obj.Parameter("nonce"); ok {
 		json.Unmarshal(nonceRaw, &a.lastNonce)
 	}
+	if stateRaw, ok := obj.Parameter("state"); ok {
+		json.Unmarshal(stateRaw, &a.lastState)
+	}
 }
 
 // callbackFor builds the query string a real authorization server would
-// redirect back with, for the given outcome, using the state captured
-// from session.Handle(). code == "" produces an error response instead
-// of a success one.
+// redirect back with, for the given outcome, echoing state: the one the
+// flow's pushed authorization request carried (lastState, read right
+// after its BeginAuthorization). code == "" produces an error response
+// instead of a success one.
 func (a *fakeAS) callbackFor(t *testing.T, state, code, errCode string) string {
 	t.Helper()
 	params := map[string]string{"state": state}
@@ -238,6 +247,28 @@ func (a *fakeAS) callbackFor(t *testing.T, state, code, errCode string) string {
 	q := url.Values{}
 	q.Set("response", responseJWT)
 	return q.Encode()
+}
+
+// completeFlow begins an authorization on c with req, has the fake AS
+// answer it with code for the state its pushed request carried, and
+// completes it, failing t unless the flow completes; it returns the
+// tokens.
+func completeFlow(t *testing.T, c *client.Client, as *fakeAS, req client.BeginAuthorizationRequest, code string) client.TokenSet {
+	t.Helper()
+	ctx := context.Background()
+	session, err := c.BeginAuthorization(ctx, req)
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: as.callbackFor(t, as.lastState, code, ""), Session: session.Handle()})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	success, ok := result.(client.CompletionSuccess)
+	if !ok {
+		t.Fatalf("result type = %T, want client.CompletionSuccess", result)
+	}
+	return success.Tokens
 }
 
 func (a *fakeAS) handleToken(w http.ResponseWriter, r *http.Request) {
@@ -648,7 +679,7 @@ func TestExchangeCodeRetriesOnDPoPNonceChallenge(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-123", "")
 	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
@@ -676,7 +707,7 @@ func TestExchangeCodeAcceptsCaseInsensitiveTokenType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-123", "")
 	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
@@ -702,7 +733,7 @@ func TestExchangeCodeToleratesMissingExpiresIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-123", "")
 	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
@@ -718,63 +749,55 @@ func TestExchangeCodeToleratesMissingExpiresIn(t *testing.T) {
 
 func TestCompleteAuthorizationHappyPathBaseline(t *testing.T) {
 	c, as, _ := newTestClient(t, false)
-	ctx := context.Background()
-
-	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
-	if err != nil {
-		t.Fatalf("BeginAuthorization: %v", err)
+	tokens := completeFlow(t, c, as, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}}, "auth-code-123")
+	if tokens.AccessToken.Reveal() != "opaque-access-token" {
+		t.Errorf("AccessToken = %q", tokens.AccessToken.Reveal())
 	}
-
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
-	if err != nil {
-		t.Fatalf("CompleteAuthorization: %v", err)
+	if !tokens.HasIDToken || tokens.Subject != "end-user-1" {
+		t.Errorf("HasIDToken=%v Subject=%q, want true/end-user-1", tokens.HasIDToken, tokens.Subject)
 	}
-	success, ok := result.(client.CompletionSuccess)
-	if !ok {
-		t.Fatalf("result type = %T, want client.CompletionSuccess", result)
-	}
-	if success.Tokens.AccessToken.Reveal() != "opaque-access-token" {
-		t.Errorf("AccessToken = %q", success.Tokens.AccessToken.Reveal())
-	}
-	if !success.Tokens.HasIDToken || success.Tokens.Subject != "end-user-1" {
-		t.Errorf("HasIDToken=%v Subject=%q, want true/end-user-1", success.Tokens.HasIDToken, success.Tokens.Subject)
-	}
-	if !success.Tokens.HasRefreshToken {
+	if !tokens.HasRefreshToken {
 		t.Errorf("HasRefreshToken = false, want true")
 	}
+	checkBaselineIDTokenClaims(t, tokens.IDTokenClaims, as.lastNonce)
+}
+
+// checkBaselineIDTokenClaims checks TestCompleteAuthorizationHappyPathBaseline's
+// IDTokenClaims, from an ID token for end-user-1 issued with nonce.
+func checkBaselineIDTokenClaims(t *testing.T, claims client.IDTokenClaims, nonce string) {
+	t.Helper()
 	// IDTokenClaims must be populated from the same validated ID token
 	// as Subject, not left at its zero value — confirms ExchangeCode
 	// actually wires validateIDToken's full result into TokenSet, not
 	// just the Subject string.
-	if success.Tokens.IDTokenClaims.Subject != "end-user-1" {
-		t.Errorf("IDTokenClaims.Subject = %q, want end-user-1", success.Tokens.IDTokenClaims.Subject)
+	if claims.Subject != "end-user-1" {
+		t.Errorf("IDTokenClaims.Subject = %q, want end-user-1", claims.Subject)
 	}
-	if success.Tokens.IDTokenClaims.ExpiresAt.IsZero() {
+	if claims.ExpiresAt.IsZero() {
 		t.Errorf("IDTokenClaims.ExpiresAt is zero, want the ID token's actual exp claim")
 	}
-	if success.Tokens.IDTokenClaims.IssuedAt.IsZero() {
+	if claims.IssuedAt.IsZero() {
 		t.Errorf("IDTokenClaims.IssuedAt is zero, want the ID token's actual iat claim")
 	}
-	if !success.Tokens.IDTokenClaims.IssuedAt.Before(success.Tokens.IDTokenClaims.ExpiresAt) {
-		t.Errorf("IssuedAt (%v) is not before ExpiresAt (%v)", success.Tokens.IDTokenClaims.IssuedAt, success.Tokens.IDTokenClaims.ExpiresAt)
+	if !claims.IssuedAt.Before(claims.ExpiresAt) {
+		t.Errorf("IssuedAt (%v) is not before ExpiresAt (%v)", claims.IssuedAt, claims.ExpiresAt)
 	}
 	// Issuer/Audience/Nonce round-trip from the same validated ID token
 	// too — a caller (e.g. a multi-issuer relying party) needs these for
 	// its own audit/telemetry, not just Subject/ExpiresAt/IssuedAt.
-	if success.Tokens.IDTokenClaims.Issuer != testIssuer {
-		t.Errorf("IDTokenClaims.Issuer = %q, want %q", success.Tokens.IDTokenClaims.Issuer, testIssuer)
+	if claims.Issuer != testIssuer {
+		t.Errorf("IDTokenClaims.Issuer = %q, want %q", claims.Issuer, testIssuer)
 	}
-	if len(success.Tokens.IDTokenClaims.Audience) != 1 || success.Tokens.IDTokenClaims.Audience[0] != testClientID {
-		t.Errorf("IDTokenClaims.Audience = %v, want [%s]", success.Tokens.IDTokenClaims.Audience, testClientID)
+	if len(claims.Audience) != 1 || claims.Audience[0] != testClientID {
+		t.Errorf("IDTokenClaims.Audience = %v, want [%s]", claims.Audience, testClientID)
 	}
-	if success.Tokens.IDTokenClaims.Nonce == "" || success.Tokens.IDTokenClaims.Nonce != as.lastNonce {
-		t.Errorf("IDTokenClaims.Nonce = %q, want the request's own nonce %q", success.Tokens.IDTokenClaims.Nonce, as.lastNonce)
+	if claims.Nonce == "" || claims.Nonce != nonce {
+		t.Errorf("IDTokenClaims.Nonce = %q, want the request's own nonce %q", claims.Nonce, nonce)
 	}
 	// AZP is only required/set for a multi-audience token (OIDC Core
 	// §3.1.3.7 step 9) — this flow's ID token names only testClientID.
-	if success.Tokens.IDTokenClaims.AZP != "" {
-		t.Errorf("IDTokenClaims.AZP = %q, want empty (single-audience token)", success.Tokens.IDTokenClaims.AZP)
+	if claims.AZP != "" {
+		t.Errorf("IDTokenClaims.AZP = %q, want empty (single-audience token)", claims.AZP)
 	}
 }
 
@@ -787,7 +810,7 @@ func TestCompleteAuthorizationHappyPathMessageSigning(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-456", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-456", "")
 	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
@@ -870,7 +893,7 @@ func TestCompleteAuthorizationRequestObjectEncodingWithoutJARM(t *testing.T) {
 		}
 	}
 
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-ro", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-ro", "")
 	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization (plain response): %v", err)
@@ -888,31 +911,16 @@ func TestCompleteAuthorizationDecryptsEncryptedIDToken(t *testing.T) {
 	for _, alg := range []fapi.KeyManagementAlgorithm{fapi.RSAOAEP256, fapi.ECDHESA256KW} {
 		t.Run(alg.String(), func(t *testing.T) {
 			c, as, _ := newTestClientWithEncryptedIDToken(t, alg)
-			ctx := context.Background()
-
-			session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
-			if err != nil {
-				t.Fatalf("BeginAuthorization: %v", err)
-			}
-
-			rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-encrypted", "")
-			result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
-			if err != nil {
-				t.Fatalf("CompleteAuthorization: %v", err)
-			}
-			success, ok := result.(client.CompletionSuccess)
-			if !ok {
-				t.Fatalf("result type = %T, want client.CompletionSuccess", result)
-			}
-			if !success.Tokens.HasIDToken || success.Tokens.Subject != "end-user-1" {
-				t.Errorf("HasIDToken=%v Subject=%q, want true/end-user-1", success.Tokens.HasIDToken, success.Tokens.Subject)
+			tokens := completeFlow(t, c, as, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}}, "auth-code-encrypted")
+			if !tokens.HasIDToken || tokens.Subject != "end-user-1" {
+				t.Errorf("HasIDToken=%v Subject=%q, want true/end-user-1", tokens.HasIDToken, tokens.Subject)
 			}
 			// The id_token actually carried over the wire must be the
 			// encrypted (5-segment) form — this is what proves the
 			// server's response really was encrypted, not that the
 			// test accidentally sent a plain token through a path that
 			// happens to still work.
-			if segments := strings.Count(success.Tokens.IDToken.Reveal(), ".") + 1; segments != 5 {
+			if segments := strings.Count(tokens.IDToken.Reveal(), ".") + 1; segments != 5 {
 				t.Errorf("wire id_token has %d segments, want 5 (encrypted)", segments)
 			}
 		})
@@ -997,7 +1005,7 @@ func TestBeginAuthorizationCommitsDPoPKeyAtPARMatchingTokenEndpointProofJKT(t *t
 		t.Errorf("PAR request carried a DPoP header %q, want none under PARDPoPBindingJKT", as.lastPARDPoPProof)
 	}
 
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-dpop-jkt", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-dpop-jkt", "")
 	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -1028,7 +1036,7 @@ func TestBeginAuthorizationCommitsDPoPKeyAtPARMatchingTokenEndpointProofDefault(
 	}
 	parJKT := dpopProofJKT(t, as.lastPARDPoPProof)
 
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-dpop-proof", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-dpop-proof", "")
 	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -1071,7 +1079,7 @@ func TestBeginAuthorizationAndExchangeCodeReuseCachedNonceOnSecondFlow(t *testin
 	if as.parCallCount != 2 {
 		t.Fatalf("first flow PAR call count = %d, want 2 (challenge + retry)", as.parCallCount)
 	}
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-1", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-1", "")
 	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 		t.Fatalf("CompleteAuthorization (first): %v", err)
 	}
@@ -1089,7 +1097,7 @@ func TestBeginAuthorizationAndExchangeCodeReuseCachedNonceOnSecondFlow(t *testin
 	if as.parCallCount != 3 {
 		t.Fatalf("PAR call count after second BeginAuthorization = %d, want 3 (no retry needed)", as.parCallCount)
 	}
-	rawQuery = as.callbackFor(t, session.Handle().String(), "auth-code-2", "")
+	rawQuery = as.callbackFor(t, as.lastState, "auth-code-2", "")
 	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 		t.Fatalf("CompleteAuthorization (second): %v", err)
 	}
@@ -1190,7 +1198,7 @@ func TestCompleteAuthorizationMessageSigningSucceedsWithRequireAuthorizationResp
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-jarm-iss-required", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-jarm-iss-required", "")
 	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
@@ -1248,7 +1256,7 @@ func TestHandleAuthorizationResponseRejectsEmptyIssuerKeySetForJARM(t *testing.T
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-empty-keyset", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-empty-keyset", "")
 	_, err = c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err == nil {
 		t.Fatalf("HandleAuthorizationResponse(empty issuer keyset) = nil error, want error")
@@ -1287,28 +1295,7 @@ func TestHandleAuthorizationResponseRejectsUnverifiableJARM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, as, _ := newTestClient(t, true)
-			ctx := context.Background()
-			session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
-			if err != nil {
-				t.Fatalf("BeginAuthorization: %v", err)
-			}
-			state, _ := json.Marshal(session.Handle().String())
-			params := jarm.CreateParams{
-				Signer: as.jarmKey, Algorithm: fapi.ES256, KeyID: "as-jarm-kid",
-				Issuer: as.issuer, Audience: testClientID,
-				Now: time.Now(), Lifetime: time.Minute,
-				Parameters: map[string]json.RawMessage{"code": json.RawMessage(`"auth-code-jarm-bad"`), "state": state},
-			}
-			tt.mutate(&params)
-			responseJWT, err := jarm.Create(params)
-			if err != nil {
-				t.Fatalf("jarm.Create: %v", err)
-			}
-			q := url.Values{}
-			q.Set("response", responseJWT)
-
-			_, err = c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode(), Session: session.Handle()})
+			err := handleMutatedJARM(t, tt.mutate)
 			cerr, ok := err.(*client.Error)
 			if !ok {
 				t.Fatalf("HandleAuthorizationResponse error = %v (%T), want *client.Error", err, err)
@@ -1321,6 +1308,36 @@ func TestHandleAuthorizationResponseRejectsUnverifiableJARM(t *testing.T) {
 			}
 		})
 	}
+}
+
+// handleMutatedJARM begins an authorization on a message-signing test
+// client and hands it a JARM response carrying a code and that flow's
+// state, built from params mutate changes, returning
+// HandleAuthorizationResponse's error.
+func handleMutatedJARM(t *testing.T, mutate func(*jarm.CreateParams)) error {
+	t.Helper()
+	c, as, _ := newTestClient(t, true)
+	ctx := context.Background()
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	state, _ := json.Marshal(as.lastState)
+	params := jarm.CreateParams{
+		Signer: as.jarmKey, Algorithm: fapi.ES256, KeyID: "as-jarm-kid",
+		Issuer: as.issuer, Audience: testClientID,
+		Now: time.Now(), Lifetime: time.Minute,
+		Parameters: map[string]json.RawMessage{"code": json.RawMessage(`"auth-code-jarm-bad"`), "state": state},
+	}
+	mutate(&params)
+	responseJWT, err := jarm.Create(params)
+	if err != nil {
+		t.Fatalf("jarm.Create: %v", err)
+	}
+	q := url.Values{}
+	q.Set("response", responseJWT)
+	_, err = c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode(), Session: session.Handle()})
+	return err
 }
 
 // TestHandleAuthorizationResponseRejectsMalformedJARM: a "response"
@@ -1355,7 +1372,7 @@ func TestCompleteAuthorizationDenied(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 
-	rawQuery := as.callbackFor(t, session.Handle().String(), "", "access_denied")
+	rawQuery := as.callbackFor(t, as.lastState, "", "access_denied")
 	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
@@ -1377,7 +1394,7 @@ func TestHandleAuthorizationResponseRejectsReplayedState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
-	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-789", "")
+	rawQuery := as.callbackFor(t, as.lastState, "auth-code-789", "")
 
 	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 		t.Fatalf("first HandleAuthorizationResponse: %v", err)
@@ -1390,7 +1407,7 @@ func TestHandleAuthorizationResponseRejectsReplayedState(t *testing.T) {
 func TestHandleAuthorizationResponseRejectsResponseModeDowngrade(t *testing.T) {
 	// Client configured for message signing, but callback arrives as a
 	// plain query response — must be rejected, not silently accepted.
-	c, _, _ := newTestClient(t, true)
+	c, as, _ := newTestClient(t, true)
 	ctx := context.Background()
 
 	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
@@ -1399,7 +1416,7 @@ func TestHandleAuthorizationResponseRejectsResponseModeDowngrade(t *testing.T) {
 	}
 
 	q := url.Values{}
-	q.Set("state", session.Handle().String())
+	q.Set("state", as.lastState)
 	q.Set("code", "downgrade-attempt")
 	q.Set("iss", testIssuer)
 
@@ -1413,7 +1430,7 @@ func TestHandleAuthorizationResponseRejectsResponseModeDowngrade(t *testing.T) {
 // RequireAuthorizationResponseIss (that setting only governs what
 // happens when "iss" is absent, not when it's present and wrong).
 func TestHandleAuthorizationResponseRejectsIssMismatch(t *testing.T) {
-	c, _, _ := newTestClient(t, false)
+	c, as, _ := newTestClient(t, false)
 	ctx := context.Background()
 
 	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
@@ -1422,7 +1439,7 @@ func TestHandleAuthorizationResponseRejectsIssMismatch(t *testing.T) {
 	}
 
 	q := url.Values{}
-	q.Set("state", session.Handle().String())
+	q.Set("state", as.lastState)
 	q.Set("code", "auth-code-iss-mismatch")
 	q.Set("iss", "https://attacker.example")
 
@@ -1463,7 +1480,7 @@ func TestHandleAuthorizationResponseRejectsMissingIssWhenRequired(t *testing.T) 
 	}
 
 	q := url.Values{}
-	q.Set("state", session.Handle().String())
+	q.Set("state", as.lastState)
 	q.Set("code", "auth-code-no-iss")
 	// deliberately no "iss"
 

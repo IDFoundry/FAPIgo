@@ -1001,6 +1001,306 @@
     "why": "New's copy of Config includes each Trust Anchor's JWKS bytes"
   },
   {
+    "id": "srv-grant-record-floor",
+    "file": "server/grant_revocation.go",
+    "old": "return max(s.grantRevocationHorizon(), minGrantRevocationRecordLifetime)",
+    "new": "return s.grantRevocationHorizon()",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestRevokeGrantRecordsUntilEverythingFromTheGrantExpires|TestRevokedGrantStaysRevokedAfterRefreshLifetimeRaised)$",
+    "why": "a revoked grant's record lasts at least 400 days, whatever the current Limits"
+  },
+  {
+    "id": "srv-revoke-grant-refresh-tokens",
+    "file": "server/grant_revocation.go",
+    "old": "revokeErr, forgetErr := s.revokeGrantRefreshTokens(ctx, key)",
+    "new": "revokeErr, forgetErr := error(nil), error(nil)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestRevokedGrantStaysRevokedAfterRefreshLifetimeRaised|TestRevokeGrantRevokesOnlyItsGrantsRefreshTokens)$",
+    "why": "RevokeGrant revokes the grant's refresh tokens in a GrantStore that can find them"
+  },
+  {
+    "id": "srv-revoke-grant-store-failure",
+    "file": "server/grant_revocation.go",
+    "old": "if revokeErr != nil {\n\t\treturn fmt.Errorf(\"server: revoke grant: the grant is revoked, but its refresh tokens couldn't all be revoked",
+    "new": "if false {\n\t\treturn fmt.Errorf(\"server: revoke grant: the grant is revoked, but its refresh tokens couldn't all be revoked",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokeGrantSaysWhenItsRefreshTokensRemain$",
+    "why": "RevokeGrant fails when the GrantStore couldn't revoke the grant's refresh tokens"
+  },
+  {
+    "id": "srv-revoke-grant-registry-failure",
+    "file": "server/grant_revocation.go",
+    "old": "if forgetErr != nil {\n\t\treturn fmt.Errorf(\"server: revoke grant: the grant and its refresh tokens are revoked",
+    "new": "if false {\n\t\treturn fmt.Errorf(\"server: revoke grant: the grant and its refresh tokens are revoked",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokeGrantSaysWhenItsRefreshTokensRemain$",
+    "why": "RevokeGrant fails when a revoked refresh token's registry entry couldn't be removed"
+  },
+  {
+    "id": "srv-revoke-grant-forgets-reported",
+    "file": "server/grant_revocation.go",
+    "old": "revoked, revokeErr := revoker.RevokeGrantRefreshTokens(ctx, refreshTokenGrantKey(revocationKey))",
+    "new": "revoked, revokeErr := revoker.RevokeGrantRefreshTokens(ctx, refreshTokenGrantKey(revocationKey))\n\tif revokeErr != nil {\n\t\treturn revokeErr, nil\n\t}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokeGrantSaysWhenItsRefreshTokensRemain$",
+    "why": "the entries of the refresh tokens a failing GrantStore reports revoked leave the grant registry"
+  },
+  {
+    "id": "srv-refresh-token-grant-id-key",
+    "file": "server/grant_revocation.go",
+    "old": "keys = append(keys, refreshTokenGrantKey(grantrevocation.Key(issuer, grant.GrantID)))",
+    "new": "keys = append(keys)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestRevokedGrantStaysRevokedAfterRefreshLifetimeRaised|TestRevokeGrantRevokesOnlyItsGrantsRefreshTokens)$",
+    "why": "a refresh token is stored with its GrantID's key, for RevokeGrant to revoke it by"
+  },
+  {
+    "id": "srv-refresh-token-code-grant-key",
+    "file": "server/grant_revocation.go",
+    "old": "keys = append(keys, refreshTokenGrantKey(grantrevocation.CodeKey(issuer, grant.CodeGrantID)))",
+    "new": "keys = append(keys)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestReusedCodesGrantStaysRevokedAfterRefreshLifetimeRaised$",
+    "why": "a refresh token is stored with its code grant's key, for a reuse of the code to revoke it by"
+  },
+  {
+    "id": "srv-refresh-revoked-grant-cleanup",
+    "file": "server/refresh.go",
+    "old": "if revErr != nil && revErr.Code() == ErrorInvalidGrant {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokedGrantLeavesNoRedeemableRefreshToken$",
+    "why": "a refresh token presented for a revoked grant is revoked itself"
+  },
+  {
+    "id": "srv-refresh-revoked-grant-cleanup-on-outage",
+    "file": "server/refresh.go",
+    "old": "if revErr != nil && revErr.Code() == ErrorInvalidGrant {",
+    "new": "if revErr != nil {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRefreshKeepsTheTokenWhenItsGrantCantBeChecked$",
+    "why": "a refresh token whose grant's revocation can't be checked isn't revoked"
+  },
+  {
+    "id": "srv-refresh-revoked-grant-forgets",
+    "file": "server/refresh.go",
+    "old": "if s.deps.Grants.RevokeRefreshToken(ctx, tokenHash) == nil {\n\t\t\t_ = s.forgetRevokedRefreshToken(ctx, tokenHash)",
+    "new": "if s.deps.Grants.RevokeRefreshToken(ctx, tokenHash) == nil {\n\t\t\t_ = tokenHash",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokedGrantLeavesNoRedeemableRefreshToken$",
+    "why": "a refresh token revoked for its revoked grant leaves the grant registry too"
+  },
+  {
+    "id": "srv-refresh-revoked-grant-refused",
+    "file": "server/refresh.go",
+    "old": "if revErr := s.checkRefreshGrantNotRevoked(ctx, grant, tokenHash); revErr != nil {",
+    "new": "if revErr := s.checkRefreshGrantNotRevoked(ctx, grant, tokenHash); revErr != nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCodeReuseBeforeTheRecordStillEndsTheTokens$",
+    "why": "a refresh token is refused once its grant is revoked, as a reused code's is when the reuse found no record of the token"
+  },
+  {
+    "id": "srv-list-grants-current-lifetime",
+    "file": "server/grant_registry.go",
+    "old": "if issuedWithin(&g.record.IssuedAt, s.cfg.Limits.RefreshTokenLifetime, l.now) {",
+    "new": "if true {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestListGrantsJudgesExpiryByTheCurrentRefreshLifetime$",
+    "why": "ListGrants leaves out a grant whose refresh token was issued longer ago than the current refresh token lifetime"
+  },
+  {
+    "id": "srv-revoked-grants-swept-by-subject",
+    "file": "server/grant_registry.go",
+    "old": "failures = append(failures, s.sweepRevokedGrants(ctx, l.revoked))",
+    "new": "failures = append(failures, error(nil))",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestRevokeSubjectGrantsEndsRevokedGrantsRefreshTokens|TestRevokingGrantsAgainFinishesAFailedRevokeGrant)$",
+    "why": "RevokeSubjectGrants revokes the refresh tokens of the user's grants revoked another way"
+  },
+  {
+    "id": "srv-revoked-grants-swept-for-unlisted-id",
+    "file": "server/grant_registry.go",
+    "old": "if err := errors.Join(s.sweepRevokedGrants(ctx, l.revoked), l.unreadable); err != nil {",
+    "new": "if err := errors.Join(error(nil), l.unreadable); err != nil {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestRevokeListedGrantEndsRevokedGrantsRefreshTokens|TestRevokingGrantsAgainFinishesAFailedRevokeGrant)$",
+    "why": "RevokeListedGrant naming a grant revoked another way revokes its refresh token"
+  },
+  {
+    "id": "srv-revoked-grants-swept-beside-listed-grant",
+    "file": "server/grant_registry.go",
+    "old": "_ = s.sweepRevokedGrants(ctx, l.revoked)",
+    "new": "_ = l.revoked",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokeListedGrantEndsRevokedGrantsRefreshTokens$",
+    "why": "RevokeListedGrant revoking a listed grant also revokes the refresh tokens of the user's grants revoked another way"
+  },
+  {
+    "id": "srv-revoked-grants-sweep-reports",
+    "file": "server/grant_registry.go",
+    "old": "return errors.Join(failures...)",
+    "new": "return nil",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestRevokedGrantsSweepReportsFailures|TestRevokingGrantsAgainFinishesAFailedRevokeGrant)$",
+    "why": "a failure to revoke a revoked grant's refresh token is reported, so calling again finishes the job"
+  },
+  {
+    "id": "srv-revoked-grants-sweep-token-first",
+    "file": "server/grant_registry.go",
+    "old": "if err := s.deps.Grants.RevokeRefreshToken(ctx, g.refreshTokenHash); err != nil {\n\t\t\tfailures = append(failures",
+    "new": "if err := s.deps.Grants.RevokeRefreshToken(ctx, g.refreshTokenHash); err != nil && false {\n\t\t\tfailures = append(failures",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokedGrantsSweepReportsFailures$",
+    "why": "a revoked grant's registry entry stays recorded until its refresh token is revoked"
+  },
+  {
+    "id": "srv-revoked-grants-unlisted-id-reports",
+    "file": "server/grant_registry.go",
+    "old": "if err := errors.Join(s.sweepRevokedGrants(ctx, l.revoked), l.unreadable); err != nil {",
+    "new": "if err := errors.Join(func() error { _ = s.sweepRevokedGrants(ctx, l.revoked); return nil }(), l.unreadable); err != nil {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestRevokedGrantsSweepReportsFailures|TestRevokingGrantsAgainFinishesAFailedRevokeGrant)$",
+    "why": "RevokeListedGrant reports a failure to revoke a revoked grant's refresh token rather than ErrGrantNotListed"
+  },
+  {
+    "id": "srv-revoked-grants-only-when-found-revoked",
+    "file": "server/grant_registry.go",
+    "old": "if revokedErr.Code() == ErrorInvalidGrant {\n\t\t\treturn g, grantEntryRevoked, nil",
+    "new": "if true {\n\t\t\treturn g, grantEntryRevoked, nil",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestGrantListingReportsAGrantWhoseRevocationCantBeChecked$",
+    "why": "a grant whose revocation can't be checked is reported, not swept as a revoked grant's"
+  },
+  {
+    "id": "srv-revoked-grants-sweep-checks-entry-key",
+    "file": "server/grant_registry.go",
+    "old": "if !ok || grantEntryKey(hash) != entry.Key {",
+    "new": "if (!ok || grantEntryKey(hash) != entry.Key) && s.checkGrantNotRevoked(ctx, grantRecord{GrantID: record.GrantID, CodeGrantID: record.CodeGrantID}) == nil {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokedGrantsSweepRefusesAnEntryWithoutItsToken$",
+    "why": "the sweep revokes no refresh token by a revoked grant's entry naming another token than its key's"
+  },
+  {
+    "id": "srv-issuance-rechecks-revocation",
+    "file": "server/grant_revocation.go",
+    "old": "if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {\n\t\treturn s.withdrawRefreshToken(",
+    "new": "if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil && false {\n\t\treturn s.withdrawRefreshToken(",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestRefreshTokenIsntIssuedForAGrantRevokedMeanwhile|TestCodeReuseBeforeTheRecordStillEndsTheTokens)$",
+    "why": "a refresh token isn't issued for a grant revoked while it was being stored"
+  },
+  {
+    "id": "srv-issuance-recheck-fails-closed",
+    "file": "server/grant_revocation.go",
+    "old": "if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {\n\t\treturn s.withdrawRefreshToken(",
+    "new": "if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil && revErr.Code() == ErrorInvalidGrant {\n\t\treturn s.withdrawRefreshToken(",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRefreshTokenIsntIssuedWhenItsGrantCantBeCheckedAgain$",
+    "why": "a refresh token whose grant's revocation can't be checked again once it's stored isn't issued"
+  },
+  {
+    "id": "srv-withdrawn-refresh-token-unlisted",
+    "file": "server/grant_registry.go",
+    "old": "_ = s.forgetRevokedRefreshToken(ctx, refreshTokenHash)\n\treturn cause",
+    "new": "return cause",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestRefreshTokenIsntIssuedForAGrantRevokedMeanwhile|TestRefreshTokenIsntIssuedWhenItsGrantCantBeCheckedAgain)$",
+    "why": "a withdrawn refresh token's registry entry is deleted, so its grant isn't listed with no refresh token behind it"
+  },
+  {
+    "id": "srv-withdrawal-failure-keeps-entry",
+    "file": "server/grant_registry.go",
+    "old": "if err := s.deps.Grants.RevokeRefreshToken(ctx, refreshTokenHash); err != nil {\n\t\treturn errors.Join(cause, fmt.Errorf(\"withdraw the refresh token: %w\", err))",
+    "new": "if err := s.deps.Grants.RevokeRefreshToken(ctx, refreshTokenHash); err != nil {\n\t\t_ = s.forgetRevokedRefreshToken(ctx, refreshTokenHash)\n\t\treturn errors.Join(cause, fmt.Errorf(\"withdraw the refresh token: %w\", err))",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRefreshTokenIsntIssuedForAGrantRevokedMeanwhile$",
+    "why": "a refresh token that couldn't be withdrawn keeps its registry entry, for RevokeSubjectGrants to revoke it by"
+  },
+  {
+    "id": "srv-code-grant-record-floor",
+    "file": "server/token_revocation.go",
+    "old": "until := s.deps.Clock.Now().Add(s.grantRevocationRecordLifetime())",
+    "new": "until := s.deps.Clock.Now().Add(s.grantRevocationHorizon())",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestRevokedRefreshTokensCodeGrantLastsAsLongAsRevokeGrants|TestRevokedRefreshTokensCodeGrantOutlastsALongerLifetime)$",
+    "why": "a revoked refresh token's code grant record lasts as long as RevokeGrant's"
+  },
+  {
     "id": "backchannel-outbound-hardened",
     "file": "backchannelhttp/notifier.go",
     "old": "OutboundHardened: n.hardened}",

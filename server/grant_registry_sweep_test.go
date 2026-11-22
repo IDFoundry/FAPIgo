@@ -255,6 +255,37 @@ func testSweepBesideAListedGrant(t *testing.T) {
 	}
 }
 
+// TestRevokedGrantsSweepRefusesAnEntryWithoutItsToken: an entry of a
+// grant revoked another way whose refresh token hash isn't the one its
+// key is derived from — another token's, as a forged unsealed record's
+// could be — isn't swept: RevokeSubjectGrants and RevokeListedGrant
+// revoke no refresh token by it and leave it, as they revoke nothing by
+// such an entry of a grant that isn't revoked
+// (TestRevokeListedGrantRefusesAnEntryWithoutItsToken).
+func TestRevokedGrantsSweepRefusesAnEntryWithoutItsToken(t *testing.T) {
+	ctx := context.Background()
+	subject := mustSubjectID(t, "user-1")
+	registry := &stubRegistry{}
+	h := stubRegistryHarness(t, registry)
+	other := sha256.Sum256([]byte("other"))
+	registry.entries = []storage.GrantEntry{registryEntry(t, h, "k", testIssuer, "user-1", h.now, map[string]any{"rth": other[:], "grant_id": "grant-1"})}
+	if err := h.server.RevokeGrant(ctx, "grant-1"); err != nil {
+		t.Fatalf("RevokeGrant: %v", err)
+	}
+	if n, err := h.server.RevokeSubjectGrants(ctx, subject); n != 0 || err != nil {
+		t.Errorf("RevokeSubjectGrants = %d, %v; want 0, nil", n, err)
+	}
+	if err := h.server.RevokeListedGrant(ctx, subject, registryKey("k")); !errors.Is(err, server.ErrGrantNotListed) {
+		t.Errorf("RevokeListedGrant(the mismatched entry) = %v, want ErrGrantNotListed", err)
+	}
+	h.grants.mu.Lock()
+	revoked := h.grants.refreshRevoked[other]
+	h.grants.mu.Unlock()
+	if revoked || len(registry.deleted) != 0 {
+		t.Errorf("the refresh token the entry names revoked: %v, DeleteGrant calls %v; want neither", revoked, registry.deleted)
+	}
+}
+
 // failedRevokeGrant is an outage that makes RevokeGrant fail once it has
 // recorded the grant as revoked.
 type failedRevokeGrant struct {

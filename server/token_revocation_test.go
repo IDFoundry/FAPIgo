@@ -5,14 +5,18 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -23,6 +27,14 @@ const testRevocationEndpoint = "https://as.example/revoke"
 // endpoint enabled and testClientID allowed offline_access.
 func newRevocationHarness(t *testing.T, attesterKey *ecdsa.PrivateKey) harness {
 	t.Helper()
+	return newRevocationHarnessWith(t, attesterKey, nil)
+}
+
+// newRevocationHarnessWith is newRevocationHarness with tweak, if
+// non-nil, then adjusting the server's Config and testClientID's
+// registration.
+func newRevocationHarnessWith(t *testing.T, attesterKey *ecdsa.PrivateKey, tweak func(*server.Config, *storage.RegisteredClientConfig)) harness {
+	t.Helper()
 	revocation, err := fapi.ParseEndpointURL(testRevocationEndpoint)
 	if err != nil {
 		t.Fatal(err)
@@ -31,6 +43,9 @@ func newRevocationHarness(t *testing.T, attesterKey *ecdsa.PrivateKey) harness {
 		cfg.Endpoints.Revocation = revocation
 		cfg.AdditionalGrantTypes = []string{preAuthorizedCodeGrant}
 		c.AllowedScopes = []string{"openid", "accounts", "offline_access"}
+		if tweak != nil {
+			tweak(cfg, c)
+		}
 	})
 }
 
@@ -183,6 +198,52 @@ func TestRevokeTokenRefusals(t *testing.T) {
 			}
 			if last := lastAudit(t, h); last.Type != server.AuditEventRevokeToken || last.Outcome != server.AuditOutcomeFailure {
 				t.Errorf("last audit event = %+v, want a RevokeToken failure", last)
+			}
+		})
+	}
+}
+
+// TestRevokeTokenRefusesOwnAccessTokensPast16KiB: the client's own live
+// access token is refused with unsupported_token_type, and audited as a
+// failure, at any size this server issues (Limits.MaxAccessTokenBytes),
+// not only within the 16 KiB token.ParseAccessToken allows by default.
+// With MaxAccessTokenClaimsBytes raised, the server issues tokens either
+// side of 16 KiB, and both are answered alike.
+func TestRevokeTokenRefusesOwnAccessTokensPast16KiB(t *testing.T) {
+	registry, err := extension.NewRARRegistry(16<<10, 4, extension.RARDefinition[testPaymentDetail]{Type: "payment", MaxObjects: 1, MaxBytesPerObject: 16 << 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attesterKey := generateKey(t)
+	h := newRevocationHarnessWith(t, attesterKey, func(cfg *server.Config, c *storage.RegisteredClientConfig) {
+		cfg.Limits.MaxAccessTokenClaimsBytes = 16 << 10
+		cfg.RAR = registry
+		c.AuthorizationDetailsTypes = []string{"payment"}
+	})
+	owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	req := embedderAccessTokenRequest(t, owner, generateKey(t))
+	// issue issues owner an access token for a payment whose amount is
+	// digits long, so the token grows with digits.
+	issue := func(digits int) string {
+		req.AuthorizationDetails = []json.RawMessage{json.RawMessage(`{"type":"payment","actions":["approve"],"amount":"` + strings.Repeat("9", digits) + `"}`)}
+		result, err := h.server.IssueAccessToken(context.Background(), req)
+		if err != nil {
+			t.Fatalf("IssueAccessToken with a %d-digit amount: %v", digits, err)
+		}
+		return result.AccessToken.Reveal()
+	}
+	// The longest token at most 16 KiB, and the next one up.
+	digits := sort.Search(jose.DefaultMaxCompactBytes, func(n int) bool { return len(issue(n)) > jose.DefaultMaxCompactBytes })
+	under, over := issue(digits-1), issue(digits)
+	if len(under) > jose.DefaultMaxCompactBytes || len(over) <= jose.DefaultMaxCompactBytes {
+		t.Fatalf("access tokens of %d and %d bytes, want one either side of %d", len(under), len(over), jose.DefaultMaxCompactBytes)
+	}
+	for name, accessToken := range map[string]string{"at most 16 KiB": under, "over 16 KiB": over} {
+		t.Run(name, func(t *testing.T) {
+			what := fmt.Sprintf("revoking the client's own %d-byte access token", len(accessToken))
+			assertRequestErrorCode(t, what, owner.revoke(formParam("token", accessToken)), server.ErrorUnsupportedTokenType)
+			if last := lastAudit(t, h); last.Type != server.AuditEventRevokeToken || last.Outcome != server.AuditOutcomeFailure || last.Description != string(server.ErrorUnsupportedTokenType) {
+				t.Errorf("last audit event = %+v, want a RevokeToken failure for unsupported_token_type", last)
 			}
 		})
 	}

@@ -7,6 +7,7 @@ import (
 
 func TestValidateClaimsParameter(t *testing.T) {
 	str := func(s string) json.RawMessage { b, _ := json.Marshal(s); return b }
+	twice := func(s string) json.RawMessage { return str(string(str(s))) }
 	for name, tc := range map[string]struct {
 		raw   json.RawMessage
 		valid bool
@@ -35,11 +36,23 @@ func TestValidateClaimsParameter(t *testing.T) {
 		"ID_TOKEN not an object":         {json.RawMessage(`{"ID_TOKEN":5}`), false},
 		"UserInfo":                       {json.RawMessage(`{"UserInfo":{"name":null}}`), false},
 		"Id_Token as a form string":      {str(`{"Id_Token":{"email":null}}`), false},
+		// JSON-encoded twice: a string holding a string holding the
+		// object. Every reader unwraps one string layer and so sees no
+		// claims at all, so validation refuses it rather than checking
+		// the object no reader looks at.
+		"essential acr encoded twice": {twice(`{"id_token":{"acr":{"essential":true,"values":["gold"]}}}`), false},
+		"sub value encoded twice":     {twice(`{"id_token":{"sub":{"value":"user-1"}}}`), false},
+		"empty object encoded twice":  {twice(`{}`), false},
+		"encoded three times":         {str(string(twice(`{}`))), false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := validateClaimsParameter(map[string]json.RawMessage{"claims": tc.raw})
 			if (err == nil) != tc.valid {
 				t.Fatalf("validateClaimsParameter(%s) = %v, want valid=%v", tc.raw, err, tc.valid)
+			}
+			// What validation accepts, the readers can read.
+			if _, ok := claimsMembers(tc.raw); tc.valid && !ok {
+				t.Fatalf("claimsMembers(%s) finds no members in a value validation accepts", tc.raw)
 			}
 		})
 	}

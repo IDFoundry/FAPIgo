@@ -636,9 +636,12 @@ What to decide when you deploy it:
   (`Dependencies.Clock`); running it late only keeps rows longer. A row
   stays as long as something may need it: a redeemed authorization code
   until the tokens it issued expire, so reusing the code still revokes
-  them, and a CIBA request until `sqlstore.BackchannelExpiredRetention`
+  them, a CIBA request until `sqlstore.BackchannelExpiredRetention`
   (an hour) after it expires, so a late poll gets `expired_token`
-  rather than `invalid_grant`. Pairwise subjects are never swept.
+  rather than `invalid_grant`, and a revoked grant's record at least
+  400 days (see "How long a revoked grant stays revoked" in
+  [step 5](#5-the-one-piece-thats-genuinely-yours-the-login-flow)).
+  Pairwise subjects are never swept.
 - **Table prefix.** `Options.TablePrefix` (`fapigo_` by default)
   prefixes every table, so several DBs, or another application's
   tables, can share one database and one `*sql.DB`.
@@ -908,6 +911,25 @@ with no refresh token isn't listed; its access token expires within
 `Limits.AccessTokenLifetime`. Neither call checks who is asking, so
 pass the subject your login session authenticated, never one from the
 request.
+
+**How long a revoked grant stays revoked.** `srv.RevokeGrant` records
+the grant as revoked for at least 400 days, longer when the current
+`Limits` let something issued from it be used for longer, and a reused
+authorization code's grant is recorded the same way. When
+`Dependencies.Grants` implements `storage.GrantRefreshTokenRevoker`
+(`memstore`'s does), the grant's refresh tokens are revoked in the store
+too, so nothing can redeem them again, whatever lifetimes apply later;
+if that fails, `RevokeGrant` says the grant is revoked but its refresh
+tokens couldn't all be revoked, and calling it again revokes the rest.
+Otherwise, and for a refresh token stored before the store had it, or
+while `RevokeGrant` ran, only the record refuses them: raising
+`Limits.RefreshTokenLifetime` later, or running instances with longer
+`Limits`, can't bring a revoked grant back unless a refresh token
+lifetime over 400 days applies. With longer lifetimes, withdraw grants
+with `RevokeListedGrant`, which revokes the refresh token itself, or
+call `RevokeGrant` again once the longer lifetime is in force. Either
+way, the revocation store keeps one record per revoked grant, and per
+reused code, for those 400 days at least.
 
 **Closing an account.** `srv.RevokeSubjectGrants(ctx, subject)` revokes
 every grant the registry lists for the user, and, with a CIBA inbox,

@@ -37,7 +37,10 @@ type Dependencies struct {
 	// DeploymentHorizontallyScaled).
 	InteractionLookup storage.InteractionLookup
 
-	// Grants persists issued authorization codes and refresh tokens.
+	// Grants persists issued authorization codes and refresh tokens. One
+	// that is also a storage.GrantRefreshTokenRevoker (memstore's is)
+	// lets RevokeGrant, and the reuse of an authorization code, revoke
+	// the grant's refresh tokens in the store as well (see RevokeGrant).
 	Grants storage.GrantStore
 
 	// GrantRegistry, if set, records each grant the server issues a

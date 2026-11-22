@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"time"
@@ -81,27 +83,51 @@ func (s *Server) grantRevocationReader() (revocationReader, bool) {
 // answers invalid_token for an access token carrying the grant ID — so
 // a resource server must read the same revocation store the
 // authorization server writes, as it must for access token revocation
-// already. The record lasts as long as anything issued from the grant
-// can still be used: the longest of Limits.RefreshTokenLifetime,
+// already. Then, when Dependencies.Grants is a
+// storage.GrantRefreshTokenRevoker (memstore's GrantStore is), it
+// revokes the grant's refresh tokens in that store as well, and removes
+// them from Dependencies.GrantRegistry. If revoking them fails, the
+// grant is revoked all the same, and the error says its refresh tokens
+// couldn't all be revoked: call RevokeGrant again to revoke the rest.
+// If only removing a registry entry fails, the error says the grant and
+// its refresh tokens are revoked. Calling RevokeGrant again may not
+// remove that entry, since the store needn't report a refresh token it
+// has already revoked, but ListGrants doesn't list the entry while the
+// grant's record lasts, and the entry expires with its refresh token:
+// with refresh token lifetimes of up to 400 days, it's never listed
+// again.
+//
+// The record lasts at least 400 days, or as long as anything issued
+// from the grant can still be used under the current Limits, if that's
+// longer: the longest of Limits.RefreshTokenLifetime,
 // Limits.AuthorizationCodeLifetime and
 // Limits.BackchannelAuthenticationRequestLifetime (a refresh token,
 // unredeemed code or approved auth_req_id already outstanding), plus
 // Limits.AccessTokenLifetime (an access token issued just before) and
 // Limits.MaxClockSkew (the leeway resource.Verifier allows on its
-// expiry). Those are the current Limits: a refresh token, code or CIBA
-// decision issued under a longer lifetime than today's expires at its
-// issue time plus today's lifetime, whatever its stored expiry, so
-// shortening a lifetime can't let one outlive the record — except one
-// written before that issue time was recorded: a refresh token issued
-// before v0.50.0 keeps its stored expiry, so after shortening
-// Limits.RefreshTokenLifetime it can outlive this record. Until those
-// have expired, revoke such a refresh token itself (RevokeToken) rather
-// than relying on its grant's record. An access token keeps the exp it was issued with; one issued under a longer
-// Limits.AccessTokenLifetime stays covered while that old lifetime is no
-// longer than the current record lifetime. To cut such tokens off as
-// soon as you shorten Limits.AccessTokenLifetime, lower the resource
-// server's maximum accepted lifetime with it (resource.JWTAccessTokens'
-// MaxTokenLifetime).
+// expiry). The revocation store keeps one such record for each revoked
+// grant. The 400 days are for a refresh token the GrantStore didn't
+// revoke — one stored by a GrantStore without that interface, or before
+// it had it, or while RevokeGrant ran, or one it failed to revoke —
+// which only the record refuses: a longer Limits.RefreshTokenLifetime
+// than the record was sized from can apply to it later, raised after
+// the revocation or on another instance running other Limits. So a
+// revoked grant's refresh tokens that the GrantStore revoked can never
+// be redeemed again, and any other is refused for good unless a refresh
+// token lifetime over 400 days applies to it. With longer lifetimes, use
+// a GrantStore that implements the interface, or also revoke the
+// refresh token itself (RevokeListedGrant does), or call RevokeGrant
+// again once the longer lifetime applies.
+//
+// Shortening a lifetime can't let anything outlive the record either: a
+// refresh token, code or CIBA decision issued under a longer lifetime
+// than today's expires at its issue time plus today's lifetime, whatever
+// its stored expiry. An access token keeps the exp it was issued with;
+// one issued under a longer Limits.AccessTokenLifetime stays covered
+// while that old lifetime is no longer than the record's. To cut such
+// tokens off as soon as you shorten Limits.AccessTokenLifetime, lower
+// the resource server's maximum accepted lifetime with it
+// (resource.JWTAccessTokens' MaxTokenLifetime).
 //
 // RevokeGrant doesn't check who is asking: the application must make
 // sure the user revoking a grant is the one it was granted by. A grant
@@ -117,11 +143,73 @@ func (s *Server) RevokeGrant(ctx context.Context, grantID string) error {
 	if _, ok := s.grantRevocationReader(); !ok {
 		return errors.New("server: revoke grant: Dependencies.Revocation can't revoke grants (it's NoRevocation, or doesn't implement IsRevoked)")
 	}
-	until := s.deps.Clock.Now().Add(s.grantRevocationHorizon())
-	if err := s.deps.Revocation.Revoke(ctx, grantrevocation.Key(s.cfg.Issuer.String(), grantID), until); err != nil {
+	key := grantrevocation.Key(s.cfg.Issuer.String(), grantID)
+	if err := s.deps.Revocation.Revoke(ctx, key, s.deps.Clock.Now().Add(s.grantRevocationRecordLifetime())); err != nil {
 		return fmt.Errorf("server: revoke grant: %w", err)
 	}
+	revokeErr, forgetErr := s.revokeGrantRefreshTokens(ctx, key)
+	if revokeErr != nil {
+		return fmt.Errorf("server: revoke grant: the grant is revoked, but its refresh tokens couldn't all be revoked (call RevokeGrant again to revoke the rest): %w", errors.Join(revokeErr, forgetErr))
+	}
+	if forgetErr != nil {
+		return fmt.Errorf("server: revoke grant: the grant and its refresh tokens are revoked, but some of their grant registry entries couldn't be removed: %w", forgetErr)
+	}
 	return nil
+}
+
+// revokeGrantRefreshTokens revokes, in Dependencies.Grants, the refresh
+// tokens issued from the grant revocationKey (grantrevocation.Key or
+// CodeKey) names, and removes each from Dependencies.GrantRegistry, as
+// revokeRefreshToken does one token, when Grants can find them: when
+// it's a storage.GrantRefreshTokenRevoker. It runs once the grant's
+// revocation is recorded, so a token it misses is still refused.
+//
+// The two failures are told apart. revokeErr is the store's: a later
+// call revokes the tokens it left. forgetErr joins the failures to
+// remove a reported token's registry entry, which a later call may not
+// retry, since the store needn't report a token it has already revoked.
+// So every token the store reports has its entry removed, even with
+// revokeErr (a store failing part way reports what it did revoke), and
+// one entry failing to go doesn't keep the others'.
+func (s *Server) revokeGrantRefreshTokens(ctx context.Context, revocationKey string) (revokeErr, forgetErr error) {
+	revoker, ok := s.deps.Grants.(storage.GrantRefreshTokenRevoker)
+	if !ok {
+		return nil, nil
+	}
+	revoked, revokeErr := revoker.RevokeGrantRefreshTokens(ctx, refreshTokenGrantKey(revocationKey))
+	var failures []error
+	for _, hash := range revoked {
+		if err := s.forgetRevokedRefreshToken(ctx, hash); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return revokeErr, errors.Join(failures...)
+}
+
+// refreshTokenGrantKeys are the storage.NewRefreshToken.GrantKeys of a
+// refresh token issued from grant: the key RevokeGrant revokes its
+// GrantID's refresh tokens by, and the key a reuse of its authorization
+// code revokes its CodeGrantID's by, whichever it has.
+func (s *Server) refreshTokenGrantKeys(grant grantRecord) []string {
+	issuer := s.cfg.Issuer.String()
+	var keys []string
+	if grant.GrantID != "" {
+		keys = append(keys, refreshTokenGrantKey(grantrevocation.Key(issuer, grant.GrantID)))
+	}
+	if grant.CodeGrantID != "" {
+		keys = append(keys, refreshTokenGrantKey(grantrevocation.CodeKey(issuer, grant.CodeGrantID)))
+	}
+	return keys
+}
+
+// refreshTokenGrantKey is the key a GrantStore indexes the refresh
+// tokens of the grant revocationKey names by (storage.NewRefreshToken.
+// GrantKeys): a digest of that key, which names the grant's issuer and
+// ID, so the store keeps a fixed-length digest, never the grant ID the
+// application chose, as it keeps a token's digest, never the token.
+func refreshTokenGrantKey(revocationKey string) string {
+	sum := sha256.Sum256([]byte("fapigo refresh token grant\x00" + revocationKey))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // checkGrantNotRevoked refuses a grant that has been revoked with
@@ -175,8 +263,29 @@ func anyRevoked(ctx context.Context, reader revocationReader, keys []string) (bo
 	return false, nil
 }
 
+// minGrantRevocationRecordLifetime is the shortest time a grant's
+// revocation record lasts, whatever the current Limits: the record
+// RevokeGrant writes, and the one a reused authorization code's grant
+// gets. A record sized from the current Limits alone lapses early once
+// a longer refresh token lifetime applies, raised later or on another
+// instance with other Limits, while a refresh token the GrantStore still
+// holds would be redeemable under it again (see RevokeGrant). 400 days
+// is longer than any refresh token lifetime a deployment is likely to
+// set (RecommendedLimits' is a day), at the cost of a revocation store
+// keeping each such record that long.
+const minGrantRevocationRecordLifetime = 400 * 24 * time.Hour
+
+// grantRevocationRecordLifetime is how long the revocation record of a
+// grant RevokeGrant revokes, or of a reused code's grant, lasts:
+// grantRevocationHorizon, or minGrantRevocationRecordLifetime when
+// that's longer.
+func (s *Server) grantRevocationRecordLifetime() time.Duration {
+	return max(s.grantRevocationHorizon(), minGrantRevocationRecordLifetime)
+}
+
 // grantRevocationHorizon is how long after now anything issued from a
-// grant can still be used — RevokeGrant's record lifetime.
+// grant can still be used under the current Limits: how long a revoked
+// grant's record must last at least (grantRevocationRecordLifetime).
 //
 // The sum saturates at the largest Duration rather than wrapping, so
 // lifetimes configured absurdly long still give a record that outlasts

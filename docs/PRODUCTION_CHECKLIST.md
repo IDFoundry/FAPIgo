@@ -80,6 +80,18 @@ are things no constructor can check.
   Redirect with 303 after a form POST, and render errors with
   `WriteText`/`WriteJSON`, never `Error()`.
   [Step 5](../GETTING_STARTED.md#5-the-one-piece-thats-genuinely-yours-the-login-flow)
+- [ ] *(yours)* **Rate-limit `/authorize`, and size the replay store for
+  it.** `BeginAuthorization` runs before anyone has authenticated, and
+  counts each interaction it begins in `Dependencies.Replay`: a 32-byte
+  record, kept `Limits.PushedRequestLifetime` plus twice
+  `Limits.MaxClockSkew`, up to eight per `request_uri`. Set
+  `Dependencies.PushedRequestLookup` to the `storage.PushedRequestLookup`
+  built on your `Transactions` storage, if it has one (one of your own
+  must pass `storage.TestPushedRequestLookupContract`): a `request_uri`
+  that is unknown, expired, already used or presented with another
+  `client_id` is then refused before anything is written. Without it,
+  every such request leaves a record until it expires.
+  [PAR](guides/par.md#authorization-server-the-endpoint-and-the-authorization-step)
 - [ ] *(yours)* **The HTTP layer:** TLS 1.2 or later with BCP 195 cipher
   suites (at the proxy, if one terminates TLS), HSTS on browser-facing
   endpoints, and no CORS on the authorization endpoint.

@@ -107,32 +107,41 @@ type BeginAuthorizationRequest struct {
 // third party can read: serve the login page with
 // "Referrer-Policy: no-referrer" and no third-party resources, and don't
 // log full authorization request URLs.
+//
+// The interactions are counted in Dependencies.Replay, in the namespace
+// "server:authorization-interaction", so the bound holds across
+// instances. Nobody has authenticated at the authorization endpoint, so
+// before counting one BeginAuthorization asks
+// Dependencies.PushedRequestLookup, when it's set, whether the
+// request_uri can be begun at all: one that is unknown, expired, already
+// used or presented with another client_id is refused with
+// ErrorInvalidRequestURI, as the store would refuse it, and leaves
+// nothing behind. Without the lookup, each such request leaves a record
+// in Dependencies.Replay until it expires: set it, and rate-limit the
+// authorization endpoint. A lookup that couldn't answer is an
+// ErrorServerError LocalErrorResponse, as a store that couldn't is.
 func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationRequest) (AuthorizationAction, error) {
 	// Until it matches the client that pushed the request (below), the
 	// query's client_id is only what the browser claims: those failures
 	// are audited with no client (AuditEvent.ClientID), never with this
 	// unverified value, which could carry anything into an audit log.
-	if req.RequestURI == "" && req.Request != "" {
-		// OIDC Core §6.1: an OP that doesn't support the request
-		// parameter here answers request_not_supported.
-		return s.beginFail(ctx, "", newError(ErrorRequestNotSupported, 400, "the request parameter is not supported at the authorization endpoint: push the request object (RFC 9126)", nil)), nil
-	}
-	reference, ok := par.SplitRequestURI(req.RequestURI)
-	if !ok {
-		return s.beginFail(ctx, "", newError(ErrorInvalidRequest, 400, "request_uri is not recognized", nil)), nil
-	}
-	if req.ClientID == "" {
-		return s.beginFail(ctx, "", newError(ErrorInvalidRequest, 400, "client_id is required", nil)), nil
-	}
-
-	handle, err := generateInteractionHandle(s.deps.Random)
-	if err != nil {
-		return s.beginFail(ctx, "", newError(ErrorServerError, 500, "failed to generate interaction handle", err)), nil
+	reference, refusal := beginReference(req)
+	if refusal != nil {
+		return s.beginFail(ctx, "", refusal), nil
 	}
 
 	now := s.deps.Clock.Now()
 	handleExpiresAt := now.Add(s.cfg.Limits.InteractionLifetime)
 	referenceKey := parReferenceKey(req.ClientID, reference)
+	if unusable := s.refuseUnusableRequestURI(ctx, req.ClientID, referenceKey, now); unusable != nil {
+		return s.beginFail(ctx, "", unusable), nil
+	}
+	// Only once the lookup, when set, has let the request_uri through: a
+	// request_uri it refuses reads nothing from Random either.
+	handle, err := generateInteractionHandle(s.deps.Random)
+	if err != nil {
+		return s.beginFail(ctx, "", newError(ErrorServerError, 500, "failed to generate interaction handle", err)), nil
+	}
 	if slotErr := s.claimInteractionSlot(ctx, referenceKey, now); slotErr != nil {
 		return s.beginFail(ctx, "", slotErr), nil
 	}
@@ -187,6 +196,26 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	}
 	s.audit(ctx, AuditEventBeginAuthorization, req.ClientID, AuditOutcomeSuccess, "")
 	return action, nil
+}
+
+// beginReference returns the reference of the request_uri req presents,
+// or why BeginAuthorization can't begin anything from req: a request
+// object without a request_uri, a request_uri this server didn't issue,
+// or no client_id.
+func beginReference(req BeginAuthorizationRequest) (string, *Error) {
+	if req.RequestURI == "" && req.Request != "" {
+		// OIDC Core §6.1: an OP that doesn't support the request
+		// parameter here answers request_not_supported.
+		return "", newError(ErrorRequestNotSupported, 400, "the request parameter is not supported at the authorization endpoint: push the request object (RFC 9126)", nil)
+	}
+	reference, ok := par.SplitRequestURI(req.RequestURI)
+	if !ok {
+		return "", newError(ErrorInvalidRequest, 400, "request_uri is not recognized", nil)
+	}
+	if req.ClientID == "" {
+		return "", newError(ErrorInvalidRequest, 400, "client_id is required", nil)
+	}
+	return reference, nil
 }
 
 // authorizationInteraction is the InteractionRequest for request, a

@@ -580,6 +580,102 @@
     "why": "an interaction handle is refused at exactly its expiry"
   },
   {
+    "id": "srv-authorize-lookup-consulted",
+    "file": "server/authorization.go",
+    "old": "s.refuseUnusableRequestURI(ctx, req.ClientID, referenceKey, now); unusable != nil {",
+    "new": "s.refuseUnusableRequestURI(ctx, req.ClientID, referenceKey, now); unusable != nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestBeginAuthorizationRefusesUnusableRequestURIBeforeWriting|TestBeginAuthorizationRejectsClientIDMismatch|TestBeginAuthorizationRejectsExpiredRequestURI)$",
+    "why": "a request_uri the pushed request lookup finds unusable is refused, writing nothing"
+  },
+  {
+    "id": "srv-authorize-lookup-before-slot",
+    "file": "server/authorization.go",
+    "old": "\tif unusable := s.refuseUnusableRequestURI(ctx, req.ClientID, referenceKey, now); unusable != nil {\n\t\treturn s.beginFail(ctx, \"\", unusable), nil\n\t}\n\t// Only once the lookup, when set, has let the request_uri through: a\n\t// request_uri it refuses reads nothing from Random either.\n\thandle, err := generateInteractionHandle(s.deps.Random)\n\tif err != nil {\n\t\treturn s.beginFail(ctx, \"\", newError(ErrorServerError, 500, \"failed to generate interaction handle\", err)), nil\n\t}\n\tif slotErr := s.claimInteractionSlot(ctx, referenceKey, now); slotErr != nil {\n\t\treturn s.beginFail(ctx, \"\", slotErr), nil\n\t}\n",
+    "new": "\t// Only once the lookup, when set, has let the request_uri through: a\n\t// request_uri it refuses reads nothing from Random either.\n\thandle, err := generateInteractionHandle(s.deps.Random)\n\tif err != nil {\n\t\treturn s.beginFail(ctx, \"\", newError(ErrorServerError, 500, \"failed to generate interaction handle\", err)), nil\n\t}\n\tif slotErr := s.claimInteractionSlot(ctx, referenceKey, now); slotErr != nil {\n\t\treturn s.beginFail(ctx, \"\", slotErr), nil\n\t}\n\tif unusable := s.refuseUnusableRequestURI(ctx, req.ClientID, referenceKey, now); unusable != nil {\n\t\treturn s.beginFail(ctx, \"\", unusable), nil\n\t}\n",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestBeginAuthorizationRefusesUnusableRequestURIBeforeWriting|TestBeginAuthorizationRejectsClientIDMismatch|TestBeginAuthorizationRejectsExpiredRequestURI)$",
+    "why": "the pushed request lookup runs before an interaction slot is claimed in the replay store"
+  },
+  {
+    "id": "srv-authorize-lookup-client-id",
+    "file": "server/interaction_slots.go",
+    "old": "if pushed.ClientID != clientID {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBeginAuthorizationBackstopsPushedRequestLookup$",
+    "why": "a lookup answering with another client's pushed request refuses the request_uri before anything is written"
+  },
+  {
+    "id": "srv-authorize-lookup-expiry",
+    "file": "server/interaction_slots.go",
+    "old": "if !now.Before(pushed.ExpiresAt) {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBeginAuthorizationBackstopsPushedRequestLookup$",
+    "why": "a lookup answering with an expired pushed request refuses the request_uri before anything is written"
+  },
+  {
+    "id": "srv-authorize-lookup-expiry-boundary",
+    "file": "server/interaction_slots.go",
+    "old": "if !now.Before(pushed.ExpiresAt) {",
+    "new": "if now.After(pushed.ExpiresAt) {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBeginAuthorizationBackstopsPushedRequestLookup$",
+    "why": "a lookup answering with a pushed request at exactly its expiry refuses the request_uri"
+  },
+  {
+    "id": "srv-authorize-lookup-outage",
+    "file": "server/interaction_slots.go",
+    "old": "return storeFailure(ctx, err, \"failed to look up the pushed authorization request\", newError(ErrorInvalidRequestURI, 400, \"request_uri is invalid, expired, or already used\", err))",
+    "new": "return newError(ErrorInvalidRequestURI, 400, \"request_uri is invalid, expired, or already used\", err)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBeginAuthorizationPushedRequestLookupOutage$",
+    "why": "a pushed request lookup that couldn't answer is a 500 server_error, not an unusable request_uri"
+  },
+  {
+    "id": "srv-production-pushed-request-lookup",
+    "file": "server/server.go",
+    "old": "if deps.PushedRequestLookup != nil {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestProductionChecksPushedRequestLookup$",
+    "why": "AssuranceProduction checks the pushed request lookup's StoreAssurance"
+  },
+  {
+    "id": "srv-production-pushed-request-lookup-cross-instance",
+    "file": "server/server.go",
+    "old": "checkStoreAssurance(\"pushed_request_lookup\", deps.PushedRequestLookup, false, scaled)",
+    "new": "checkStoreAssurance(\"pushed_request_lookup\", deps.PushedRequestLookup, false, false)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestProductionChecksPushedRequestLookup$",
+    "why": "AssuranceProduction with DeploymentHorizontallyScaled requires the pushed request lookup to declare CrossInstanceConsistent"
+  },
+  {
     "id": "srv-mtls-dn-non-string",
     "file": "server/client_auth_mtls.go",
     "old": "if _, ok := atv.Value.(string); !ok {",

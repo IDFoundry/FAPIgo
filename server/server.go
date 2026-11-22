@@ -895,10 +895,10 @@ func attesterTrustSources(trust AttesterTrust) []namedSource {
 }
 
 // checkProductionStateStores checks the stores holding flow state:
-// transactions (and the interaction lookup, when set), grants (and the
-// grant registry, when set), replay records, the backchannel store when CIBA
-// is in use, and the DPoP nonce store, which is required unless
-// declined with NoDPoPNonces.
+// transactions (and the interaction and pushed request lookups, when
+// set), grants (and the grant registry, when set), replay records, the
+// backchannel store when CIBA is in use, and the DPoP nonce store, which
+// is required unless declined with NoDPoPNonces.
 func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) []error {
 	errs := []error{
 		checkStoreAssurance("transactions", deps.Transactions, true, scaled),
@@ -907,6 +907,9 @@ func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) []e
 	}
 	if deps.InteractionLookup != nil {
 		errs = append(errs, checkStoreAssurance("interaction_lookup", deps.InteractionLookup, false, scaled))
+	}
+	if deps.PushedRequestLookup != nil {
+		errs = append(errs, checkStoreAssurance("pushed_request_lookup", deps.PushedRequestLookup, false, scaled))
 	}
 	if deps.GrantRegistry != nil {
 		errs = append(errs, checkStoreAssurance("grant_registry", deps.GrantRegistry, false, scaled))

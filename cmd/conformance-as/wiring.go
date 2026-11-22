@@ -342,9 +342,10 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		return nil, fmt.Errorf("conformance-as: unknown access token format %q", resolved.AccessTokenFormat)
 	}
 
+	transactions := memstore.NewTransactionStore()
 	srvDeps := server.Dependencies{
 		Clients:      clientRepo,
-		Transactions: memstore.NewTransactionStore(),
+		Transactions: transactions,
 		Grants:       memstore.NewGrantStore(),
 		Replay:       replayStore,
 		ClientKeys:   clientKeys,
@@ -384,6 +385,10 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		FederationHTTP: federationFetcher,
 		// nil unless -pairwise-subjects; see pairwiseSubjects.
 		PairwiseSubjects: pairwiseDeriver,
+		// Read before /authorize writes anything, so a request_uri no
+		// interaction can be begun for leaves no interaction slot in
+		// replayStore.
+		PushedRequestLookup: memstore.NewPushedRequestLookup(transactions),
 	}
 	if dynClients != nil {
 		srvDeps.Clients = dynClients

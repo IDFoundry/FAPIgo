@@ -68,6 +68,15 @@ of the pushed request, so a ninth is refused with `invalid_request_uri`
 rather than stored; the count is kept in `Dependencies.Replay`, so it
 holds across instances.
 
+Counting writes a record before anyone has authenticated, so set
+`Dependencies.PushedRequestLookup` to the lookup built on your
+`Transactions` storage (`memstore.NewPushedRequestLookup` for
+memstore's): `BeginAuthorization` then refuses a `request_uri` that is
+unknown, expired, already used or presented with another `client_id`
+before it writes anything, where otherwise each such request leaves a
+record until it expires. Rate-limit the authorization endpoint either
+way.
+
 Unregistered parameters are ignored rather than echoed into the grant,
 and a PAR request that itself carries a `request_uri` is refused. The
 core parameters stored with the request are bounded: `state`, `nonce`,

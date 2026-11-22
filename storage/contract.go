@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"sync"
@@ -2256,7 +2257,12 @@ func testGrantRegistryListByKey(t *testing.T, factory func() GrantRegistry) {
 // TestBackchannelInboxContract exercises factory()'s behavior against
 // the guarantees BackchannelInbox's documentation promises: entries
 // round-trip unmodified, are listed only for their own subject and only
-// until they expire, are replaced by handle hash, and are removed by it.
+// until they expire, are replaced by handle hash, and are removed by it;
+// and, on one instance, an add shows at once. For that, concurrent
+// callers each add an entry of their own, remove an entry added
+// beforehand and list, so adds race removals as well as one another: no
+// add may be lost, and each listing must include every entry whose add
+// had returned before it began.
 // factory must return a fresh, empty BackchannelInbox each call.
 func TestBackchannelInboxContract(t *testing.T, factory func() BackchannelInbox) {
 	t.Helper()
@@ -2266,6 +2272,7 @@ func TestBackchannelInboxContract(t *testing.T, factory func() BackchannelInbox)
 	t.Run("ListOnlyUnexpired", func(t *testing.T) { testBackchannelInboxListOnlyUnexpired(t, factory) })
 	t.Run("AddReplacesByHandle", func(t *testing.T) { testBackchannelInboxAddReplacesByHandle(t, factory) })
 	t.Run("Remove", func(t *testing.T) { testBackchannelInboxRemove(t, factory) })
+	t.Run("ConcurrentAddsAreAllListed", func(t *testing.T) { testBackchannelInboxConcurrentAddsAreAllListed(t, factory) })
 }
 
 func inboxHash(name string) [32]byte { return sha256.Sum256([]byte(name)) }
@@ -2375,6 +2382,98 @@ func testBackchannelInboxRemove(t *testing.T, factory func() BackchannelInbox) {
 	if err := inbox.RemoveBackchannelRequest(ctx, inboxHash("h1")); err != nil {
 		t.Errorf("RemoveBackchannelRequest(already removed) = %v, want nil", err)
 	}
+}
+
+// contractInboxConcurrentAdds is how many concurrent callers
+// testBackchannelInboxConcurrentAddsAreAllListed has add an entry for
+// one subject: more than twice server.Limits' default cap of 32 pending
+// requests, so an inbox that cuts a listing off at 32 entries, or at 64,
+// fails it too.
+const contractInboxConcurrentAdds = 65
+
+// testBackchannelInboxConcurrentAddsAreAllListed checks, on one
+// instance, that an add shows at once and that none is lost to another
+// add or to a removal. It first adds, for one subject, an entry for each
+// of its concurrent callers to remove. Each caller then adds an entry of
+// its own, from one of a few clients, removes the one added for it, and
+// lists the subject, so adds race removals as well as one another. Each
+// listing must include every entry, with its ClientID, whose add had
+// returned before the listing began, the caller's own among them, and
+// once every add has returned, a listing must include all of them.
+// Neither check needs a removal to have shown. A caller removes after
+// its add rather than before it, so the removals don't spread the adds
+// out: fewer of them would race, and an inbox that loses concurrent adds
+// would pass more often.
+func testBackchannelInboxConcurrentAddsAreAllListed(t *testing.T, factory func() BackchannelInbox) {
+	inbox := factory()
+	expires := time.Now().Add(time.Hour)
+	names := make([]string, contractInboxConcurrentAdds)
+	entries := make([]NewBackchannelInboxEntry, len(names))
+	for i := range names {
+		names[i] = fmt.Sprintf("h%d", i)
+		entries[i] = NewBackchannelInboxEntry{HandleHash: inboxHash(names[i]), SubjectKey: "s1", ClientID: fapi.ClientID(fmt.Sprintf("client-%d", i%3)), Record: contractPayload, ExpiresAt: expires}
+		addInboxEntry(t, inbox, NewBackchannelInboxEntry{HandleHash: inboxHash("r" + names[i]), SubjectKey: "s1", ClientID: "client-r", Record: contractPayload, ExpiresAt: expires})
+	}
+	var mu sync.Mutex
+	next := 0
+	added := make(map[[32]byte]fapi.ClientID, len(entries))
+	complete := runConcurrently(len(entries), func() bool {
+		mu.Lock()
+		i := next
+		next++
+		mu.Unlock()
+		return addRemoveAndListInboxEntries(t, inbox, entries[i], inboxHash("r"+names[i]), &mu, added)
+	})
+	if complete != len(entries) {
+		t.Errorf("%d of %d concurrent callers' listings included every entry, with its ClientID, whose add had returned before the listing began, the caller's own among them; want all", complete, len(entries))
+	}
+	listed := listInboxHashes(t, inbox, "s1", time.Now())
+	missing := 0
+	for _, name := range names {
+		if _, found := slices.BinarySearchFunc(listed, inboxHash(name), func(a, b [32]byte) int { return bytes.Compare(a[:], b[:]) }); !found {
+			missing++
+		}
+	}
+	if missing != 0 {
+		t.Errorf("ListBackchannelRequests once every add had returned is missing %d of the %d entries added", missing, len(names))
+	}
+}
+
+// addRemoveAndListInboxEntries adds entry to inbox and records it in
+// added, by HandleHash with its ClientID, under mu. It then removes the
+// entry whose HandleHash is remove, lists entry's subject, and reports
+// whether the listing includes, with its ClientID, every entry that
+// added held just before the listing began: each one an entry whose add
+// had returned by then, entry itself among them. It reports a failed
+// call with t.Errorf rather than t.Fatalf, so a goroutine other than the
+// test's can call it.
+func addRemoveAndListInboxEntries(t *testing.T, inbox BackchannelInbox, entry NewBackchannelInboxEntry, remove [32]byte, mu *sync.Mutex, added map[[32]byte]fapi.ClientID) bool {
+	t.Helper()
+	ctx := context.Background()
+	if err := inbox.AddBackchannelRequest(ctx, entry); err != nil {
+		t.Errorf("AddBackchannelRequest: %v", err)
+		return false
+	}
+	mu.Lock()
+	added[entry.HandleHash] = entry.ClientID
+	mu.Unlock()
+	if err := inbox.RemoveBackchannelRequest(ctx, remove); err != nil {
+		t.Errorf("RemoveBackchannelRequest: %v", err)
+	}
+	mu.Lock()
+	want := maps.Clone(added)
+	mu.Unlock()
+	listed, err := inbox.ListBackchannelRequests(ctx, BackchannelInboxListing{SubjectKey: entry.SubjectKey, Now: time.Now()})
+	if err != nil {
+		t.Errorf("ListBackchannelRequests(%q): %v", entry.SubjectKey, err)
+		return false
+	}
+	for _, e := range listed {
+		if clientID, ok := want[e.HandleHash]; ok && clientID == e.ClientID {
+			delete(want, e.HandleHash)
+		}
+	}
+	return len(want) == 0
 }
 
 // TestPairwiseSubjectEraserContract exercises factory()'s ForgetSubject

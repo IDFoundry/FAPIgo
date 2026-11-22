@@ -216,7 +216,10 @@ type Dependencies struct {
 	// records a Deny, or an approval by someone else, for whoever presents
 	// the handle. Under AssuranceProduction it must declare
 	// storage.StoreAssurance (Durable, and CrossInstanceConsistent with
-	// DeploymentHorizontallyScaled).
+	// DeploymentHorizontallyScaled). At any level, an inbox of your own
+	// must show each add at once, as storage.BackchannelInbox requires,
+	// or requests filed at the same moment could be admitted together
+	// past a cap.
 	// Ignored unless Config.Endpoints.BackchannelAuthentication is set.
 	BackchannelInbox storage.BackchannelInbox
 

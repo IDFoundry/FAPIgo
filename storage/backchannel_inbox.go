@@ -67,6 +67,24 @@ type BackchannelInboxEntry struct {
 // succeeds when there is none. A store that couldn't answer wraps
 // ErrStoreUnavailable. Run TestBackchannelInboxContract against an
 // implementation.
+//
+// An add must show at once: once AddBackchannelRequest returns nil,
+// every listing of the entry's subject begun afterwards, the adder's
+// own next one among them, on any instance sharing the store, includes
+// the entry until it expires or is removed or replaced; so concurrent
+// adds of different handles must all be kept, none lost to another add
+// or to a removal. TestBackchannelInboxContract checks this on one
+// instance, with adds racing one another and removals. The server lists
+// a user's inbox right after filing a request in it, to count their
+// pending requests against
+// server.Limits.MaxPendingBackchannelAuthenticationRequests and
+// MaxPendingBackchannelAuthenticationRequestsPerClient, while it may be
+// removing other entries of theirs: a listing that missed a completed
+// add could admit a request past a cap. The caps don't need a removal to
+// show at once, nor an expired entry to be deleted promptly: an entry
+// still listed after its removal only makes the server count a request
+// no longer pending, so at worst it refuses a request it could have
+// admitted, never the reverse.
 type BackchannelInbox interface {
 	AddBackchannelRequest(ctx context.Context, entry NewBackchannelInboxEntry) error
 	ListBackchannelRequests(ctx context.Context, listing BackchannelInboxListing) ([]BackchannelInboxEntry, error)

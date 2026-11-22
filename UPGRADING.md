@@ -53,10 +53,11 @@ values the client accepts, in order of preference.
 
 **Affects:** a server with `Dependencies.BackchannelInbox` set whose
 end users can have more than 32 CIBA requests awaiting their decision
-at once, or more than 8 from one client, and code that relies on
+at once, or more than 8 from one client; code that relies on
 `ListBackchannelInteractions` or `DenyBackchannelInteractions` reading
-on after their context has ended. A server without an inbox is
-unaffected.
+on after their context has ended; and a `storage.BackchannelInbox` of
+your own that can lose an add, or whose listing can miss one that has
+returned. A server without an inbox is unaffected.
 
 **Why:** any registered CIBA client could file any number of requests
 for any user whose hint it knew, and every `ListBackchannelInteractions`
@@ -65,7 +66,9 @@ a store read and a client lookup each. One client could make a user's
 listing slow and memory-hungry, and under a deadline return nothing,
 hiding other clients' requests. Once a request is filed, before it's
 stored, the server now counts the user's pending requests by the
-`ClientID` each inbox entry carries. No storage interface changes.
+`ClientID` each inbox entry carries. No storage interface gains a
+method, but `storage.BackchannelInbox` must now show an add at once
+(see What to change).
 
 **What fails:** nothing at startup, unless either new limit is
 negative. `BeginBackchannelAuthentication` refuses with `access_denied`
@@ -77,7 +80,10 @@ client (8 when zero). A request counts until it's decided or expires.
 `ListBackchannelInteractions` and `DenyBackchannelInteractions` return
 an error wrapping `ctx.Err()` if their context ends before the listing
 finishes, rather than reading on; `DenyBackchannelInteractions` then
-denies nothing.
+denies nothing. `storage.TestBackchannelInboxContract` has a new
+subtest, `ConcurrentAddsAreAllListed`, which an inbox fails if it loses
+an add to a concurrent add or removal, or if a listing misses an add
+that had returned before it began.
 
 **What to change:** if your users legitimately have more requests
 pending at once, raise the limits:
@@ -94,6 +100,13 @@ another for the same user, and keep
 requests free their place sooner. Pass `ListBackchannelInteractions`
 and `DenyBackchannelInteractions` a context that lasts as long as the
 call needs.
+
+If you implement `storage.BackchannelInbox` yourself, it must show an
+add at once: every listing begun after `AddBackchannelRequest`
+returned, on any instance sharing the store, includes the entry, and
+no add is lost to a concurrent add or removal. Otherwise requests filed
+at the same moment can be admitted together past a cap. memstore's and
+sqlstore's inboxes already do this.
 
 ## v0.78.0
 

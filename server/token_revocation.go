@@ -308,11 +308,18 @@ func (s *Server) revokeRefreshToken(ctx context.Context, clientID fapi.ClientID,
 // set with a revocation store resource servers can read, and a grant
 // carrying one never gets here without it: redeemRefreshGrant's
 // checkGrantNotRevoked fails closed first.
+//
+// The record lasts as long as RevokeGrant's
+// (grantRevocationRecordLifetime). The callers revoke the grant's
+// refresh token once it's written, and a token that revocation fails to
+// end is refused by the record alone, which must then outlast the token
+// under any longer Limits.RefreshTokenLifetime that applies later, as
+// RevokeGrant's must.
 func (s *Server) revokeCodeGrant(ctx context.Context, codeGrantID string) *Error {
 	if codeGrantID == "" {
 		return nil
 	}
-	until := s.deps.Clock.Now().Add(s.grantRevocationHorizon())
+	until := s.deps.Clock.Now().Add(s.grantRevocationRecordLifetime())
 	if err := s.deps.Revocation.Revoke(ctx, grantrevocation.CodeKey(s.cfg.Issuer.String(), codeGrantID), until); err != nil {
 		return newError(ErrorServerError, 500, "failed to revoke the refresh token's grant", err)
 	}

@@ -996,7 +996,9 @@ func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClie
 // of the grant's scopes (RFC 6749 §6). binding is what the token is
 // issued against — see refreshBinding. The token is stored with its
 // grant's keys (refreshTokenGrantKeys), so a GrantStore that indexes
-// them can revoke it with its grant.
+// them can revoke it with its grant, and issued only once its grant is
+// confirmed still recorded (confirmGrantRecorded) and still not revoked
+// (confirmGrantNotRevoked) after it's stored.
 func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, grant grantRecord, binding refreshBinding) (string, error) {
 	raw, err := generateRefreshToken(s.deps.Random)
 	if err != nil {
@@ -1022,6 +1024,9 @@ func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, 
 		return "", err
 	}
 	if err := s.confirmGrantRecorded(ctx, grant.Subject, hash); err != nil {
+		return "", err
+	}
+	if err := s.confirmGrantNotRevoked(ctx, grant, hash); err != nil {
 		return "", err
 	}
 	return raw, nil

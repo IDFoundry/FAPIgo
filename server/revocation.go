@@ -36,15 +36,13 @@ type RevocationSink interface {
 	// (RevokeGrant), and "code-grant:", an ID the server derives from an
 	// authorization code or CIBA request, "@" and the issuer, when that
 	// code is reused, or when a refresh token issued from it is revoked
-	// (RevokeToken, RevokeListedGrant, RevokeSubjectGrants). For a
-	// "grant:" key, and a reused code's, expiresAt is at least 400 days
-	// on, or when nothing issued from the grant can still be used if
-	// that's later, so the store keeps one such record for each revoked
-	// grant and reused code at least that long (RevokeGrant says why).
-	// For the other "code-grant:" keys, written as the refresh token
-	// itself is revoked, it's when nothing issued from the grant can
-	// still be used under the current Limits. Keys must be compared
-	// exactly, and a key kept revoked until at least its expiresAt: run
+	// (RevokeToken, RevokeListedGrant, RevokeSubjectGrants). For either
+	// kind, expiresAt is at least 400 days on, or when nothing issued
+	// from the grant can still be used if that's later, so the store
+	// keeps one such record for each revoked grant, reused code and
+	// revoked refresh token's code or CIBA grant at least that long
+	// (RevokeGrant says why). Keys must be compared exactly, and a key
+	// kept revoked until at least its expiresAt: run
 	// storage.TestRevocationStoreContract against an implementation.
 	Revoke(ctx context.Context, key string, expiresAt time.Time) error
 }

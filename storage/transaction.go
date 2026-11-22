@@ -172,3 +172,63 @@ type InteractionLookup interface {
 	// unknown handle.
 	LookupAuthorization(ctx context.Context, txn LookupAuthorizationTransaction) (PendingInteraction, error)
 }
+
+// LookupPushedRequestTransaction is the input to
+// PushedRequestLookup.LookupPushedRequest.
+type LookupPushedRequestTransaction struct {
+	// Reference is the key NewPARRecord.Reference was stored under, as
+	// the server derives it for BeginAuthorizationTransaction.Reference:
+	// from the request_uri presented and the client_id presented with
+	// it, so one presented with another client_id is simply unknown.
+	Reference string
+
+	// Now is the server's current time (server.Dependencies.Clock): a
+	// pushed request whose NewPARRecord.ExpiresAt isn't after it is not
+	// returned.
+	Now time.Time
+}
+
+// PendingPushedRequest is what LookupPushedRequest reads for one pushed
+// authorization request an interaction can still be begun for: the
+// ClientID and ExpiresAt CreatePAR stored for it, left in place. The
+// request itself isn't read; only BeginAuthorization returns it.
+type PendingPushedRequest struct {
+	ClientID  fapi.ClientID
+	ExpiresAt time.Time
+}
+
+// PushedRequestLookup reads a pushed authorization request without
+// beginning an interaction for it: server.Dependencies.PushedRequestLookup,
+// which server.Server.BeginAuthorization asks before it writes anything,
+// so a request_uri no interaction can be begun for is refused without
+// leaving a record behind. It's optional, and separate from
+// TransactionStore so adding it changes no existing store: give the one
+// built on the same storage as Dependencies.Transactions:
+// memstore.NewPushedRequestLookup for a memstore TransactionStore. A
+// TransactionStore wrapper that changes how references are keyed needs
+// a lookup that keys them the same way, or every request_uri is refused.
+type PushedRequestLookup interface {
+	// LookupPushedRequest returns the ClientID and expiry CreatePAR
+	// stored for the pushed request Reference identifies, if
+	// TransactionStore.BeginAuthorization could begin an interaction for
+	// it at txn.Now, and writes nothing: it neither consumes Reference
+	// nor counts as beginning it. A Reference begun but not completed is
+	// returned, since it can be begun again. It returns an error, as
+	// BeginAuthorization would, if Reference is unknown, already consumed
+	// by a completed interaction, or its own expiry
+	// (NewPARRecord.ExpiresAt) isn't after txn.Now. An error the store
+	// couldn't answer for (a backend unreachable, a timeout) should wrap
+	// ErrStoreUnavailable, which the server answers with 500 server_error
+	// rather than as an unknown request_uri; an unknown, consumed or
+	// expired Reference's error must not wrap it.
+	//
+	// It must see a CreatePAR as soon as it has returned, on any instance
+	// sharing the store, as BeginAuthorization does: a lookup reading a
+	// replica that lags behind refuses a request_uri pushed a moment
+	// before. Its answer is advisory. For each Reference it returns, the
+	// server still claims an interaction slot and calls
+	// BeginAuthorization, which decides atomically whether the
+	// interaction begins, so a lookup that hasn't yet seen a completion
+	// costs one slot, not a second interaction.
+	LookupPushedRequest(ctx context.Context, txn LookupPushedRequestTransaction) (PendingPushedRequest, error)
+}

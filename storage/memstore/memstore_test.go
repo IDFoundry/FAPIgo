@@ -24,6 +24,13 @@ func TestInteractionLookupContract(t *testing.T) {
 	})
 }
 
+func TestPushedRequestLookupContract(t *testing.T) {
+	storage.TestPushedRequestLookupContract(t, func() (storage.TransactionStore, storage.PushedRequestLookup) {
+		store := NewTransactionStore()
+		return store, NewPushedRequestLookup(store)
+	})
+}
+
 func TestGrantRegistryContract(t *testing.T) {
 	storage.TestGrantRegistryContract(t, func() storage.GrantRegistry { return NewGrantRegistry() })
 }

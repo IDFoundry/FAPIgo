@@ -320,20 +320,38 @@ func TestAutomaticRegistrationBranchPolicyNarrowsRARTypes(t *testing.T) {
 			})
 			action := federatedBackchannelAuthentication(t, srv, f, paymentDetails)
 			if tc.wantAllowed {
-				if tokenErr != nil || parErr != nil {
-					t.Errorf("client_credentials = %v, PAR = %v; want the payment details accepted", tokenErr, parErr)
-				}
-				if _, ok := action.(server.BackchannelInteractionRequired); !ok {
-					t.Errorf("backchannel authentication action = %#v, want an interaction", action)
-				}
+				checkPaymentDetailsAllowed(t, tokenErr, parErr, action)
 				return
 			}
-			for endpoint, err := range map[string]error{"client_credentials": tokenErr, "PAR": parErr} {
-				if code := serverErrorCode(t, err); code != server.ErrorInvalidAuthorizationDetails {
-					t.Errorf("%s error code = %q, want %q", endpoint, code, server.ErrorInvalidAuthorizationDetails)
-				}
-			}
-			checkBackchannelRefused(t, action, server.ErrorInvalidAuthorizationDetails)
+			checkPaymentDetailsRefused(t, tokenErr, parErr, action)
 		})
 	}
+}
+
+// checkPaymentDetailsAllowed fails t unless the client_credentials token
+// request (tokenErr), the pushed authorization request (parErr) and the
+// backchannel authentication request (action) all accepted the payment
+// details.
+func checkPaymentDetailsAllowed(t *testing.T, tokenErr, parErr error, action server.BackchannelAuthenticationAction) {
+	t.Helper()
+	if tokenErr != nil || parErr != nil {
+		t.Errorf("client_credentials = %v, PAR = %v; want the payment details accepted", tokenErr, parErr)
+	}
+	if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		t.Errorf("backchannel authentication action = %#v, want an interaction", action)
+	}
+}
+
+// checkPaymentDetailsRefused fails t unless the client_credentials token
+// request (tokenErr), the pushed authorization request (parErr) and the
+// backchannel authentication request (action) all refused the payment
+// details with invalid_authorization_details.
+func checkPaymentDetailsRefused(t *testing.T, tokenErr, parErr error, action server.BackchannelAuthenticationAction) {
+	t.Helper()
+	for endpoint, err := range map[string]error{"client_credentials": tokenErr, "PAR": parErr} {
+		if code := serverErrorCode(t, err); code != server.ErrorInvalidAuthorizationDetails {
+			t.Errorf("%s error code = %q, want %q", endpoint, code, server.ErrorInvalidAuthorizationDetails)
+		}
+	}
+	checkBackchannelRefused(t, action, server.ErrorInvalidAuthorizationDetails)
 }

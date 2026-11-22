@@ -249,24 +249,7 @@ func TestAutomaticRegistrationHoldsGrantsToGrantTypesPolicy(t *testing.T) {
 			wantClientCreds: true, wantCIBA: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			members := map[string]any{
-				"redirect_uris":                                  []string{"https://rp.example.org/cb"},
-				"token_endpoint_auth_method":                     "private_key_jwt",
-				"token_endpoint_auth_signing_alg":                "ES256",
-				"backchannel_authentication_request_signing_alg": "ES256",
-			}
-			if tc.grantTypes != nil {
-				members["grant_types"] = tc.grantTypes
-			}
-			f := setupAutomaticRegistrationFixtureUnderIntermediate(t, rpMetadataMembers(t, members), policyOrNil(t, tc.taPolicy), policyOrNil(t, tc.imPolicy))
-			cfg := validAutomaticRegistrationConfig()
-			cfg.AllowsClientCredentialsGrant = true
-			cfg.AllowsCIBA = true
-			repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
-			if err != nil {
-				t.Fatalf("NewAutomaticClientRepository: %v", err)
-			}
-			client, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+			client, err := resolveWithGrantTypes(t, tc.taPolicy, tc.imPolicy, tc.grantTypes)
 			if err != nil {
 				t.Fatalf("ResolveClient: %v", err)
 			}
@@ -278,6 +261,32 @@ func TestAutomaticRegistrationHoldsGrantsToGrantTypesPolicy(t *testing.T) {
 			}
 		})
 	}
+}
+
+// resolveWithGrantTypes registers the RP publishing grantTypes (nil
+// leaves grant_types out) under taPolicy and imPolicy (see
+// setupAutomaticRegistrationFixtureUnderIntermediate), with the operator
+// allowing client_credentials and CIBA.
+func resolveWithGrantTypes(t *testing.T, taPolicy, imPolicy string, grantTypes []string) (storage.RegisteredClient, error) {
+	t.Helper()
+	members := map[string]any{
+		"redirect_uris":                                  []string{"https://rp.example.org/cb"},
+		"token_endpoint_auth_method":                     "private_key_jwt",
+		"token_endpoint_auth_signing_alg":                "ES256",
+		"backchannel_authentication_request_signing_alg": "ES256",
+	}
+	if grantTypes != nil {
+		members["grant_types"] = grantTypes
+	}
+	f := setupAutomaticRegistrationFixtureUnderIntermediate(t, rpMetadataMembers(t, members), policyOrNil(t, taPolicy), policyOrNil(t, imPolicy))
+	cfg := validAutomaticRegistrationConfig()
+	cfg.AllowsClientCredentialsGrant = true
+	cfg.AllowsCIBA = true
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	return repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
 }
 
 // TestAutomaticRegistrationNarrowsRARTypesByResolvedMetadata: the

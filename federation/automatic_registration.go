@@ -469,37 +469,14 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	if fetcher == nil {
 		return nil, fmt.Errorf("federation: fetcher is required")
 	}
-	if len(cfg.AllowedScopes) == 0 {
-		return nil, fmt.Errorf("federation: config: allowed_scopes is required")
-	}
-	if cfg.MaxCacheAge <= 0 {
-		return nil, fmt.Errorf("federation: config: max_cache_age must be positive")
-	}
-	if cfg.FailureCacheAge < 0 {
-		return nil, fmt.Errorf("federation: config: failure_cache_age must not be negative")
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 	if cfg.FailureCacheAge == 0 {
 		cfg.FailureCacheAge = DefaultFailureCacheAge
 	}
-	if cfg.MaxConcurrentResolutions < 0 {
-		return nil, fmt.Errorf("federation: config: max_concurrent_resolutions must not be negative")
-	}
 	if cfg.MaxConcurrentResolutions == 0 {
 		cfg.MaxConcurrentResolutions = DefaultMaxConcurrentResolutions
-	}
-	if err := validateAllowedClientAuthMethods(cfg.AllowedClientAuthMethods); err != nil {
-		return nil, err
-	}
-	for _, alg := range cfg.ClientAssertionAlgorithms {
-		if !alg.IsValid() {
-			return nil, fmt.Errorf("federation: config: client_assertion_algorithms: invalid algorithm %v", alg)
-		}
-	}
-	if err := validateSubjectTypes(cfg.SubjectTypes, cfg.DefaultSubjectType); err != nil {
-		return nil, err
-	}
-	if err := validateAllowedResources(cfg.AllowedResources); err != nil {
-		return nil, err
 	}
 	cfg.AllowedResources = slices.Clone(cfg.AllowedResources)
 	if clock == nil {
@@ -511,6 +488,35 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 		failures: make(map[fapi.ClientID]failedResolution),
 		inflight: make(map[fapi.ClientID]*inflightResolution),
 	}, nil
+}
+
+// validate checks c for NewAutomaticClientRepository, before its
+// defaults for a zero FailureCacheAge or MaxConcurrentResolutions apply.
+func (c AutomaticRegistrationConfig) validate() error {
+	if len(c.AllowedScopes) == 0 {
+		return fmt.Errorf("federation: config: allowed_scopes is required")
+	}
+	if c.MaxCacheAge <= 0 {
+		return fmt.Errorf("federation: config: max_cache_age must be positive")
+	}
+	if c.FailureCacheAge < 0 {
+		return fmt.Errorf("federation: config: failure_cache_age must not be negative")
+	}
+	if c.MaxConcurrentResolutions < 0 {
+		return fmt.Errorf("federation: config: max_concurrent_resolutions must not be negative")
+	}
+	if err := validateAllowedClientAuthMethods(c.AllowedClientAuthMethods); err != nil {
+		return err
+	}
+	for _, alg := range c.ClientAssertionAlgorithms {
+		if !alg.IsValid() {
+			return fmt.Errorf("federation: config: client_assertion_algorithms: invalid algorithm %v", alg)
+		}
+	}
+	if err := validateSubjectTypes(c.SubjectTypes, c.DefaultSubjectType); err != nil {
+		return err
+	}
+	return validateAllowedResources(c.AllowedResources)
 }
 
 // validateAllowedResources checks AutomaticRegistrationConfig.AllowedResources:

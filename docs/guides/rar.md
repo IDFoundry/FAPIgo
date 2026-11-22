@@ -41,12 +41,13 @@ client to name later: refuse a client-supplied value there, and the
 server can still add one at approval. `ValidateGrant` decides what
 counts as an acceptable narrowing at approval (a lower amount, fewer
 accounts); left nil, a granted object must match what was requested
-exactly. `ValidateNarrowing` decides what a client may ask for when a
-later token request narrows the grant; left nil, `ValidateGrant` decides
-that too. Set it when `ValidateGrant` lets the server add a member at
-approval: consent may add one, but a token request should only keep or
-drop what was granted, never add a value of the client's own choosing to
-a grant that holds none. Leaving it nil there fails open: `ValidateGrant`
+exactly, as your Go type reads the two (see below). `ValidateNarrowing`
+decides what a client may ask for when a later token request narrows
+the grant; left nil, `ValidateGrant` decides that too. Set it when
+`ValidateGrant` lets the server add a member at approval: consent
+may add one, but a token request should only keep or drop what was
+granted, never add a value of the client's own choosing to a grant
+that holds none. Leaving it nil there fails open: `ValidateGrant`
 can't tell a client's token request from the server's own grant, so it
 would accept the client's value. A type with a member the server mints
 must set `ValidateNarrowing`.
@@ -63,14 +64,18 @@ lose those limits. Refuse leaving out an object while the scope still
 covers it, and a client can still ask for a token for one of two granted
 credentials.
 
-The hooks see objects decoded into your Go type, so they can't tell a
-member that's absent, or `null`, from one holding its zero value: a
-missing `actions` list passes a "subset of the requested actions" check,
-while a resource server may read it as no restriction at all.
-Floating-point numbers are compared after rounding to `float64`, while
-the token carries the digits as sent. Where that matters, require the member in
+The hooks see objects decoded into your Go type, and so does the exact
+match used without them, so neither can tell a member that's absent, or
+`null`, from one holding its zero value: a missing `actions` list passes
+a "subset of the requested actions" check, while a resource server may
+read it as no restriction at all. Floating-point numbers are compared
+after rounding to `float64`. Where that matters, require the member in
 `Validate`, or give it a pointer, `json.Number` or `json.RawMessage`
-type.
+type. At the token endpoint, a type with neither `ValidateNarrowing` nor
+`ValidateGrant` issues each object as the grant holds it, so a client
+that leaves out a granted `"limit": 0` still gets a token carrying it. A
+type with a hook issues the object the client sent, so the hook must
+refuse anything in it that wasn't granted.
 
 ## Authorization server: register, gate, approve
 
@@ -120,7 +125,10 @@ for part of the grant (RFC 9396 §6). The server compares it with the
 grant the way it compares a grant with the request (`ValidateNarrowing`,
 else `ValidateGrant`, else an exact match), issues the access token with only what was asked for,
 and refuses anything malformed or wider with
-`invalid_authorization_details`. An empty array gets a token without
+`invalid_authorization_details`. Where an exact match decided, the token
+carries the granted object the requested one matched, as granted, rather
+than the client's copy of it; where a hook decided, it carries the
+object the client sent. An empty array gets a token without
 details; no parameter gets the whole grant. Each granted object a
 request leaves out, every one for an empty array, goes to its type's
 `ValidateOmission`, and a refusal is `invalid_authorization_details`

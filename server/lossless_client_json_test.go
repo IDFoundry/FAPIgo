@@ -196,7 +196,7 @@ func TestTokenRequestRefusesLossyAuthorizationDetails(t *testing.T) {
 	}
 	for amount, want := range map[string]string{`"é 😀"`: "é 😀", `"SGD �"`: "SGD �"} {
 		details := paymentAmountDetails(amount)
-		want := []testPaymentDetail{{Amount: want}}
+		want := []testPaymentDetail{rarPaymentDetail(want)}
 		result, err := rarExchangeCode(t, h, rarIssueCodeFor(t, h, rarLossyGranted), &details)
 		if err != nil {
 			t.Fatalf("ExchangeAuthorizationCode narrowing to %s: %v", amount, err)

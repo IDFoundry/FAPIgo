@@ -1,6 +1,7 @@
 package extension_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -54,7 +55,12 @@ func refuseOmission[T any](T, []string) error {
 //     ValidateNarrowing falls back to ValidateGrant's hook;
 //   - with every omission refused (ValidateOmission), it accepts exactly
 //     when the narrowed objects are the granted ones, canonically, in
-//     any order: whatever greedy matching leaves unmatched is left out.
+//     any order: whatever greedy matching leaves unmatched is left out;
+//   - Narrow accepts exactly what ValidateNarrowing accepts, and issues,
+//     in narrowed's order, an object canonically equal to each narrowed
+//     one: where a hook judged it, that object compacted but otherwise
+//     as sent, and otherwise a granted object, likewise compacted, each
+//     issued at most once.
 func FuzzRARValidateNarrowing(f *testing.F) {
 	plain, err := extension.NewRARRegistry(1024, 4, plainCredentialDef, fuzzAccountDef)
 	if err != nil {
@@ -79,11 +85,112 @@ func FuzzRARValidateNarrowing(f *testing.F) {
 	f.Add([]byte(`[]`), []byte(`[]`))
 	f.Add([]byte(`[{"type":"credential","actions":["a"]},{"type":"credential","actions":["b"]}]`), []byte(`[{"type":"credential","actions":["b"]},{"type":"credential","actions":["a"]}]`))
 	f.Add([]byte(`[{"type":"credential","actions":["a"]},{"type":"account_information","actions":["x"]}]`), []byte(`[]`))
+	f.Add([]byte(`[{"type":"credential","actions":["a","b"]},{"type":"account_information","actions":["x"]}]`), []byte(`[{"actions":["x"],"type":"account_information"},{"type":"credential","actions":["b"]}]`))
 	f.Fuzz(func(t *testing.T, grantedRaw, narrowedRaw []byte) {
 		checkExactNarrowing(t, plain, grantedRaw, narrowedRaw)
 		checkHookedNarrowing(t, subset, grantedRaw, narrowedRaw)
 		checkOmissionsRefused(t, keepAll, grantedRaw, narrowedRaw)
+		checkNarrowIssues(t, plain, grantedRaw, narrowedRaw, "")
+		checkNarrowIssues(t, subset, grantedRaw, narrowedRaw, subsetCredentialDef.Type)
+		checkNarrowIssues(t, keepAll, grantedRaw, narrowedRaw, "")
 	})
+}
+
+// checkNarrowIssues checks that Narrow accepts exactly what
+// ValidateNarrowing accepts and, where it does, issues an object for each
+// narrowed one, in narrowed's order, canonically equal to it: of type
+// hooked, the narrowed object itself, and otherwise a granted object,
+// each at most once.
+func checkNarrowIssues(t *testing.T, reg *extension.RARRegistry, grantedRaw, narrowedRaw []byte, hooked string) {
+	t.Helper()
+	granted, err1 := reg.Parse(grantedRaw)
+	narrowed, err2 := reg.Parse(narrowedRaw)
+	if err1 != nil || err2 != nil {
+		return
+	}
+	var objects []json.RawMessage
+	_ = json.Unmarshal(narrowedRaw, &objects) // Parse has decoded it as exactly this
+	issued, err := reg.Narrow(granted, objects, nil)
+	if validateErr := reg.ValidateNarrowing(granted, narrowed, nil); (err == nil) != (validateErr == nil) {
+		t.Fatalf("Narrow(%s, %s) = %v, but ValidateNarrowing = %v", grantedRaw, narrowedRaw, err, validateErr)
+	}
+	if err != nil {
+		return
+	}
+	unused := compactRARCounts(t, grantedRaw)
+	for i, obj := range issuedRARObjects(t, issued, len(objects)) {
+		checkIssuedObject(t, reg, obj, objects[i], hooked, unused)
+	}
+}
+
+// issuedRARObjects is issued, what Narrow returned for n narrowed
+// objects, split into its objects: nil for none.
+func issuedRARObjects(t *testing.T, issued json.RawMessage, n int) []json.RawMessage {
+	t.Helper()
+	if n == 0 {
+		if issued != nil {
+			t.Fatalf("Narrow to no objects issued %s", issued)
+		}
+		return nil
+	}
+	var objects []json.RawMessage
+	if err := json.Unmarshal(issued, &objects); err != nil || len(objects) != n {
+		t.Fatalf("Narrow issued %s for %d objects: %v", issued, n, err)
+	}
+	return objects
+}
+
+// checkIssuedObject checks issued, the object Narrow issued for narrowed:
+// canonically equal to it, and narrowed itself, compacted, if its type
+// is hooked, or else one of the granted objects unused counts that is
+// left to issue, which it counts off.
+func checkIssuedObject(t *testing.T, reg *extension.RARRegistry, issued, narrowed json.RawMessage, hooked string, unused map[string]int) {
+	t.Helper()
+	if !maps.Equal(canonicalCounts(t, parseOneRAR(t, reg, issued)), canonicalCounts(t, parseOneRAR(t, reg, narrowed))) {
+		t.Fatalf("Narrow issued %s for %s", issued, narrowed)
+	}
+	var head struct {
+		Type string `json:"type"`
+	}
+	_ = json.Unmarshal(issued, &head) // parseOneRAR has read its type
+	if head.Type == hooked {
+		if want := compactRAR(t, narrowed); string(issued) != want {
+			t.Fatalf("Narrow issued %s for %s, which a hook judged, want it as sent: %s", issued, narrowed, want)
+		}
+		return
+	}
+	if unused[string(issued)] == 0 {
+		t.Fatalf("Narrow issued %s for %s, which isn't a granted object left to issue", issued, narrowed)
+	}
+	unused[string(issued)]--
+}
+
+// parseOneRAR parses obj, one object, as an array of it alone.
+func parseOneRAR(t *testing.T, reg *extension.RARRegistry, obj json.RawMessage) extension.RARValues {
+	t.Helper()
+	return mustParseRAR(t, reg, "["+string(obj)+"]")
+}
+
+// compactRARCounts counts the objects of raw, an authorization_details
+// array, by their compacted bytes.
+func compactRARCounts(t *testing.T, raw []byte) map[string]int {
+	t.Helper()
+	var objects []json.RawMessage
+	_ = json.Unmarshal(raw, &objects) // Parse has decoded it as exactly this
+	counts := make(map[string]int, len(objects))
+	for _, obj := range objects {
+		counts[compactRAR(t, obj)]++
+	}
+	return counts
+}
+
+func compactRAR(t *testing.T, raw json.RawMessage) string {
+	t.Helper()
+	var b bytes.Buffer
+	if err := json.Compact(&b, raw); err != nil {
+		t.Fatalf("compact %s: %v", raw, err)
+	}
+	return b.String()
 }
 
 // checkOmissionsRefused checks that, with every omission refused,

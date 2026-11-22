@@ -74,30 +74,35 @@ func (s *Server) validateGrantedAuthorizationDetails(requestedRaw json.RawMessag
 	if len(granted) == 0 {
 		return nil, nil
 	}
-	return s.checkAuthorizationDetailsSubset(requestedRaw, granted, (*extension.RARRegistry).ValidateGrant)
+	return s.checkAuthorizationDetailsSubset(requestedRaw, granted, grantedAuthorizationDetails)
 }
 
 // validateNarrowedAuthorizationDetails is validateGrantedAuthorizationDetails
 // for a client's token request narrowing a grant (RFC 9396 §6.1): narrowed
 // is checked against grantedRaw, the grant's own stored details, by
-// RARRegistry.ValidateNarrowing, so a RARDefinition that lets consent add a
-// member the server mints can still refuse a client adding one. scope is
-// the access token's, for the RARDefinition.ValidateOmission of each
-// granted object narrowed leaves out. An empty narrowed is checked too,
-// since it leaves out every one of them.
+// RARRegistry.Narrow, which matches as ValidateNarrowing does, so a
+// RARDefinition that lets consent add a member the server mints can still
+// refuse a client adding one. scope is the access token's, for the
+// RARDefinition.ValidateOmission of each granted object narrowed leaves
+// out. An empty narrowed is checked too, since it leaves out every one of
+// them.
+//
+// It returns the array the access token carries, from Narrow: narrowed's
+// objects in their own order, except that an object only the default
+// exact match judged is replaced by the granted object it matched, since
+// its own bytes may say less than the grant does.
 func (s *Server) validateNarrowedAuthorizationDetails(grantedRaw json.RawMessage, narrowed []json.RawMessage, scope []string) (json.RawMessage, error) {
-	return s.checkAuthorizationDetailsSubset(grantedRaw, narrowed, func(registry *extension.RARRegistry, granted, narrowed extension.RARValues) error {
-		return registry.ValidateNarrowing(granted, narrowed, scope)
+	return s.checkAuthorizationDetailsSubset(grantedRaw, narrowed, func(registry *extension.RARRegistry, granted extension.RARValues, narrowed []json.RawMessage) (json.RawMessage, error) {
+		return registry.Narrow(granted, narrowed, scope)
 	})
 }
 
-// checkAuthorizationDetailsSubset parses baseRaw and subset with
-// Config.RAR and has check compare them, returning subset as one JSON
-// array, or nil when subset is empty — the shared body of
-// validateGrantedAuthorizationDetails and
+// checkAuthorizationDetailsSubset parses baseRaw with Config.RAR and has
+// check compare subset with it, returning the JSON array check returns,
+// or nil — the shared body of validateGrantedAuthorizationDetails and
 // validateNarrowedAuthorizationDetails. An empty subset of an empty base
 // needs no check.
-func (s *Server) checkAuthorizationDetailsSubset(baseRaw json.RawMessage, subset []json.RawMessage, check func(*extension.RARRegistry, extension.RARValues, extension.RARValues) error) (json.RawMessage, error) {
+func (s *Server) checkAuthorizationDetailsSubset(baseRaw json.RawMessage, subset []json.RawMessage, check func(*extension.RARRegistry, extension.RARValues, []json.RawMessage) (json.RawMessage, error)) (json.RawMessage, error) {
 	if len(baseRaw) == 0 {
 		if len(subset) == 0 {
 			return nil, nil
@@ -111,23 +116,26 @@ func (s *Server) checkAuthorizationDetailsSubset(baseRaw json.RawMessage, subset
 	if err != nil {
 		return nil, fmt.Errorf("stored requested authorization_details is invalid: %w", err)
 	}
+	return check(s.cfg.RAR, baseValues, subset)
+}
 
-	var subsetRaw json.RawMessage
-	var subsetValues extension.RARValues
-	if len(subset) > 0 {
-		// Unescaped, so the array is checked, stored and issued as the
-		// bytes it arrived as: json.Marshal's HTML escaping could grow it
-		// past Config.RAR's bounds here, or at a later re-check of the
-		// grant.
-		subsetRaw, _ = strictjson.MarshalUnescaped(subset) // marshaling a []json.RawMessage cannot fail
-		if subsetValues, err = s.cfg.RAR.Parse(subsetRaw); err != nil {
-			return nil, err
-		}
-	}
-	if err := check(s.cfg.RAR, baseValues, subsetValues); err != nil {
+// grantedAuthorizationDetails is validateGrantedAuthorizationDetails'
+// check: granted, parsed with registry, must be an acceptable narrowing
+// of requested (RARRegistry.ValidateGrant). It returns granted as one
+// JSON array, the grant to store.
+func grantedAuthorizationDetails(registry *extension.RARRegistry, requested extension.RARValues, granted []json.RawMessage) (json.RawMessage, error) {
+	// Unescaped, so the array is checked, stored and issued as the bytes
+	// it arrived as: json.Marshal's HTML escaping could grow it past
+	// Config.RAR's bounds here, or at a later re-check of the grant.
+	grantedRaw, _ := strictjson.MarshalUnescaped(granted) // marshaling a []json.RawMessage cannot fail
+	grantedValues, err := registry.Parse(grantedRaw)
+	if err != nil {
 		return nil, err
 	}
-	return subsetRaw, nil
+	if err := registry.ValidateGrant(requested, grantedValues); err != nil {
+		return nil, err
+	}
+	return grantedRaw, nil
 }
 
 // withAuthorizationDetails merges details (RFC 9396's "authorization_details"
@@ -405,11 +413,13 @@ func (s *Server) tokenRequestAuthorizationDetails(params map[string]string) (req
 // named no authorization_details (RFC 9396 §7: the AS then "determines
 // the resulting authorization_details at its discretion" — here, all of
 // the grant's), and otherwise with its AuthorizationDetails replaced by
-// requested, once requested is shown to ask for no more than the grant
-// holds — RFC 9396 §6: "The AS checks whether the underlying grant ...
-// allows the issuance of an access token with the requested authorization
-// details. Otherwise, the AS refuses the request with the error code
-// invalid_authorization_details".
+// requested's objects, once requested is shown to ask for no more than
+// the grant holds — RFC 9396 §6: "The AS checks whether the underlying
+// grant ... allows the issuance of an access token with the requested
+// authorization details. Otherwise, the AS refuses the request with the
+// error code invalid_authorization_details". An object only the default
+// exact match judged is replaced in turn by the granted object it
+// matched, as stored.
 //
 // The comparison is the one a resource owner's grant gets at completion
 // (validateGrantedAuthorizationDetails) — RFC 9396 §6.1's "the same

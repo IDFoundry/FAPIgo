@@ -62,25 +62,30 @@ type RARDefinition[T any] struct {
 	// requested — see RARRegistry.ValidateGrant) is an acceptable
 	// narrowing of the requested object it's matched against, e.g.
 	// approving a lower payment amount or a subset of an "actions" list.
-	// If nil, a granted object of this type must be byte-for-byte
-	// identical (once canonically re-encoded) to the requested object it
-	// matches — no narrowing beyond dropping whole objects is permitted.
+	// If nil, a granted object of this type must equal the requested
+	// object it matches once both are decoded into T: the two must
+	// encode the same — no narrowing beyond dropping whole objects is
+	// permitted.
 	//
 	// It judges what the authorization server grants: a resource owner's
 	// consent, a server's RARPolicy decision. A client asking at the
 	// token endpoint for less than its grant holds is judged by
 	// ValidateNarrowing instead, falling back to ValidateGrant.
 	//
-	// The hook sees requested and granted decoded into T, so it can't
-	// tell a member that's absent, or null, from one holding T's zero
-	// value: a nil "actions" slice passes a "subset of the requested
-	// actions" check, while a resource server may read the absent member
-	// as no restriction at all. Floating-point members are compared
-	// after rounding to float64. Where that matters, make Validate
-	// require the member, or give it a pointer, json.Number or
-	// json.RawMessage type in T, so the hook sees what was sent. The
-	// same holds for ValidateNarrowing, where the client chooses the
-	// narrowed bytes the access token then carries.
+	// The hook sees requested and granted decoded into T, and so does the
+	// exact match used without one, so neither can tell a member that's
+	// absent, or null, from one holding T's zero value: a nil "actions"
+	// slice passes a "subset of the requested actions" check, while a
+	// resource server may read the absent member as no restriction at
+	// all. Floating-point members are compared after rounding to
+	// float64. Where that matters, make Validate require the member, or
+	// give it a pointer, json.Number or json.RawMessage type in T, so the
+	// comparison sees what was sent. The same holds for
+	// ValidateNarrowing, where the client chooses the narrowed bytes the
+	// access token then carries. Where the exact match alone judges a
+	// token request, the access token carries the granted object it
+	// matched instead (RARRegistry.Narrow), so a client can't leave out
+	// or respell what its grant holds.
 	ValidateGrant func(requested, granted T) error
 
 	// ValidateNarrowing, if non-nil, decides whether a detail object a
@@ -89,8 +94,9 @@ type RARDefinition[T any] struct {
 	// (RFC 9396 §6.1; RARRegistry.ValidateNarrowing) — is an acceptable
 	// narrowing of the granted object it's matched against. If nil,
 	// ValidateGrant(granted, narrowed) decides, or, when that is nil
-	// too, the two must be byte-for-byte identical once canonically
-	// re-encoded.
+	// too, the exact match ValidateGrant describes. Under either hook,
+	// the access token carries the narrowed object as the client sent
+	// it; under the exact match, it carries the granted object.
 	//
 	// Set it when ValidateGrant lets the grant add a member the client
 	// requested without: one the authorization server mints at consent,
@@ -150,11 +156,19 @@ type registeredRAR interface {
 	validateGrant(requestedRaw, grantedRaw json.RawMessage) error
 	validateNarrowing(grantedRaw, narrowedRaw json.RawMessage) error
 	validateOmission(grantedRaw json.RawMessage, scope []string) error
+	narrowsExactly() bool
 }
 
 func (d RARDefinition[T]) rarType() string        { return d.Type }
 func (d RARDefinition[T]) maxObjects() int        { return d.MaxObjects }
 func (d RARDefinition[T]) maxBytesPerObject() int { return d.MaxBytesPerObject }
+
+// narrowsExactly reports whether only the default exact match judges a
+// token request's narrowing of this type: neither ValidateNarrowing nor
+// ValidateGrant is set.
+func (d RARDefinition[T]) narrowsExactly() bool {
+	return d.ValidateNarrowing == nil && d.ValidateGrant == nil
+}
 
 // decodeCheck decodes raw into T strictly: a member T doesn't declare
 // is an error. The "type" member is the exception when T doesn't declare
@@ -231,7 +245,7 @@ func (d RARDefinition[T]) validateOmission(grantedRaw json.RawMessage, scope []s
 
 // compare decodes baseRaw and candidateRaw (named baseName and
 // candidateName in errors) and applies hook to them, or, if hook is nil,
-// requires them to be identical once canonically re-encoded.
+// requires the two decoded values to encode the same.
 func (d RARDefinition[T]) compare(baseRaw, candidateRaw json.RawMessage, baseName, candidateName string, hook func(base, candidate T) error) error {
 	var base, candidate T
 	if err := json.Unmarshal(baseRaw, &base); err != nil {
@@ -478,8 +492,9 @@ func (r *RARRegistry) parse(raw json.RawMessage, request bool) (RARValues, error
 // registered RARDefinition's own ValidateGrant hook decides whether a
 // granted object may narrow the requested object it's matched against
 // (e.g. a lower payment amount, or a subset of an "actions" list); when a
-// type's ValidateGrant is nil, the two must be byte-for-byte identical once
-// canonically re-encoded. Matching is greedy, in array order — RFC 9396
+// type's ValidateGrant is nil, the two must encode the same once decoded
+// into the type's Go value (see RARDefinition.ValidateGrant for what that
+// can't tell apart). Matching is greedy, in array order — RFC 9396
 // does not mandate a matching algorithm, only that an authorization server
 // "may grant less" than was requested; this is a deliberate, documented
 // choice, not a spec requirement.
@@ -520,6 +535,11 @@ func (r *RARRegistry) ValidateGrant(requested, granted RARValues) error {
 //
 // Like ValidateGrant's granted, narrowed must already have been produced
 // by this same registry's own Parse.
+//
+// ValidateNarrowing only judges narrowed. Where only the default exact
+// match judges an object, narrowed's own bytes may say less than the
+// granted object they match (see RARDefinition.ValidateGrant), so
+// issue the access token with what Narrow returns, not with narrowed.
 func (r *RARRegistry) ValidateNarrowing(granted, narrowed RARValues, scope []string) error {
 	matched, err := r.matchAll(granted, narrowed, true)
 	if err != nil {
@@ -528,38 +548,118 @@ func (r *RARRegistry) ValidateNarrowing(granted, narrowed RARValues, scope []str
 	return r.checkOmissions(granted, matched, scope)
 }
 
+// Narrow is ValidateNarrowing for narrowed, the detail objects a token
+// request asks for, in the order it sends them, that also returns the
+// authorization_details the access token is issued with: nil when
+// narrowed is empty, and otherwise an array of narrowed's objects, in
+// that order. Each is compacted but otherwise as sent, except an object
+// of a type that sets neither ValidateNarrowing nor ValidateGrant: in
+// its place is the granted object it matched, likewise compacted but
+// otherwise as granted holds it.
+//
+// Only the default exact match judges such an object, and it compares
+// the two decoded into the type's Go value. There, a member that's
+// absent, null or holds its zero value reads the same, as do numbers
+// that round to the same float64, so the client's own object can say
+// less than the grant it matched: no "limit" member, where the grant
+// holds "limit":0. A resource server that reads the claim without that
+// Go type, or reads an absent member differently, would read it as
+// wider than what the resource owner granted. A hook, in contrast,
+// judges the object the client sent, which the access token then
+// carries.
+//
+// narrowed is checked as Parse checks an array of its objects, so it
+// needn't have been parsed already; Parse's errors are returned as
+// Parse returns them. granted must have been produced by this
+// registry's own Parse, as for ValidateNarrowing.
+func (r *RARRegistry) Narrow(granted RARValues, narrowed []json.RawMessage, scope []string) (json.RawMessage, error) {
+	narrowedValues, err := r.parseObjects(narrowed)
+	if err != nil {
+		return nil, err
+	}
+	matched, err := r.matchAll(granted, narrowedValues, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.checkOmissions(granted, matched, scope); err != nil {
+		return nil, err
+	}
+	if len(narrowed) == 0 {
+		return nil, nil
+	}
+	// Unescaped, as RARSet encodes. Every object is valid JSON: narrowed's
+	// passed parseObjects, and granted's were parsed from an array.
+	issued, _ := strictjson.MarshalUnescaped(r.issuedObjects(granted, narrowed, matched))
+	return issued, nil
+}
+
+// parseObjects is Parse for objects, the objects of an
+// authorization_details array, or the zero RARValues for none.
+func (r *RARRegistry) parseObjects(objects []json.RawMessage) (RARValues, error) {
+	if len(objects) == 0 {
+		return RARValues{}, nil
+	}
+	// Unescaped: json.Marshal's HTML escaping could grow the array past
+	// the bounds it's checked against.
+	raw, err := strictjson.MarshalUnescaped(objects)
+	if err != nil {
+		return RARValues{}, fmt.Errorf("extension: authorization_details object is not valid JSON: %w", err)
+	}
+	return r.Parse(raw)
+}
+
+// issuedObjects is Narrow's result for narrowed, which matchAll has
+// matched against granted (matched): narrowed's objects in their own
+// order, each replaced by the granted object it matched where its type
+// narrowsExactly.
+func (r *RARRegistry) issuedObjects(granted RARValues, narrowed []json.RawMessage, matched map[string][]int) []json.RawMessage {
+	issued := make([]json.RawMessage, 0, len(narrowed))
+	seen := make(map[string]int, len(matched)) // by type, the objects before this one
+	for _, obj := range narrowed {
+		var head rarObjectHead
+		_ = json.Unmarshal(obj, &head) // parseObjects has already read its type
+		k := seen[head.Type]
+		seen[head.Type]++
+		if r.byType[head.Type].narrowsExactly() {
+			obj = granted.byType[head.Type][matched[head.Type][k]]
+		}
+		issued = append(issued, obj)
+	}
+	return issued
+}
+
 // matchAll is ValidateGrant (narrowing false) and ValidateNarrowing
 // (narrowing true): every object of candidates must match a distinct,
 // not-yet-matched object of base of the same type. It returns, by type,
-// which of base's objects a candidate matched.
-func (r *RARRegistry) matchAll(base, candidates RARValues, narrowing bool) (map[string][]bool, error) {
-	consumed := make(map[string][]bool, len(base.byType))
-	for typ, raws := range base.byType {
-		consumed[typ] = make([]bool, len(raws))
-	}
+// the index into base's objects of the one each of candidates' objects
+// matched, in candidates' order.
+func (r *RARRegistry) matchAll(base, candidates RARValues, narrowing bool) (map[string][]int, error) {
+	matched := make(map[string][]int, len(candidates.byType))
 	for typ, candidateRaws := range candidates.byType {
 		def, ok := r.byType[typ]
 		if !ok {
 			return nil, fmt.Errorf("%w: %q", ErrRARUnregisteredType, typ)
 		}
 		baseRaws := base.byType[typ]
-		usedIdx := consumed[typ]
+		usedIdx := make([]bool, len(baseRaws))
 		for _, candidateRaw := range candidateRaws {
-			if !matchObject(def, candidateRaw, baseRaws, usedIdx, narrowing) {
+			i := matchObject(def, candidateRaw, baseRaws, usedIdx, narrowing)
+			if i < 0 {
 				return nil, fmt.Errorf("%w: type %q", ErrRARGrantExceedsRequest, typ)
 			}
+			matched[typ] = append(matched[typ], i)
 		}
 	}
-	return consumed, nil
+	return matched, nil
 }
 
 // checkOmissions asks each type's RARDefinition.ValidateOmission about
 // every object of granted that no narrowed object matched (matched, from
 // matchAll), with scope, the access token's.
-func (r *RARRegistry) checkOmissions(granted RARValues, matched map[string][]bool, scope []string) error {
+func (r *RARRegistry) checkOmissions(granted RARValues, matched map[string][]int, scope []string) error {
 	for typ, raws := range granted.byType {
 		for i, raw := range raws {
-			if matched[typ][i] {
+			if slices.Contains(matched[typ], i) {
 				continue
 			}
 			def, ok := r.byType[typ]
@@ -576,10 +676,10 @@ func (r *RARRegistry) checkOmissions(granted RARValues, matched map[string][]boo
 
 // matchObject finds an unused entry of baseRaws that def accepts
 // candidateRaw against (def.validateNarrowing if narrowing, otherwise
-// def.validateGrant), marking it used (usedIdx) and reporting whether a
-// match was found — split out of matchAll purely to keep that method's
-// own cognitive complexity manageable.
-func matchObject(def registeredRAR, candidateRaw json.RawMessage, baseRaws []json.RawMessage, usedIdx []bool, narrowing bool) bool {
+// def.validateGrant), marking it used (usedIdx) and returning its index,
+// or -1 when there is none — split out of matchAll purely to keep that
+// method's own cognitive complexity manageable.
+func matchObject(def registeredRAR, candidateRaw json.RawMessage, baseRaws []json.RawMessage, usedIdx []bool, narrowing bool) int {
 	check := def.validateGrant
 	if narrowing {
 		check = def.validateNarrowing
@@ -590,10 +690,10 @@ func matchObject(def registeredRAR, candidateRaw json.RawMessage, baseRaws []jso
 		}
 		if err := check(baseRaw, candidateRaw); err == nil {
 			usedIdx[i] = true
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 // checkJSONDepth reports whether raw's JSON nesting ever exceeds

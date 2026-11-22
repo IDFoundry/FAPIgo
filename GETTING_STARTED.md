@@ -1986,21 +1986,28 @@ cfg.Certificates = []tls.Certificate{clientCert} // or cfg.GetClientCertificate
 transport, err := fapihttp.NewClient(cfg)
 ```
 
-Then, in your handlers:
+Then, in your handlers, with the session cookie that binds each
+authorization to its browser built once (`cookieKeys` are 32 random
+bytes each, shared by every instance):
 
 ```go
-// 1. Start: push the request, remember the session, send the browser on.
+browserSessions, err := sessioncookie.New(cookieKeys, sessioncookie.Options{}) // once
+
+// 1. Start: push the request, bind it to this browser, send the browser on.
 session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
 if err != nil {
 	return err
 }
-setSessionCookie(w, session.Handle().String()) // e.g. client/sessioncookie
+if err := browserSessions.Set(w, session, "", time.Now()); err != nil {
+	return err
+}
 http.Redirect(w, r, session.URL().String(), http.StatusFound)
 
 // 2. Callback: validate the response and exchange the code in one call.
-handle, err := client.ParseSessionHandle(sessionCookie(r))
+handle, _, err := browserSessions.Read(r, time.Now())
+browserSessions.Clear(w)
 if err != nil {
-	return err
+	return err // this browser began no authorization here
 }
 result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: r.URL.RawQuery, Session: handle})
 if err != nil {
@@ -2038,6 +2045,20 @@ if err != nil {
 }
 sealed, err := sealer.Seal(tokens, userID)
 ```
+
+The session handle is what ties a callback to the browser that began
+it, so keep it where only your application can have put it:
+`client/sessioncookie` seals it into a `__Host-` cookie with `Path=/`,
+with a value of yours for the authorization (an order ID, say)
+alongside if you pass one, and a cookie you MAC with a key of your own,
+or a server-side record your own session cookie names, works too. Never
+keep `Handle().String()` as a plain cookie value, which anyone who
+learns the handle can set. The handle itself is never sent: the
+authorization request's `state` is a one-way digest of it, so the
+authorization response, which others may read before the browser
+delivers it, doesn't reveal it. Serve the redirect URI with
+`Referrer-Policy: no-referrer` and no third-party script, and redirect
+to a clean URL once the callback is handled.
 
 `HandleAuthorizationResponse` followed by `ExchangeCode` is the same
 flow in two steps, for when you want the validated response before

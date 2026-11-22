@@ -183,8 +183,9 @@ func TestBeginAuthorizationMTLSSendsNoDPoPHeader(t *testing.T) {
 	}
 }
 
-// callbackFor builds the query string a real authorization server would
-// redirect back with for session, mirroring fakeAS.callbackFor's own
+// mtlsCallbackFor builds the query string a real authorization server
+// would redirect back with, echoing state (the one the flow's pushed
+// authorization request carried), mirroring fakeAS.callbackFor's own
 // plain-mode shape (mTLS sender-constraining is orthogonal to the
 // response mode, so the baseline profile's plain query-param callback
 // applies unchanged).
@@ -201,7 +202,7 @@ func TestExchangeCodeMTLSBindingHappyPath(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 
-	rawQuery := mtlsCallbackFor(testIssuer, session.Handle().String(), "auth-code-123")
+	rawQuery := mtlsCallbackFor(testIssuer, as.lastPARForm.Get("state"), "auth-code-123")
 	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
@@ -264,7 +265,7 @@ func TestExchangeCodePropagatesTransportFailureMTLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
-	rawQuery := mtlsCallbackFor(testIssuer, session.Handle().String(), "auth-code-123")
+	rawQuery := mtlsCallbackFor(testIssuer, as.lastPARForm.Get("state"), "auth-code-123")
 	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err == nil {
 		t.Fatalf("CompleteAuthorization(MTLS transport failure) = nil error, want error")
 	}
@@ -635,7 +636,7 @@ func TestExchangeCodeMTLSRejectsUnexpectedTokenType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
-	rawQuery := mtlsCallbackFor(testIssuer, session.Handle().String(), "auth-code-123")
+	rawQuery := mtlsCallbackFor(testIssuer, as.lastPARForm.Get("state"), "auth-code-123")
 
 	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err == nil {
 		t.Fatalf("CompleteAuthorization(unexpected token_type) = nil error, want error")
@@ -648,21 +649,7 @@ func TestExchangeCodeMTLSRejectsUnexpectedTokenType(t *testing.T) {
 func TestMTLSNonOAuthErrorNamesMediaType(t *testing.T) {
 	for _, path := range []string{"/par", "/token"} {
 		t.Run(path, func(t *testing.T) {
-			c, as, _ := newTestClientWithMTLS(t)
-			ctx := context.Background()
-			if path == "/par" {
-				as.nonOAuthPath = path
-			}
-			session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
-			if path == "/token" {
-				if err != nil {
-					t.Fatalf("BeginAuthorization: %v", err)
-				}
-				as.nonOAuthPath = path
-				_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{
-					RawQuery: mtlsCallbackFor(testIssuer, session.Handle().String(), "auth-code-123"), Session: session.Handle(),
-				})
-			}
+			err := mtlsNonOAuthError(t, path)
 			if err == nil {
 				t.Fatal("error = nil, want the endpoint's non-OAuth response")
 			}
@@ -671,4 +658,28 @@ func TestMTLSNonOAuthErrorNamesMediaType(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mtlsNonOAuthError runs an authorization against the mTLS fake AS
+// answering path ("/par" or "/token") with a proxy's page, and returns
+// the error the call to that endpoint fails with.
+func mtlsNonOAuthError(t *testing.T, path string) error {
+	t.Helper()
+	c, as, _ := newTestClientWithMTLS(t)
+	ctx := context.Background()
+	if path == "/par" {
+		as.nonOAuthPath = path
+	}
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if path != "/token" {
+		return err
+	}
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	as.nonOAuthPath = path
+	_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{
+		RawQuery: mtlsCallbackFor(testIssuer, as.lastPARForm.Get("state"), "auth-code-123"), Session: session.Handle(),
+	})
+	return err
 }

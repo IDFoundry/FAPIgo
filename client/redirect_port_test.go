@@ -28,7 +28,7 @@ func TestBeginAuthorizationRedirectPort(t *testing.T) {
 			if got := as.lastPARForm.Get("redirect_uri"); got != tc.want {
 				t.Errorf("PAR redirect_uri = %q, want %q", got, tc.want)
 			}
-			rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
+			rawQuery := as.callbackFor(t, as.lastState, "auth-code-123", "")
 			if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 				t.Fatalf("CompleteAuthorization: %v", err)
 			}

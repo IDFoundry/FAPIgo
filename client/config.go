@@ -672,11 +672,12 @@ type CallbackBinding uint8
 const (
 	// CallbackBindingSessionHandle requires AuthorizationCallback.Session:
 	// the SessionHandle the application kept with the user agent that
-	// began the flow (a cookie; client/sessioncookie). A callback whose
-	// state doesn't match it is refused. The zero value, and the only
-	// right choice wherever Dependencies.Sessions holds more than one
-	// user agent's sessions — any server-side store — since an attacker's
-	// own session is found there by its state too.
+	// began the flow (client/sessioncookie's sealed cookie, a MAC'd
+	// cookie or a server-side record; see SessionHandle). A callback
+	// whose state isn't the one derived from it is refused. The zero
+	// value, and the only right choice wherever Dependencies.Sessions
+	// holds more than one user agent's sessions — any server-side store —
+	// since an attacker's own session is found there by its state too.
 	CallbackBindingSessionHandle CallbackBinding = iota
 
 	// CallbackBindingDeviceLocalStore is for a native app whose

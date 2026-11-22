@@ -83,9 +83,11 @@
 // It follows the same hardening rules as server and resource (see
 // ARCHITECTURE.md, "Design rules"): AuthorizationSession is opaque with
 // no public constructor, and a SessionHandle can only be recovered from
-// its own String form (ParseSessionHandle) — the caller stores it with
-// the user agent that began the flow (package client/sessioncookie does
-// this), and HandleAuthorizationResponse
+// its own String form (ParseSessionHandle) — the caller keeps it with
+// the user agent that began the flow, where only the application can
+// have put it (package client/sessioncookie seals it into a cookie), the
+// authorization request carries only a one-way digest of it as "state",
+// and HandleAuthorizationResponse
 // rejects a callback that doesn't carry the matching one — unless
 // Config.CallbackBinding is CallbackBindingDeviceLocalStore, for a
 // native app whose session store is its own (see "Native apps" below);

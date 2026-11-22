@@ -5065,6 +5065,8 @@ the browser that started the flow stops login CSRF (RFC 9700 §4.7).
 Store the handle with the user agent when you redirect, and pass it back
 at the callback:
 
+*Superseded:* keep the handle in `client/sessioncookie`'s sealed cookie, not the plain cookie below (see `client.SessionHandle`).
+
 ```go
 // Starting the flow.
 session, err := rp.BeginAuthorization(ctx, req)

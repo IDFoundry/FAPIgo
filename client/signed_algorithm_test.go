@@ -43,7 +43,7 @@ func TestCompleteAuthorizationNamesIDTokenAlgorithmMismatch(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{
-		RawQuery: as.callbackFor(t, session.Handle().String(), "auth-code-123", ""), Session: session.Handle(),
+		RawQuery: as.callbackFor(t, as.lastState, "auth-code-123", ""), Session: session.Handle(),
 	})
 	assertNamesAlgorithms(t, err, "ID token is signed with ES256, but Config.Algorithms.IDToken is PS256")
 }
@@ -60,7 +60,7 @@ func TestCompleteAuthorizationNamesJARMAlgorithmMismatch(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{
-		RawQuery: as.callbackFor(t, session.Handle().String(), "auth-code-123", ""), Session: session.Handle(),
+		RawQuery: as.callbackFor(t, as.lastState, "auth-code-123", ""), Session: session.Handle(),
 	})
 	assertNamesAlgorithms(t, err, "authorization response is signed with ES256, but Config.Algorithms.JARM is PS256")
 }

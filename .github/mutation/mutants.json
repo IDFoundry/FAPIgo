@@ -648,6 +648,54 @@
     "why": "Message Signing requires a positive MaxJARMResponseLifetime"
   },
   {
+    "id": "client-state-digest",
+    "file": "client/session.go",
+    "old": "\treturn base64.RawURLEncoding.EncodeToString(sum[:])",
+    "new": "\t_ = sum\n\treturn handle",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^(TestPushedStateIsNotTheSessionHandle|TestCallbackStateAsTheHandleIsRefused|TestPlainCookieRPRefusesTheResponseReader)$",
+    "why": "an authorization request's state is a digest of the session handle, so a party reading the response can't present the handle"
+  },
+  {
+    "id": "client-callback-binding-digest",
+    "file": "client/authorization_response.go",
+    "old": "subtle.ConstantTimeCompare([]byte(state), []byte(stateForHandle(cb.Session.value))) != 1",
+    "new": "subtle.ConstantTimeCompare([]byte(state), []byte(cb.Session.value)) != 1",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestCallbackStateAsTheHandleIsRefused$",
+    "why": "a callback binds to the Session whose digest is its state, never to a Session equal to its state"
+  },
+  {
+    "id": "client-callback-binding-compare",
+    "file": "client/authorization_response.go",
+    "old": "if subtle.ConstantTimeCompare([]byte(state), []byte(stateForHandle(cb.Session.value))) != 1 {",
+    "new": "if _ = subtle.ConstantTimeCompare; false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^(TestCallbackStateAsTheHandleIsRefused|TestCallbackMustBeBoundToItsSession)$",
+    "why": "a callback whose state isn't its Session's digest is refused before its session is consumed"
+  },
+  {
+    "id": "client-jarm-binding-before-keys",
+    "file": "client/authorization_response.go",
+    "old": "\tif bindErr := c.checkCallbackBinding(cb, unverifiedState); bindErr != nil {\n\t\treturn nil, \"\", bindErr\n\t}",
+    "new": "\t_ = unverifiedState",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestUnboundJARMCallbackResolvesNoIssuerKey$",
+    "why": "a JARM response with no Session, or a state that isn't the Session's, is refused before any issuer key is resolved"
+  },
+  {
     "id": "resource-pairwise-empty-subject",
     "file": "resource/verify.go",
     "old": "case internal == \"\":",

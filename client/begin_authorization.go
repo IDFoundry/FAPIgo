@@ -234,11 +234,13 @@ const authorizationDetailsParameter = "authorization_details"
 const errPushedAuthorizationRequestFailed = "pushed authorization request failed"
 
 // BeginAuthorization starts a new authorization attempt: it generates
-// state, nonce and a PKCE verifier, builds and signs a request object
-// when Config.Profile or Config.PushedRequestEncoding requires one,
-// authenticates to and calls the
-// pushed-authorization-request endpoint (RFC 9126), and persists
-// correlation state for the eventual callback.
+// the session handle, the "state" it derives from it, a nonce and a PKCE
+// verifier, builds and signs a request object when Config.Profile or
+// Config.PushedRequestEncoding requires one, authenticates to and calls
+// the pushed-authorization-request endpoint (RFC 9126), and persists
+// correlation state for the eventual callback under that state. The
+// handle, which the returned session's Handle gives, is never sent:
+// "state" is a one-way digest of it (see SessionHandle).
 //
 // Call it only from a request the user made on purpose and that is
 // protected against cross-site request forgery: a POST guarded by a
@@ -255,10 +257,14 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	if reqErr != nil {
 		return AuthorizationSession{}, reqErr
 	}
-	state, err := generateRandomToken(c.deps.Random)
+	handle, err := generateRandomToken(c.deps.Random)
 	if err != nil {
-		return AuthorizationSession{}, newError(ErrorInternal, "failed to generate state", err)
+		return AuthorizationSession{}, newError(ErrorInternal, "failed to generate session handle", err)
 	}
+	// The authorization server echoes state back in a response others
+	// may read first: it carries a digest of the handle, never the
+	// handle that binds the session to this user agent.
+	state := stateForHandle(handle)
 	nonce, err := generateRandomToken(c.deps.Random)
 	if err != nil {
 		return AuthorizationSession{}, newError(ErrorInternal, "failed to generate nonce", err)
@@ -338,7 +344,7 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		"request_uri": {result.RequestURI},
 	})
 
-	return AuthorizationSession{url: browserURL, handle: SessionHandle{value: state}, expiresAt: now.Add(c.cfg.Limits.SessionLifetime)}, nil
+	return AuthorizationSession{url: browserURL, handle: SessionHandle{value: handle}, expiresAt: now.Add(c.cfg.Limits.SessionLifetime)}, nil
 }
 
 // dpopKeyThumbprint returns the JWK SHA-256 thumbprint (RFC 7638) of

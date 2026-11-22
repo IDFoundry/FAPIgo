@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -142,6 +143,41 @@ func TestReadRefuses(t *testing.T) {
 		if _, _, err := tc.c.Read(tc.r, tc.now); !errors.Is(err, sessioncookie.ErrNoSession) {
 			t.Errorf("%s: Read = %v, want ErrNoSession", name, err)
 		}
+	}
+}
+
+// TestReadRefusesARawHandleOrState covers a cookie set by someone other
+// than this Cookie: one holding the raw handle, as a plain cookie would,
+// or the state read from the authorization response, opens no session,
+// while the sealed one still completes the authorization.
+func TestReadRefusesARawHandleOrState(t *testing.T) {
+	h, session := begin(t)
+	now := time.Now()
+	c := newCookie(t, newKey(t))
+	ck := set(t, c, session, "", now)
+	rawQuery, err := h.CaptureCallback(context.Background(), session)
+	if err != nil {
+		t.Fatalf("CaptureCallback: %v", err)
+	}
+	q, err := url.ParseQuery(rawQuery)
+	if err != nil || q.Get("state") == "" {
+		t.Fatalf("authorization response %q carries no state: %v", rawQuery, err)
+	}
+
+	for name, value := range map[string]string{
+		"the raw handle":           session.Handle().String(),
+		"the response's own state": q.Get("state"),
+	} {
+		if _, _, err := c.Read(callbackWith(&http.Cookie{Name: ck.Name, Value: value}), now); !errors.Is(err, sessioncookie.ErrNoSession) {
+			t.Errorf("%s: Read = %v, want ErrNoSession", name, err)
+		}
+	}
+	handle, _, err := c.Read(callbackWith(ck), now)
+	if err != nil {
+		t.Fatalf("Read(the sealed cookie): %v", err)
+	}
+	if _, err := h.RunAuthorizationCodeFlowWithCallback(context.Background(), handle, rawQuery); err != nil {
+		t.Errorf("the handle from the sealed cookie didn't complete the authorization: %v", err)
 	}
 }
 

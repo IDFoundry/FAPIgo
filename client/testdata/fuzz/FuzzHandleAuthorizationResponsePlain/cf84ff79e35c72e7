@@ -1,0 +1,5 @@
+go test fuzz v1
+string("code=%80&state=OTqj2L7OAHtiB7mpeOaWfsfl19EIBlmCPj3tdl_qeA8&iss=https%3A%2F%2Fas.example")
+bool(true)
+bool(true)
+bool(false)

@@ -2,6 +2,7 @@ package client
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"io"
 	"time"
@@ -9,8 +10,10 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 )
 
-// randomTokenSize is the byte length of a generated state, nonce or
-// SessionHandle value — 256 bits.
+// randomTokenSize is the byte length of a generated nonce or
+// SessionHandle value — 256 bits. The "state" an authorization request
+// carries is the SHA-256 of a SessionHandle value (stateForHandle), the
+// same length.
 const randomTokenSize = 32
 
 func generateRandomToken(random io.Reader) (string, error) {
@@ -24,14 +27,35 @@ func generateRandomToken(random io.Reader) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
+// statePrefix separates the digest an authorization request's "state"
+// is from every other digest this module computes.
+const statePrefix = "fapigo client authorization state\x00"
+
+// stateForHandle is the "state" the authorization request of the session
+// whose SessionHandle value is handle carries, and the key that session
+// is stored under: the SHA-256 of the handle after statePrefix,
+// base64url-encoded. The authorization server echoes "state" in its
+// response, which parties other than the user agent can read before it
+// does: an app claiming the same redirect URI scheme, a script on the
+// redirect page, a log of redirect URLs. A one-way digest tells them
+// nothing of the handle, so the response alone can't complete the flow
+// in another user agent (RFC 9700 §2.1.1, §4.7).
+func stateForHandle(handle string) string {
+	sum := sha256.Sum256([]byte(statePrefix + handle))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
 // SessionHandle binds one in-progress authorization attempt to the user
 // agent that started it. BeginAuthorization returns it; the caller keeps
-// it with that browser — an HttpOnly, Secure, SameSite=Lax cookie, set
-// when redirecting to AuthorizationSession.URL — and passes it back as
-// AuthorizationCallback.Session when the callback arrives, recovered
-// with ParseSessionHandle. Package client/sessioncookie does this, in an
-// encrypted cookie that can carry the application's own value for the
-// authorization (an order ID, say) alongside.
+// it with that browser, set when redirecting to AuthorizationSession.URL,
+// and passes it back as AuthorizationCallback.Session when the callback
+// arrives. Keep it where only this application can have put it:
+// package client/sessioncookie seals it into an encrypted HttpOnly,
+// Secure, SameSite=Lax __Host- cookie, which can carry the application's
+// own value for the authorization (an order ID, say) alongside. A cookie
+// MAC'd with a key of the application's own, or a server-side record
+// that the browser's own session names, binds it as well. A plain cookie
+// holding String() doesn't: anyone who learns the handle can set it.
 //
 // That binding is required, not defense in depth: the callback's own
 // "state" only identifies a session, and anyone can deliver a callback
@@ -39,7 +63,11 @@ func generateRandomToken(random io.Reader) (string, error) {
 // a flow as themselves and have a victim's browser complete it — login
 // CSRF, landing the victim in the attacker's account (RFC 9700 §4.7).
 // HandleAuthorizationResponse and CompleteAuthorization reject a
-// callback whose Session doesn't match its "state".
+// callback whose "state" isn't the one BeginAuthorization derived from
+// its Session, before consuming anything. The handle itself is never
+// sent: "state" is a one-way digest of it, so the authorization
+// response, which anyone between the authorization server and the user
+// agent may read, doesn't reveal it.
 //
 // A native app whose session store is its own on-device storage has that
 // binding already: see CallbackBindingDeviceLocalStore.
@@ -47,14 +75,17 @@ type SessionHandle struct {
 	value string
 }
 
-// String returns the handle's opaque wire value, for storing it with the
+// String returns the handle's opaque wire value, for keeping it with the
 // user agent (see SessionHandle); ParseSessionHandle reverses it.
 func (h SessionHandle) String() string { return h.value }
 
 // ParseSessionHandle recovers a SessionHandle from its String form — the
-// value the caller stored with the user agent — for
+// value the caller kept with the user agent — for
 // AuthorizationCallback.Session. It rejects anything BeginAuthorization
-// couldn't have produced.
+// couldn't have produced. It checks only the form: whether the value is
+// the handle of that user agent's session is up to where the caller kept
+// it (see SessionHandle). A callback's "state" has the same form, but as
+// a handle it matches no session.
 func ParseSessionHandle(s string) (SessionHandle, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil || len(raw) != randomTokenSize {
@@ -64,8 +95,8 @@ func ParseSessionHandle(s string) (SessionHandle, error) {
 }
 
 // AuthorizationSession is returned by BeginAuthorization: the browser URL
-// to redirect the user agent to, and an opaque handle for the caller's
-// own correlation purposes.
+// to redirect the user agent to, and the opaque handle that binds the
+// session to that user agent.
 type AuthorizationSession struct {
 	url       fapi.URL
 	handle    SessionHandle
@@ -75,7 +106,9 @@ type AuthorizationSession struct {
 // URL is the authorization URL to redirect the user agent to.
 func (s AuthorizationSession) URL() fapi.URL { return s.url }
 
-// Handle is this session's opaque correlation handle.
+// Handle is this session's opaque handle: the secret that binds it to the
+// user agent that began it, to keep with that user agent (see
+// SessionHandle). It is never sent to the authorization server.
 func (s AuthorizationSession) Handle() SessionHandle { return s.handle }
 
 // ExpiresAt is when the session expires (Limits.SessionLifetime from

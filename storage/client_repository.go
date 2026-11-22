@@ -658,16 +658,7 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	if err := ValidateClientName(cfg.Display.Name); err != nil {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q: %w", cfg.ID, err)
 	}
-	if cfg.RequestObjectAlgorithm != 0 && !cfg.RequestObjectAlgorithm.IsValid() {
-		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid request object algorithm", cfg.ID)
-	}
-	if cfg.SenderConstrain != SenderConstrainDPoP && cfg.SenderConstrain != SenderConstrainMTLS {
-		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid sender_constrain value", cfg.ID)
-	}
-	if cfg.BackchannelAuthenticationRequestAlgorithm != 0 && !cfg.BackchannelAuthenticationRequestAlgorithm.IsValid() {
-		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid backchannel authentication request algorithm", cfg.ID)
-	}
-	if err := validateBackchannelTokenDeliveryMode(cfg); err != nil {
+	if err := validateRequestAndDeliveryFields(cfg); err != nil {
 		return RegisteredClient{}, err
 	}
 	if err := validateIDTokenEncryptionFields(cfg); err != nil {
@@ -846,6 +837,25 @@ func validateAttestationFields(cfg RegisteredClientConfig) error {
 		return fmt.Errorf("storage: client %q has no valid client attestation algorithm", cfg.ID)
 	}
 	return nil
+}
+
+// validateRequestAndDeliveryFields checks the algorithms cfg's signed
+// requests are verified under (its request objects', its CIBA
+// backchannel authentication requests') and how its tokens are bound
+// and delivered (its sender constraint, its CIBA token delivery mode)
+// — split out of NewRegisteredClient for the same reason
+// validateClientAuthMethodFields is.
+func validateRequestAndDeliveryFields(cfg RegisteredClientConfig) error {
+	if cfg.RequestObjectAlgorithm != 0 && !cfg.RequestObjectAlgorithm.IsValid() {
+		return fmt.Errorf("storage: client %q has an invalid request object algorithm", cfg.ID)
+	}
+	if cfg.SenderConstrain != SenderConstrainDPoP && cfg.SenderConstrain != SenderConstrainMTLS {
+		return fmt.Errorf("storage: client %q has an invalid sender_constrain value", cfg.ID)
+	}
+	if cfg.BackchannelAuthenticationRequestAlgorithm != 0 && !cfg.BackchannelAuthenticationRequestAlgorithm.IsValid() {
+		return fmt.Errorf("storage: client %q has an invalid backchannel authentication request algorithm", cfg.ID)
+	}
+	return validateBackchannelTokenDeliveryMode(cfg)
 }
 
 // validateBackchannelTokenDeliveryMode checks the field(s) each

@@ -228,7 +228,7 @@ func TestCompleteBackchannelAuthenticationRefusesInteractionNeeded(t *testing.T)
 	err := h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
 		Handle: pending[0].Handle, Result: server.InteractionNeeded(server.NeedLogin, "no session"),
 	})
-	if code := serverErrorCode(t, err); code != server.ErrorServerError {
+	if serverErrorCode(t, err) != server.ErrorServerError {
 		t.Fatalf("CompleteBackchannelAuthentication(InteractionNeeded) = %v, want server_error", err)
 	}
 	if calls := notifier.callCount(); calls != 0 {

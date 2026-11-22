@@ -49,6 +49,44 @@ is filed in the inbox or stored. The bound on `scope` is unchanged.
 short identifier as `login_hint`, and name in `acr_values` only the few
 values the client accepts, in order of preference.
 
+### CIBA: at most 32 pending requests per end user, 8 from one client (server)
+
+**Affects:** a server with `Dependencies.BackchannelInbox` set whose
+end users can have more than 32 CIBA requests awaiting their decision
+at once, or more than 8 from one client. A server without an inbox is
+unaffected.
+
+**Why:** any registered CIBA client could file any number of requests
+for any user whose hint it knew, and every `ListBackchannelInteractions`
+and `DenyBackchannelInteractions` call rebuilt every one of them, with
+a store read and a client lookup each. One client could make a user's
+listing slow and memory-hungry, and under a deadline return nothing,
+hiding other clients' requests. Once a request is filed, before it's
+stored, the server now counts the user's pending requests by the
+`ClientID` each inbox entry carries. No storage interface changes.
+
+**What fails:** nothing at startup, unless either new limit is
+negative. `BeginBackchannelAuthentication` refuses with `access_denied`
+(HTTP 403, CIBA Core §13) a request that would leave its end user more
+than `Limits.MaxPendingBackchannelAuthenticationRequests` pending
+requests (32 when zero), or more than
+`Limits.MaxPendingBackchannelAuthenticationRequestsPerClient` from its
+client (8 when zero). A request counts until it's decided or expires.
+
+**What to change:** if your users legitimately have more requests
+pending at once, raise the limits:
+
+```go
+limits := server.RecommendedLimits()
+limits.MaxPendingBackchannelAuthenticationRequests = 64
+limits.MaxPendingBackchannelAuthenticationRequestsPerClient = 16
+```
+
+Otherwise, have a client wait for a request's outcome before it sends
+another for the same user, and keep
+`Limits.BackchannelAuthenticationRequestLifetime` short, so undecided
+requests free their place sooner.
+
 ## v0.78.0
 
 ### A client attestation status checker must check its own configuration (server, *production only*)

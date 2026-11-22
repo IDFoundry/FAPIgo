@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"time"
 
@@ -218,10 +219,13 @@ func (e MTLSEndpoints) IsZero() bool {
 	return e.Token.IsZero() && e.PushedAuthorizationRequest.IsZero() && e.BackchannelAuthentication.IsZero() && e.Revocation.IsZero()
 }
 
-// Limits bounds the lifetimes, clock tolerances and sizes this server
-// enforces. None of these have an implicit default — New rejects a zero
-// (or, for MaxClockSkew, negative) value. RecommendedLimits returns a
-// documented starting point for every field.
+// Limits bounds the lifetimes, clock tolerances, sizes and counts this
+// server enforces. None of these have an implicit default — New rejects
+// a zero (or, for MaxClockSkew, negative) value — except the two caps on
+// pending CIBA requests, MaxPendingBackchannelAuthenticationRequests and
+// MaxPendingBackchannelAuthenticationRequestsPerClient, where zero means
+// the default each names. RecommendedLimits returns a documented
+// starting point for every field.
 type Limits struct {
 	// PushedRequestLifetime is how long a pushed authorization request's
 	// request_uri remains valid, and is reported to the client as
@@ -374,6 +378,28 @@ type Limits struct {
 	// (CIBA §7.3), and a truncated value would tell the client to poll
 	// sooner than this enforces.
 	BackchannelAuthenticationPollInterval time.Duration
+
+	// MaxPendingBackchannelAuthenticationRequests bounds how many CIBA
+	// requests may await one end user's decision at once, from all
+	// clients together, when Dependencies.BackchannelInbox is set — and
+	// so how much one ListBackchannelInteractions or
+	// DenyBackchannelInteractions call reads. A request that would take
+	// its end user past it is refused with access_denied (HTTP 403, CIBA
+	// Core §13's code for a request the OpenID Provider itself denies),
+	// and isn't stored. A request counts while its user's inbox holds it:
+	// until it's decided or expires. Requests filed at the same moment
+	// can be refused together, but are never admitted together past it.
+	// Zero means 32; New refuses a negative value.
+	MaxPendingBackchannelAuthenticationRequests int
+
+	// MaxPendingBackchannelAuthenticationRequestsPerClient bounds how
+	// many of one end user's pending CIBA requests may come from any one
+	// client, so that one client can't fill an end user's inbox alone: a
+	// request past it is refused as one past
+	// MaxPendingBackchannelAuthenticationRequests is. Zero means 8; New
+	// refuses a negative value. At or above
+	// MaxPendingBackchannelAuthenticationRequests, it has no effect.
+	MaxPendingBackchannelAuthenticationRequestsPerClient int
 
 	// MaxClientAttestationLifetime bounds how far in the future a
 	// Client Attestation JWT's exp claim may be, relative to the time
@@ -856,4 +882,21 @@ const defaultMaxAccessTokenBytes = 16 << 10
 func (l Limits) MaxAccessTokenBytes() int {
 	encoded := (l.MaxAccessTokenClaimsBytes*4 + 2) / 3
 	return max(defaultMaxAccessTokenBytes, maxAccessTokenFixedBytes+encoded)
+}
+
+// defaultMaxPendingBackchannelAuthenticationRequests and
+// defaultMaxPendingBackchannelAuthenticationRequestsPerClient are what
+// the Limits fields of those names mean when left zero.
+const (
+	defaultMaxPendingBackchannelAuthenticationRequests          = 32
+	defaultMaxPendingBackchannelAuthenticationRequestsPerClient = 8
+)
+
+// pendingBackchannelAuthenticationRequestCaps returns
+// MaxPendingBackchannelAuthenticationRequests and
+// MaxPendingBackchannelAuthenticationRequestsPerClient, each its default
+// when zero.
+func (l Limits) pendingBackchannelAuthenticationRequestCaps() (total, perClient int) {
+	return cmp.Or(l.MaxPendingBackchannelAuthenticationRequests, defaultMaxPendingBackchannelAuthenticationRequests),
+		cmp.Or(l.MaxPendingBackchannelAuthenticationRequestsPerClient, defaultMaxPendingBackchannelAuthenticationRequestsPerClient)
 }

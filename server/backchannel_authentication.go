@@ -142,7 +142,12 @@ type BeginBackchannelAuthenticationRequest struct {
 // one — there is no plain-parameter path, unlike PAR), validates it
 // against the client's registration, and persists it for the
 // embedder's own out-of-band authentication component to later decide
-// via CompleteBackchannelAuthentication.
+// via CompleteBackchannelAuthentication. With
+// Dependencies.BackchannelInbox set, it refuses a request that would
+// leave its end user more pending requests than
+// Limits.MaxPendingBackchannelAuthenticationRequests allows, or more
+// from its client than MaxPendingBackchannelAuthenticationRequestsPerClient,
+// with access_denied.
 func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBackchannelAuthenticationRequest) (BackchannelAuthenticationAction, error) {
 	if s.cfg.Endpoints.BackchannelAuthentication.IsZero() {
 		return s.backchannelBeginFail(ctx, "", newError(ErrorServerError, 500, "backchannel authentication is not configured", nil)), nil
@@ -203,9 +208,6 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "validated extension parameters could not be read back", err)), nil
 	}
 	interaction.RequiredSubject = requestRecord{RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal}.requiredSubjectForApplication()
-	if hintErr := s.checkBackchannelHints(ctx, client.ID(), interaction.Hints); hintErr != nil {
-		return s.backchannelBeginFail(ctx, client.ID(), hintErr), nil
-	}
 	resolvedSubject, resolveSubjectErr := s.resolveBackchannelSubject(ctx, client.ID(), interaction.Hints, requiredInternal)
 	if resolveSubjectErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), resolveSubjectErr), nil
@@ -249,10 +251,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode backchannel authentication request", err)), nil
 	}
-	if err := s.fileBackchannelRequest(ctx, client.ID(), handleRaw, resolvedSubject, expiresAt); err != nil {
-		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to file the backchannel authentication request in the end user's inbox", err)), nil
-	}
-	if err := s.deps.Backchannel.CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
+	if storeErr := s.storeBackchannelRequest(ctx, handleRaw, resolvedSubject, storage.NewBackchannelAuthentication{
 		AuthReqIDHash:           backchannelAuthReqIDHash(authReqIDRaw, authn.InstanceKey, dpopJKT),
 		AuthReqID:               authReqIDForNotification,
 		HandleHash:              sha256.Sum256([]byte(handleRaw)),
@@ -262,8 +261,8 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		ClientNotificationToken: notificationToken,
 		PollInterval:            s.cfg.Limits.BackchannelAuthenticationPollInterval,
 		ExpiresAt:               expiresAt,
-	}); err != nil {
-		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to persist backchannel authentication request", err)), nil
+	}); storeErr != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), storeErr), nil
 	}
 
 	action := BackchannelInteractionRequired{

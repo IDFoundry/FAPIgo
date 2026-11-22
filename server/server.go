@@ -353,6 +353,14 @@ func validateLimits(cfg Config, cibaEnabled bool) error {
 }
 
 func validateCIBALimits(cfg Config, cibaEnabled bool) error {
+	// Checked whether or not CIBA is on: zero means a cap's default, and
+	// a negative one means nothing.
+	if cfg.Limits.MaxPendingBackchannelAuthenticationRequests < 0 {
+		return fmt.Errorf("server: config: limits.max_pending_backchannel_authentication_requests must not be negative")
+	}
+	if cfg.Limits.MaxPendingBackchannelAuthenticationRequestsPerClient < 0 {
+		return fmt.Errorf("server: config: limits.max_pending_backchannel_authentication_requests_per_client must not be negative")
+	}
 	if !cibaEnabled {
 		return nil
 	}

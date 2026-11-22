@@ -433,24 +433,7 @@ func TestRevokeListedGrantReportsAFailedSecondRevocation(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			registry := &outageAfterDelete{GrantRegistry: memstore.NewGrantRegistry()}
-			h, owner := registryHarness(t, registry, declineRevocation)
-			registry.grants = h.grants
-			refreshToken := owner.issueRefreshToken()
-			id := listGrants(t, h, "user-1")[0].ID
-			if n, err := revoke(h, id); n != 0 || err == nil || !strings.Contains(err.Error(), "grants down") {
-				t.Fatalf("%s = %d, %v, want the failed revocation reported, and nothing counted revoked", name, n, err)
-			}
-			if listed := listGrants(t, h, "user-1"); len(listed) != 1 || listed[0].ID != id {
-				t.Fatalf("ListGrants after = %+v, want the grant still listed, for a retry", listed)
-			}
-			h.grants.failRevokeRefresh = nil
-			if n, err := h.server.RevokeSubjectGrants(ctx, subject); n != 1 || err != nil {
-				t.Fatalf("RevokeSubjectGrants retried = %d, %v, want the grant revoked", n, err)
-			}
-			if _, err := owner.refresh(refreshToken); err == nil {
-				t.Error("the revoked grant's refresh token still refreshes")
-			}
+			checkFailedSecondRevocationRetried(t, name, subject, revoke)
 		})
 	}
 	t.Run("registry down too", func(t *testing.T) {
@@ -463,6 +446,34 @@ func TestRevokeListedGrantReportsAFailedSecondRevocation(t *testing.T) {
 			t.Fatalf("RevokeListedGrant = %v, want both failures reported", err)
 		}
 	})
+}
+
+// checkFailedSecondRevocationRetried issues user-1 a refresh token over
+// an outageAfterDelete registry, on a server declining revocation, then
+// checks that revoke, named name, reports the failed second revocation
+// of the token, counting nothing revoked, and leaves the grant listed,
+// and that RevokeSubjectGrants(subject), retried once grants are back,
+// ends it.
+func checkFailedSecondRevocationRetried(t *testing.T, name string, subject server.SubjectID, revoke func(h harness, id string) (revoked int, err error)) {
+	t.Helper()
+	registry := &outageAfterDelete{GrantRegistry: memstore.NewGrantRegistry()}
+	h, owner := registryHarness(t, registry, declineRevocation)
+	registry.grants = h.grants
+	refreshToken := owner.issueRefreshToken()
+	id := listGrants(t, h, "user-1")[0].ID
+	if n, err := revoke(h, id); n != 0 || err == nil || !strings.Contains(err.Error(), "grants down") {
+		t.Fatalf("%s = %d, %v, want the failed revocation reported, and nothing counted revoked", name, n, err)
+	}
+	if listed := listGrants(t, h, "user-1"); len(listed) != 1 || listed[0].ID != id {
+		t.Fatalf("ListGrants after = %+v, want the grant still listed, for a retry", listed)
+	}
+	h.grants.failRevokeRefresh = nil
+	if n, err := h.server.RevokeSubjectGrants(context.Background(), subject); n != 1 || err != nil {
+		t.Fatalf("RevokeSubjectGrants retried = %d, %v, want the grant revoked", n, err)
+	}
+	if _, err := owner.refresh(refreshToken); err == nil {
+		t.Error("the revoked grant's refresh token still refreshes")
+	}
 }
 
 // TestRevokeTokenReportsARegistryFailure: a refresh token revoked at the

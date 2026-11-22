@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
+	"weak"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/sqlstore"
@@ -321,6 +324,148 @@ func TestClientCacheValuesCantBeMutated(t *testing.T) {
 			t.Fatalf("keys after mutating the last result = %s, %v, want %s", inline, err, jwks)
 		}
 	})
+}
+
+// requestBody is a form body, of a size a server reads whole, naming
+// client id, and id as the slice of it that a server's form parsing
+// hands the repository: a string sharing the body's memory.
+func requestBody(id fapi.ClientID) (body string, named fapi.ClientID) {
+	const field = "client_id="
+	body = field + string(id) + "&pad=" + strings.Repeat("a", 64<<10)
+	return body, fapi.ClientID(body[len(field) : len(field)+len(id)])
+}
+
+// wantNoSharedMemory fails t if any of ids shares the memory of one of
+// bodies.
+func wantNoSharedMemory(t *testing.T, bodies []string, ids ...fapi.ClientID) {
+	t.Helper()
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		at := uintptr(unsafe.Pointer(unsafe.StringData(string(id))))
+		for _, body := range bodies {
+			start := uintptr(unsafe.Pointer(unsafe.StringData(body)))
+			if at >= start && at < start+uintptr(len(body)) {
+				t.Fatalf("client ID %q shares a request body's memory: the cache keeps the whole body", id)
+			}
+		}
+	}
+}
+
+// The cache keys a client, and builds it, with a copy of its id, never
+// the caller's: a client_id sliced from a request body would keep the
+// whole body in memory for as long as the cache held the client. No
+// key, and no client ResolveClient returns, shares a body's memory,
+// whichever of ResolveClient and ClientKeys cached the client, on a
+// hit, and once the row has changed.
+func TestClientCacheKeepsCopiesOfClientIDs(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		for _, ttl := range []time.Duration{0, time.Hour} {
+			t.Run(ttl.String(), func(t *testing.T) { testClientCacheKeepsCopiesOfClientIDs(t, dialect, ttl) })
+		}
+	})
+}
+
+func testClientCacheKeepsCopiesOfClientIDs(t *testing.T, dialect sqlstore.Dialect, ttl time.Duration) {
+	ctx := context.Background()
+	c := newCachePlace(t, dialect, sqlstore.Options{ClientCacheTTL: ttl})
+	repo := c.d.Clients()
+	for _, id := range []fapi.ClientID{"a", "b"} {
+		must(t, repo.PutWithKeys(ctx, scoped(id, "s0"), sqlstore.ClientKeyRegistration{JWKS: clientJWKS(t, "k")}))
+	}
+	var bodies []string
+	resolve := func(id fapi.ClientID) {
+		t.Helper()
+		body, named := requestBody(id)
+		bodies = append(bodies, body)
+		client, err := repo.ResolveClient(ctx, named)
+		if err != nil || client.ID() != id {
+			t.Fatalf("ResolveClient(%s) = %v, %v", id, client, err)
+		}
+		cached, err := repo.ResolveClient(ctx, id) // the cache's own
+		must(t, err)
+		wantNoSharedMemory(t, bodies, append(sqlstore.ClientCacheKeys(c.d), client.ID(), cached.ID())...)
+	}
+	keys := func(id fapi.ClientID) {
+		t.Helper()
+		body, named := requestBody(id)
+		bodies = append(bodies, body)
+		_, _, err := sqlstore.LookupClientKeys(ctx, c.d, named)
+		must(t, err)
+		wantNoSharedMemory(t, bodies, sqlstore.ClientCacheKeys(c.d)...)
+	}
+
+	resolve("a") // cached by ResolveClient
+	keys("a")
+	keys("b") // cached by ClientKeys
+	resolve("b")
+	for _, id := range []fapi.ClientID{"a", "b"} { // hits
+		resolve(id)
+		keys(id)
+	}
+	c.setConfig(t, scoped("a", "s1")) // behind its back
+	c.clock.advance(ttl)
+	resolve("a") // cached again, for the new configuration
+	wantScope(t, c.d, "a", "s1")
+}
+
+// Nothing the cache keeps holds on to a request body a client_id was
+// sliced from: once ResolveClient and ClientKeys have looked up more
+// clients than it holds, each with an id sliced from a body of its
+// own, the cache is full and every body is unreachable.
+func TestClientCacheKeepsNoRequestBody(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		ctx := context.Background()
+		c := newCachePlace(t, dialect, sqlstore.Options{})
+		const bound, clients = 4, 8
+		sqlstore.SetClientCache(c.d, bound, c.clock.Now)
+		for i := range clients {
+			id := fapi.ClientID(fmt.Sprintf("client-%d", i))
+			must(t, c.d.Clients().PutWithKeys(ctx, scoped(id, "s0"), sqlstore.ClientKeyRegistration{JWKS: clientJWKS(t, "k")}))
+		}
+		var bodies []weak.Pointer[byte]
+		for i := range clients {
+			bodies = append(bodies, lookUpFromBodies(t, c.d, fapi.ClientID(fmt.Sprintf("client-%d", i)), i%2 == 1)...)
+		}
+		runtime.GC()
+		reachable := 0
+		for _, body := range bodies {
+			if body.Value() != nil {
+				reachable++
+			}
+		}
+		if n := sqlstore.ClientCacheLen(c.d); reachable > 0 || n != bound {
+			t.Fatalf("%d of %d request bodies reachable with %d clients cached, want none with %d", reachable, len(bodies), n, bound)
+		}
+		runtime.KeepAlive(c)
+	})
+}
+
+// lookUpFromBodies resolves client id through d, and its keys (first,
+// with keysFirst), each with id sliced from a request body of its own,
+// and returns weak pointers to the bodies.
+func lookUpFromBodies(t *testing.T, d *sqlstore.DB, id fapi.ClientID, keysFirst bool) []weak.Pointer[byte] {
+	t.Helper()
+	ctx := context.Background()
+	resolve := func() weak.Pointer[byte] {
+		body, named := requestBody(id)
+		if _, err := d.Clients().ResolveClient(ctx, named); err != nil {
+			t.Fatal(err)
+		}
+		return weak.Make(unsafe.StringData(body))
+	}
+	keys := func() weak.Pointer[byte] {
+		body, named := requestBody(id)
+		if _, _, err := sqlstore.LookupClientKeys(ctx, d, named); err != nil {
+			t.Fatal(err)
+		}
+		return weak.Make(unsafe.StringData(body))
+	}
+	if keysFirst {
+		return []weak.Pointer[byte]{keys(), resolve()}
+	}
+	return []weak.Pointer[byte]{resolve(), keys()}
 }
 
 // Concurrent lookups, and writes through this DB and behind its back,

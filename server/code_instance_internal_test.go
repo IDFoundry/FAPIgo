@@ -21,10 +21,10 @@ func TestAuthorizationCodeHash(t *testing.T) {
 		}
 	}
 	got := authorizationCodeHash(code, bound)
-	if want := sha256.Sum256([]byte(codeHashPrefix + "0:" + "9:challenge" + "21:https://rp.example/cb" + "0:" + code)); got != want {
+	if got != sha256.Sum256([]byte(codeHashPrefix+"0:"+"9:challenge"+"21:https://rp.example/cb"+"0:"+code)) {
 		t.Error("authorizationCodeHash isn't the SHA-256 of the prefix, the length-prefixed binding and the code")
 	}
-	if again := authorizationCodeHash(code, bound); again != got {
+	if authorizationCodeHash(code, bound) != got {
 		t.Error("authorizationCodeHash isn't deterministic")
 	}
 }

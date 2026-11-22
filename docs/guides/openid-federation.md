@@ -50,8 +50,9 @@ federation.WriteEntityStatement(w, token)
 ```
 
 With `AutomaticRegistration.TrustAnchors` set, an unknown `client_id`
-that is an `https` Entity Identifier is resolved through its Trust Chain,
-and its `openid_relying_party` metadata becomes its registration.
+that is an `https` Entity Identifier of at most 2 KiB is resolved through
+its Trust Chain, and its `openid_relying_party` metadata becomes its
+registration.
 Outbound fetches go through `Dependencies.FederationHTTP`, which `New`
 requires once trust anchors are set: build it with `fapihttp.New` over
 `fapihttp.NewClient`'s client, since the Entity Identifiers it fetches

@@ -2,6 +2,7 @@ package federation
 
 import (
 	"container/list"
+	"strings"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -89,7 +90,9 @@ func (c *registrationCache) len() int { return len(c.entries) }
 
 // put caches entry as id's registration at now, within the limits
 // registrationCache's doc comment sets out, and reports whether it did.
-// Re-caching an id replaces its entry.
+// Re-caching an id replaces its entry. The entry's key, also kept in its
+// superior's list, is a copy of id: a client_id can share the memory of
+// the whole request it came in, which the cache mustn't keep alive.
 func (c *registrationCache) put(id fapi.ClientID, entry cachedClient, now time.Time) bool {
 	c.remove(id)
 	if entry.branch != "" {
@@ -114,6 +117,7 @@ func (c *registrationCache) put(id fapi.ClientID, entry cachedClient, now time.T
 		own = list.New()
 		c.bySuperior[entry.superior] = own
 	}
+	id = fapi.ClientID(strings.Clone(string(id)))
 	c.entries[id] = &cacheSlot{entry: entry, elem: own.PushBack(id)}
 	if entry.branch != "" {
 		c.branchCounts[entry.branch]++

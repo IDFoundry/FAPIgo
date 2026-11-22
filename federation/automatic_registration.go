@@ -206,9 +206,9 @@ type AutomaticRegistrationConfig struct {
 	DefaultSubjectType fapi.SubjectType
 
 	// OnResolutionFailure, if set, is called with the reason whenever a
-	// client_id that is a well-formed Entity Identifier, and not
-	// statically registered, fails automatic registration: its Trust
-	// Chain doesn't resolve to a configured Trust Anchor, it has no
+	// client_id that is a well-formed Entity Identifier (at most 2 KiB),
+	// and not statically registered, fails automatic registration: its
+	// Trust Chain doesn't resolve to a configured Trust Anchor, it has no
 	// openid_relying_party metadata, or that metadata can't be used
 	// (e.g. no client authentication method this package implements, or
 	// a token_endpoint_auth_method outside AllowedClientAuthMethods).
@@ -284,6 +284,16 @@ const DefaultFailureCacheAge = 10 * time.Second
 // simply isn't remembered — the same as before failures were cached.
 const maxFailedResolutions = 4096
 
+// maxEntityIDBytes bounds the client_id AutomaticClientRepository
+// resolves: 2 KiB, far longer than a real Entity Identifier, a URL naming
+// an entity. (None much past 6 KiB could resolve anyway: its Entity
+// Configuration names it twice, as iss and sub, and a statement is parsed
+// only up to 16 KiB.) A longer client_id is answered like one that isn't
+// an Entity Identifier at all, before any cache is consulted or anything
+// fetched, so what a client_id makes the caches and error text hold stays
+// small whatever its length.
+const maxEntityIDBytes = 2048
+
 // maxRememberedFailureBytes bounds the message a remembered failure
 // keeps. A failed Trust Chain resolution's error names every branch tried
 // and echoes the RP's and its superiors' own claims, so its length is
@@ -332,7 +342,8 @@ func newRememberedFailure(err error) error {
 // Static registration always wins: Underlying is tried first, and its
 // result returned as-is when it succeeds — federation resolution is
 // only attempted when Underlying fails to resolve id AND id is itself
-// a well-formed https Entity Identifier (ValidEntityID). An Underlying
+// a well-formed https Entity Identifier (ValidEntityID) of at most 2 KiB;
+// any other id is an unknown client, with nothing fetched. An Underlying
 // failure wrapping storage.ErrStoreUnavailable is returned as it is;
 // any other is read as "not statically registered". The same split
 // decides where AutomaticClientKeySource takes a client's keys from, so
@@ -391,6 +402,9 @@ type AutomaticClientRepository struct {
 	// AutomaticRegistrationConfig.FailureCacheAge), at most
 	// maxFailedResolutions of them.
 	failures map[fapi.ClientID]failedResolution
+	// failureSweepDue is when lookupFailure next drops every expired
+	// failure.
+	failureSweepDue time.Time
 	// inflight holds the resolution currently running for each
 	// client_id, so concurrent requests naming the same unknown
 	// client_id share one Trust Chain resolution rather than each
@@ -558,8 +572,14 @@ func (a *AutomaticClientRepository) resolveVerificationKeys(ctx context.Context,
 }
 
 // resolve returns id's cached entry if still fresh, or resolves (via
-// Resolver.Resolve) and caches a new one.
+// Resolver.Resolve) and caches a new one. An id longer than
+// maxEntityIDBytes is refused first, as resolveUncached refuses one that
+// isn't an Entity Identifier.
 func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientID) (cachedClient, error) {
+	if len(id) > maxEntityIDBytes {
+		return cachedClient{}, fmt.Errorf("federation: %s is not a registered client and, at %d bytes, too long to be a federation entity ID (at most %d)",
+			quoteEntityID(string(id)), len(id), maxEntityIDBytes)
+	}
 	now := a.clock.Now()
 
 	a.mu.Lock()
@@ -567,15 +587,15 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 		a.mu.Unlock()
 		return entry, nil
 	}
-	if failed, ok := a.failures[id]; ok && now.Before(failed.expiresAt) {
+	if err := a.lookupFailure(id, now); err != nil {
 		a.mu.Unlock()
-		return cachedClient{}, failed.err
+		return cachedClient{}, err
 	}
 	call, ok := a.inflight[id]
 	if !ok {
 		if a.running >= a.maxConcurrentResolutions() {
 			a.mu.Unlock()
-			return cachedClient{}, fmt.Errorf("federation: resolve client %q: %w", id, ErrTooManyResolutions)
+			return cachedClient{}, fmt.Errorf("federation: resolve client %s: %w", quoteEntityID(string(id)), ErrTooManyResolutions)
 		}
 		call = a.startResolution(ctx, id)
 	}
@@ -599,6 +619,38 @@ func (a *AutomaticClientRepository) maxConcurrentResolutions() int {
 	return DefaultMaxConcurrentResolutions
 }
 
+// lookupFailure returns id's remembered registration failure, or nil if
+// none is remembered or it has expired at now. It deletes an expired one
+// it finds and, at most once per FailureCacheAge, every other expired
+// one: a failure is otherwise deleted only when its client_id is
+// resolved again or the cache is full, so the failures of client_ids
+// never named again would stay until it fills. a.mu must be held.
+func (a *AutomaticClientRepository) lookupFailure(id fapi.ClientID, now time.Time) error {
+	if !now.Before(a.failureSweepDue) {
+		a.dropExpiredFailures(now)
+	}
+	failed, ok := a.failures[id]
+	if !ok {
+		return nil
+	}
+	if !now.Before(failed.expiresAt) {
+		delete(a.failures, id)
+		return nil
+	}
+	return failed.err
+}
+
+// dropExpiredFailures deletes every failure expired at now, and puts
+// lookupFailure's next sweep FailureCacheAge later. a.mu must be held.
+func (a *AutomaticClientRepository) dropExpiredFailures(now time.Time) {
+	for id, failed := range a.failures {
+		if !now.Before(failed.expiresAt) {
+			delete(a.failures, id)
+		}
+	}
+	a.failureSweepDue = now.Add(a.cfg.FailureCacheAge)
+}
+
 // startResolution starts id's resolution and records it as in flight.
 // a.mu must be held.
 //
@@ -609,7 +661,16 @@ func (a *AutomaticClientRepository) maxConcurrentResolutions() int {
 // take. It is cancelled only once every caller waiting on it has gone
 // (leaveResolution), so a caller hanging up doesn't leave outbound
 // fetches running on its behalf.
+//
+// id outlives the caller's request, so the resolution works with its own
+// copy of it: a client_id read from a form is a substring of the whole
+// request body, which anything sharing its memory keeps alive. That copy
+// is a.inflight's key, the registered client's own ID and
+// OnResolutionFailure's argument; the failure and registration caches
+// each keep a copy of their own as well, so neither depends on its
+// caller for one.
 func (a *AutomaticClientRepository) startResolution(ctx context.Context, id fapi.ClientID) *inflightResolution {
+	id = fapi.ClientID(strings.Clone(string(id)))
 	resolveCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	call := &inflightResolution{done: make(chan struct{}), cancel: cancel}
 	a.inflight[id] = call
@@ -652,7 +713,7 @@ func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi
 	if err := ValidEntityID(string(id)); err != nil {
 		// Not a federation client_id at all — an ordinary unknown
 		// client, so nothing for OnResolutionFailure to report.
-		return cachedClient{}, fmt.Errorf("federation: %q is not a registered client and not a valid federation entity ID: %w", id, err)
+		return cachedClient{}, fmt.Errorf("federation: %s is not a registered client and not a valid federation entity ID: %w", quoteEntityID(string(id)), err)
 	}
 	entry, err := a.register(ctx, id)
 	if err != nil {
@@ -686,21 +747,19 @@ func (a *AutomaticClientRepository) cacheRegistration(id fapi.ClientID, entry ca
 
 // rememberFailure records err as id's registration failure until
 // FailureCacheAge after now, within maxFailedResolutions, keeping only
-// its bounded message (see rememberedFailure).
+// its bounded message (see rememberedFailure) and its own copy of id
+// (see startResolution).
 func (a *AutomaticClientRepository) rememberFailure(id fapi.ClientID, err error, now time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if _, ok := a.failures[id]; !ok && len(a.failures) >= maxFailedResolutions {
-		for k, f := range a.failures {
-			if !now.Before(f.expiresAt) {
-				delete(a.failures, k)
-			}
-		}
+		a.dropExpiredFailures(now)
 		if len(a.failures) >= maxFailedResolutions {
 			return
 		}
 	}
-	a.failures[id] = failedResolution{err: newRememberedFailure(err), expiresAt: now.Add(a.cfg.FailureCacheAge)}
+	key := fapi.ClientID(strings.Clone(string(id)))
+	a.failures[key] = failedResolution{err: newRememberedFailure(err), expiresAt: now.Add(a.cfg.FailureCacheAge)}
 }
 
 // register resolves the Entity Identifier id's Trust Chain and builds
@@ -709,7 +768,7 @@ func (a *AutomaticClientRepository) rememberFailure(id fapi.ClientID, err error,
 func (a *AutomaticClientRepository) register(ctx context.Context, id fapi.ClientID) (cachedClient, error) {
 	resolved, err := a.resolver.Resolve(ctx, string(id))
 	if err != nil {
-		return cachedClient{}, fmt.Errorf("federation: resolve client %q: %w", id, err)
+		return cachedClient{}, fmt.Errorf("federation: resolve client %s: %w", quoteEntityID(string(id)), err)
 	}
 	raw, ok := resolved.Metadata[relyingPartyEntityType]
 	if !ok {

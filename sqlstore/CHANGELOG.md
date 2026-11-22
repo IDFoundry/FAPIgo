@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.9.1...sqlstore/v0.9.2) (2026-11-22)
+
+
+### Bug Fixes
+
+* **sqlstore:** copy the client ID the client cache keeps ([d06112b](https://github.com/IDFoundry/FAPIgo/commit/d06112b0cb82e463ab335824c625282adea1bf4a))
+
 ## [0.9.1](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.9.0...sqlstore/v0.9.1) (2026-11-19)
 
 

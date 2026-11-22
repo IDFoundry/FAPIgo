@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.79.0](https://github.com/IDFoundry/FAPIgo/compare/v0.78.0...v0.79.0) (2026-11-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** with Dependencies.BackchannelInbox set, BeginBackchannelAuthentication refuses with access_denied (HTTP 403) a request that would leave its end user more than 32 pending requests, or more than 8 from its client. See UPGRADING.md.
+* **server:** a backchannel authentication request whose core parameters exceed the new size bounds, or whose acr_values names more than 32 values, is refused with invalid_request. See UPGRADING.md for the bounds.
+
+### Features
+
+* **storage:** let a grant store revoke a grant's refresh tokens ([ff3b17a](https://github.com/IDFoundry/FAPIgo/commit/ff3b17a763f33150539ea887e9d5ec9426178afc))
+
+
+### Bug Fixes
+
+* **federation:** bound automatic registration grants by the grant_types policy ([1e63263](https://github.com/IDFoundry/FAPIgo/commit/1e632634081aa722d1b82b9be2bba25c6d2d49fb))
+* **federation:** copy and bound the client_ids automatic registration keeps ([67cba6f](https://github.com/IDFoundry/FAPIgo/commit/67cba6f80d5ad5411205e6a0ea90a71e1e0615d9))
+* **federation:** drop expired registration failures before the cache fills ([41478bb](https://github.com/IDFoundry/FAPIgo/commit/41478bb8fe4b49d6f6135bc9e1639894d65fceed))
+* **federation:** narrow automatic registration RAR types by metadata and policy ([8c1d1fd](https://github.com/IDFoundry/FAPIgo/commit/8c1d1fdfb74f7abd45731b99212fa2c6ee6ef826))
+* **keys:** copy entry client IDs and key unknown kids by digest ([1f4f8cc](https://github.com/IDFoundry/FAPIgo/commit/1f4f8cc2f201e4658fc0bfd64dc8c2d147688617))
+* **server:** bound a CIBA request's core parameters, as PAR does ([aa66a2e](https://github.com/IDFoundry/FAPIgo/commit/aa66a2ea0815785e46692ec35611f63bea478f3a))
+* **server:** bound and copy form parameters while parsing them ([7c71221](https://github.com/IDFoundry/FAPIgo/commit/7c71221e0d271ce1dcfa9e4b5c96089d6dafa04a))
+* **server:** cap a user's pending CIBA requests ([255f04f](https://github.com/IDFoundry/FAPIgo/commit/255f04f2560e9ea66dbabfa3231426395b5558d2))
+* **server:** end a refresh token issued while its grant is revoked ([9207c6d](https://github.com/IDFoundry/FAPIgo/commit/9207c6dc55dc6dc57a7ce963b4568fa101f41c22))
+* **server:** keep a grant revoked when a longer refresh lifetime applies ([1ab374d](https://github.com/IDFoundry/FAPIgo/commit/1ab374dc6f18ba08f748f7c55d717074d96a0875))
+* **server:** refuse a claims parameter JSON-encoded twice ([48cd107](https://github.com/IDFoundry/FAPIgo/commit/48cd107d5dab5426b6fdadc228fdfaaea2b77352))
+* **server:** refuse a malformed auth_req_id before polling for it ([2ca091c](https://github.com/IDFoundry/FAPIgo/commit/2ca091c59ccb0a9fa1e989362914df6e1e94eafe))
+* **server:** refuse own access tokens over 16 KiB at revocation ([f5727c6](https://github.com/IDFoundry/FAPIgo/commit/f5727c6a688fe4f90a03d9882a4d58aa9b83c7b5))
+* **server:** stop listing a CIBA inbox once the context ends ([7f32810](https://github.com/IDFoundry/FAPIgo/commit/7f32810e1b419c5551a47421c37ebed0773a0692))
+* **storage:** copy the client ID NewRegisteredClient keeps ([8cd9cdc](https://github.com/IDFoundry/FAPIgo/commit/8cd9cdca9caebd1abda55786db2a1f228918639c))
+* **storage:** require a CIBA inbox to list every completed add ([ac1643b](https://github.com/IDFoundry/FAPIgo/commit/ac1643b5f00bf90f613bb20d83c3701f6f7aea84))
+
 ## [0.78.0](https://github.com/IDFoundry/FAPIgo/compare/v0.77.1...v0.78.0) (2026-11-20)
 
 

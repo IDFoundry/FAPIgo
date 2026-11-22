@@ -144,15 +144,24 @@
 // and one *sql.DB.
 //
 // Migration 0005, new in sqlstore v0.10, adds the refresh_token_grants
-// table (see Grant revocation). It only adds: an instance of v0.9 still
-// running keeps working on a database migrated to it, never reading the
-// new table, so a rolling deploy can run Migrate first and then replace
-// the instances. But v0.9's Migrate and CheckSchema refuse the newer
-// schema, as every release's refuse one migrated further: once it's
-// migrated, a v0.9 instance that starts — restarted, scaled out, or
-// rolled back to — fails at startup. So migrate from a deployment step,
-// or let the first v0.10 instance do it, and then finish the deploy
-// rather than start v0.9 instances.
+// table (see Grant revocation) and a revoked column, defaulting to 0, to
+// refresh_tokens (see Revoked refresh tokens). It only adds: an instance
+// of v0.9 still running keeps working on a database migrated to it,
+// never reading the new table or column, so a rolling deploy can run
+// Migrate first and then replace the instances. But v0.9's Migrate and
+// CheckSchema refuse the newer schema, as every release's refuse one
+// migrated further: once it's migrated, a v0.9 instance that starts —
+// restarted, scaled out, or rolled back to — fails at startup. So
+// migrate from a deployment step, or let the first v0.10 instance do it,
+// and then finish the deploy rather than start v0.9 instances. On
+// PostgreSQL the new column, whose default is a constant, rewrites no
+// rows, but adding it takes refresh_tokens' exclusive lock: Migrate
+// waits for the transactions using the table to end, and holds up those
+// that come after until it's added. A lock_timeout on the role running
+// Migrate makes it give up, to be run again, rather than wait behind a
+// long transaction. It also bounds how long a Migrate waits for another
+// instance's to finish: with a short one, instances migrating at once
+// can fail too, to be run again.
 //
 // # Atomicity
 //
@@ -238,6 +247,49 @@
 // lasts, and revoked when it's next presented or revoked by
 // RevokeListedGrant or RevokeToken. Sweep removes a token's index rows
 // once the token expires.
+//
+// # Revoked refresh tokens
+//
+// RevokeRefreshToken deletes the token or, finding none to delete,
+// writes a tombstone under its hash: a row marked revoked, which
+// RedeemRefreshToken treats as an unknown token and CreateRefreshToken
+// can't store a token over, as it holds the hash's primary key. The
+// server can revoke a refresh token before storing it: a revocation
+// through the grant registry (RevokeListedGrant, RevokeSubjectGrants)
+// reads the token's hash from the entry its issuance records first. So
+// once RevokeRefreshToken returns nil, a token stored under its hash
+// before or while the revocation ran is never redeemable, and one whose
+// CreateRefreshToken runs afterwards fails while the tombstone lasts
+// (an hour, below, which outlasts any issuance in flight): the
+// tombstone is an upsert, which turns a token stored since the DELETE
+// into the tombstone, and waits for one being stored meanwhile before
+// turning it into the tombstone too, or makes it fail. That holds at
+// every isolation level (see Capabilities); on SQLite, whose writes are
+// serialized, a token is stored before the DELETE, between the two, or
+// not at all.
+//
+// A tombstone lasts an hour by the instance's clock, then Sweep removes
+// it: longer, many times over, than an issuance takes between recording
+// its grant and storing its token, which only waits on the store. Each
+// is the hash of a refresh token the server issued, or was issuing,
+// written when it revokes one there's no row for: a token the registry
+// revokes (whose second revocation, after deleting the entry, finds the
+// token gone), one RevokeToken revokes after RevokeGrant has revoked it
+// through its grant, a reused code's token, or one the server withdraws
+// or cleans up after a race. None is a hash a caller chooses, and a
+// client can only revoke the tokens issued to it, so the table holds at
+// most one tombstone for each refresh token revoked in the last hour. A
+// tombstone's record is the byte a sealed record starts with, 3, and
+// nothing else: RedeemRefreshToken never opens it, and SealRecords leaves
+// it alone.
+//
+// While a deploy applying migration 0005 rolls out, a v0.9 instance
+// still running reads a tombstone's record as a sealed record it can't
+// open, with a Sealer or without, and answers a refresh presenting its
+// hash as an outage (500 server_error), never with a token; its
+// CreateRefreshToken fails on a tombstone as on a stored token; and its
+// RevokeRefreshToken deletes a tombstone as it deletes a token, so a
+// revocation made by a v0.9 instance has v0.9's guarantee only.
 //
 // # Sealing
 //
@@ -506,8 +558,9 @@
 // that a Sweep running while the server issues those tokens can't
 // remove it before the server records them, and a revocation until the
 // latest expiry it was recorded with. A refresh token's grant keys are
-// kept until the token expires, revoked or not. An opaque access token
-// is kept until it expires, and a CIBA request until
+// kept until the token expires, revoked or not, and a revoked refresh
+// token's tombstone an hour (see Revoked refresh tokens). An opaque
+// access token is kept until it expires, and a CIBA request until
 // BackchannelExpiredRetention (an hour) after it does, so a client that
 // polls it late gets expired_token rather than an unknown auth_req_id's
 // invalid_grant. A relying party's session is kept until it's consumed

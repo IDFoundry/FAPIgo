@@ -16,7 +16,7 @@ var sweptTables = []string{
 	"par_requests",                // NewPARRecord.ExpiresAt, or a later interaction's
 	"interactions",                // BeginAuthorizationTransaction.HandleExpiresAt
 	"authorization_codes",         // NewAuthorizationCode.ExpiresAt; once redeemed, + RedeemedCodeRetention, or a later issued token's
-	"refresh_tokens",              // NewRefreshToken.ExpiresAt
+	"refresh_tokens",              // NewRefreshToken.ExpiresAt; a tombstone's, tombstoneLifetime after it's written
 	"refresh_token_grants",        // NewRefreshToken.ExpiresAt, its token's
 	"replay",                      // ReplayUse.ExpiresAt
 	"dpop_nonces",                 // NonceIssuance.ExpiresAt

@@ -306,7 +306,8 @@ func grantKeysOf(keys []string) ([]string, error) {
 // CreateRefreshToken commits after the DELETE has read the index is left
 // for the next call, as the interface allows. The index rows stay until
 // Sweep removes them, with their tokens' expiry: a later call finds
-// those tokens gone, and reports nothing for them.
+// those tokens gone, and reports nothing for them. It deletes no
+// tombstone (see RevokeRefreshToken): one stays until Sweep removes it.
 //
 // A wrapper of a deployment's own that embeds *GrantStore and overrides
 // CreateRefreshToken, RedeemRefreshToken or RevokeRefreshToken inherits
@@ -337,7 +338,7 @@ func (s *GrantStore) RevokeGrantRefreshTokens(ctx context.Context, grantKey stri
 // digest's 32 bytes, as no token CreateRefreshToken stored has, is
 // deleted but not reported.
 func (s *GrantStore) deleteIndexedRefreshTokens(ctx context.Context, q querier, grantKey string) ([][32]byte, error) {
-	rows, err := q.QueryContext(ctx, s.d.q("DELETE FROM {refresh_tokens} WHERE token_hash IN (SELECT token_hash FROM {refresh_token_grants} WHERE grant_key = ?) RETURNING token_hash"), grantKey)
+	rows, err := q.QueryContext(ctx, s.d.q("DELETE FROM {refresh_tokens} WHERE revoked = 0 AND token_hash IN (SELECT token_hash FROM {refresh_token_grants} WHERE grant_key = ?) RETURNING token_hash"), grantKey)
 	if err != nil {
 		return nil, err
 	}
@@ -357,12 +358,13 @@ func (s *GrantStore) deleteIndexedRefreshTokens(ctx context.Context, q querier, 
 
 // RedeemRefreshToken implements storage.GrantStore. Not single-use (see
 // the interface): it only reads the token, which stays until it's
-// revoked or swept.
+// revoked or swept. A tombstone (see RevokeRefreshToken) is as unknown
+// as no row, and never opened as a record.
 func (s *GrantStore) RedeemRefreshToken(ctx context.Context, redemption storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
 	var clientID string
 	var record []byte
 	var expires int64
-	err := s.d.queryRow(ctx, "SELECT client_id, record, expires_at FROM {refresh_tokens} WHERE token_hash = ?",
+	err := s.d.queryRow(ctx, "SELECT client_id, record, expires_at FROM {refresh_tokens} WHERE token_hash = ? AND revoked = 0",
 		redemption.TokenHash[:]).Scan(&clientID, &record, &expires)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -377,19 +379,81 @@ func (s *GrantStore) RedeemRefreshToken(ctx context.Context, redemption storage.
 	return storage.RedeemedRefreshToken{ClientID: fapi.ClientID(clientID), Grant: grant, ExpiresAt: timeOf(expires)}, nil
 }
 
-// RevokeRefreshToken implements storage.GrantStore by deleting the
-// token, so a later RedeemRefreshToken finds none. Revoking an unknown
-// (or already revoked) token is not an error: there is nothing left
-// that could redeem it.
+// RevokeRefreshToken implements storage.GrantStore. It deletes the
+// token, so a later RedeemRefreshToken finds none, or, finding none to
+// delete, writes a tombstone under its hash: a row marked revoked, which
+// RedeemRefreshToken treats as unknown, and which keeps
+// CreateRefreshToken from storing a token under the hash while it
+// lasts. So a token revoked before it's stored — by a revocation that
+// read its hash from the server's grant registry while the token's
+// issuance was still in flight — isn't redeemable either: its
+// CreateRefreshToken fails while the tombstone lasts
+// (tombstoneLifetime), which outlasts any issuance in flight. The
+// tombstone is written by an upsert on the table's primary key, so a
+// token stored between the DELETE and it becomes the tombstone, and one
+// whose transaction is storing it meanwhile is waited for and then
+// becomes it; on SQLite, whose writes are serialized, a token is stored
+// before the DELETE, between the two, or not at all. Sweep removes a
+// tombstone an hour after it's written (tombstoneLifetime). Revoking an
+// unknown, or already revoked, token isn't an error.
 func (s *GrantStore) RevokeRefreshToken(ctx context.Context, tokenHash [32]byte) error {
+	var deleted int64
 	err := s.d.writeOne(ctx, func(q querier) error {
-		_, err := q.ExecContext(ctx, s.d.q("DELETE FROM {refresh_tokens} WHERE token_hash = ?"), tokenHash[:])
+		res, err := q.ExecContext(ctx, s.d.q("DELETE FROM {refresh_tokens} WHERE token_hash = ? AND revoked = 0"), tokenHash[:])
+		if err != nil {
+			return err
+		}
+		deleted, err = res.RowsAffected()
 		return err
 	})
+	if err == nil && deleted == 0 {
+		err = s.writeTombstone(ctx, tokenHash)
+	}
 	if err != nil {
 		return unavailable("revoke refresh token", err)
 	}
 	return nil
+}
+
+// tombstoneLifetime is how long a tombstone RevokeRefreshToken writes
+// lasts, by the instance's own clock, before Sweep removes it: longer
+// than any CreateRefreshToken of its hash can still be in flight. The
+// server stores a refresh token straight after recording its grant in
+// the grant registry, the one place a revocation can read the token's
+// hash from before it's stored (a client presents a token, and a code
+// records one, only once it's stored). In between are only the store's
+// own waits — for a pooled connection, for SQLite's write lock
+// (Options.SQLiteBusyTimeout, ten seconds by default), for a row lock on
+// PostgreSQL — and database/sql's immediate retry of a statement whose
+// connection broke before it was sent: the server never retries the
+// store. An hour covers those many times over, as RedeemedCodeRetention
+// covers the server's recording of a redeemed code's tokens. An issuance
+// slower still is caught by the server itself, which confirms the grant
+// is still recorded once the token is stored, and revokes the token if
+// it isn't.
+const tombstoneLifetime = time.Hour
+
+// tombstoneRecord is a tombstone's record: the byte a sealed record
+// starts with (recordSealed) and nothing after it. No release of this
+// package opens it, with a Sealer or without (a DB without one refuses
+// a sealed record, and an AEAD opens nothing from no bytes), so one
+// that doesn't know tombstones, v0.9 among them, answers a redemption
+// of one as an unreadable record, an outage, never with a token; and
+// SealRecords, which seals what doesn't start with that byte, leaves it
+// alone.
+var tombstoneRecord = []byte{recordSealed}
+
+// writeTombstone writes a tombstone under tokenHash: one upsert, which
+// turns a token stored under it into the tombstone too. Its client_id
+// is empty, its record tombstoneRecord, its expires_at the earliest
+// time a row can hold, and its sweep_after tombstoneLifetime from now.
+func (s *GrantStore) writeTombstone(ctx context.Context, tokenHash [32]byte) error {
+	until := nanos(time.Now().Add(tombstoneLifetime))
+	return s.d.writeOne(ctx, func(q querier) error {
+		_, err := q.ExecContext(ctx, s.d.q("INSERT INTO {refresh_tokens} (token_hash, client_id, record, expires_at, sweep_after, revoked) VALUES (?, '', ?, ?, ?, 1) ON CONFLICT (token_hash) DO UPDATE SET client_id = excluded.client_id, record = excluded.record, expires_at = excluded.expires_at, sweep_after = excluded.sweep_after, revoked = excluded.revoked"),
+			tokenHash[:], tombstoneRecord, int64(math.MinInt64), until)
+		return err
+	})
 }
 
 // Capabilities implements storage.StoreAssurance — see the package

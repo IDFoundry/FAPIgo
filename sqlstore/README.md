@@ -148,7 +148,11 @@ authorization code, revoke the grant's refresh tokens in the store
 (`db.Grants()` and `db.BatchingGrants()` are
 `storage.GrantRefreshTokenRevoker`s) rather than leaving them to the
 grant's revocation record alone. It requires FAPIgo v0.79.0, which
-hands the store each refresh token's grant keys.
+hands the store each refresh token's grant keys. The migration also
+adds a `revoked` column to `refresh_tokens`: revoking a refresh token
+that isn't stored yet, as a grant registry revocation racing the
+token's issuance can, leaves a tombstone under its hash for an hour,
+so the token is refused when it's stored, and never redeemed.
 
 - **Run `Migrate` before instances start v0.10**, from a deployment step
   or the first upgraded instance: v0.10's `CheckSchema` refuses a schema
@@ -157,10 +161,21 @@ hands the store each refresh token's grant keys.
   rolls out. But v0.9's `Migrate` and `CheckSchema`, like every
   release's, refuse a schema migrated further than they know: a v0.9
   instance that starts after the migration (restarted, scaled out, or
-  rolled back to) fails at startup, so finish the deploy.
+  rolled back to) fails at startup, so finish the deploy. On PostgreSQL,
+  adding the column takes `refresh_tokens`' exclusive lock for a moment
+  (it rewrites no rows), waiting for the transactions using the table:
+  a `lock_timeout` on the migrating role keeps it from queueing traffic
+  behind a long one. It also bounds how long one `Migrate` waits for
+  another instance's: with a short one, instances migrating at once can
+  fail too, to be run again.
 - **Refresh tokens stored before the migration**, or by a v0.9 instance
   during the deploy, aren't indexed: `RevokeGrant` leaves them to the
   grant's revocation record, which lasts at least 400 days, as before.
+- **During the deploy**, a v0.9 instance can't open a tombstone's record
+  and answers a refresh presenting a tombstoned token with
+  `server_error` (500) rather than `invalid_grant`, never with tokens;
+  its `CreateRefreshToken` fails on one, and its `RevokeRefreshToken`
+  deletes one, as it deletes a token.
 
 ## Upgrading from v0.7
 

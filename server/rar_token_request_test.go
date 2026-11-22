@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"testing"
@@ -118,20 +119,38 @@ func assertIssuedAuthorizationDetails(t *testing.T, h harness, result server.Tok
 	assertPaymentDetails(t, "access token authorization_details claim", claim, want)
 }
 
+// assertPaymentDetails checks that raw is want byte for byte, as
+// rarGrantAll encodes a grant, once raw is compacted: an object that
+// decodes the same but leaves out a member, or spells one differently,
+// isn't what was granted.
 func assertPaymentDetails(t *testing.T, what string, raw json.RawMessage, want []testPaymentDetail) {
 	t.Helper()
-	var got []testPaymentDetail
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("%s: unmarshal %s: %v", what, raw, err)
+	assertCompactJSON(t, what, raw, string(mustMarshal(t, want)))
+}
+
+// assertCompactJSON checks that raw is want byte for byte once both are
+// compacted.
+func assertCompactJSON(t *testing.T, what string, raw json.RawMessage, want string) {
+	t.Helper()
+	var got, wantCompact bytes.Buffer
+	if err := json.Compact(&got, raw); err != nil {
+		t.Fatalf("%s: compact %s: %v", what, raw, err)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("%s = %s, want %d objects", what, raw, len(want))
+	if err := json.Compact(&wantCompact, []byte(want)); err != nil {
+		t.Fatalf("compact %s: %v", want, err)
 	}
-	for i := range want {
-		if got[i].Amount != want[i].Amount {
-			t.Fatalf("%s = %s, want amounts %+v", what, raw, want)
-		}
+	if got.String() != wantCompact.String() {
+		t.Fatalf("%s = %s, want %s", what, &got, &wantCompact)
 	}
+}
+
+// assertIssuedJSON checks that both the token response and the access
+// token's own claim carry want byte for byte, once each is compacted.
+func assertIssuedJSON(t *testing.T, h harness, result server.TokenResult, want string) {
+	t.Helper()
+	assertCompactJSON(t, "TokenResult.AuthorizationDetails", result.AuthorizationDetails, want)
+	claim := authorizationDetailsAccessTokenClaim(t, result.AccessToken.Reveal(), &h.serverKey.PublicKey)
+	assertCompactJSON(t, "access token authorization_details claim", claim, want)
 }
 
 func assertInvalidAuthorizationDetails(t *testing.T, err error) {
@@ -144,9 +163,15 @@ func assertInvalidAuthorizationDetails(t *testing.T, err error) {
 	}
 }
 
+// rarPaymentDetail is the payment object of amount that the tests here
+// request and grant.
+func rarPaymentDetail(amount string) testPaymentDetail {
+	return testPaymentDetail{Type: "payment", Actions: []string{"approve"}, Amount: amount}
+}
+
 var (
-	rarBothPayments = []testPaymentDetail{{Amount: "SGD 500.00"}, {Amount: "SGD 10.00"}}
-	rarSmallPayment = []testPaymentDetail{{Amount: "SGD 10.00"}}
+	rarBothPayments = []testPaymentDetail{rarPaymentDetail("SGD 500.00"), rarPaymentDetail("SGD 10.00")}
+	rarSmallPayment = []testPaymentDetail{rarPaymentDetail("SGD 10.00")}
 )
 
 func rarParam(s string) *string { return &s }
@@ -154,7 +179,9 @@ func rarParam(s string) *string { return &s }
 // RFC 9396 §6: a token request's authorization_details asks for an access
 // token with those details, which the AS checks the grant allows, refusing
 // with invalid_authorization_details otherwise; §7: the token response
-// returns what the access token was assigned.
+// returns what the access token was assigned. An object the exact match
+// judged is issued as granted, whatever order the request gives its
+// members in.
 func TestExchangeAuthorizationCodeNarrowsAuthorizationDetails(t *testing.T) {
 	h := rarTokenRequestHarness(t)
 	for _, tc := range []struct {
@@ -164,6 +191,7 @@ func TestExchangeAuthorizationCodeNarrowsAuthorizationDetails(t *testing.T) {
 	}{
 		{"absent", nil, rarBothPayments},
 		{"narrowed", rarParam(rarTokenRequestSmall), rarSmallPayment},
+		{"narrowed, members reordered", rarParam(`[{"amount":"SGD 10.00","actions":["approve"],"type":"payment"}]`), rarSmallPayment},
 		{"all", rarParam(rarTokenRequestGranted), rarBothPayments},
 		{"empty", rarParam(`[]`), nil},
 	} {

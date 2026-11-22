@@ -718,19 +718,24 @@ the request" framing.
 
 Whether a narrower grant is acceptable is, per type, decided by
 `RARDefinition.ValidateGrant(requested, granted T) error` — nil requires
-byte-for-byte (canonically re-encoded) equality; set, it can permit real
+the two to be equal once decoded into `T` and re-encoded, which can't
+tell a member left out, `null` or zero apart; set, it can permit real
 field-level narrowing (e.g. a lower payment amount). `RARRegistry.ValidateGrant`
 does the per-type matching this drives. It judges what the server grants
 (consent, a `RARPolicy`'s decision); a client's token-request
 `authorization_details` narrowing its grant (code exchange, CIBA token,
 refresh — `accessTokenGrant`, via `validateNarrowedAuthorizationDetails`)
-goes through `RARRegistry.ValidateNarrowing` instead, the same matching
+goes through `RARRegistry.Narrow` instead: `ValidateNarrowing`'s matching,
 driven by `RARDefinition.ValidateNarrowing(granted, narrowed T) error`,
 which falls back to `ValidateGrant(granted, narrowed)` and then to exact
-match. The split exists because a `ValidateGrant` that lets consent add a
-server-minted member would otherwise let a client add one of its own
-choosing at the token endpoint. Each granted object the token request
-leaves out (all of them for an empty array) then goes to
+match, plus the array the access token carries. Where only the exact
+match judged an object, that array holds the granted object it matched,
+as stored, so a client's copy that decodes the same but leaves out a
+granted zero value can't stand in for it; where a hook judged one, it
+holds the client's object. The split exists because a `ValidateGrant` that
+lets consent add a server-minted member would otherwise let a client add
+one of its own choosing at the token endpoint. Each granted object the
+token request leaves out (all of them for an empty array) then goes to
 `RARDefinition.ValidateOmission(granted T, scope []string) error`, with
 the scope the access token will carry: a type whose objects narrow what
 a scope also authorizes (OpenID4VCI's `openid_credential`) refuses an

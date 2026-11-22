@@ -63,6 +63,13 @@ func newHarnessWithRAR(t *testing.T, profile server.Profile, registry *extension
 // registered for types instead of just "payment".
 func newHarnessWithRARTypes(t *testing.T, profile server.Profile, registry *extension.RARRegistry, authCodePolicy, cibaPolicy server.RARPolicy, types []string) harness {
 	t.Helper()
+	return newHarnessWithRARAt(t, profile, registry, authCodePolicy, cibaPolicy, types, server.AssuranceDevelopment)
+}
+
+// newHarnessWithRARAt is newHarnessWithRARTypes under assurance, with the
+// dependencies AssuranceProduction requires when it's that.
+func newHarnessWithRARAt(t *testing.T, profile server.Profile, registry *extension.RARRegistry, authCodePolicy, cibaPolicy server.RARPolicy, types []string, assurance server.AssuranceLevel) harness {
+	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
 	serverKey := generateKey(t)
@@ -143,6 +150,14 @@ func newHarnessWithRARTypes(t *testing.T, profile server.Profile, registry *exte
 		BackchannelNotifier:        server.NoBackchannelNotifications{},
 		AuthorizationCodeRARPolicy: authCodePolicy,
 		CIBARARPolicy:              cibaPolicy,
+	}
+	if assurance == server.AssuranceProduction {
+		asProduction(&cfg)
+		cfg.Deployment = server.DeploymentSingleInstance
+		deps.Audit = &fakeAuditSink{}
+		deps.ClientCertificateTrust = server.ClientCertificateChainVerifiedUpstream{}
+		deps.Nonces = server.NoDPoPNonces{}
+		deps.Backchannel = declaredBackchannelStore{memstore.NewBackchannelAuthenticationStore()}
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

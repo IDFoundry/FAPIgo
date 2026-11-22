@@ -192,6 +192,58 @@
     "why": "ValidateNarrowing refuses a token request leaving out a granted object its type's ValidateOmission won't drop"
   },
   {
+    "id": "rar-narrow-issues-granted",
+    "file": "extension/rar.go",
+    "old": "if r.byType[head.Type].narrowsExactly() {",
+    "new": "if r.byType[head.Type].narrowsExactly() && false {",
+    "module": "root",
+    "packages": [
+      "./extension",
+      "./server"
+    ],
+    "run": "^(TestRARRegistryNarrowIssuesTheGrantedObject|TestTokenRequestNarrowingIssuesTheGrantedObject)$",
+    "why": "a token request only the exact match judged is issued the granted object it matched, not the client's copy that decodes the same"
+  },
+  {
+    "id": "rar-narrow-matched-object",
+    "file": "extension/rar.go",
+    "old": "obj = granted.byType[head.Type][matched[head.Type][k]]",
+    "new": "obj = granted.byType[head.Type][k]",
+    "module": "root",
+    "packages": [
+      "./extension",
+      "./server"
+    ],
+    "run": "^(TestRARRegistryNarrowKeepsTheOrderAndEachMatch|TestTokenRequestNarrowingKeepsTheRequestsOrder)$",
+    "why": "each object a token request narrows to is issued as the granted object it matched, not the one at its position"
+  },
+  {
+    "id": "rar-narrowing-hook-issues-sent",
+    "file": "extension/rar.go",
+    "old": "return d.ValidateNarrowing == nil && d.ValidateGrant == nil",
+    "new": "return d.ValidateGrant == nil",
+    "module": "root",
+    "packages": [
+      "./extension",
+      "./server"
+    ],
+    "run": "^(TestRARRegistryNarrowIssuesWhatAHookJudged|TestTokenRequestNarrowingIssuesWhatAHookJudged)$",
+    "why": "an object a ValidateNarrowing hook judged is issued as the client sent it, not widened back to the granted object"
+  },
+  {
+    "id": "rar-grant-hook-issues-sent",
+    "file": "extension/rar.go",
+    "old": "return d.ValidateNarrowing == nil && d.ValidateGrant == nil",
+    "new": "return d.ValidateNarrowing == nil",
+    "module": "root",
+    "packages": [
+      "./extension",
+      "./server"
+    ],
+    "run": "^(TestRARRegistryNarrowIssuesWhatAHookJudged|TestTokenRequestNarrowingFallsBackToValidateGrant)$",
+    "why": "an object the ValidateGrant fallback judged is issued as the client sent it, not widened back to the granted object"
+  },
+  {
     "id": "extension-definition-validate",
     "file": "extension/definition.go",
     "old": "if err := d.Validate(v); err != nil {",
@@ -214,6 +266,18 @@
     ],
     "run": "^TestParseClientConfigRefusals$",
     "why": "a high surrogate escape followed by text is refused"
+  },
+  {
+    "id": "srv-narrowing-issues-registry-result",
+    "file": "server/rar.go",
+    "old": "return registry.Narrow(granted, narrowed, scope)",
+    "new": "issued, err := registry.Narrow(granted, narrowed, scope); if err != nil || issued == nil { return issued, err }; return strictjson.MarshalUnescaped(narrowed)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestTokenRequestNarrowingIssuesTheGrantedObject|TestExchangeAuthorizationCodeNarrowsAuthorizationDetails)$",
+    "why": "the token-endpoint narrowing issues the array RARRegistry.Narrow returns, not the client's objects"
   },
   {
     "id": "srv-cc-scope-allowlist",

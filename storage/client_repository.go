@@ -625,10 +625,12 @@ func (cfg RegisteredClientConfig) NeedsJWKS() bool {
 }
 
 // NewRegisteredClient validates cfg and returns an immutable
-// RegisteredClient. Each thematic group of checks is split into its
-// own function purely to keep this constructor's own cognitive
-// complexity manageable — the checks, their order and their error
-// messages are unchanged.
+// RegisteredClient. Its ID is a copy of cfg.ID, sharing no memory with
+// it, so a ClientRepository may build a client under the id it was
+// asked to resolve (see ClientRepository) and keep it. Each thematic
+// group of checks is split into its own function purely to keep this
+// constructor's own cognitive complexity manageable — the checks, their
+// order and their error messages are unchanged.
 func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	if cfg.ID == "" {
 		return RegisteredClient{}, fmt.Errorf("storage: client ID is empty")
@@ -679,9 +681,13 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	}
 	redirectURIs := make([]fapi.RegisteredRedirectURI, len(cfg.RedirectURIs))
 	copy(redirectURIs, cfg.RedirectURIs)
+	// cfg.ID may be the client_id a request named, passed through by the
+	// repository resolving it: a client kept in a cache mustn't keep that
+	// whole request alive with it.
+	id := fapi.ClientID(strings.Clone(string(cfg.ID)))
 
 	return RegisteredClient{
-		id:                                        cfg.ID,
+		id:                                        id,
 		redirectURIs:                              redirectURIs,
 		applicationType:                           cfg.ApplicationType,
 		clientAssertionAlgorithm:                  primaryAlg,
@@ -1414,5 +1420,12 @@ type ClientRepository interface {
 	// isn't told its credentials are wrong. The client returned must be
 	// the one registered under exactly id, never another: run
 	// TestClientRepositoryContract against an implementation.
+	//
+	// id may share memory with the request it came from: a client_id
+	// cut out of a request body, which anyone may send and which can be
+	// far larger than the id. An implementation that keeps id beyond
+	// the call, as a cache key say, should keep a copy of it
+	// (strings.Clone): keeping id itself keeps that whole request in
+	// memory too. NewRegisteredClient copies the ID it is given.
 	ResolveClient(ctx context.Context, id fapi.ClientID) (RegisteredClient, error)
 }

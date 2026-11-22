@@ -192,7 +192,12 @@ func (s *Server) isOwnJWTAccessToken(ctx context.Context, clientID fapi.ClientID
 	if !ok {
 		return false, nil
 	}
-	parsed, err := token.ParseAccessToken(rawToken)
+	// Parsed within Limits.MaxAccessTokenBytes, the largest token this
+	// server issues, not ParseAccessToken's 16 KiB: with
+	// MaxAccessTokenClaimsBytes raised, the client's own token can be
+	// longer, and a parse refusing it would answer 200, as though it were
+	// no token of the client's.
+	parsed, err := token.ParseAccessTokenMax(rawToken, s.cfg.Limits.MaxAccessTokenBytes())
 	if err != nil || parsed.Algorithm() != signing.Algorithm {
 		return false, nil
 	}

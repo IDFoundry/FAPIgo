@@ -373,6 +373,20 @@ func (s *Server) unfileBackchannelRequest(ctx context.Context, handleHash [32]by
 // finishes the job. If ctx ends before the requests are all listed, it
 // denies none of them and returns ctx's error.
 //
+// Every denial is recorded before any ping client is notified, so a
+// client whose notification endpoint doesn't answer can't hold up the
+// other denials, or keep their requests approvable meanwhile. The
+// notifications are then sent eight at a time, and the call returns
+// once each has been sent or has failed; each can take as long as the
+// notifier allows, backchannelhttp's Config.Timeout. So run it on a
+// context that isn't tied to an interactive request's deadline, such as
+// context.WithoutCancel(ctx) or a background job's: a store that honours
+// ctx records no denial once ctx has ended, and a notification ctx's end
+// overtakes is cut short. To empty an inbox for good, as when closing an
+// account, have Dependencies.BackchannelSubjects stop resolving the
+// user's hints first, so no new request is filed, then call it again
+// until ListBackchannelInteractions lists nothing.
+//
 // DenyBackchannelInteractions doesn't check who is asking: the
 // application must make sure the request is subject's own, or an
 // administrator's.
@@ -381,23 +395,24 @@ func (s *Server) DenyBackchannelInteractions(ctx context.Context, subject Subjec
 	if err != nil {
 		return 0, fmt.Errorf("server: deny backchannel interactions: %w", err)
 	}
-	denied := 0
 	failures := []error{unreadable}
+	var decided []storage.DecidedBackchannelAuthentication
 	for _, p := range pending {
-		err := s.CompleteBackchannelAuthentication(ctx, CompleteBackchannelAuthenticationRequest{Handle: p.Handle, Result: Deny(reason)})
-		var serverErr *Error
+		denial, failure := s.recordBackchannelDecision(ctx, CompleteBackchannelAuthenticationRequest{Handle: p.Handle, Result: Deny(reason)})
 		switch {
-		case err == nil:
-			denied++
-		case errors.As(err, &serverErr) && (serverErr.Code() == ErrorInvalidRequest || serverErr.Code() == ErrorExpiredToken):
+		case failure == nil:
+			decided = append(decided, denial)
+		case failure.Code() == ErrorInvalidRequest || failure.Code() == ErrorExpiredToken:
 			// Decided or expired since it was listed: its entry is stale.
 			s.unfileBackchannelRequest(ctx, backchannelHandleHash(p.Handle))
 		default:
-			failures = append(failures, err)
+			failures = append(failures, failure)
 		}
 	}
+	// Only now, with every denial recorded, are ping clients notified.
+	s.notifyBackchannelPings(ctx, decided)
 	if err := errors.Join(failures...); err != nil {
-		return denied, fmt.Errorf("server: deny backchannel interactions: %w", err)
+		return len(decided), fmt.Errorf("server: deny backchannel interactions: %w", err)
 	}
-	return denied, nil
+	return len(decided), nil
 }

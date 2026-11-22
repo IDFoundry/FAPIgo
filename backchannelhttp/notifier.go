@@ -39,6 +39,9 @@ type Config struct {
 	// requires the caller to treat every error as best-effort
 	// informational only — but a hung client notification endpoint
 	// should still never be able to stall that caller indefinitely.
+	// It does stall it for Timeout: a client whose endpoint takes the
+	// notification and never answers holds each decision on its
+	// requests that long, so keep Timeout to a few seconds.
 	Timeout time.Duration
 }
 

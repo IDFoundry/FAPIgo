@@ -216,7 +216,12 @@ func claimsRequestingSub(value string) string {
 // pushPlainClaims pushes value as a plain form "claims" parameter.
 func pushPlainClaims(t *testing.T, value string) error {
 	t.Helper()
-	h := newHarness(t, server.ProfileFAPISecurity, true)
+	return pushPlainClaimsTo(t, newHarness(t, server.ProfileFAPISecurity, true), value)
+}
+
+// pushPlainClaimsTo is pushPlainClaims to h's server.
+func pushPlainClaimsTo(t *testing.T, h harness, value string) error {
+	t.Helper()
 	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{"claims": value})},
 	})
@@ -227,7 +232,12 @@ func pushPlainClaims(t *testing.T, value string) error {
 // is raw, signed as sent.
 func pushClaimsRequestObject(t *testing.T, raw string) error {
 	t.Helper()
-	h := newHarness(t, server.ProfileFAPISecurity, true)
+	return pushClaimsRequestObjectTo(t, newHarness(t, server.ProfileFAPISecurity, true), raw)
+}
+
+// pushClaimsRequestObjectTo is pushClaimsRequestObject to h's server.
+func pushClaimsRequestObjectTo(t *testing.T, h harness, raw string) error {
+	t.Helper()
 	params := standardAuthParams(t)
 	params["claims"] = json.RawMessage(lossyPlaceholder)
 	obj := resignWithRawValue(t, h.requestObject(t, params), h.key, raw)

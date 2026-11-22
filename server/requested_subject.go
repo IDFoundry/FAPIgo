@@ -15,7 +15,7 @@ import (
 // is for: the subject of its "id_token_hint" (OIDC Core §3.1.2.1, CIBA
 // Core §7.1), or of a "sub" value in its "claims" parameter (OIDC Core
 // §5.5.1), "" when it names none. The completion must authenticate that
-// user or fail: OIDC Core §5.5.1 says the server "MUST NOT reply with
+// user or fail: OIDC Core §3.1.2.2 says the server "MUST NOT reply with
 // an ID Token or Access Token for a different user".
 //
 // A hint that isn't an ID token this server issued to clientID, a

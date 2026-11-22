@@ -10,13 +10,6 @@ import (
 	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
-// validateClaimsParameter checks the "claims" request parameter (OIDC
-// Core §5.5), when present: it must be a JSON object (or, as a plain
-// form parameter, a string holding one) whose "id_token" and "userinfo"
-// members, if present, map claim names to null or an object.
-// parseRequestedClaimNames reads a malformed value as no claims at all,
-// so without this a client that sent one would believe it requested
-// claims it never did.
 // Bounds on the "claims" parameter (OIDC Core §5.5), so parsing it stays
 // cheap whatever a client sends. maxClaimsParameterBytes matches
 // jose.DefaultMaxCompactBytes: a signed request object can't carry a
@@ -29,6 +22,18 @@ const (
 	maxRequestedClaimValues       = 64
 )
 
+// validateClaimsParameter checks the "claims" request parameter (OIDC
+// Core §5.5), when present: it must be a JSON object (or, as a plain
+// form parameter, a string holding one) whose "id_token" and "userinfo"
+// members, if present, map claim names to null or an object.
+// parseRequestedClaimNames reads a malformed value as no claims at all,
+// so without this a client that sent one would believe it requested
+// claims it never did.
+//
+// It reads the value as every reader does (claimsMembers), unwrapping
+// one string layer at most. A value JSON-encoded twice is refused: the
+// readers see it as no claims at all, so accepting it would drop the
+// essential acr or sub value it asks for.
 func validateClaimsParameter(params map[string]json.RawMessage) error {
 	raw, ok := params["claims"]
 	if !ok {
@@ -50,7 +55,9 @@ func validateClaimsParameter(params map[string]json.RawMessage) error {
 	if !strictjson.DecodesLosslessly(raw) || !strictjson.DecodesLosslessly(object) {
 		return errClaimsNotLossless
 	}
-	top, ok := claimsMembers(object)
+	// object is already unwrapped: claimsMembers(object) would unwrap a
+	// second string layer, which no reader does.
+	top, ok := objectMembers(object)
 	if !ok {
 		return errors.New("claims must be a JSON object")
 	}
@@ -132,15 +139,26 @@ func isJSONNull(raw json.RawMessage) bool {
 // claimsMembers decodes the "claims" parameter's raw value (a JSON
 // object, or, as a plain form parameter, a string holding one) into its
 // top-level members, keyed exactly as sent. ok is false when it isn't an
-// object. Every reader of the parameter goes through this, so they all
-// see the same members: decoding into a struct instead would match
-// "ID_TOKEN" to "id_token" the way encoding/json folds case, while
-// validation, reading exact keys, wouldn't.
+// object. Every reader of the parameter goes through this, and
+// validateClaimsParameter through the same two steps (claimsObject, then
+// objectMembers), so they all see the same members: decoding into a
+// struct instead would match "ID_TOKEN" to "id_token" the way
+// encoding/json folds case, while validation, reading exact keys,
+// wouldn't.
 func claimsMembers(raw json.RawMessage) (map[string]json.RawMessage, bool) {
 	object, ok := claimsObject(raw)
 	if !ok {
 		return nil, false
 	}
+	return objectMembers(object)
+}
+
+// objectMembers decodes object, the claims parameter's JSON text as
+// claimsObject returns it, into its top-level members, keyed exactly as
+// sent. ok is false when object isn't a JSON object, including when it
+// is a string holding one: only claimsObject unwraps a string, and only
+// once.
+func objectMembers(object json.RawMessage) (map[string]json.RawMessage, bool) {
 	var top map[string]json.RawMessage
 	if len(object) == 0 || object[0] != '{' || json.Unmarshal(object, &top) != nil {
 		return nil, false

@@ -8,12 +8,17 @@ import (
 )
 
 // FuzzClaimsReadersAgree checks the three readers of the "claims"
-// request parameter against each other, and the two encodings a request
-// can carry it in (a request object's nested JSON object, and a plain
-// form parameter's JSON string holding the object) against each other:
+// request parameter against each other and against validation, and the
+// two encodings a request can carry it in (a request object's nested
+// JSON object, and a plain form parameter's JSON string holding the
+// object) against each other:
 //
 //   - validation, essential acr and the requested claim names never
 //     panic;
+//   - whatever validation accepts, claimsMembers, the one decoding every
+//     reader goes through, finds members in: validation never passes a
+//     value the readers all see as no claims at all, such as one
+//     JSON-encoded twice;
 //   - when validation accepts both, an object and the same object
 //     wrapped as a JSON string give identical results from all three
 //     readers. (Validation may refuse one encoding and not the other,
@@ -24,6 +29,7 @@ import (
 //     the ID token's requested claim names;
 //   - requested claim names are sorted and unique.
 func FuzzClaimsReadersAgree(f *testing.F) {
+	asString := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	for _, s := range []string{
 		`{"id_token":{"acr":{"essential":true,"values":["gold","silver"]}}}`,
 		`{"id_token":{"acr":{"essential":true,"value":"gold"}},"userinfo":{"email":null}}`,
@@ -33,6 +39,10 @@ func FuzzClaimsReadersAgree(f *testing.F) {
 		`{"id_token":null,"id_token":{"acr":{"essential":true,"value":"x"}}}`,
 		`{"id_token":5}`, `[]`, `"{}"`, `null`, `{"id_token":{"a\u0063r":{"essential":true,"value":"x"}}}`,
 		`{"id_token":{"acr":{"essential":true,"values":["a","a"]}}}`,
+		// JSON-encoded twice: validation once checked the object inside,
+		// which no reader looks at.
+		asString(`"{}"`),
+		asString(asString(`{"id_token":{"acr":{"essential":true,"values":["gold"]},"sub":{"value":"user-1"}}}`)),
 	} {
 		f.Add(s)
 	}
@@ -41,31 +51,48 @@ func FuzzClaimsReadersAgree(f *testing.F) {
 			return
 		}
 		obj := readClaims(map[string]json.RawMessage{"claims": json.RawMessage(claims)})
+		checkAcceptedClaimsReadable(t, claims, obj)
 		checkClaimsEncodingsAgree(t, claims, obj)
 		checkRequestedNamesSortedUnique(t, obj)
 		checkEssentialACRRequested(t, claims, obj)
 	})
 }
 
-// claimsReading is what the three "claims" readers make of one request.
+// claimsReading is what validation and the three "claims" readers make
+// of one request.
 type claimsReading struct {
 	valid             bool
+	readable          bool
 	essential         []string
 	essentialErr      bool
 	idToken, userInfo []string
 }
 
-// readClaims runs validation, the essential-acr reader and the
-// requested-names reader over params.
+// readClaims runs validation, the decoding the readers share
+// (claimsMembers), the essential-acr reader and the requested-names
+// reader over params.
 func readClaims(params map[string]json.RawMessage) claimsReading {
 	ess, essErr := essentialACRValues(params)
 	idt, ui := parseRequestedClaimNames(params["claims"])
+	_, readable := claimsMembers(params["claims"])
 	return claimsReading{
 		valid:        validateClaimsParameter(params) == nil,
+		readable:     readable,
 		essential:    ess,
 		essentialErr: essErr != nil,
 		idToken:      idt,
 		userInfo:     ui,
+	}
+}
+
+// checkAcceptedClaimsReadable: whatever validation accepts,
+// claimsMembers finds members in, so validation never passes a value
+// every reader then reads as no claims at all, dropping the essential
+// acr or sub value it asks for.
+func checkAcceptedClaimsReadable(t *testing.T, claims string, obj claimsReading) {
+	t.Helper()
+	if obj.valid && !obj.readable {
+		t.Fatalf("validation accepts claims %s, but claimsMembers finds no members in it", claims)
 	}
 }
 

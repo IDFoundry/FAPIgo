@@ -3,7 +3,6 @@ package server
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -29,6 +28,13 @@ type Server struct {
 // present and valid; see Config, Limits and Dependencies for what "no
 // implicit fallback" means for each field.
 //
+// New copies cfg before validating it, every slice it holds included:
+// each AlgorithmPolicy set, AdditionalGrantTypes, Resources,
+// Federation.AuthorityHints, and AutomaticRegistration's lists with each
+// Trust Anchor's JWKS. The Server keeps only that copy, so changing cfg
+// or the contents of its slices afterwards, even while the Server
+// serves requests, changes nothing it does.
+//
 // New also resolves every signing key the server will use from its
 // KeyManager(s) — ID token, JARM, UserInfo, access token and federation
 // signing, as configured — and builds its published JWK Set once, so a
@@ -37,6 +43,8 @@ type Server struct {
 // request. A KeyManager backed by a remote KMS is asked over the
 // network: New allows that 10 seconds.
 func New(cfg Config, deps Dependencies) (*Server, error) {
+	// Copied before anything reads it, so what's validated is what's kept.
+	cfg = cfg.clone()
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -46,8 +54,6 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 	// NoDPoPNonces declines nonces as nil does; every nonce check below
 	// New tests deps.Nonces against nil.
 	deps.Nonces = dpopnonce.Active[NoDPoPNonces](deps.Nonces)
-	// Copied, so a caller changing its slice later changes nothing here.
-	cfg.Resources = slices.Clone(cfg.Resources)
 	if cfg.Extensions == nil {
 		// No implicit permissive fallback: an unconfigured registry
 		// rejects every custom parameter, it does not accept anything —

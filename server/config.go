@@ -425,8 +425,9 @@ type Limits struct {
 	MaxClientAttestationPoPAge time.Duration
 }
 
-// Config is this server's immutable configuration. It is copied by New;
-// mutating a Config after passing it to New has no effect.
+// Config is this server's immutable configuration. It is copied by New,
+// the contents of its slices included; mutating a Config after passing
+// it to New has no effect.
 type Config struct {
 	// Issuer is this server's issuer identifier — the audience client
 	// assertions and request objects must be addressed to, and every

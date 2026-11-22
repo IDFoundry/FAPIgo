@@ -516,6 +516,30 @@
     "why": "ValidateCallerCertificateKey bounds caller-supplied certificate keys"
   },
   {
+    "id": "srv-config-copied",
+    "file": "server/server.go",
+    "old": "cfg = cfg.clone()",
+    "new": "_ = cfg",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewCopiesConfigSlices$",
+    "why": "New keeps its own copy of Config's slices, so editing the caller's afterwards changes nothing"
+  },
+  {
+    "id": "srv-config-copied-trust-anchor-jwks",
+    "file": "server/config_clone.go",
+    "old": "c.TrustAnchors[i].JWKS = slices.Clone(c.TrustAnchors[i].JWKS)",
+    "new": "c.TrustAnchors[i].JWKS = c.TrustAnchors[i].JWKS",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestConfigCloneCopiesEverySlice$",
+    "why": "New's copy of Config includes each Trust Anchor's JWKS bytes"
+  },
+  {
     "id": "backchannel-outbound-hardened",
     "file": "backchannelhttp/notifier.go",
     "old": "OutboundHardened: n.hardened}",

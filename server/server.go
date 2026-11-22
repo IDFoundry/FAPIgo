@@ -67,64 +67,76 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 	if len(cfg.AutomaticRegistration.AllowedResources) > 0 && len(cfg.Resources) == 0 && deps.ResourcePolicy == nil {
 		return nil, fmt.Errorf("server: config: automatic_registration: %w", errConfinedWithoutResourceIndicators)
 	}
-	if len(cfg.AutomaticRegistration.TrustAnchors) > 0 {
-		// Wraps deps.Clients/ClientKeys transparently — every other
-		// internal (PAR, the token endpoint, CIBA) keeps calling those
-		// same Dependencies fields exactly as before, unaware an
-		// automatically-registered client is now also possible. The
-		// original deps.Clients/ClientKeys (statically registered
-		// clients) are passed in as Underlying, so they always take
-		// priority — see AutomaticRegistrationConfig's own doc comment.
-		resolver, err := federation.NewResolver(federation.Config{
-			TrustAnchors: cfg.AutomaticRegistration.TrustAnchors,
-			Limits: federation.Limits{
-				MaxPathLength:        cfg.AutomaticRegistration.MaxPathLength,
-				MaxAuthorityHints:    cfg.AutomaticRegistration.MaxAuthorityHints,
-				MaxStatementLifetime: cfg.AutomaticRegistration.MaxStatementLifetime,
-				MaxClockSkew:         cfg.AutomaticRegistration.MaxClockSkew,
-			},
-		}, federation.Dependencies{HTTP: deps.FederationHTTP, Clock: deps.Clock})
-		if err != nil {
-			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
-		}
-		// Checked by validateDependencies (validateSubjects).
-		automaticSubjectTypes, automaticDefaultSubjectType, _ := automaticRegistrationSubjects(cfg, deps.PairwiseSubjects)
-		automaticAuthMethods, err := automaticClientAuthMethods(cfg.AutomaticRegistration.AllowedClientAuthMethods, deps.ClientCertificateTrust)
-		if err != nil {
-			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
-		}
-		automaticClients, err := federation.NewAutomaticClientRepository(deps.Clients, resolver, deps.FederationHTTP, federation.AutomaticRegistrationConfig{
-			AllowedScopes:                cfg.AutomaticRegistration.AllowedScopes,
-			AuthorizationDetailsTypes:    cfg.AutomaticRegistration.AuthorizationDetailsTypes,
-			AllowedResources:             cfg.AutomaticRegistration.AllowedResources,
-			MaxCacheAge:                  cfg.AutomaticRegistration.MaxCacheAge,
-			FailureCacheAge:              cfg.AutomaticRegistration.FailureCacheAge,
-			MaxConcurrentResolutions:     cfg.AutomaticRegistration.MaxConcurrentResolutions,
-			AllowsClientCredentialsGrant: cfg.AutomaticRegistration.AllowsClientCredentialsGrant,
-			AllowsCIBA:                   cfg.AutomaticRegistration.AllowsCIBA,
-			AllowedClientAuthMethods:     automaticAuthMethods,
-			OnResolutionFailure:          cfg.AutomaticRegistration.OnResolutionFailure,
-			ClientAssertionAlgorithms:    cfg.Algorithms.ClientAssertion,
-			IDTokenSigningAlgorithm:      automaticIDTokenAlgorithm(cfg),
-			UserInfoSigningAlgorithm:     cfg.Algorithms.UserInfo,
-			SubjectTypes:                 automaticSubjectTypes,
-			DefaultSubjectType:           automaticDefaultSubjectType,
-		}, deps.Clock)
-		if err != nil {
-			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
-		}
-		automaticClientKeys, err := federation.NewAutomaticClientKeySource(deps.ClientKeys, automaticClients)
-		if err != nil {
-			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
-		}
-		deps.Clients = automaticClients
-		deps.ClientKeys = automaticClientKeys
+	deps, err := withAutomaticRegistration(cfg, deps)
+	if err != nil {
+		return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
 	}
 	s := &Server{cfg: cfg, deps: deps}
 	if err := s.checkSigningKeys(); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// withAutomaticRegistration returns deps with Clients and ClientKeys
+// wrapped for OpenID Federation automatic registration when cfg
+// configures it (Config.AutomaticRegistration has TrustAnchors), and
+// deps unchanged otherwise. The wrapping is transparent — every other
+// internal (PAR, the token endpoint, CIBA) keeps calling those same
+// Dependencies fields exactly as before, unaware an
+// automatically-registered client is now also possible. The original
+// deps.Clients/ClientKeys (statically registered clients) are passed in
+// as Underlying, so they always take priority — see
+// AutomaticRegistrationConfig's own doc comment.
+func withAutomaticRegistration(cfg Config, deps Dependencies) (Dependencies, error) {
+	if len(cfg.AutomaticRegistration.TrustAnchors) == 0 {
+		return deps, nil
+	}
+	resolver, err := federation.NewResolver(federation.Config{
+		TrustAnchors: cfg.AutomaticRegistration.TrustAnchors,
+		Limits: federation.Limits{
+			MaxPathLength:        cfg.AutomaticRegistration.MaxPathLength,
+			MaxAuthorityHints:    cfg.AutomaticRegistration.MaxAuthorityHints,
+			MaxStatementLifetime: cfg.AutomaticRegistration.MaxStatementLifetime,
+			MaxClockSkew:         cfg.AutomaticRegistration.MaxClockSkew,
+		},
+	}, federation.Dependencies{HTTP: deps.FederationHTTP, Clock: deps.Clock})
+	if err != nil {
+		return Dependencies{}, err
+	}
+	// Checked by validateDependencies (validateSubjects).
+	automaticSubjectTypes, automaticDefaultSubjectType, _ := automaticRegistrationSubjects(cfg, deps.PairwiseSubjects)
+	automaticAuthMethods, err := automaticClientAuthMethods(cfg.AutomaticRegistration.AllowedClientAuthMethods, deps.ClientCertificateTrust)
+	if err != nil {
+		return Dependencies{}, err
+	}
+	automaticClients, err := federation.NewAutomaticClientRepository(deps.Clients, resolver, deps.FederationHTTP, federation.AutomaticRegistrationConfig{
+		AllowedScopes:                cfg.AutomaticRegistration.AllowedScopes,
+		AuthorizationDetailsTypes:    cfg.AutomaticRegistration.AuthorizationDetailsTypes,
+		AllowedResources:             cfg.AutomaticRegistration.AllowedResources,
+		MaxCacheAge:                  cfg.AutomaticRegistration.MaxCacheAge,
+		FailureCacheAge:              cfg.AutomaticRegistration.FailureCacheAge,
+		MaxConcurrentResolutions:     cfg.AutomaticRegistration.MaxConcurrentResolutions,
+		AllowsClientCredentialsGrant: cfg.AutomaticRegistration.AllowsClientCredentialsGrant,
+		AllowsCIBA:                   cfg.AutomaticRegistration.AllowsCIBA,
+		AllowedClientAuthMethods:     automaticAuthMethods,
+		OnResolutionFailure:          cfg.AutomaticRegistration.OnResolutionFailure,
+		ClientAssertionAlgorithms:    cfg.Algorithms.ClientAssertion,
+		IDTokenSigningAlgorithm:      automaticIDTokenAlgorithm(cfg),
+		UserInfoSigningAlgorithm:     cfg.Algorithms.UserInfo,
+		SubjectTypes:                 automaticSubjectTypes,
+		DefaultSubjectType:           automaticDefaultSubjectType,
+	}, deps.Clock)
+	if err != nil {
+		return Dependencies{}, err
+	}
+	automaticClientKeys, err := federation.NewAutomaticClientKeySource(deps.ClientKeys, automaticClients)
+	if err != nil {
+		return Dependencies{}, err
+	}
+	deps.Clients = automaticClients
+	deps.ClientKeys = automaticClientKeys
+	return deps, nil
 }
 
 // validateConfig checks cfg as a whole. Each thematic group of checks

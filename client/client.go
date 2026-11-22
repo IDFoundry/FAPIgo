@@ -36,6 +36,12 @@ type Client struct {
 // its Profile, the flows its Endpoints enable, its ClientAuthMethod and
 // SenderConstrain, and its Assurance level — is present and valid.
 //
+// New copies cfg before validating it, its slices included
+// (TrustedIDTokenAudiences and Federation.AuthorityHints), and the
+// Client keeps only that copy, so changing cfg or the contents of its
+// slices afterwards, even while the Client is in use, changes neither
+// the ID token audiences it trusts nor the authority_hints it publishes.
+//
 // New also resolves each key of the client's own cfg calls for — the
 // client authentication, attestation PoP, DPoP, request object, CIBA
 // request and federation signing keys from deps.Keys, and the ID token
@@ -45,6 +51,8 @@ type Client struct {
 // Decrypter backed by a remote KMS is asked over the network: New
 // allows that 10 seconds.
 func New(cfg Config, deps Dependencies) (*Client, error) {
+	// Copied before anything reads it, so what's validated is what's kept.
+	cfg = cfg.clone()
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}

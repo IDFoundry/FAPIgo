@@ -51,6 +51,10 @@ type fakeAS struct {
 	idTokenAuthTime time.Time
 	// idTokenACR, if not empty, is the issued ID token's acr.
 	idTokenACR string
+	// idTokenAudience, if not empty, is the issued ID token's aud in
+	// place of testClientID alone, with its first entry as azp (OpenID
+	// Connect Core §3.1.3.7 steps 3 and 9-10).
+	idTokenAudience []string
 
 	lastPARForm        url.Values
 	lastPARDPoPProof   string
@@ -354,6 +358,9 @@ func (a *fakeAS) writeTokenIssued(w http.ResponseWriter) {
 	if err != nil {
 		a.t.Fatalf("issue id token: %v", err)
 	}
+	if len(a.idTokenAudience) > 0 {
+		idToken = a.multiAudienceIDToken()
+	}
 	if a.encryptIDTokenTo != nil {
 		idToken, err = jwe.Encrypt(jwe.EncryptRequest{
 			Algorithm: a.encryptIDTokenAlg, Encryption: fapi.A256GCM,
@@ -391,6 +398,25 @@ func (a *fakeAS) writeTokenIssued(w http.ResponseWriter) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// multiAudienceIDToken is the ID token writeTokenIssued issues with
+// idTokenAudience set: signed as IssueIDToken signs one, for those
+// audiences, the first as azp.
+func (a *fakeAS) multiAudienceIDToken() string {
+	now := time.Now()
+	payload, err := json.Marshal(map[string]any{
+		"iss": a.issuer, "sub": "end-user-1", "aud": a.idTokenAudience, "azp": a.idTokenAudience[0],
+		"nonce": a.lastNonce, "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(),
+	})
+	if err != nil {
+		a.t.Fatalf("marshal id token claims: %v", err)
+	}
+	idToken, err := jose.Sign(a.idTokenKey, jose.Header{Algorithm: fapi.ES256, KeyID: "as-id-kid"}, payload)
+	if err != nil {
+		a.t.Fatalf("sign id token: %v", err)
+	}
+	return idToken
 }
 
 func newTestClient(t *testing.T, messageSigned bool) (*client.Client, *fakeAS, *httptest.Server) {

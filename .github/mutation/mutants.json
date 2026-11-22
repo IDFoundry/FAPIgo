@@ -876,6 +876,30 @@
     "why": "AssuranceProduction refuses CallbackBindingDeviceLocalStore without a native redirect URI, session store or not"
   },
   {
+    "id": "client-config-copied",
+    "file": "client/client.go",
+    "old": "cfg = cfg.clone()",
+    "new": "_ = cfg",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestNewCopiesConfigSlices$",
+    "why": "New keeps its own copy of Config's slices, so editing the caller's afterwards changes neither audience trust nor authority_hints"
+  },
+  {
+    "id": "client-trusted-audiences-copied",
+    "file": "client/config.go",
+    "old": "c.TrustedIDTokenAudiences = slices.Clone(c.TrustedIDTokenAudiences)",
+    "new": "c.TrustedIDTokenAudiences = c.TrustedIDTokenAudiences",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^(TestNewCopiesConfigSlices|TestConfigCloneCopiesEverySlice)$",
+    "why": "the audiences a Client trusts in an ID token's aud are its own copy, not the caller's slice"
+  },
+  {
     "id": "resource-pairwise-empty-subject",
     "file": "resource/verify.go",
     "old": "case internal == \"\":",

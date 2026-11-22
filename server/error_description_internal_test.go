@@ -38,6 +38,10 @@ var reviewedDescriptions = map[string]bool{
 	`subject+" is revoked"`: true,
 	// a fixed certificate description.
 	`"failed to check the "+subject+"'s revocation status"`: true,
+	// decodeFormParameters' fixed subject: a string literal at every call.
+	`subject+" has too many parameters"`: true,
+	// decodeFormParameters' fixed subject: a string literal at every call.
+	`subject+" is malformed"`: true,
 	// tok is openid or offline_access.
 	`"the client_credentials grant has no end user: "+tok+" cannot be requested"`: true,
 	// a fixed record name.

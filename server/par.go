@@ -968,6 +968,11 @@ func (s *Server) clientAllowsScope(client storage.RegisteredClient, scope string
 // hand-built FormRequest never passes through. Every parameter's value
 // can end up stored with the request or grant, so the bound belongs
 // here. A real request carries a few dozen parameters at most.
+// FormRequestFromHTTP, and BeginAuthorizationRequestFromHTTP for a
+// query, also count against maxFormParameters while they parse
+// (decodeFormParameters), refusing the parameter after the last before
+// it is decoded, so a body of many tiny parameters never has them all
+// built; the count here is what holds a hand-built FormRequest to it.
 const (
 	maxFormParameters     = 100
 	maxFormParameterBytes = maxFormRequestBytes

@@ -48,6 +48,25 @@ func TestTokenEndpointChallengesAuthorizationHeaderAuthentication(t *testing.T) 
 	}
 }
 
+// A form the constructor can't take is refused as one before the
+// Authorization header is looked at: 400 invalid_request with no
+// challenge, even from a client that sent nothing but the header.
+func TestTokenEndpointRefusesAnUntakeableFormBeforeChallenging(t *testing.T) {
+	basic := func(r *http.Request) { r.SetBasicAuth("client-1", "secret") }
+	for name, body := range map[string]string{
+		"too many parameters": "grant_type=authorization_code&" + numberedForm(100, "&"),
+		"too large":           "grant_type=authorization_code&code=" + strings.Repeat("a", 1<<20),
+	} {
+		_, err := server.TokenEndpointRequestFromHTTP(basicAuthTokenRequest(body, basic))
+		code := serverErrorCode(t, err)
+		rec := httptest.NewRecorder()
+		server.WriteError(rec, err)
+		if rec.Code != http.StatusBadRequest || code != server.ErrorInvalidRequest || rec.Header().Get("WWW-Authenticate") != "" {
+			t.Errorf("%s: status %d, code %q, WWW-Authenticate %q; want 400 invalid_request and no challenge", name, rec.Code, code, rec.Header().Get("WWW-Authenticate"))
+		}
+	}
+}
+
 // A request that also carries a credential this server takes is
 // authenticated by it, as before.
 func TestTokenEndpointIgnoresAuthorizationHeaderBesideAnAssertion(t *testing.T) {

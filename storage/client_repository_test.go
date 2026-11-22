@@ -2,7 +2,9 @@ package storage
 
 import (
 	"slices"
+	"strings"
 	"testing"
+	"unsafe"
 
 	fapi "github.com/idfoundry/fapigo"
 )
@@ -45,6 +47,29 @@ func TestNewRegisteredClient(t *testing.T) {
 	}
 	if c.AutomaticFederationRegistration() {
 		t.Fatalf("AutomaticFederationRegistration() = true, want false (not set)")
+	}
+}
+
+// TestNewRegisteredClientCopiesItsID: the client's ID shares no memory
+// with the one it was built from, which a repository may have cut out
+// of a request, so a client kept in a cache doesn't keep the request.
+func TestNewRegisteredClientCopiesItsID(t *testing.T) {
+	request := "client_id=client-123&pad=" + strings.Repeat("a", 1<<16)
+	id, _, _ := strings.Cut(strings.TrimPrefix(request, "client_id="), "&")
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                       fapi.ClientID(id),
+		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm: fapi.ES256,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	if c.ID() != "client-123" {
+		t.Fatalf("ID() = %q, want %q", c.ID(), "client-123")
+	}
+	start := uintptr(unsafe.Pointer(unsafe.StringData(request)))
+	if got := uintptr(unsafe.Pointer(unsafe.StringData(c.ID().String()))); got >= start && got < start+uintptr(len(request)) {
+		t.Fatal("ID() shares the request's memory, want a copy")
 	}
 }
 

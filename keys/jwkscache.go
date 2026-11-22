@@ -2,6 +2,7 @@ package keys
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"sync"
 	"time"
@@ -41,7 +42,7 @@ type jwksCache[V any] struct {
 	lastRefreshErr   error
 	lastRefreshErrAt time.Time
 	inflight         *refreshCall[V]
-	negativeKIDs     map[string]time.Time
+	negativeKIDs     map[[sha256.Size]byte]time.Time // by negativeKIDKey
 }
 
 // refreshCall is an in-flight refresh shared by every caller that
@@ -55,10 +56,22 @@ type refreshCall[V any] struct {
 
 // maxNegativeKIDs bounds the negative-cache map so an attacker sending
 // an unbounded number of distinct unknown kids cannot grow it without
-// limit. When full, expired entries are evicted first; if it is still
-// full, new misses simply aren't remembered — the worst case is an
-// occasional extra refresh, which minRefreshInterval already bounds.
+// limit: not in entries, and, since an entry is keyed by its kid's
+// fixed-size digest (negativeKIDKey), not in bytes either, however long
+// the kids sent. When full, expired entries are evicted first; if it is
+// still full, new misses simply aren't remembered — the worst case is
+// an occasional extra refresh, which minRefreshInterval already bounds.
 const maxNegativeKIDs = 1024
+
+// negativeKIDKey is kid's key in a jwksCache's negative cache: its
+// SHA-256 digest, 32 bytes whatever the kid's length, which only the
+// JWS size limit bounds (a kid comes from an unverified JWT header). A
+// digest rather than a prefix, so two kids sharing a long prefix stay
+// distinct: a miss on one can't hold back the refresh for a key later
+// rotated in under the other.
+func negativeKIDKey(kid string) [sha256.Size]byte {
+	return sha256.Sum256([]byte(kid))
+}
 
 // defaultMinRefreshInterval is how often, by default, an unknown kid
 // may force a refetch of a JWK Set: short enough that a signer's key
@@ -94,7 +107,7 @@ func newJWKSCache[V any](timing jwksCacheTiming, now func() time.Time, fetch fun
 		minRefreshInterval: timing.minRefreshInterval,
 		refreshBackoff:     timing.refreshBackoff,
 		now:                now,
-		negativeKIDs:       make(map[string]time.Time),
+		negativeKIDs:       make(map[[sha256.Size]byte]time.Time),
 	}
 }
 
@@ -111,7 +124,11 @@ func resolveFromJWKSCache[V, K any](ctx context.Context, c *jwksCache[V], kid st
 	if len(matched) > 0 || kid == "" {
 		return matched, nil
 	}
-	if !c.reserveForcedRefresh(kid, arrived) {
+	// The kid's negative-cache key, digested once and before c is
+	// locked: the kid can be as long as a JWS allows, and every request
+	// for c's set takes that lock.
+	missed := negativeKIDKey(kid)
+	if !c.reserveForcedRefresh(missed, arrived) {
 		return nil, nil
 	}
 	fresh, err := c.refreshSingleflight(ctx)
@@ -120,7 +137,7 @@ func resolveFromJWKSCache[V, K any](ctx context.Context, c *jwksCache[V], kid st
 	}
 	matched = match(fresh)
 	if len(matched) == 0 {
-		c.rememberMiss(kid)
+		c.rememberMiss(missed)
 	}
 	return matched, nil
 }
@@ -149,24 +166,25 @@ func (c *jwksCache[V]) current(ctx context.Context) (V, error) {
 	return c.refreshSingleflight(ctx)
 }
 
-// reserveForcedRefresh reports whether an unknown-kid miss on kid, in
-// a request that arrived at arrived, may force a live refresh right
-// now, and if so records it as the last forced refresh. It may not if
-// kid is still negative-cached, or if the last forced refresh was
-// within minRefreshInterval. A plain TTL refresh doesn't count against
-// that limit (if it did, a minRefreshInterval as long as cacheTTL would
-// let a kid miss force nothing at all), but a set fetched since the
-// request arrived is already as fresh as a forced refresh would make
-// it, so a miss on it is negative-cached instead of refetched.
-func (c *jwksCache[V]) reserveForcedRefresh(kid string, arrived time.Time) bool {
+// reserveForcedRefresh reports whether an unknown-kid miss, on the kid
+// whose negativeKIDKey is missed, in a request that arrived at arrived,
+// may force a live refresh right now, and if so records it as the last
+// forced refresh. It may not if the kid is still negative-cached, or if
+// the last forced refresh was within minRefreshInterval. A plain TTL
+// refresh doesn't count against that limit (if it did, a
+// minRefreshInterval as long as cacheTTL would let a kid miss force
+// nothing at all), but a set fetched since the request arrived is
+// already as fresh as a forced refresh would make it, so a miss on it
+// is negative-cached instead of refetched.
+func (c *jwksCache[V]) reserveForcedRefresh(missed [sha256.Size]byte, arrived time.Time) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
-	if retryAt, ok := c.negativeKIDs[kid]; ok && now.Before(retryAt) {
+	if retryAt, ok := c.negativeKIDs[missed]; ok && now.Before(retryAt) {
 		return false
 	}
 	if c.haveCached && !c.cachedAt.Before(arrived) {
-		c.rememberMissLocked(kid, now)
+		c.rememberMissLocked(missed, now)
 		return false
 	}
 	if !c.lastForced.IsZero() && now.Sub(c.lastForced) < c.minRefreshInterval {
@@ -176,18 +194,19 @@ func (c *jwksCache[V]) reserveForcedRefresh(kid string, arrived time.Time) bool 
 	return true
 }
 
-// rememberMiss negative-caches kid until minRefreshInterval has passed,
-// so a repeated request for the same unknown kid doesn't force another
-// refresh before then. It also opportunistically evicts expired
-// entries so the map stays bounded under maxNegativeKIDs.
-func (c *jwksCache[V]) rememberMiss(kid string) {
+// rememberMiss negative-caches the kid whose negativeKIDKey is missed
+// until minRefreshInterval has passed, so a repeated request for the
+// same unknown kid doesn't force another refresh before then. It also
+// opportunistically evicts expired entries so the map stays bounded
+// under maxNegativeKIDs.
+func (c *jwksCache[V]) rememberMiss(missed [sha256.Size]byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.rememberMissLocked(kid, c.now())
+	c.rememberMissLocked(missed, c.now())
 }
 
 // rememberMissLocked is rememberMiss with c.mu held.
-func (c *jwksCache[V]) rememberMissLocked(kid string, now time.Time) {
+func (c *jwksCache[V]) rememberMissLocked(missed [sha256.Size]byte, now time.Time) {
 	if len(c.negativeKIDs) >= maxNegativeKIDs {
 		for k, retryAt := range c.negativeKIDs {
 			if !now.Before(retryAt) {
@@ -196,7 +215,7 @@ func (c *jwksCache[V]) rememberMissLocked(kid string, now time.Time) {
 		}
 	}
 	if len(c.negativeKIDs) < maxNegativeKIDs {
-		c.negativeKIDs[kid] = now.Add(c.minRefreshInterval)
+		c.negativeKIDs[missed] = now.Add(c.minRefreshInterval)
 	}
 }
 

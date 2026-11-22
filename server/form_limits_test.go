@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +47,46 @@ func TestPushAuthorizationRequestBoundsHandBuiltForm(t *testing.T) {
 		HTTP: server.FormRequest{Parameters: atLimit},
 	}); err != nil {
 		t.Fatalf("PushAuthorizationRequest(%d parameters): %v", len(atLimit), err)
+	}
+}
+
+// encodedFormPOST is a POST of params, form-encoded and joined by sep.
+func encodedFormPOST(t *testing.T, params []server.FormParameter, sep string) *http.Request {
+	t.Helper()
+	pairs := make([]string, len(params))
+	for i, p := range params {
+		pairs[i] = url.QueryEscape(p.Name) + "=" + url.QueryEscape(p.Value)
+	}
+	return newFormPOST(t, "application/x-www-form-urlencoded", strings.Join(pairs, sep))
+}
+
+// TestPushAuthorizationRequestFromHTTPHoldsTheParameterBound: over
+// HTTP, at either assurance level, a pushed authorization request of
+// 100 parameters, empty pairs between them, is read and pushed, while
+// one of 101 is refused by PushAuthorizationRequestFromHTTP before the
+// server sees it: the same bound the server holds a hand-built form to.
+func TestPushAuthorizationRequestFromHTTPHoldsTheParameterBound(t *testing.T) {
+	for _, assurance := range []server.AssuranceLevel{server.AssuranceDevelopment, server.AssuranceProduction} {
+		t.Run(fmt.Sprintf("assurance %d", assurance), func(t *testing.T) {
+			h := newHarnessWithRedirectURI(t, server.ProfileFAPISecurity, false, testRedirectURI, assurance)
+			atLimit := plainFormParameters(t, h.clientAssertion(t), nil)
+			for i := len(atLimit); i < 100; i++ {
+				atLimit = append(atLimit, formParam(fmt.Sprintf("x%d", i), "v"))
+			}
+			req, err := server.PushAuthorizationRequestFromHTTP(encodedFormPOST(t, atLimit, "&&"))
+			if err != nil {
+				t.Fatalf("PushAuthorizationRequestFromHTTP(100 parameters): %v", err)
+			}
+			if _, err := h.server.PushAuthorizationRequest(context.Background(), req); err != nil {
+				t.Fatalf("PushAuthorizationRequest(100 parameters): %v", err)
+			}
+
+			over := append(atLimit[:len(atLimit):len(atLimit)], formParam("x100", "v"))
+			_, err = server.PushAuthorizationRequestFromHTTP(encodedFormPOST(t, over, "&"))
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+				t.Fatalf("PushAuthorizationRequestFromHTTP(101 parameters): error code %q, want %q", code, server.ErrorInvalidRequest)
+			}
+		})
 	}
 }
 

@@ -32,8 +32,10 @@ type TokenRevocationRequest struct {
 }
 
 // TokenRevocationRequestFromHTTP reads a TokenRevocationRequest from r:
-// its form, its client attestation headers and its TLS client
-// certificate. An error is an *Error to write as the response.
+// its form, held to FormRequestFromHTTP's bounds as
+// PushAuthorizationRequestFromHTTP's is, its client attestation headers
+// and its TLS client certificate. An error is an *Error to write as the
+// response.
 func TokenRevocationRequestFromHTTP(r *http.Request) (TokenRevocationRequest, error) {
 	parts, err := readHTTPRequestParts(r)
 	return TokenRevocationRequest{

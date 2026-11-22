@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
@@ -169,6 +170,31 @@ func resolveES256(t *testing.T, src ClientKeySource, id fapi.ClientID, kid strin
 		ClientID: id, Purpose: ClientAssertionVerification, Algorithm: fapi.ES256, KeyID: kid,
 	})
 	return set.Keys, err
+}
+
+// TestClientJWKSSourceKeysEntriesByACopy: the client ID an entry is kept
+// under shares no memory with the one it was resolved for, which may
+// have been cut out of a request: an entry kept for as long as the
+// client is mustn't keep that request alive.
+func TestClientJWKSSourceKeysEntriesByACopy(t *testing.T) {
+	doc, _ := es256JWKS(t, "k")
+	src, _, _ := newURISource(t, map[fapi.ClientID][]byte{"client-1": doc})
+	request := "client_id=client-1&pad=" + strings.Repeat("a", 1<<16)
+	id, _, _ := strings.Cut(strings.TrimPrefix(request, "client_id="), "&")
+	if got, err := resolveES256(t, src, fapi.ClientID(id), "k"); err != nil || len(got) != 1 {
+		t.Fatalf("got %d keys, err %v; want the client's key", len(got), err)
+	}
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	if len(src.entries) != 1 {
+		t.Fatalf("%d entries, want the client's", len(src.entries))
+	}
+	start := uintptr(unsafe.Pointer(unsafe.StringData(request)))
+	for kept := range src.entries {
+		if p := uintptr(unsafe.Pointer(unsafe.StringData(kept.String()))); p >= start && p < start+uintptr(len(request)) {
+			t.Fatal("the entry's client ID shares the request's memory, want a copy")
+		}
+	}
 }
 
 // TestClientJWKSSourceCachesPerClient: repeated lookups are served from

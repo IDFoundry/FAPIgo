@@ -776,14 +776,15 @@ func TestTokenEndpointRequestResources(t *testing.T) {
 	if got := httptestTokenRequest(t, "grant_type=x").Resources(); got != nil {
 		t.Fatalf("Resources = %v, want nil", got)
 	}
-	// Too many parameters: nothing escapes the bound.
+	// Too many parameters: nothing escapes the bound, which
+	// TokenEndpointRequestFromHTTP applies as it reads the body, so no
+	// request is built at all. A repeatable "resource" counts as every
+	// other parameter does.
 	many := "grant_type=x" + strings.Repeat("&resource="+resourceA, 120)
-	tooMany := httptestTokenRequest(t, many)
-	if _, err := tooMany.Parameters(); err == nil {
-		t.Fatal("Parameters accepted too many parameters")
-	}
-	if got := tooMany.Resources(); got != nil {
-		t.Fatalf("Resources = %d values, want nil", len(got))
+	r := httptest.NewRequest(http.MethodPost, testTokenEndpoint, strings.NewReader(many))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if _, err := server.TokenEndpointRequestFromHTTP(r); serverErrorCode(t, err) != server.ErrorInvalidRequest {
+		t.Fatalf("TokenEndpointRequestFromHTTP(121 parameters) = %v, want invalid_request", err)
 	}
 }
 

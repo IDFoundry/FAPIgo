@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/x509"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -29,7 +30,9 @@ type httpRequestParts struct {
 // readHTTPRequestParts reads everything from r at once, so an adapter
 // can't forget a header that only some clients send. A request whose
 // only credential is the Authorization header is refused here
-// (authorizationHeaderOnly).
+// (authorizationHeaderOnly), but only once its form has been read: a
+// form FormRequestFromHTTP refuses (too large, too many parameters,
+// malformed) is that 400, whatever the Authorization header says.
 func readHTTPRequestParts(r *http.Request) (httpRequestParts, error) {
 	form, err := FormRequestFromHTTP(r)
 	if err != nil {
@@ -104,7 +107,11 @@ func isTokenChar(c rune) bool {
 // certificate (PeerCertificateFromHTTP). Filling the struct field by
 // field compiles just as well with a field left out, and then fails only
 // for the clients that need it — typically those using mTLS or
-// attestation-based client authentication.
+// attestation-based client authentication. The form is held to
+// FormRequestFromHTTP's bounds — at most 1 MiB and 100 parameters —
+// and one it refuses is an invalid_request *Error (400), returned before
+// anything else is checked: even for a request that authenticates only
+// with the Authorization header, which is otherwise refused with 401.
 //
 // Behind a proxy that terminates TLS, r carries no client certificate:
 // set PeerCertificate afterwards from however the proxy forwards it —
@@ -195,12 +202,15 @@ func (t TokenEndpointRequest) BackchannelTokenExchange() BackchannelTokenExchang
 // r.URL.Query().Get would silently take the first of a repeated
 // parameter; RFC 6749 §3.1 says one "MUST NOT be included more than
 // once", so a repeated client_id, request_uri or request, a malformed
-// query or body, or a POST that isn't form-encoded, is an
-// invalid_request *Error. Render it locally: an authorization endpoint
-// never redirects for a request it can't attribute to a client's
-// registered redirect URI. A missing value is left empty for
-// BeginAuthorization to answer, as it does any request_uri or client_id
-// it doesn't accept.
+// query or body, a query or body of more than 100 parameters (counted
+// as it is parsed, as FormRequestFromHTTP counts them), or a POST that
+// isn't form-encoded, is an invalid_request *Error. Render it locally:
+// an authorization endpoint never redirects for a request it can't
+// attribute to a client's registered redirect URI. A missing value is
+// left empty for BeginAuthorization to answer, as it does any
+// request_uri or client_id it doesn't accept. The values are copies,
+// sharing no memory with r's query or body, so keeping one doesn't
+// keep the whole request alive.
 func BeginAuthorizationRequestFromHTTP(r *http.Request) (BeginAuthorizationRequest, error) {
 	params, err := authorizationEndpointParameters(r)
 	if err != nil {
@@ -221,14 +231,13 @@ func BeginAuthorizationRequestFromHTTP(r *http.Request) (BeginAuthorizationReque
 // authorizationEndpointParameters is an authorization request's
 // parameters: a POST's form body, or any other request's query string.
 func authorizationEndpointParameters(r *http.Request) (url.Values, error) {
-	if r.Method != http.MethodPost {
-		query, err := url.ParseQuery(r.URL.RawQuery)
-		if err != nil {
-			return nil, newError(ErrorInvalidRequest, 400, "the authorization request's query is malformed", err)
-		}
-		return query, nil
+	var form FormRequest
+	var err error
+	if r.Method == http.MethodPost {
+		form, err = FormRequestFromHTTP(r)
+	} else {
+		form.Parameters, err = authorizationQueryParameters(r.URL.RawQuery)
 	}
-	form, err := FormRequestFromHTTP(r)
 	if err != nil {
 		return nil, err
 	}
@@ -237,4 +246,16 @@ func authorizationEndpointParameters(r *http.Request) (url.Values, error) {
 		params.Add(p.Name, p.Value)
 	}
 	return params, nil
+}
+
+// authorizationQueryParameters decodes an authorization request's query
+// as FormRequestFromHTTP decodes a body: counted as it is parsed, with
+// the same bound, and copied out of query. As in url.ParseQuery, a
+// semicolon isn't a separator but makes the query malformed, so this
+// server can't split it one way and a proxy in front of it another.
+func authorizationQueryParameters(query string) ([]FormParameter, error) {
+	if strings.Contains(query, ";") {
+		return nil, newError(ErrorInvalidRequest, 400, "the authorization request's query is malformed", errors.New("invalid semicolon separator in query"))
+	}
+	return decodeFormParameters(query, "the authorization request's query")
 }

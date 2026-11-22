@@ -31,6 +31,25 @@ func TestValidateAdditionalGrantTypes(t *testing.T) {
 	}
 }
 
+// TestTokenEndpointRequestBoundsItsOwnParameters: Parameters and
+// Resources hold a request's form to the parameter bound themselves,
+// not only through TokenEndpointRequestFromHTTP, so not even the
+// repeatable "resource" escapes it in a form that didn't come from
+// there.
+func TestTokenEndpointRequestBoundsItsOwnParameters(t *testing.T) {
+	params := []FormParameter{{Name: "grant_type", Value: "x"}}
+	for range maxFormParameters {
+		params = append(params, FormParameter{Name: resourceParameter, Value: "https://rs.example"})
+	}
+	req := TokenEndpointRequest{parts: httpRequestParts{HTTP: FormRequest{Parameters: params}}}
+	if _, err := req.Parameters(); err == nil {
+		t.Fatalf("Parameters accepted %d parameters", len(params))
+	}
+	if got := req.Resources(); got != nil {
+		t.Fatalf("Resources = %d values, want nil", len(got))
+	}
+}
+
 // failingNonceStore can't issue a nonce.
 type failingNonceStore struct{}
 

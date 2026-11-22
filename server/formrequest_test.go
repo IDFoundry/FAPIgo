@@ -1,8 +1,10 @@
 package server_test
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -114,5 +116,110 @@ func TestFormRequestGetAbsentReturnsEmpty(t *testing.T) {
 
 	if got := form.Get("grant_type"); got != "" {
 		t.Fatalf("Get(grant_type) = %q, want \"\" for an absent parameter", got)
+	}
+}
+
+// numberedForm is n parameters, p0=v0 to p<n-1>=v<n-1>, joined by sep.
+func numberedForm(n int, sep string) string {
+	pairs := make([]string, n)
+	for i := range pairs {
+		pairs[i] = fmt.Sprintf("p%d=v%d", i, i)
+	}
+	return strings.Join(pairs, sep)
+}
+
+// bytesAllocated is testing.AllocsPerRun in bytes: the heap bytes one
+// call to f allocates, averaged over runs calls after a first that
+// warms up. Like AllocsPerRun, it measures at GOMAXPROCS 1, so other
+// goroutines add little to it.
+func bytesAllocated(runs int, f func()) uint64 {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	f()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for range runs {
+		f()
+	}
+	runtime.ReadMemStats(&after)
+	return (after.TotalAlloc - before.TotalAlloc) / uint64(runs)
+}
+
+// TestFormRequestFromHTTPBoundsParameterCount: a body may carry 100
+// parameters, counted as the server's methods count a FormRequest's,
+// so the empty pairs around and between them are none; the 101st is
+// refused before it is decoded, so a malformed one is refused for the
+// count too.
+func TestFormRequestFromHTTPBoundsParameterCount(t *testing.T) {
+	const form = "application/x-www-form-urlencoded"
+	atLimit, err := server.FormRequestFromHTTP(newFormPOST(t, form, "&&"+numberedForm(100, "&&&")+"&"))
+	if err != nil {
+		t.Fatalf("FormRequestFromHTTP(100 parameters): %v", err)
+	}
+	if n := len(atLimit.Parameters); n != 100 || atLimit.Parameters[0] != (server.FormParameter{Name: "p0", Value: "v0"}) || atLimit.Parameters[99] != (server.FormParameter{Name: "p99", Value: "v99"}) {
+		t.Fatalf("Parameters = %d of them, want p0=v0 to p99=v99", n)
+	}
+
+	for name, body := range map[string]string{
+		"101 parameters":    numberedForm(101, "&"),
+		"a malformed 101st": numberedForm(100, "&") + "&%zz=v",
+		// 1 MiB, within the size limit: 524,288 one-byte parameters.
+		"many tiny parameters": strings.Repeat("a&", 1<<19),
+	} {
+		_, err := server.FormRequestFromHTTP(newFormPOST(t, form, body))
+		if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+			t.Errorf("%s: error code %q, want %q", name, code, server.ErrorInvalidRequest)
+		}
+		if got := serverErrorDescription(t, err); got != "the request body has too many parameters" {
+			t.Errorf("%s: description %q, want the parameter count's", name, got)
+		}
+	}
+
+	// Separators alone are no parameters, however many there are.
+	separators, err := server.FormRequestFromHTTP(newFormPOST(t, form, strings.Repeat("&", 1<<20)))
+	if err != nil || len(separators.Parameters) != 0 {
+		t.Fatalf("FormRequestFromHTTP(1 MiB of separators) = %d parameters, %v; want none", len(separators.Parameters), err)
+	}
+}
+
+// TestFormRequestFromHTTPAllocationIsBounded: taking a 1 MiB body costs
+// about what reading it does, however many pairs it splits into —
+// 524,288 one-byte parameters, or separators alone — rather than growing
+// with each pair.
+func TestFormRequestFromHTTPAllocationIsBounded(t *testing.T) {
+	const form = "application/x-www-form-urlencoded"
+	for name, body := range map[string]string{
+		"many tiny parameters": strings.Repeat("a&", 1<<19),
+		"separators only":      strings.Repeat("&", 1<<20),
+	} {
+		allocated := bytesAllocated(4, func() {
+			_, _ = server.FormRequestFromHTTP(newFormPOST(t, form, body))
+		})
+		if allocated > 8<<20 {
+			t.Errorf("%s: FormRequestFromHTTP allocated %d bytes for a 1 MiB body, want at most 8 MiB", name, allocated)
+		}
+	}
+}
+
+// TestFormRequestFromHTTPCopiesAValueOnce: a value is copied out of the
+// body once, whether or not it has to be unescaped (unescaping it
+// already builds a string of its own), so a body that is one long value
+// costs about that value's length more to take than a body as long with
+// nothing in it to decode: what reading the body costs is the same.
+func TestFormRequestFromHTTPCopiesAValueOnce(t *testing.T) {
+	const form, length = "application/x-www-form-urlencoded", 1 << 19
+	take := func(value string) uint64 {
+		body := "v=" + value
+		return bytesAllocated(4, func() {
+			_, _ = server.FormRequestFromHTTP(newFormPOST(t, form, body))
+		})
+	}
+	reading := take(strings.Repeat("&", length))
+	for name, value := range map[string]string{
+		"unescaped": strings.Repeat("a", length),
+		"escaped":   strings.Repeat("+", length),
+	} {
+		if taking := take(value); taking > reading+length+length/2 {
+			t.Errorf("%s: taking a %d-byte value allocated %d bytes, %d for a body with nothing to decode: want the value copied once", name, length, taking, reading)
+		}
 	}
 }

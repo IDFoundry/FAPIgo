@@ -25,11 +25,20 @@ const maxFormRequestBytes = 1 << 20
 // fronted by something other than net/http.Request is free to build a
 // FormRequest by hand instead.
 //
-// A body it can't take — not form-encoded, unreadable, over 1 MiB, or
-// malformed — is an invalid_request *Error (400), so WriteError answers
-// it as the client's mistake, never a 500. The same goes for the
-// *FromHTTP constructors built on it (PushAuthorizationRequestFromHTTP,
-// TokenEndpointRequestFromHTTP, BeginBackchannelAuthenticationRequestFromHTTP).
+// A body it can't take — not form-encoded, unreadable, over 1 MiB, with
+// more than 100 parameters, or malformed — is an invalid_request *Error
+// (400), so WriteError answers it as the client's mistake, never a 500.
+// Parameters are counted as the body is parsed, the way the server's
+// methods count a FormRequest's (an empty pair, as in "a=1&&b=2", is
+// none), and the 101st is refused before it is decoded: a body of many
+// tiny parameters costs no more to refuse than one of a few. Every name
+// and value is a copy, sharing no memory with the body, so keeping one
+// (a client_id, say) doesn't keep the whole body alive. The same goes
+// for the *FromHTTP constructors built on it
+// (PushAuthorizationRequestFromHTTP, TokenEndpointRequestFromHTTP,
+// BeginBackchannelAuthenticationRequestFromHTTP,
+// TokenRevocationRequestFromHTTP, and BeginAuthorizationRequestFromHTTP
+// for a POST).
 func FormRequestFromHTTP(r *http.Request) (FormRequest, error) {
 	// RFC 9110 §8.3.1: the media type is case-insensitive, and may carry
 	// parameters ("; charset=UTF-8"); "application/x-www-form-urlencodedx"
@@ -45,23 +54,59 @@ func FormRequestFromHTTP(r *http.Request) (FormRequest, error) {
 		return FormRequest{}, newError(ErrorInvalidRequest, http.StatusBadRequest, "the request body is too large", fmt.Errorf("body exceeds %d bytes", maxFormRequestBytes))
 	}
 
+	params, err := decodeFormParameters(string(body), "the request body")
+	if err != nil {
+		return FormRequest{}, err
+	}
+	return FormRequest{Parameters: params}, nil
+}
+
+// decodeFormParameters decodes encoded — name=value pairs joined by
+// "&", application/x-www-form-urlencoded — into its parameters, in
+// order and with every repeat kept. Any error is an invalid_request
+// *Error (400) whose description names encoded as subject ("the
+// request body").
+//
+// An empty pair is skipped, as if it had never been sent, so the
+// parameters are counted exactly as formParametersToMap counts them,
+// and the one after maxFormParameters is refused before it is decoded.
+// Neither skipping nor splitting off a pair allocates, so what a
+// request costs beyond encoded itself is bounded by the parameters it
+// may have, not by the pairs or separators it sends. Each name and
+// value is a string of its own (unescapeFormComponent): a substring of
+// encoded would keep all of it alive.
+func decodeFormParameters(encoded, subject string) ([]FormParameter, error) {
 	var params []FormParameter
-	for _, pair := range strings.Split(string(body), "&") {
-		if pair == "" {
-			continue
+	for rest := strings.TrimLeft(encoded, "&"); rest != ""; rest = strings.TrimLeft(rest, "&") {
+		if len(params) == maxFormParameters {
+			return nil, newError(ErrorInvalidRequest, http.StatusBadRequest, subject+" has too many parameters", fmt.Errorf("more than %d parameters", maxFormParameters))
 		}
+		var pair string
+		pair, rest, _ = strings.Cut(rest, "&")
 		name, value, _ := strings.Cut(pair, "=")
-		decodedName, err := url.QueryUnescape(name)
+		decodedName, err := unescapeFormComponent(name)
 		if err != nil {
-			return FormRequest{}, newError(ErrorInvalidRequest, http.StatusBadRequest, "the request body is malformed", fmt.Errorf("parameter name: %w", err))
+			return nil, newError(ErrorInvalidRequest, http.StatusBadRequest, subject+" is malformed", fmt.Errorf("parameter name: %w", err))
 		}
-		decodedValue, err := url.QueryUnescape(value)
+		decodedValue, err := unescapeFormComponent(value)
 		if err != nil {
-			return FormRequest{}, newError(ErrorInvalidRequest, http.StatusBadRequest, "the request body is malformed", fmt.Errorf("parameter value: %w", err))
+			return nil, newError(ErrorInvalidRequest, http.StatusBadRequest, subject+" is malformed", fmt.Errorf("parameter value: %w", err))
 		}
 		params = append(params, FormParameter{Name: decodedName, Value: decodedValue})
 	}
-	return FormRequest{Parameters: params}, nil
+	return params, nil
+}
+
+// unescapeFormComponent is url.QueryUnescape(s) in memory of its own,
+// sharing none with s. QueryUnescape returns s itself when there is
+// nothing to unescape (no "%" and no "+"), so such an s is copied
+// instead; any other s it decodes into a new string, which isn't
+// copied again.
+func unescapeFormComponent(s string) (string, error) {
+	if !strings.ContainsAny(s, "%+") {
+		return strings.Clone(s), nil
+	}
+	return url.QueryUnescape(s)
 }
 
 // isFormContentType reports whether a Content-Type header names

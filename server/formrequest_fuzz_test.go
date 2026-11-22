@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,11 +22,18 @@ import (
 // way net/url.Values (and internal/par.DecodeForm, built on it) would,
 // so this package's own validation — not an HTTP adapter — is what
 // detects a duplicated or malformed parameter. That's a hand-rolled
-// strings.Split/strings.Cut/url.QueryUnescape loop, not the shared
-// jose.ParseCompact-style parsing every other fuzz target in this repo
-// goes through, and doesn't match any Parse/Decode/Unmarshal naming
-// convention — found only by grepping for strings.Split calls directly.
-// Only checks for panics/hangs.
+// strings.Cut/url.QueryUnescape loop (decodeFormParameters), not the
+// shared jose.ParseCompact-style parsing every other fuzz target in
+// this repo goes through. Besides panics and hangs, it checks the
+// loop's count: a body within the size limit is taken whole, one
+// parameter for each non-empty pair, when it has at most
+// server.MaxFormParameters of them, and refused for their number only
+// when it has more. The seeds stay within the size limit, so each
+// reaches the loop. They are small too: a mutant of a 1 MiB seed that
+// reaches new coverage is about 1 MiB as well, and minimizing it a
+// byte at a time would take most of a run, so the 1 MiB shapes are
+// left to TestFormRequestFromHTTPBoundsParameterCount and
+// TestFormRequestFromHTTPAllocationIsBounded.
 func FuzzFormRequestFromHTTP(f *testing.F) {
 	f.Add([]byte(`grant_type=authorization_code&code=fuzz-code&redirect_uri=https%3A%2F%2Fclient.example%2Fcb`))
 	f.Add([]byte(`client_id=a&client_id=b`))
@@ -34,7 +42,10 @@ func FuzzFormRequestFromHTTP(f *testing.F) {
 	f.Add([]byte(`=&=&=`))
 	f.Add([]byte(``))
 	f.Add([]byte(`&&&`))
-	f.Add([]byte(strings.Repeat("a=1&", 300000)))
+	f.Add([]byte(strings.Repeat("a=1&", server.MaxFormParameters)))
+	f.Add([]byte("&" + strings.Repeat("a=1&&", server.MaxFormParameters+1)))
+	f.Add([]byte(strings.Repeat("a&", 1<<11))) // 2,048 one-byte parameters, past the bound
+	f.Add([]byte(strings.Repeat("&", 1<<12)))  // separators only
 
 	f.Fuzz(func(t *testing.T, body []byte) {
 		req, err := http.NewRequest(http.MethodPost, "https://as.example/token", bytes.NewReader(body))
@@ -42,8 +53,31 @@ func FuzzFormRequestFromHTTP(f *testing.F) {
 			t.Fatalf("http.NewRequest: %v", err)
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		_, _ = server.FormRequestFromHTTP(req)
+		form, err := server.FormRequestFromHTTP(req)
+		if len(body) > 1<<20 {
+			return // refused for its size before anything is counted
+		}
+		pairs := nonEmptyPairs(body)
+		var serr *server.Error
+		if err == nil && (len(form.Parameters) != pairs || pairs > server.MaxFormParameters) {
+			t.Fatalf("took %d parameters from %d non-empty pairs, want each of at most %d", len(form.Parameters), pairs, server.MaxFormParameters)
+		}
+		if errors.As(err, &serr) && serr.PublicDescription() == "the request body has too many parameters" && pairs <= server.MaxFormParameters {
+			t.Fatalf("refused %d non-empty pairs as too many, at most %d", pairs, server.MaxFormParameters)
+		}
 	})
+}
+
+// nonEmptyPairs counts body's non-empty "&"-separated pairs: the
+// positions where a run of anything but "&" begins.
+func nonEmptyPairs(body []byte) int {
+	n := 0
+	for i, c := range body {
+		if c != '&' && (i == 0 || body[i-1] == '&') {
+			n++
+		}
+	}
+	return n
 }
 
 // FuzzFormRequestFromHTTPQueryUnescape narrows FuzzFormRequestFromHTTP

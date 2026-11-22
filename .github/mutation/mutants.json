@@ -96,6 +96,78 @@
     "why": "JSON nested one level below maxJSONDepth is accepted"
   },
   {
+    "id": "fed-registration-config-copied",
+    "file": "federation/automatic_registration.go",
+    "old": "cfg = cfg.clone()",
+    "new": "_ = cfg",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestNewAutomaticClientRepositoryCopiesItsConfig$",
+    "why": "NewAutomaticClientRepository keeps its own copy of the config's slices, so editing the caller's afterwards changes no registration"
+  },
+  {
+    "id": "fed-resolver-config-copied",
+    "file": "federation/resolver.go",
+    "old": "cfg = cfg.clone()",
+    "new": "_ = cfg",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestNewResolverCopiesTrustAnchorJWKS|TestNewResolverCopiesTrustAnchorEntityIDs)$",
+    "why": "NewResolver keeps its own copy of the Trust Anchors, so editing the caller's afterwards changes neither which it accepts nor their keys"
+  },
+  {
+    "id": "fed-resolver-trust-anchor-jwks-copied",
+    "file": "federation/resolver.go",
+    "old": "c.TrustAnchors[i].JWKS = slices.Clone(c.TrustAnchors[i].JWKS)",
+    "new": "c.TrustAnchors[i].JWKS = c.TrustAnchors[i].JWKS",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestNewResolverCopiesTrustAnchorJWKS$",
+    "why": "NewResolver's copy of the Trust Anchors includes their JWKS bytes"
+  },
+  {
+    "id": "fed-resolved-trust-anchor-jwks-copied",
+    "file": "federation/resolver.go",
+    "old": "JWKS: slices.Clone(anchor.JWKS),",
+    "new": "JWKS: anchor.JWKS,",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestResolveReturnsACopyOfTrustAnchorJWKS$",
+    "why": "the JWKS Resolve returns for a configured Trust Anchor is a copy, not the Resolver's own keys"
+  },
+  {
+    "id": "fed-self-issuer-config-copied",
+    "file": "federation/self_issue.go",
+    "old": "cfg, deps = cfg.clone(), deps.clone()",
+    "new": "_, _ = cfg, deps",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestNewSelfIssuerCopiesItsConfig$",
+    "why": "NewSelfIssuer keeps its own copy of the authority_hints, trust_mark_issuers and jwks it publishes"
+  },
+  {
+    "id": "fed-self-issuer-trust-mark-issuer-lists-copied",
+    "file": "federation/self_issue.go",
+    "old": "c.TrustMarkIssuers[trustMarkType] = slices.Clone(issuers)",
+    "new": "c.TrustMarkIssuers[trustMarkType] = issuers",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestNewSelfIssuerCopiesItsConfig|TestConstructorConfigClonesCopyEverySlice)$",
+    "why": "NewSelfIssuer's copy of trust_mark_issuers includes each list in it"
+  },
+  {
     "id": "rar-unregistered-granted-type",
     "file": "extension/rar.go",
     "old": "def, ok := r.byType[typ]\n\t\tif !ok {\n\t\t\treturn nil, fmt.Errorf(\"%w: %q\", ErrRARUnregisteredType, typ)",

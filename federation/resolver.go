@@ -117,8 +117,8 @@ func (r *Resolver) maxTrustMarkStatusAge() time.Duration {
 }
 
 // Config is this Resolver's immutable configuration. It is copied by
-// NewResolver; mutating a Config after passing it to NewResolver has no
-// effect.
+// NewResolver, each Trust Anchor's JWKS included; mutating a Config
+// after passing it to NewResolver has no effect.
 type Config struct {
 	// TrustAnchors is every Trust Anchor Resolve is willing to root a
 	// Trust Chain at. Required — at least one.
@@ -171,7 +171,16 @@ type Resolver struct {
 }
 
 // NewResolver validates cfg and deps and returns a Resolver.
+//
+// NewResolver copies cfg.TrustAnchors before validating them, each
+// anchor's JWKS bytes included, and the Resolver keeps only that copy:
+// changing the caller's anchors or their JWKS afterwards changes neither
+// which Trust Anchors it accepts nor the keys it checks them against.
+// Nor does changing ResolvedEntity.JWKS, a copy of its own, when the
+// entity resolved is a configured Trust Anchor.
 func NewResolver(cfg Config, deps Dependencies) (*Resolver, error) {
+	// Copied before anything reads it, so what's validated is what's kept.
+	cfg = cfg.clone()
 	if len(cfg.TrustAnchors) == 0 {
 		return nil, fmt.Errorf("federation: config: at least one trust anchor is required")
 	}
@@ -207,6 +216,16 @@ func NewResolver(cfg Config, deps Dependencies) (*Resolver, error) {
 		return nil, fmt.Errorf("federation: dependencies: clock is required")
 	}
 	return &Resolver{cfg: cfg, deps: deps, trustAnchorsByID: byID}, nil
+}
+
+// clone returns c with a copy of TrustAnchors, and of each anchor's
+// JWKS, nil staying nil.
+func (c Config) clone() Config {
+	c.TrustAnchors = slices.Clone(c.TrustAnchors)
+	for i := range c.TrustAnchors {
+		c.TrustAnchors[i].JWKS = slices.Clone(c.TrustAnchors[i].JWKS)
+	}
+	return c
 }
 
 // ResolvedEntity is a successfully resolved Trust Chain and its
@@ -689,7 +708,8 @@ func (r *Resolver) resolveSelfAsTrustAnchor(subjectID string, leafStmt intfed.St
 	return ResolvedEntity{
 		EntityID: subjectID, TrustAnchor: subjectID, Chain: []string{subjectID},
 		Metadata: leafClaims.Metadata, ExpiresAt: leafClaims.ExpiresAt,
-		JWKS: anchor.JWKS, TrustMarks: leafClaims.TrustMarks, TrustMarkOwners: leafClaims.TrustMarkOwners,
+		// A copy: the configured keys are this Resolver's own.
+		JWKS: slices.Clone(anchor.JWKS), TrustMarks: leafClaims.TrustMarks, TrustMarkOwners: leafClaims.TrustMarkOwners,
 		TrustMarkIssuers:      leafClaims.TrustMarkIssuers,
 		Tokens:                []string{leafToken},
 		configurationMetadata: leafClaims.Metadata,

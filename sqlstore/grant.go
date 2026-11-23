@@ -144,7 +144,7 @@ func (s *GrantStore) RecordIssuedAccessToken(ctx context.Context, codeHash [32]b
 
 // RecordIssuedRefreshToken implements storage.GrantStore, keeping the
 // code's row at least until the refresh token expires.
-func (s *GrantStore) RecordIssuedRefreshToken(ctx context.Context, codeHash [32]byte, refreshTokenHash [32]byte, expiresAt time.Time) error {
+func (s *GrantStore) RecordIssuedRefreshToken(ctx context.Context, codeHash, refreshTokenHash [32]byte, expiresAt time.Time) error {
 	return s.recordIssued(ctx, "refresh_token", "issued_refresh_token_hash = ?", codeHash, nanos(expiresAt), refreshTokenHash[:])
 }
 

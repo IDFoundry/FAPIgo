@@ -46,7 +46,10 @@ type VerifyRequest struct {
 	// with more than one is malformed (RFC 9110 §5.3: the field isn't a
 	// list): VerifyRequestFromHTTP marks it so for Verify to refuse, and
 	// an adapter filling this field itself refuses it first, rather than
-	// passing one of them on. A proxy in front might act on another.
+	// passing one of them on. A proxy in front might act on another. It
+	// is the raw access token: a VerifyRequest prints and logs it as its
+	// scheme and [REDACTED], but encoding/json doesn't, so never log the
+	// field.
 	Authorization string
 
 	// DPoPProofs is every "DPoP" header value the request carried, in
@@ -55,7 +58,8 @@ type VerifyRequest struct {
 	// values down to the first instead of letting Verify reject the
 	// request as RFC 9449 §4.3 requires. Empty means no DPoP header was
 	// present at all. Only relevant when Authorization uses the "DPoP"
-	// scheme.
+	// scheme. A VerifyRequest prints and logs each as [REDACTED]; never
+	// log the field.
 	DPoPProofs []string
 
 	// PeerCertificate is the TLS client certificate presented on the

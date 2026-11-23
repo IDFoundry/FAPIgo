@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.80.0](https://github.com/IDFoundry/FAPIgo/compare/v0.79.0...v0.80.0) (2026-11-23)
+
+
+### Features
+
+* **storage:** let a server look up a pushed request without writing ([e99c855](https://github.com/IDFoundry/FAPIgo/commit/e99c8557e85eef553aa3548621cb16280aa729d1))
+
+
+### Bug Fixes
+
+* **client:** copy Config's slices in New ([5548ed2](https://github.com/IDFoundry/FAPIgo/commit/5548ed2a1acd34df03b98c729f038a9ec6baf668))
+* **client:** derive the authorization state from the session handle ([bd9ab1f](https://github.com/IDFoundry/FAPIgo/commit/bd9ab1f8aaa2bd1eff5534d83d8f12466d5da7c3))
+* **client:** refuse the authorization code flow on a client without it ([5109554](https://github.com/IDFoundry/FAPIgo/commit/5109554362d453fff33ed38174bdd1c441705a1d))
+* **client:** try at most eight of the issuer's keys for a JWS ([d18de3d](https://github.com/IDFoundry/FAPIgo/commit/d18de3d989b00a0cc8cce0c5d927e898ee4dfb48))
+* **extension:** issue the granted RAR object an exact match narrows to ([90415d0](https://github.com/IDFoundry/FAPIgo/commit/90415d0fcec76f6d88921021c882f1dca38f48c1))
+* **federation:** copy the config slices each constructor keeps ([e1ca547](https://github.com/IDFoundry/FAPIgo/commit/e1ca5473fb8bef4cba04e20244ba4e92e544654b))
+* **server:** audit a revoking authorization code reuse as its own event ([4ff21d7](https://github.com/IDFoundry/FAPIgo/commit/4ff21d78c8a328fa3d9f1154f4a90b84b793d4a3))
+* **server:** copy every Config slice in New ([2c39b69](https://github.com/IDFoundry/FAPIgo/commit/2c39b699bed96eb43b4456c419da030c69caaafd))
+* **server:** don't leave a revoked grant's refresh token to its record ([0213825](https://github.com/IDFoundry/FAPIgo/commit/021382572199efdfc3838d28cd1637f20604bc54))
+* **server:** end revoked grants' refresh tokens the registry still holds ([2977432](https://github.com/IDFoundry/FAPIgo/commit/29774327fe64be4feb2d5e2b78b26fe757d4cfa3))
+* **server:** key authorization codes by PKCE challenge, redirect URI and DPoP key ([afb8f2c](https://github.com/IDFoundry/FAPIgo/commit/afb8f2c10109b315478891ceeeb4af46486e417d))
+* **server:** look up a request_uri before claiming an interaction slot ([1003f02](https://github.com/IDFoundry/FAPIgo/commit/1003f02ab2c72f472bf417c47cd0f6652abd3b9c))
+* **server:** record CIBA decisions before waiting on ping notifications ([193cea4](https://github.com/IDFoundry/FAPIgo/commit/193cea42e42ea9024f30409b923f169746a85e7e))
+
 ## [0.79.0](https://github.com/IDFoundry/FAPIgo/compare/v0.78.0...v0.79.0) (2026-11-22)
 
 

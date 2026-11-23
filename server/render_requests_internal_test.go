@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/internal/rendertest"
 )
 
@@ -262,12 +263,12 @@ func TestRequestsQuoteWhatTheClientChose(t *testing.T) {
 }
 
 func TestCompletionRequestsPrintNoHandle(t *testing.T) {
-	complete := CompleteAuthorizationRequest{Handle: InteractionHandle{value: fapi.NewSecret(renderInteractionHandle)}, Result: Deny("the user declined")}
+	complete := CompleteAuthorizationRequest{Handle: InteractionHandle{value: redact.MakeHandle(renderInteractionHandle)}, Result: Deny("the user declined")}
 	rendertest.Check(t, complete, []string{renderInteractionHandle})
 	if got := fmt.Sprintf("%+v", complete); !strings.HasPrefix(got, "{Handle:[REDACTED] Result:") || complete.String() != fmt.Sprint(complete) {
 		t.Errorf("%%+v = %s", got)
 	}
-	ciba := CompleteBackchannelAuthenticationRequest{Handle: BackchannelAuthenticationHandle{value: fapi.NewSecret(renderCIBAHandle)}, Result: Deny("the user declined")}
+	ciba := CompleteBackchannelAuthenticationRequest{Handle: BackchannelAuthenticationHandle{value: redact.MakeHandle(renderCIBAHandle)}, Result: Deny("the user declined")}
 	rendertest.Check(t, ciba, []string{renderCIBAHandle})
 	if got := fmt.Sprintf("%#v", ciba); !strings.HasPrefix(got, `server.CompleteBackchannelAuthenticationRequest{Handle:"[REDACTED]"`) || ciba.String() != fmt.Sprint(ciba) {
 		t.Errorf("%%#v = %s", got)

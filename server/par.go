@@ -17,6 +17,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/internal/pkce"
+	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/internal/requestobject"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -329,7 +330,7 @@ func (s *Server) pushedResult(ctx context.Context, clientID fapi.ClientID, reque
 
 	s.audit(ctx, AuditEventPushAuthorizationRequest, clientID, AuditOutcomeSuccess, "")
 	return PushAuthorizationResult{
-		RequestURI:    RequestURI{value: fapi.NewSecret(requestURI)},
+		RequestURI:    RequestURI{value: redact.MakeHandle(requestURI)},
 		ExpiresIn:     s.cfg.Limits.PushedRequestLifetime,
 		NextDPoPNonce: nextNonce,
 	}, nil

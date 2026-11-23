@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/redact"
 )
 
 // FuzzParseHandles checks ParseInteractionHandle and
@@ -65,7 +66,7 @@ func checkHandleDigests(t *testing.T, a, b, clientID string) {
 		if interactionHandleKey(a) == interactionHandleKey(b) {
 			t.Fatalf("interaction handles %q and %q share a store key", a, b)
 		}
-		if backchannelHandleHash(BackchannelAuthenticationHandle{fapi.NewSecret(a)}) == backchannelHandleHash(BackchannelAuthenticationHandle{fapi.NewSecret(b)}) {
+		if backchannelHandleHash(BackchannelAuthenticationHandle{redact.MakeHandle(a)}) == backchannelHandleHash(BackchannelAuthenticationHandle{redact.MakeHandle(b)}) {
 			t.Fatalf("backchannel handles %q and %q share a store key", a, b)
 		}
 	}

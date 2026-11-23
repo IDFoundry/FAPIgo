@@ -1,11 +1,11 @@
 package fapi
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
-	"unique"
 )
 
 // ErrSecretSerialization is returned by Secret.MarshalText, so a Secret
@@ -25,34 +25,28 @@ const redactedSecret = "[REDACTED]"
 // get the raw value back out, so a caller has to opt in explicitly at
 // the point it's actually needed (building a header, an HTTP body).
 //
-// The value never sits in a string field: a Secret holds the canonical
-// handle unique.Make returns for it. Where fmt calls no method of a
-// value — %p, %w on a value that isn't an error, or a Secret (or a
-// struct holding one) in an unexported field, which is also how
-// log/slog's text handler prints a struct — it prints only that
-// handle's address, never the value. Two Secrets holding the same value
-// share one handle, so ==, map keys and reflect.DeepEqual compare
-// Secrets by value, and equal Secrets print the same address. A
-// security decision that compares a secret compares its revealed value
-// in constant time instead.
+// The value never sits in a string field: a Secret holds a pointer to
+// it. Where fmt calls no method of a value — %p, %w on a value that
+// isn't an error, or a Secret (or a struct holding one) in an
+// unexported field, which is also how log/slog's text handler prints a
+// struct — it prints only that pointer's address, never the value.
 //
-// The handles are shared process-wide, and NewSecret of a value some
-// live Secret already holds takes a fraction of the time a new value
-// does, so whoever can both choose a value NewSecret wraps and time it
-// can learn whether the process holds that value. Wrap only values too
-// long and random to guess, as this module's codes, tokens and handles
-// are, never a short or predictable one, such as a one-time code, that
-// someone could also submit.
+// A Secret isn't comparable: ==, a map key, a switch on one or a
+// comparable type argument doesn't compile, nor does == on a struct
+// holding one, because comparing the pointers would silently stop
+// matching equal values. Compare with Equal, which takes constant time,
+// and test for the zero Secret with IsZero. Comparing Secrets through an
+// interface (any(a) == any(b), a map[any] or sync.Map key) compiles and
+// panics. reflect.DeepEqual compares Secrets by value, and go-cmp uses
+// Equal.
 //
 // json.Marshal, xml.Marshal and gob fail on a Secret and on a struct
-// holding one in an exported field (MarshalText). A reflecting tool
-// that copies a struct's private fields, or go-cmp's AllowUnexported,
-// can't rebuild the handle; compare Secrets with == or
-// cmpopts.EquateComparable instead. A method Secret gains later that a
-// generic encoder calls, such as AppendText, must fail as MarshalText
-// does.
+// holding one in an exported field (MarshalText). A method Secret gains
+// later that a generic encoder calls, such as AppendText, must fail as
+// MarshalText does.
 type Secret struct {
-	h unique.Handle[string]
+	_ [0]func() // not comparable: compare with Equal
+	v *string   // nil for the zero Secret, which NewSecret("") returns
 }
 
 // NewSecret wraps value as a Secret. NewSecret("") is the zero Secret.
@@ -60,16 +54,27 @@ func NewSecret(value string) Secret {
 	if value == "" {
 		return Secret{}
 	}
-	return Secret{h: unique.Make(value)}
+	return Secret{v: &value}
 }
 
 // Reveal returns the wrapped value: "" for the zero Secret.
 func (s Secret) Reveal() string {
-	if s.h == (unique.Handle[string]{}) {
-		// The zero handle points nowhere: Value would dereference nil.
+	if s.v == nil {
 		return ""
 	}
-	return s.h.Value()
+	return *s.v
+}
+
+// IsZero reports whether s is the zero Secret, which NewSecret("")
+// returns too.
+func (s Secret) IsZero() bool {
+	return s.v == nil
+}
+
+// Equal reports whether s and t wrap the same value, in time that
+// depends only on the values' lengths. Two zero Secrets are equal.
+func (s Secret) Equal(t Secret) bool {
+	return subtle.ConstantTimeCompare([]byte(s.Reveal()), []byte(t.Reveal())) == 1
 }
 
 // String returns a fixed redacted placeholder, never the wrapped value.

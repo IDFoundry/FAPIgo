@@ -19,6 +19,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/internal/rendertest"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
@@ -33,7 +34,8 @@ import (
 //
 // TestRedactionGuardRenderings fills each string a guarded type holds,
 // exported or not, with a sentinel of its own (a fapi.Secret with
-// NewSecret of one, a fapi.URL with one as its code, a json.RawMessage
+// NewSecret of one, the internal holder of a handle's value with
+// redact.MakeHandle of one, a fapi.URL with one as its code, a json.RawMessage
 // with one quoted): in the fields of this module's structs, down to
 // maxFillDepth levels, where a field, a pointer, a slice's first element
 // and a string-keyed map's one entry each count as one. It leaves an
@@ -49,8 +51,8 @@ import (
 // and gob). The record must match testdata/redaction.golden, which go
 // test -run TestRedactionGuard -update rewrites: a field or type that
 // starts printing shows up in review as a change to it. A value held in
-// a fapi.Secret must print in no class at all, except a handle's or a
-// request_uri's wire value through its String.
+// a fapi.Secret or a handle's holder must print in no class at all,
+// except a handle's or a request_uri's wire value through its String.
 
 var updateGolden = flag.Bool("update", false, "rewrite testdata/redaction.golden from the renderings")
 
@@ -306,6 +308,27 @@ func typeSpecs(file *ast.File) []*ast.TypeSpec {
 // prints by design: the handles, and a request_uri.
 var handleTypes = []string{"client.SessionHandle", "server.InteractionHandle", "server.BackchannelAuthenticationHandle", "server.AuthReqID", "server.RequestURI"}
 
+// TestHandlesStayComparable pins that the types holding their value in
+// the internal holder, rather than a fapi.Secret, stay comparable by
+// value: the handles, whose Parse(h.String()) == h is their round trip,
+// and a ping, whose callers may compare one.
+func TestHandlesStayComparable(t *testing.T) {
+	for _, name := range append(slices.Clone(handleTypes), "client.BackchannelNotification") {
+		if !guardedTypes[name].Comparable() {
+			t.Errorf("%s isn't comparable", name)
+		}
+	}
+	a, err := server.ParseInteractionHandle("handle-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := server.ParseInteractionHandle(strings.Clone("handle-1"))
+	c, _ := server.ParseInteractionHandle("handle-2")
+	if a != b || a == c {
+		t.Error("InteractionHandles don't compare by value")
+	}
+}
+
 // TestRedactionGuardRenderings renders every guarded type, filled with
 // sentinels, and checks what prints against testdata/redaction.golden.
 func TestRedactionGuardRenderings(t *testing.T) {
@@ -341,8 +364,8 @@ func sortedNames(m map[string]reflect.Type) []string {
 
 // guardType fills a value of t with sentinels, renders it, and returns
 // a golden line for each field path that printed, with the classes that
-// printed it; it fails for a value held in a fapi.Secret that printed
-// other than through a handle's String.
+// printed it; it fails for a value held in a fapi.Secret or a handle's
+// holder that printed other than through a handle's String.
 func guardType(t *testing.T, name string, typ reflect.Type) (lines []string) {
 	t.Helper()
 	defer func() {
@@ -360,7 +383,7 @@ func guardType(t *testing.T, name string, typ reflect.Type) (lines []string) {
 	for _, l := range rendertest.LeaksOf(v, f.sentinels) {
 		path := f.paths[l.Secret]
 		if f.secret[l.Secret] && (l.Class != rendertest.Logging || !isHandleValue(path)) {
-			t.Errorf("%s: %s, held in a fapi.Secret, printed: %v", name, path, l)
+			t.Errorf("%s: %s, held in a fapi.Secret or a handle's holder, printed: %v", name, path, l)
 		}
 		if !slices.Contains(classes[path], string(l.Class)) {
 			classes[path] = append(classes[path], string(l.Class))
@@ -445,6 +468,7 @@ func (f *filler) next(path string) string {
 
 var (
 	secretType     = reflect.TypeFor[fapi.Secret]()
+	handleType     = reflect.TypeFor[redact.Handle]()
 	urlType        = reflect.TypeFor[fapi.URL]()
 	rawMessageType = reflect.TypeFor[json.RawMessage]()
 )
@@ -485,6 +509,10 @@ func (f *filler) fillSpecial(v reflect.Value, path string) bool {
 		s := f.next(path)
 		f.secret[s] = true
 		v.Set(reflect.ValueOf(fapi.NewSecret(s)))
+	case handleType:
+		s := f.next(path)
+		f.secret[s] = true
+		v.Set(reflect.ValueOf(redact.MakeHandle(s)))
 	case urlType:
 		u, err := fapi.ParseEndpointURL("https://guard.example/p?code=" + f.next(path))
 		if err != nil {

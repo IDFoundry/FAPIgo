@@ -5,7 +5,7 @@
 // any token, code or credential value — fmt under every verb, log/slog,
 // String, GoString and MarshalText all redact, and the value sits in no
 // string field fmt's reflection could print; Reveal is the only way
-// out) and URL (constructed only via
+// out, and Equal, not ==, compares two) and URL (constructed only via
 // ParseIssuerURL/ParseEndpointURL, never a bare string, enforcing HTTPS,
 // no fragment, no embedded credentials and a normalized host).
 //

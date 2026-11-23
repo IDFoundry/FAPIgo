@@ -10,6 +10,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -56,7 +57,7 @@ const interactionHandleSize = 32
 // handle in an unexported field, or under a verb other than v, s, q, x
 // and X) prints an address.
 type InteractionHandle struct {
-	value fapi.Secret
+	value redact.Handle
 }
 
 // String returns the handle's opaque wire value.
@@ -78,7 +79,7 @@ func ParseInteractionHandle(value string) (InteractionHandle, error) {
 	if value == "" {
 		return InteractionHandle{}, fmt.Errorf("server: interaction handle is empty")
 	}
-	return InteractionHandle{value: fapi.NewSecret(value)}, nil
+	return InteractionHandle{value: redact.MakeHandle(value)}, nil
 }
 
 func generateInteractionHandle(random io.Reader) (string, error) {

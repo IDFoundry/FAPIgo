@@ -10,6 +10,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/httperror"
 	"github.com/idfoundry/fapigo/internal/par"
+	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -197,7 +198,7 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	}
 
 	action := InteractionRequired{
-		Handle:      InteractionHandle{value: fapi.NewSecret(handle)},
+		Handle:      InteractionHandle{value: redact.MakeHandle(handle)},
 		Interaction: interaction,
 		ExpiresAt:   handleExpiresAt,
 	}

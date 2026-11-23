@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/redact"
 )
 
 // pingRequest builds a ping callback the way server.NewBackchannelNotificationRequest
@@ -123,7 +124,7 @@ func TestParseBackchannelNotificationBodyReadError(t *testing.T) {
 // constant time.
 func TestAuthenticatesNeedsATokenOnBothSides(t *testing.T) {
 	poll := BackchannelAuthenticationSession{authReqID: fapi.NewSecret("req-1")}
-	if (BackchannelNotification{authReqID: fapi.NewSecret("req-1")}).Authenticates(poll) {
+	if (BackchannelNotification{authReqID: redact.MakeHandle("req-1")}).Authenticates(poll) {
 		t.Error("a notification without a token authenticates for a session without one")
 	}
 }

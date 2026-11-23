@@ -13,6 +13,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/internal/rendertest"
 )
 
@@ -62,19 +63,19 @@ func renderBackchannelInteraction(t *testing.T) BackchannelInteractionRequest {
 // X, Sprint and the templates print it; log/slog logs it as
 // [REDACTED], and fmt's reflection fallback prints an address.
 func TestHandlesKeepTheirWireValue(t *testing.T) {
-	checkHandle(t, InteractionHandle{value: fapi.NewSecret(renderInteractionHandle)}, renderInteractionHandle)
-	checkHandle(t, BackchannelAuthenticationHandle{value: fapi.NewSecret(renderCIBAHandle)}, renderCIBAHandle)
-	checkHandle(t, AuthReqID{value: fapi.NewSecret(renderAuthReqID)}, renderAuthReqID)
+	checkHandle(t, InteractionHandle{value: redact.MakeHandle(renderInteractionHandle)}, renderInteractionHandle)
+	checkHandle(t, BackchannelAuthenticationHandle{value: redact.MakeHandle(renderCIBAHandle)}, renderCIBAHandle)
+	checkHandle(t, AuthReqID{value: redact.MakeHandle(renderAuthReqID)}, renderAuthReqID)
 	// A request_uri is a bearer value until its interaction completes,
 	// and its String its wire value, as a handle's is.
-	checkHandle(t, RequestURI{value: fapi.NewSecret(renderPushedRequestURI)}, renderPushedRequestURI)
-	if h, err := ParseInteractionHandle(renderInteractionHandle); err != nil || h.String() != renderInteractionHandle || h != (InteractionHandle{value: fapi.NewSecret(renderInteractionHandle)}) {
+	checkHandle(t, RequestURI{value: redact.MakeHandle(renderPushedRequestURI)}, renderPushedRequestURI)
+	if h, err := ParseInteractionHandle(renderInteractionHandle); err != nil || h.String() != renderInteractionHandle || h != (InteractionHandle{value: redact.MakeHandle(renderInteractionHandle)}) {
 		t.Errorf("ParseInteractionHandle(String()) = %v, %v; want the handle back", h, err)
 	}
 }
 
 func TestPushAuthorizationResultPrintsNoRequestURI(t *testing.T) {
-	r := PushAuthorizationResult{RequestURI: RequestURI{value: fapi.NewSecret(renderPushedRequestURI)}, ExpiresIn: time.Minute, NextDPoPNonce: "dpop-nonce-1"}
+	r := PushAuthorizationResult{RequestURI: RequestURI{value: redact.MakeHandle(renderPushedRequestURI)}, ExpiresIn: time.Minute, NextDPoPNonce: "dpop-nonce-1"}
 	rendertest.Check(t, r, []string{renderPushedRequestURI})
 	if got := fmt.Sprintf("%+v", r); got != "{RequestURI:[REDACTED] ExpiresIn:1m0s NextDPoPNonce:dpop-nonce-1}" || r.String() != fmt.Sprint(r) {
 		t.Errorf("%%+v = %s, String() = %s", got, r.String())
@@ -117,7 +118,7 @@ func checkHandle[T interface {
 }
 
 func TestInteractionRequiredPrintsNoHandleOrValue(t *testing.T) {
-	a := InteractionRequired{Handle: InteractionHandle{value: fapi.NewSecret(renderInteractionHandle)}, Interaction: renderInteraction(t), ExpiresAt: time.Unix(1_900_000_000, 0).UTC()}
+	a := InteractionRequired{Handle: InteractionHandle{value: redact.MakeHandle(renderInteractionHandle)}, Interaction: renderInteraction(t), ExpiresAt: time.Unix(1_900_000_000, 0).UTC()}
 	rendertest.Check(t, a, []string{renderInteractionHandle})
 	// An application keeps an interaction in its session as JSON, through
 	// MarshalText, its storage encoding, which carries every value.
@@ -155,7 +156,7 @@ func TestInteractionRequestLogsNoValue(t *testing.T) {
 
 func TestBackchannelInteractionRequiredPrintsNoSecret(t *testing.T) {
 	a := BackchannelInteractionRequired{
-		Handle: BackchannelAuthenticationHandle{value: fapi.NewSecret(renderCIBAHandle)}, AuthReqID: AuthReqID{value: fapi.NewSecret(renderAuthReqID)},
+		Handle: BackchannelAuthenticationHandle{value: redact.MakeHandle(renderCIBAHandle)}, AuthReqID: AuthReqID{value: redact.MakeHandle(renderAuthReqID)},
 		ExpiresIn: time.Minute, Interval: 5 * time.Second, Interaction: renderBackchannelInteraction(t),
 	}
 	rendertest.Check(t, a, []string{renderCIBAHandle, renderAuthReqID})
@@ -178,7 +179,7 @@ func TestBackchannelInteractionRequiredPrintsNoSecret(t *testing.T) {
 }
 
 func TestPendingBackchannelInteractionPrintsItsIDNotItsHandle(t *testing.T) {
-	p := PendingBackchannelInteraction{ID: "pending-id-1", Handle: BackchannelAuthenticationHandle{value: fapi.NewSecret(renderCIBAHandle)}, Interaction: renderBackchannelInteraction(t), ExpiresAt: time.Unix(1_900_000_000, 0).UTC()}
+	p := PendingBackchannelInteraction{ID: "pending-id-1", Handle: BackchannelAuthenticationHandle{value: redact.MakeHandle(renderCIBAHandle)}, Interaction: renderBackchannelInteraction(t), ExpiresAt: time.Unix(1_900_000_000, 0).UTC()}
 	rendertest.Check(t, p, []string{renderCIBAHandle})
 	rendertest.Check(t, p, []string{renderOTP}, rendertest.Allow(rendertest.Encoding))
 	if got := fmt.Sprintf("%+v", p); !strings.HasPrefix(got, "{ID:pending-id-1 Handle:[REDACTED] Interaction:") {
@@ -307,10 +308,10 @@ func TestShadowsKeepTheirTypesFields(t *testing.T) {
 // formatting it.
 func TestStringIsTheVRendering(t *testing.T) {
 	for _, v := range []fmt.Stringer{
-		InteractionRequired{Handle: InteractionHandle{value: fapi.NewSecret(renderInteractionHandle)}},
-		BackchannelInteractionRequired{AuthReqID: AuthReqID{value: fapi.NewSecret(renderAuthReqID)}},
-		PendingBackchannelInteraction{ID: "id", Handle: BackchannelAuthenticationHandle{value: fapi.NewSecret(renderCIBAHandle)}},
-		PushAuthorizationResult{RequestURI: RequestURI{value: fapi.NewSecret(renderPushedRequestURI)}},
+		InteractionRequired{Handle: InteractionHandle{value: redact.MakeHandle(renderInteractionHandle)}},
+		BackchannelInteractionRequired{AuthReqID: AuthReqID{value: redact.MakeHandle(renderAuthReqID)}},
+		PendingBackchannelInteraction{ID: "id", Handle: BackchannelAuthenticationHandle{value: redact.MakeHandle(renderCIBAHandle)}},
+		PushAuthorizationResult{RequestURI: RequestURI{value: redact.MakeHandle(renderPushedRequestURI)}},
 		AuthorizationRedirect{destination: fapi.NewSecret("https://rp.example/cb?code=" + renderCode)},
 		RedirectResponse{}, BackchannelAuthenticationHints{LoginHintToken: renderHintToken},
 	} {

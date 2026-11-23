@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/redact"
 )
 
 // maxBackchannelNotificationBytes bounds a ping callback's body, which
@@ -23,8 +23,8 @@ const maxBackchannelNotificationBytes = 4096
 // prints and logs without its auth_req_id and bearer token, which show
 // as [REDACTED] under every fmt verb and in log/slog.
 type BackchannelNotification struct {
-	authReqID fapi.Secret
-	token     fapi.Secret
+	authReqID redact.Handle
+	token     redact.Handle
 }
 
 // AuthReqID is the auth_req_id the notification is about: the key for
@@ -85,7 +85,7 @@ func ParseBackchannelNotification(r *http.Request) (BackchannelNotification, err
 	if raw, ok := members["auth_req_id"]; !ok || json.Unmarshal(raw, &authReqID) != nil || authReqID == "" {
 		return BackchannelNotification{}, newError(ErrorInvalidRequest, "the backchannel notification has no auth_req_id", errors.New("auth_req_id missing, empty or not a string"))
 	}
-	return BackchannelNotification{authReqID: fapi.NewSecret(authReqID), token: fapi.NewSecret(bearerToken(r.Header))}, nil
+	return BackchannelNotification{authReqID: redact.MakeHandle(authReqID), token: redact.MakeHandle(bearerToken(r.Header))}, nil
 }
 
 // bearerToken returns the request's bearer token, or "" (which never

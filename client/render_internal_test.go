@@ -13,6 +13,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/internal/rendertest"
 )
 
@@ -101,7 +102,7 @@ func TestBackchannelAuthenticationSessionPrintsNoSecret(t *testing.T) {
 }
 
 func TestBackchannelNotificationPrintsNoSecret(t *testing.T) {
-	n := BackchannelNotification{authReqID: fapi.NewSecret(renderAuthReqID), token: fapi.NewSecret(renderNotify)}
+	n := BackchannelNotification{authReqID: redact.MakeHandle(renderAuthReqID), token: redact.MakeHandle(renderNotify)}
 	rendertest.Check(t, n, []string{renderAuthReqID, renderNotify})
 	if got := fmt.Sprintf("%+v", n); got != "{authReqID:[REDACTED] token:[REDACTED]}" {
 		t.Errorf("%%+v = %s", got)
@@ -119,7 +120,7 @@ func TestBackchannelNotificationPrintsNoSecret(t *testing.T) {
 // v, s, q, x and X, Sprint and the templates print it; log/slog logs it
 // as [REDACTED], and fmt's reflection fallback prints an address.
 func TestSessionHandleKeepsItsWireValue(t *testing.T) {
-	h := SessionHandle{value: fapi.NewSecret(renderHandle)}
+	h := SessionHandle{value: redact.MakeHandle(renderHandle)}
 	checkHandleRenderings(t, h, renderHandle)
 	var page bytes.Buffer
 	if err := htmltemplate.Must(htmltemplate.New("p").Parse(`<input value="{{.}}">`)).Execute(&page, h); err != nil || page.String() != `<input value="`+renderHandle+`">` {
@@ -155,7 +156,7 @@ func TestAuthorizationSessionPrintsNoHandle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := AuthorizationSession{url: fapi.NewSecret(u.String()), handle: SessionHandle{value: fapi.NewSecret(renderHandle)}, expiresAt: time.Unix(1_900_000_000, 0).UTC()}
+	s := AuthorizationSession{url: fapi.NewSecret(u.String()), handle: SessionHandle{value: redact.MakeHandle(renderHandle)}, expiresAt: time.Unix(1_900_000_000, 0).UTC()}
 	rendertest.Check(t, s, []string{renderHandle, renderRequestURI})
 	if s.URL() != u || (AuthorizationSession{}).URL() != (fapi.URL{}) {
 		t.Errorf("URL() = %v, want %v back, and the zero URL for the zero session", s.URL(), u)
@@ -189,7 +190,7 @@ func TestAuthorizationSessionURLParsesBack(t *testing.T) {
 func TestAuthorizationCallbackPrintsNoValue(t *testing.T) {
 	cb := AuthorizationCallback{
 		RawQuery: "code=" + renderCode + "&state=" + renderState + "&iss=https%3A%2F%2Fas.example",
-		Session:  SessionHandle{value: fapi.NewSecret(renderHandle)},
+		Session:  SessionHandle{value: redact.MakeHandle(renderHandle)},
 	}
 	rendertest.Check(t, cb, []string{renderHandle})
 	// RawQuery is an exported string: fmt's reflection fallback and the
@@ -268,8 +269,8 @@ func TestShadowsKeepTheirTypesFields(t *testing.T) {
 func TestStringIsTheVRendering(t *testing.T) {
 	for _, v := range []fmt.Stringer{
 		renderResponse(), ResourceClient{token: fapi.NewSecret(renderToken)}, renderBackchannelSession(),
-		BackchannelNotification{authReqID: fapi.NewSecret(renderAuthReqID), token: fapi.NewSecret(renderNotify)},
-		AuthorizationSession{handle: SessionHandle{value: fapi.NewSecret(renderHandle)}},
+		BackchannelNotification{authReqID: redact.MakeHandle(renderAuthReqID), token: redact.MakeHandle(renderNotify)},
+		AuthorizationSession{handle: SessionHandle{value: redact.MakeHandle(renderHandle)}},
 		AuthorizationCallback{RawQuery: "code=" + renderCode},
 		BeginBackchannelAuthenticationRequest{LoginHintToken: renderHintToken},
 	} {

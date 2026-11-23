@@ -278,7 +278,7 @@ func (c *Client) checkCallbackBinding(cb AuthorizationCallback, state string) *E
 	if state == "" {
 		return newError(ErrorInvalidRequest, "callback is missing state", nil)
 	}
-	if cb.Session.value == (fapi.Secret{}) {
+	if cb.Session.value.IsZero() {
 		if c.cfg.CallbackBinding == CallbackBindingDeviceLocalStore {
 			return nil
 		}

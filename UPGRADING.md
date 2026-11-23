@@ -40,6 +40,50 @@ value out.
 **What to change:** drop `ReturnInTokenClaims`, or declare the
 parameter `extension.NotSensitive` if tokens may carry it.
 
+### `fapi.Secret` can't be compared with `==` (root, client, server, storage)
+
+**Affects:** code that compares two `fapi.Secret` values with `==` or
+`!=`, compares one with `fapi.Secret{}`, uses one as a map key or in a
+`switch`, or passes one as a `comparable` type argument (to
+`slices.Contains`, say); and code that compares, or
+keys a map by, a struct holding one: `client.ResourceClient`,
+`client.AuthorizationSession`, `server.AuthorizationRedirect`,
+`server.BackchannelNotification`, `storage.DecidedBackchannelAuthentication`,
+or a type of your own. The handle types (`client.SessionHandle`,
+`server.InteractionHandle`, `server.BackchannelAuthenticationHandle`,
+`server.AuthReqID`), `server.RequestURI` and
+`client.BackchannelNotification` stay comparable, so
+`Parse(h.String()) == h` still holds.
+
+**Why:** a `Secret` kept its value in a plain string field, which fmt
+prints through reflection under most verbs, and under every verb when
+the `Secret` sits in an unexported field, as log/slog's text handler
+prints a struct. The value now sits behind a pointer, which fmt never
+follows below the top level. Comparing those pointers would silently
+stop matching equal values, so a `Secret` isn't comparable at all.
+Interning each value, so that `==` could still compare values, cost a
+relying party holding 100,000 token sets about half as much memory
+again and several times the garbage collector's marking work, and
+added to the token endpoint's tail latency.
+
+**What fails:** compilation, at each such use, with
+`invalid operation: a == b (struct containing [0]func() cannot be
+compared)`, `invalid map key type fapi.Secret`, `cannot switch on s
+(variable of struct type fapi.Secret) (fapi.Secret is not
+comparable)` or `fapi.Secret does not satisfy comparable`; for a struct
+holding one, `invalid operation: a == b (struct containing fapi.Secret
+cannot be compared)` or, as a map key, `invalid map key type
+client.AuthorizationSession`. A comparison through an interface
+(`any(a) == any(b)`, a `map[any]` or `sync.Map` key) compiles and
+panics at run time instead. No comparison changes its result silently.
+
+**What to change:** `a.Equal(b)`, which takes constant time, for
+`a == b`; `s.IsZero()` for `s == fapi.Secret{}`; key a map by
+`s.Reveal()` (or by a hash of it, if the map can end up in a log); and
+compare a struct of your own that holds one field by field, with
+`Equal` for the `Secret`. `reflect.DeepEqual` and
+testify keep comparing `Secret`s by value, and go-cmp uses `Equal`.
+
 ## v0.81.0
 
 ### Automatic registration: an omitted `grant_types` means the authorization code flow alone, and CIBA needs a delivery mode (federation, server)

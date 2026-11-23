@@ -19,6 +19,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/internal/pkce"
+	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/internal/requestobject"
 	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/keys"
@@ -351,7 +352,7 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		"request_uri": {result.RequestURI},
 	})
 
-	return AuthorizationSession{url: fapi.NewSecret(browserURL.String()), handle: SessionHandle{value: fapi.NewSecret(handle)}, expiresAt: now.Add(c.cfg.Limits.SessionLifetime)}, nil
+	return AuthorizationSession{url: fapi.NewSecret(browserURL.String()), handle: SessionHandle{value: redact.MakeHandle(handle)}, expiresAt: now.Add(c.cfg.Limits.SessionLifetime)}, nil
 }
 
 // checkAuthorizationCodeFlow is BeginAuthorization's and

@@ -16,8 +16,6 @@ import (
 	"io"
 	"net/url"
 	"strings"
-
-	fapi "github.com/idfoundry/fapigo"
 )
 
 // Redacted is what a hidden value prints as.
@@ -28,9 +26,10 @@ const Redacted = "[REDACTED]"
 // fallback, or a verb it rejects, prints only the placeholder.
 type Hidden string
 
-// Mask is s's placeholder: Redacted, or "" for the zero Secret.
-func Mask(s fapi.Secret) Hidden {
-	if s == (fapi.Secret{}) {
+// Mask is v's placeholder, for a fapi.Secret or a Handle: Redacted, or
+// "" for the zero value.
+func Mask[T interface{ IsZero() bool }](v T) Hidden {
+	if v.IsZero() {
 		return ""
 	}
 	return Redacted

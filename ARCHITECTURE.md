@@ -139,12 +139,17 @@ identically:
   verb and flag (`Format`), log/slog logs it (`LogValue`), and
   `String()`, `GoString()` and `MarshalText()` all redact; `Reveal()` is
   the only way to get the raw value out. The value sits in no string
-  field: a `Secret` holds the canonical `unique.Handle` of its value, so
-  where fmt calls no method — `%p`, `%w` on a non-error, a `Secret` in
-  an unexported field at any depth, which is also how slog's text
-  handler prints a struct — it prints only an address, while `==` and
-  map keys still compare `Secret`s by value. `client.TokenSet` and
-  `server.TokenResult` use it for every token they carry;
+  field: a `Secret` holds a pointer to it, so where fmt calls no method
+  — `%p`, `%w` on a non-error, a `Secret` in an unexported field at any
+  depth, which is also how slog's text handler prints a struct — it
+  prints only an address. A `Secret` isn't comparable (`==` on
+  pointers would silently stop matching equal values): `Equal` compares
+  two in constant time, and `IsZero` tests for none. `client.TokenSet`
+  and `server.TokenResult` use a `Secret` for every token they carry.
+  The handle types, `server.RequestURI` and
+  `client.BackchannelNotification` keep their values out of string
+  fields too, but in an internal holder that stays comparable by value,
+  so `Parse(h.String()) == h` holds.
   `resource.AuthorizationContext` carries no raw token value at all.
 - **`URL`** (constructed via `ParseIssuerURL` / `ParseEndpointURL` /
   `ParseRedirectURL`, not a bare `string`) — enforces absolute, HTTPS

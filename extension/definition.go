@@ -3,6 +3,7 @@ package extension
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -35,7 +36,9 @@ type Definition[T any] struct {
 	// error message: Sensitive, for one a caller reading it back via Get
 	// must treat as it would a fapi.Secret, or NotSensitive. Required —
 	// NewRegistry refuses the zero value, so a secret parameter can't be
-	// logged because its Definition forgot to say so.
+	// logged because its Definition forgot to say so. An error refusing
+	// a Sensitive value names the parameter and T, and never quotes the
+	// value (see Sensitive); Values prints no value of any sensitivity.
 	Sensitivity Sensitivity
 
 	// ReturnInTokenClaims, if true, means a validated value should be
@@ -64,7 +67,10 @@ type Definition[T any] struct {
 	// Validate, if non-nil, applies extra semantic checks beyond T's JSON
 	// shape (e.g. a string pattern, a numeric range, a business rule). A
 	// Definition with no Validate accepts any value that unmarshals into
-	// T without unknown fields.
+	// T without unknown fields. Keep the value out of the error it
+	// returns: a NotSensitive Definition's refusal carries that error's
+	// text into server.Error's, which is meant for logs. A Sensitive
+	// one's withholds it, and errors.Is still matches a sentinel it wraps.
 	Validate func(T) error
 }
 
@@ -116,28 +122,122 @@ func (d Definition[T]) validate(raw json.RawMessage, source Source, out *Values)
 	// case-sensitive reader of the token 1000000. Refuse both shapes, as
 	// RARDefinition does.
 	if err := checkDuplicateMembers(raw); err != nil {
-		return fmt.Errorf("extension: %q: malformed value: %w", d.Name, err)
+		return d.refuse(valueMalformed, malformedStage, err)
 	}
 	var v T
 	if err := strictjson.CheckTaggedFieldCase(raw, &v); err != nil {
-		return fmt.Errorf("extension: %q: malformed value: %w", d.Name, err)
+		return d.refuse(valueMalformed, malformedStage, err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&v); err != nil {
-		return fmt.Errorf("extension: %q: malformed value: %w", d.Name, err)
+		return d.refuse(valueMalformed, malformedStage, err)
 	}
 	if d.Validate != nil {
 		if err := d.Validate(v); err != nil {
-			return fmt.Errorf("extension: %q: %w", d.Name, err)
+			return d.refuse(valueRejected, "", err)
 		}
 	}
 
-	if out.raw == nil {
-		out.raw = make(map[string]json.RawMessage)
-	}
-	out.raw[d.Name] = raw
+	out.put(d.Name, raw)
 	return nil
+}
+
+// refuse is the error validate and Set return when d refuses a value:
+// kind is how, and stage the text a NotSensitive refusal carries before
+// its cause, as it always has.
+func (d Definition[T]) refuse(kind valueErrorKind, stage string, cause error) error {
+	if d.Sensitivity == Sensitive {
+		held := cause
+		cause = &withheldCause{&held}
+	}
+	return &valueError{
+		name: d.Name, kind: kind, stage: stage, typeName: reflect.TypeFor[T]().String(),
+		cause: cause, sensitive: d.Sensitivity == Sensitive,
+	}
+}
+
+// withheldCause holds a Sensitive Definition's refusal cause out of
+// reach of fmt's reflection fallback (%#v, %w outside Errorf, a verb an
+// error doesn't take), which prints a refusal's fields, and with them a
+// cause held by value, such as netip's parse error, which quotes the
+// value. Behind a pointer to an interface the cause prints as an
+// address: fmt follows only a pointer to a struct, map, slice or array,
+// and that only at the top. errors.Is still reaches the cause, through
+// Unwrap.
+type withheldCause struct{ err *error }
+
+// Error withholds the cause's text, as the refusal's own does.
+func (*withheldCause) Error() string { return withheldDetail }
+
+// Unwrap returns the cause, for errors.Is through valueError.Is.
+func (c *withheldCause) Unwrap() error { return *c.err }
+
+// malformedStage is the text a NotSensitive refusal of a malformed value
+// carries before its cause.
+const malformedStage = "malformed value: "
+
+// valueErrorKind is how a Definition refused a value.
+type valueErrorKind uint8
+
+const (
+	// valueMalformed: the value isn't a valid T (its JSON, a member
+	// repeated in it, or, at Set, T's own encoding).
+	valueMalformed valueErrorKind = iota + 1
+
+	// valueRejected: the Definition's Validate refused it.
+	valueRejected
+)
+
+// valueError is a Definition's refusal of a value, from Registry.Parse
+// or Set. Its text names the parameter. For a NotSensitive Definition it
+// then carries its cause's text, and Unwrap the cause, exactly as
+// before; for a Sensitive one it gives only how the value failed and
+// T's name, and Unwrap returns nil, since the cause can quote the value:
+// encoding/json's does for a number out of range or with a fraction, and
+// time.Time, netip.Addr and big.Int quote what they couldn't parse, as
+// the duplicate-member check names a map-typed value's members. errors.Is
+// still finds a sentinel the cause wraps, through Is, without handing the
+// cause out.
+type valueError struct {
+	name      string
+	kind      valueErrorKind
+	stage     string
+	typeName  string
+	cause     error
+	sensitive bool
+}
+
+// withheldDetail ends a Sensitive Definition's refusal, in place of its
+// cause.
+const withheldDetail = "detail withheld: the definition is Sensitive"
+
+func (e *valueError) Error() string {
+	switch {
+	case !e.sensitive:
+		return fmt.Sprintf("extension: %q: %s%v", e.name, e.stage, e.cause)
+	case e.kind == valueRejected:
+		return fmt.Sprintf("extension: %q: value rejected by its Validate (%s)", e.name, withheldDetail)
+	default:
+		return fmt.Sprintf("extension: %q: malformed value: not a valid %s (%s)", e.name, e.typeName, withheldDetail)
+	}
+}
+
+// Unwrap returns a NotSensitive Definition's cause, and nil for a
+// Sensitive one's, so neither a printer that walks the chain nor
+// errors.As can reach text quoting the value.
+func (e *valueError) Unwrap() error {
+	if e.sensitive {
+		return nil
+	}
+	return e.cause
+}
+
+// Is reports whether a Sensitive Definition's cause matches target, so
+// errors.Is finds ErrDuplicateMember, or a sentinel of Validate's own,
+// as it does through a NotSensitive one's Unwrap.
+func (e *valueError) Is(target error) bool {
+	return e.sensitive && errors.Is(e.cause, target)
 }
 
 // Values holds validated extension values, keyed internally by wire
@@ -146,8 +246,52 @@ func (d Definition[T]) validate(raw json.RawMessage, source Source, out *Values)
 // the same Definition a value was validated against, so a caller can
 // never mismatch a stored value's type against its wire name the way a
 // map[string]any would allow.
+//
+// Values prints its parameter names and no value, whatever each one's
+// Sensitivity (Format, String, GoString, LogValue): a Values restored by
+// UnmarshalJSON knows no Definitions, so naming its parameters is all it
+// can print without risking a Sensitive value. Log a NotSensitive value
+// by reading it with Get. MarshalJSON, Snapshot and AsParameters carry
+// every value, Sensitive ones included: they are for storing and issuing
+// values, never for a log.
 type Values struct {
+	// The zero-size array of funcs keeps Values non-comparable, as the
+	// map it holds made it.
+	_ [0]func()
+
+	// p points at a pointer to the values, so that fmt's reflection
+	// fallback (a Values in an unexported field, or under %p, %w or a
+	// verb fmt rejects) prints an address, never a value. One pointer
+	// isn't enough: under a verb fmt rejects for a pointer it reaches by
+	// reflection (s, q, f, t and most others), it prints that pointer
+	// again as if it were the operand itself, showing what a pointer to
+	// a struct or a map points to, but not what a pointer to a pointer
+	// does.
+	p **valuesData
+}
+
+// valuesData is what a non-zero Values holds. Copies of a Values share
+// it, as they shared the map it holds.
+type valuesData struct {
 	raw map[string]json.RawMessage
+}
+
+// rawValues is values' map, nil for the zero Values.
+func (values Values) rawValues() map[string]json.RawMessage {
+	if values.p == nil {
+		return nil
+	}
+	return (*values.p).raw
+}
+
+// put stores raw under name, giving a zero values storage of its own
+// first.
+func (values *Values) put(name string, raw json.RawMessage) {
+	if values.p == nil {
+		data := &valuesData{raw: make(map[string]json.RawMessage)}
+		values.p = &data
+	}
+	(*values.p).raw[name] = raw
 }
 
 // Set encodes v under def's wire name into values. It fails if v does
@@ -156,24 +300,21 @@ type Values struct {
 func Set[T any](values *Values, def Definition[T], v T) error {
 	if def.Validate != nil {
 		if err := def.Validate(v); err != nil {
-			return fmt.Errorf("extension: %q: %w", def.Name, err)
+			return def.refuse(valueRejected, "", err)
 		}
 	}
 	encoded, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("extension: %q: marshal: %w", def.Name, err)
+		return def.refuse(valueMalformed, "marshal: ", err)
 	}
 	if def.MaxBytes <= 0 || len(encoded) > def.MaxBytes {
 		return fmt.Errorf("%w: %q", ErrValueTooLarge, def.Name)
 	}
 	// A T with its own MarshalJSON could still emit a repeated member.
 	if err := checkDuplicateMembers(encoded); err != nil {
-		return fmt.Errorf("extension: %q: %w", def.Name, err)
+		return def.refuse(valueMalformed, "", err)
 	}
-	if values.raw == nil {
-		values.raw = make(map[string]json.RawMessage)
-	}
-	values.raw[def.Name] = encoded
+	values.put(def.Name, encoded)
 	return nil
 }
 
@@ -185,7 +326,7 @@ func Set[T any](values *Values, def Definition[T], v T) error {
 // rather than panicking on an externally-assembled Values.
 func Get[T any](values Values, def Definition[T]) (T, bool) {
 	var zero T
-	raw, ok := values.raw[def.Name]
+	raw, ok := values.rawValues()[def.Name]
 	if !ok {
 		return zero, false
 	}
@@ -202,10 +343,12 @@ func Get[T any](values Values, def Definition[T]) (T, bool) {
 // Values without knowing each entry's Definition ahead of time. It is
 // the one place this package hands back an untyped map, and only ever
 // raw JSON bytes Set has already validated — never a live reference to
-// Values' internal storage.
+// Values' internal storage. It carries every value, Sensitive ones
+// included: never log it.
 func Snapshot(values Values) map[string]json.RawMessage {
-	out := make(map[string]json.RawMessage, len(values.raw))
-	for k, v := range values.raw {
+	raw := values.rawValues()
+	out := make(map[string]json.RawMessage, len(raw))
+	for k, v := range raw {
 		out[k] = v
 	}
 	return out
@@ -223,7 +366,7 @@ func AsParameters(values Values, defs ...Registered) map[string]json.RawMessage 
 		if !d.returnInTokenClaims() {
 			continue
 		}
-		if raw, ok := values.raw[d.name()]; ok {
+		if raw, ok := values.rawValues()[d.name()]; ok {
 			out[d.name()] = raw
 		}
 	}
@@ -232,12 +375,14 @@ func AsParameters(values Values, defs ...Registered) map[string]json.RawMessage 
 
 // MarshalJSON encodes values as a JSON object of their wire names — for
 // storing, with the rest of an interaction, until the end user decides
-// (see server.InteractionRequest.MarshalText).
+// (see server.InteractionRequest.MarshalText). The encoding carries
+// every value, Sensitive ones included: store it as you would a
+// credential, and never log it.
 func (values Values) MarshalJSON() ([]byte, error) {
-	if values.raw == nil {
+	if values.p == nil {
 		return []byte("{}"), nil
 	}
-	return json.Marshal(values.raw)
+	return json.Marshal((*values.p).raw)
 }
 
 // UnmarshalJSON restores values MarshalJSON encoded. It doesn't validate
@@ -249,9 +394,11 @@ func (values *Values) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("extension: values: %w", err)
 	}
 	if len(raw) == 0 {
-		raw = nil // the zero value, as Values{} encodes
+		*values = Values{} // the zero value, as Values{} encodes
+		return nil
 	}
-	values.raw = raw
+	restored := &valuesData{raw: raw}
+	values.p = &restored
 	return nil
 }
 

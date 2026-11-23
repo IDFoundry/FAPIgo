@@ -28,7 +28,12 @@ const (
 
 	// Sensitive means the value must never be copied into a log line or
 	// error message: a caller reading it back via Get applies the same
-	// care it would to a fapi.Secret.
+	// care it would to a fapi.Secret. This package keeps to it: an error
+	// refusing the value, from Registry.Parse or Set (and so the cause of
+	// the server's refusal of the request carrying it), names the
+	// parameter and its Go type, and never quotes the value, or the text
+	// of a decoder, of Validate or of the duplicate-member check, which
+	// can. Values prints no value of any sensitivity.
 	Sensitive
 )
 

@@ -104,6 +104,20 @@ func (r *Registry) Parse(params map[string]json.RawMessage, core map[string]stru
 	return values, nil
 }
 
+// Sensitive reports whether the Definition r holds for name is
+// Sensitive, and whether r holds one for name at all: for code that
+// logs extension values it read back with Get, which must leave a
+// Sensitive one out. A name r holds no Definition for is reported as
+// neither; Parse drops such a parameter, so no Values it returns holds
+// one.
+func (r *Registry) Sensitive(name string) (sensitive, registered bool) {
+	d, ok := r.byName[name]
+	if !ok {
+		return false, false
+	}
+	return d.sensitive(), true
+}
+
 // TokenClaimNames returns the wire names of every Definition registered
 // with ReturnInTokenClaims — the names under which a validated value
 // is copied into issued tokens, for a token issuer to check against the

@@ -314,3 +314,55 @@ func TestAsParametersLeavesOutSensitiveValues(t *testing.T) {
 		t.Errorf("AsParameters()[x_purpose] = %s, want %s", got["x_purpose"], want)
 	}
 }
+
+func TestRegistrySensitive(t *testing.T) {
+	reg, err := extension.NewRegistry(otpDef, purposeDef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name                  string
+		sensitive, registered bool
+	}{
+		{"x_otp", true, true},
+		{"x_purpose", false, true},
+		{"x_unknown", false, false},
+	} {
+		if sensitive, registered := reg.Sensitive(tc.name); sensitive != tc.sensitive || registered != tc.registered {
+			t.Errorf("Sensitive(%q) = %t, %t; want %t, %t", tc.name, sensitive, registered, tc.sensitive, tc.registered)
+		}
+	}
+}
+
+// TestValueRefusalsMatchTheirSentinels checks errors.Is tells a
+// malformed value from one Validate rejected, for a Sensitive and a
+// NotSensitive Definition alike, and matches neither for a refusal of
+// another kind.
+func TestValueRefusalsMatchTheirSentinels(t *testing.T) {
+	for _, s := range []extension.Sensitivity{extension.Sensitive, extension.NotSensitive} {
+		malformed := parseRefusal(t, refusals[0], s)
+		def := extension.Definition[string]{
+			Sensitivity: s, Name: "x_pin", Cardinality: extension.Single,
+			AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
+			Validate: func(string) error { return errPINTooShort },
+		}
+		var values extension.Values
+		rejected := extension.Set(&values, def, testOTP)
+		if !errors.Is(malformed, extension.ErrMalformedValue) || errors.Is(malformed, extension.ErrValueRejected) {
+			t.Errorf("%v malformed value: errors.Is matches the wrong sentinel: %v", s, malformed)
+		}
+		if !errors.Is(rejected, extension.ErrValueRejected) || errors.Is(rejected, extension.ErrMalformedValue) {
+			t.Errorf("%v rejected value: errors.Is matches the wrong sentinel: %v", s, rejected)
+		}
+	}
+	def := otpDef
+	def.AllowedSources = extension.SourceRequestObject
+	reg, err := extension.NewRegistry(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = reg.Parse(map[string]json.RawMessage{"x_otp": json.RawMessage(`"` + testOTP + `"`)}, nil, extension.SourcePlainParameter)
+	if !errors.Is(err, extension.ErrSourceNotAllowed) || errors.Is(err, extension.ErrMalformedValue) || errors.Is(err, extension.ErrValueRejected) {
+		t.Errorf("a refusal by source matches a value sentinel: %v", err)
+	}
+}

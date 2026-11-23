@@ -52,7 +52,7 @@ func sensitiveRegistry(t *testing.T) *extension.Registry {
 // parameter's value as it refused any invalid extension value, with
 // code and status unchanged, and that its text, meant for logs, names
 // the parameter but quotes nothing of the value, nor does any other
-// rendering of it.
+// rendering of it, while errors.Is still finds ErrMalformedValue.
 func checkSensitiveRefusal(t *testing.T, err error, code server.ErrorCode, param, literal string) {
 	t.Helper()
 	var serr *server.Error
@@ -67,6 +67,9 @@ func checkSensitiveRefusal(t *testing.T, err error, code server.ErrorCode, param
 	}
 	if errors.As(err, new(*json.UnmarshalTypeError)) || errors.As(err, new(*time.ParseError)) {
 		t.Error("the refusal hands out the decoder's error, which quotes the value")
+	}
+	if !errors.Is(err, extension.ErrMalformedValue) {
+		t.Error("errors.Is doesn't find ErrMalformedValue in the refusal")
 	}
 	rendertest.Check(t, err, []string{literal})
 }
@@ -145,6 +148,9 @@ func TestSensitiveExtensionReparseQuotesNoValue(t *testing.T) {
 	}
 	if text := local.Error.Error(); local.Error.Code() != server.ErrorServerError || strings.Contains(text, sensitivePINLiteral) || !strings.Contains(text, "x_pin") {
 		t.Errorf("refusal = %s %q: want server_error, naming x_pin and quoting nothing of its value", local.Error.Code(), text)
+	}
+	if !errors.Is(local.Error, extension.ErrMalformedValue) {
+		t.Error("errors.Is doesn't find ErrMalformedValue in the refusal")
 	}
 	rendertest.Check(t, local.Error, []string{sensitivePINLiteral})
 }

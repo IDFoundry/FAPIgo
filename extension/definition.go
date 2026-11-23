@@ -202,15 +202,16 @@ const (
 )
 
 // valueError is a Definition's refusal of a value, from Registry.Parse
-// or Set. Its text names the parameter. For a NotSensitive Definition it
-// then carries its cause's text, and Unwrap the cause, exactly as
-// before; for a Sensitive one it gives only how the value failed and
-// T's name, and Unwrap returns nil, since the cause can quote the value:
-// encoding/json's does for a number out of range or with a fraction, and
-// time.Time, netip.Addr and big.Int quote what they couldn't parse, as
-// the duplicate-member check names a map-typed value's members. errors.Is
-// still finds a sentinel the cause wraps, through Is, without handing the
-// cause out.
+// or Set, which errors.Is matches to ErrMalformedValue or
+// ErrValueRejected by its kind. Its text names the parameter. For a
+// NotSensitive Definition it then carries its cause's text, and Unwrap
+// the cause, exactly as before; for a Sensitive one it gives only how
+// the value failed and T's name, and Unwrap returns nil, since the
+// cause can quote the value: encoding/json's does for a number out of
+// range or with a fraction, and time.Time, netip.Addr and big.Int quote
+// what they couldn't parse, as the duplicate-member check names a
+// map-typed value's members. errors.Is still finds a sentinel the cause
+// wraps, through Is, without handing the cause out.
 type valueError struct {
 	name      string
 	kind      valueErrorKind
@@ -245,10 +246,18 @@ func (e *valueError) Unwrap() error {
 	return e.cause
 }
 
-// Is reports whether a Sensitive Definition's cause matches target, so
-// errors.Is finds ErrDuplicateMember, or a sentinel of Validate's own,
-// as it does through a NotSensitive one's Unwrap.
+// Is reports whether target is ErrMalformedValue or ErrValueRejected
+// and names how e refused its value, or, for a Sensitive Definition,
+// whether its cause matches target, so errors.Is finds
+// ErrDuplicateMember, or a sentinel of Validate's own, as it does
+// through a NotSensitive one's Unwrap.
 func (e *valueError) Is(target error) bool {
+	switch target {
+	case ErrMalformedValue:
+		return e.kind == valueMalformed
+	case ErrValueRejected:
+		return e.kind == valueRejected
+	}
 	return e.sensitive && errors.Is(e.cause, target)
 }
 

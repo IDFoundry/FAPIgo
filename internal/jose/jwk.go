@@ -48,7 +48,8 @@ const (
 )
 
 // NewJWK wraps pub for use with alg (a "use":"sig" JWK). It fails if
-// pub's type or size does not match what alg requires.
+// pub's type or size does not match what alg requires, if pub is empty,
+// or if an ECDSA pub is not a point on its curve.
 func NewJWK(pub crypto.PublicKey, alg fapi.SignatureAlgorithm) (JWK, error) {
 	if err := validateKeyForAlgorithm(pub, alg); err != nil {
 		return JWK{}, err
@@ -375,24 +376,9 @@ type rawJWK struct {
 func validateKeyForAlgorithm(pub crypto.PublicKey, alg fapi.SignatureAlgorithm) error {
 	switch alg {
 	case fapi.ES256:
-		key, ok := pub.(*ecdsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("jose: ES256 requires an ECDSA public key, got %T", pub)
-		}
-		if key.Curve != elliptic.P256() {
-			return fmt.Errorf("jose: ES256 requires curve P-256")
-		}
+		return validateES256Key(pub)
 	case fapi.PS256:
-		key, ok := pub.(*rsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("jose: PS256 requires an RSA public key, got %T", pub)
-		}
-		if key.N.BitLen() < 2048 {
-			return fmt.Errorf("jose: PS256 requires an RSA key of at least 2048 bits, got %d", key.N.BitLen())
-		}
-		if key.N.BitLen() > maxRSAModulusBits {
-			return fmt.Errorf("jose: PS256 requires an RSA key of at most %d bits, got %d", maxRSAModulusBits, key.N.BitLen())
-		}
+		return validateRSAKey(pub, "PS256")
 	case fapi.EdDSA:
 		key, ok := pub.(ed25519.PublicKey)
 		if !ok {
@@ -401,8 +387,48 @@ func validateKeyForAlgorithm(pub crypto.PublicKey, alg fapi.SignatureAlgorithm) 
 		if len(key) != ed25519.PublicKeySize {
 			return fmt.Errorf("jose: EdDSA requires a %d-byte Ed25519 public key, got %d", ed25519.PublicKeySize, len(key))
 		}
+		return nil
 	default:
 		return fmt.Errorf("jose: unsupported algorithm %v", alg)
+	}
+}
+
+// validateES256Key checks that pub is a usable P-256 ECDSA public key:
+// not empty, and a point on the curve. A point off the curve, or a
+// coordinate outside the field, can't be encoded at the curve's size,
+// so Thumbprint and MarshalJSON would panic in FillBytes.
+func validateES256Key(pub crypto.PublicKey) error {
+	key, ok := pub.(*ecdsa.PublicKey)
+	if !ok {
+		return fmt.Errorf("jose: ES256 requires an ECDSA public key, got %T", pub)
+	}
+	if key == nil || key.X == nil || key.Y == nil {
+		return fmt.Errorf("jose: ES256 requires an ECDSA public key, got an empty one")
+	}
+	if key.Curve != elliptic.P256() {
+		return fmt.Errorf("jose: ES256 requires curve P-256")
+	}
+	if _, err := key.ECDH(); err != nil {
+		return fmt.Errorf("jose: ES256 requires a point on curve P-256: %w", err)
+	}
+	return nil
+}
+
+// validateRSAKey checks that pub is an RSA public key with a modulus of
+// 2048 to maxRSAModulusBits bits, for alg (named in its errors).
+func validateRSAKey(pub crypto.PublicKey, alg string) error {
+	key, ok := pub.(*rsa.PublicKey)
+	if !ok {
+		return fmt.Errorf("jose: %s requires an RSA public key, got %T", alg, pub)
+	}
+	if key == nil || key.N == nil {
+		return fmt.Errorf("jose: %s requires an RSA public key, got an empty one", alg)
+	}
+	if key.N.BitLen() < 2048 {
+		return fmt.Errorf("jose: %s requires an RSA key of at least 2048 bits, got %d", alg, key.N.BitLen())
+	}
+	if key.N.BitLen() > maxRSAModulusBits {
+		return fmt.Errorf("jose: %s requires an RSA key of at most %d bits, got %d", alg, maxRSAModulusBits, key.N.BitLen())
 	}
 	return nil
 }
@@ -418,28 +444,22 @@ func validateKeyForAlgorithm(pub crypto.PublicKey, alg fapi.SignatureAlgorithm) 
 func validateKeyForKeyManagementAlgorithm(pub crypto.PublicKey, alg fapi.KeyManagementAlgorithm) error {
 	switch alg {
 	case fapi.RSAOAEP256:
-		key, ok := pub.(*rsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("jose: RSAOAEP256 requires an RSA public key, got %T", pub)
-		}
-		if key.N.BitLen() < 2048 {
-			return fmt.Errorf("jose: RSAOAEP256 requires an RSA key of at least 2048 bits, got %d", key.N.BitLen())
-		}
-		if key.N.BitLen() > maxRSAModulusBits {
-			return fmt.Errorf("jose: RSAOAEP256 requires an RSA key of at most %d bits, got %d", maxRSAModulusBits, key.N.BitLen())
-		}
+		return validateRSAKey(pub, "RSAOAEP256")
 	case fapi.ECDHESA256KW:
 		key, ok := pub.(*ecdh.PublicKey)
 		if !ok {
 			return fmt.Errorf("jose: ECDHESA256KW requires an ECDH public key, got %T", pub)
 		}
+		if key == nil {
+			return fmt.Errorf("jose: ECDHESA256KW requires an ECDH public key, got an empty one")
+		}
 		if key.Curve() != ecdh.P256() {
 			return fmt.Errorf("jose: ECDHESA256KW requires curve P-256")
 		}
+		return nil
 	default:
 		return fmt.Errorf("jose: unsupported key management algorithm %v", alg)
 	}
-	return nil
 }
 
 func coordinateSize(curve elliptic.Curve) int {

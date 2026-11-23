@@ -122,15 +122,16 @@ var errGrantRevokedWhileIssued = errors.New("the grant was revoked while its ref
 // refreshTokenHash was created, that its grant is still in
 // Dependencies.GrantRegistry, when one is set. A revocation that lists
 // the grant once recordGrant has recorded it can revoke the token
-// before the token is created, which the GrantStore needn't remember (a
-// SQL store's DELETE finds nothing to delete): the token would be live,
-// and, once the revocation deletes the entry, unlisted, so unrevocable
-// by RevokeSubjectGrants. Such a revocation revokes the token again
-// after deleting the entry (revokeListed). So either this check comes
-// after the deletion and finds the entry gone, and then it revokes the
-// token itself and fails the issuance, or it finds the entry, and the
-// deletion and the second revocation are still to come: the token
-// exists by then, so that revocation revokes it.
+// before the token is created. storage.GrantStore requires the store to
+// keep that revocation, but this doesn't rely on it: with a store that
+// doesn't (one that only deletes a token, finding nothing to delete),
+// the token would be live, and, once the revocation deletes the entry,
+// unlisted, so unrevocable by RevokeSubjectGrants. Such a revocation
+// revokes the token again after deleting the entry (revokeListed). So
+// either this check comes after the deletion and finds the entry gone,
+// and then it revokes the token itself and fails the issuance, or it
+// finds the entry, and the deletion and the second revocation are still
+// to come: the token exists by then, so that revocation revokes it.
 func (s *Server) confirmGrantRecorded(ctx context.Context, subject string, refreshTokenHash [32]byte) error {
 	if s.deps.GrantRegistry == nil {
 		return nil
@@ -395,7 +396,8 @@ func (s *Server) RevokeListedGrant(ctx context.Context, subject SubjectID, id st
 // The refresh token is revoked again once the entry is deleted: the
 // token's issuance may still be in flight, having recorded the entry
 // this listed, and may store the token after the first revocation,
-// which the GrantStore needn't remember for a token it didn't hold yet.
+// which storage.GrantStore requires the store to keep for a token it
+// didn't hold yet, but which one falling short of that would forget.
 // The issuance confirms the entry is still recorded after storing the
 // token (confirmGrantRecorded): if it does so after the deletion, it
 // withdraws the token itself; if before, the token is stored by the

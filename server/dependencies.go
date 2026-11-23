@@ -57,6 +57,13 @@ type Dependencies struct {
 	// that is also a storage.GrantRefreshTokenRevoker (memstore's is)
 	// lets RevokeGrant, and the reuse of an authorization code, revoke
 	// the grant's refresh tokens in the store as well (see RevokeGrant).
+	// A store of your own must refuse a refresh token stored up to an
+	// hour after its hash was revoked, and accept the revocation of a
+	// hash it holds no token under, as storage.GrantStore's
+	// RevokeRefreshToken requires: RevokeListedGrant and
+	// RevokeSubjectGrants can revoke a refresh token before its issuance
+	// has stored it, and the server revokes tokens already revoked, or
+	// already gone, in the normal course.
 	Grants storage.GrantStore
 
 	// GrantRegistry, if set, records each grant the server issues a
@@ -68,11 +75,12 @@ type Dependencies struct {
 	// issuing a refresh token the registry doesn't list. A
 	// RevokeListedGrant or RevokeSubjectGrants racing the issuance, once
 	// it has listed the grant, either fails the token request or revokes
-	// the refresh token the request was issued, even when Grants keeps no
-	// record of revoking a token before the token was stored: the
-	// issuance confirms the grant is still recorded once it has stored
-	// the token, and the revocation revokes the token again once it has
-	// deleted the grant's entry. Under AssuranceProduction it must declare
+	// the refresh token the request was issued. Grants must keep a
+	// revocation that reaches it before the token does (see Grants), and
+	// the server doesn't rely on that alone: the issuance confirms the
+	// grant is still recorded once it has stored the token, and the
+	// revocation revokes the token again once it has deleted the grant's
+	// entry. Under AssuranceProduction it must declare
 	// storage.StoreAssurance (Durable, and CrossInstanceConsistent with
 	// DeploymentHorizontallyScaled).
 	GrantRegistry storage.GrantRegistry

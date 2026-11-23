@@ -14,10 +14,11 @@ import (
 )
 
 // deletingGrantStore is the harness's GrantStore revoking a refresh
-// token as a SQL store does, by deleting it: revoking one it doesn't
-// hold yet does nothing, so a token stored after its revocation is live.
-// storage.GrantStore asks no more: only a token already created must
-// stop redeeming once revoked.
+// token only by deleting it: revoking one it doesn't hold yet does
+// nothing, so a token stored after its revocation is live. That falls
+// short of storage.GrantStore, which requires such a revocation to be
+// kept; the harness uses it to check that the server doesn't rely on
+// the store for that.
 type deletingGrantStore struct{ *fakeGrantStore }
 
 func (g deletingGrantStore) RevokeRefreshToken(_ context.Context, tokenHash [32]byte) error {

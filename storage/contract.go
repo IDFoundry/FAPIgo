@@ -53,7 +53,10 @@ func runConcurrently(attempts int, fn func() bool) int {
 // refresh tokens kept apart (neither redemption returns the other's
 // record under the same digest), faithful
 // round-tripping of stored fields, and exactly one winner under
-// concurrent redemption of the same code or token. A store that also
+// concurrent redemption of the same code or token. Revoking a refresh
+// token succeeds for a hash no token is stored under, or that was
+// revoked before, and a token revoked before it's stored, or while it's
+// being stored, stays unredeemable. A store that also
 // implements IssuedTokensRecorder or GrantRefreshTokenRevoker is checked
 // against what those promise too. factory must return a fresh, empty
 // GrantStore each call — its subtests share nothing between them.
@@ -80,6 +83,13 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 	t.Run("RedeemUnknownRefreshTokenFails", func(t *testing.T) { testGrantStoreRedeemUnknownRefreshTokenFails(t, factory) })
 	t.Run("ConcurrentRedeemRefreshTokenAllSucceed", func(t *testing.T) { testGrantStoreConcurrentRedeemRefreshTokenAllSucceed(t, factory) })
 	t.Run("RevokeRefreshTokenPreventsRedemption", func(t *testing.T) { testGrantStoreRevokeRefreshTokenPreventsRedemption(t, factory) })
+	t.Run("RevokeRefreshTokenIsIdempotent", func(t *testing.T) { testGrantStoreRevokeRefreshTokenIsIdempotent(t, factory) })
+	t.Run("RevokeRefreshTokenBeforeCreateKeepsItUnredeemable", func(t *testing.T) {
+		testGrantStoreRevokeRefreshTokenBeforeCreateKeepsItUnredeemable(t, factory)
+	})
+	t.Run("ConcurrentRevokeAndCreateRefreshTokenKeepItUnredeemable", func(t *testing.T) {
+		testGrantStoreConcurrentRevokeAndCreateRefreshTokenKeepItUnredeemable(t, factory)
+	})
 	t.Run("RedeemRefreshTokenDoesNotReturnAuthorizationCode", func(t *testing.T) {
 		testGrantStoreRedeemRefreshTokenDoesNotReturnAuthorizationCode(t, factory)
 	})
@@ -516,6 +526,207 @@ func testGrantStoreRevokeRefreshTokenPreventsRedemption(t *testing.T, factory fu
 	}
 	if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err == nil {
 		t.Fatal("RedeemRefreshToken after revocation = nil error, want error")
+	}
+}
+
+// testGrantStoreRevokeRefreshTokenIsIdempotent checks that
+// RevokeRefreshToken returns nil for a hash no token is stored under,
+// and for one revoked before, and that a stored token revoked twice
+// stays unredeemable: the server revokes such hashes in the normal
+// course (see GrantStore.RevokeRefreshToken), and takes an error for a
+// failure to revoke.
+func testGrantStoreRevokeRefreshTokenIsIdempotent(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	unstored := sha256.Sum256([]byte("never-stored-refresh"))
+	stored := contractRefreshToken("revoked-twice-refresh")
+	if err := store.CreateRefreshToken(ctx, stored); err != nil {
+		t.Fatalf("CreateRefreshToken(a token to revoke twice): %v", err)
+	}
+	for _, attempt := range []string{"first", "second"} {
+		if err := store.RevokeRefreshToken(ctx, unstored); err != nil {
+			t.Errorf("%s RevokeRefreshToken of a hash no token was stored under: %v, want nil", attempt, err)
+		}
+		if err := store.RevokeRefreshToken(ctx, stored.TokenHash); err != nil {
+			t.Errorf("%s RevokeRefreshToken of a stored token: %v, want nil", attempt, err)
+		}
+		if refreshTokenRedeems(store, stored.TokenHash) {
+			t.Errorf("RedeemRefreshToken after the %s revocation of a stored token = nil error, want error", attempt)
+		}
+	}
+}
+
+// testGrantStoreRevokeRefreshTokenBeforeCreateKeepsItUnredeemable checks
+// that a refresh token whose hash is revoked before it's stored is never
+// redeemed, as a revocation through the server's grant registry can
+// come before the token's issuance stores it: CreateRefreshToken may
+// fail, or store the token so that RedeemRefreshToken refuses it. It
+// checks a token without grant keys, then one with a grant key: the
+// server's tokens carry grant keys when their grant can be revoked, and
+// a store may write those another way, in a transaction rather than one
+// statement, say. A token with the same keys stored afterwards and
+// never revoked must still redeem, so a store that refuses every token,
+// or every one stored after a revocation, fails.
+func testGrantStoreRevokeRefreshTokenBeforeCreateKeepsItUnredeemable(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	checkRevokedBeforeCreate(t, store, "without grant keys")
+	checkRevokedBeforeCreate(t, store, "with a grant key", contractGrantKey("revoked-before-stored-grant"))
+}
+
+// checkRevokedBeforeCreate revokes the hash of a refresh token with
+// grantKeys, as shape describes them, then stores the token, and checks
+// that the token doesn't redeem, while a control token with the same
+// keys, stored afterwards and never revoked, does.
+func checkRevokedBeforeCreate(t *testing.T, store GrantStore, shape string, grantKeys ...string) {
+	t.Helper()
+	ctx := context.Background()
+	revoked := contractRefreshToken("revoked-before-stored-refresh "+shape, grantKeys...)
+	control := contractRefreshToken("never-revoked-refresh "+shape, grantKeys...)
+	if err := store.RevokeRefreshToken(ctx, revoked.TokenHash); err != nil {
+		t.Fatalf("RevokeRefreshToken of the hash of a token %s, not stored yet: %v, want nil", shape, err)
+	}
+	createErr := store.CreateRefreshToken(ctx, revoked)
+	if err := store.CreateRefreshToken(ctx, control); err != nil {
+		t.Fatalf("CreateRefreshToken(a token %s, never revoked): %v", shape, err)
+	}
+	if refreshTokenRedeems(store, revoked.TokenHash) {
+		t.Errorf("RedeemRefreshToken of a token %s, stored after its hash was revoked = nil error, want error (its CreateRefreshToken returned %v)", shape, createErr)
+	}
+	checkRefreshTokenRedeems(t, store, fmt.Sprintf("a token %s, stored after another's hash was revoked", shape), control.TokenHash)
+}
+
+// contractRevokeCreateRaces is how many refresh tokens
+// testGrantStoreConcurrentRevokeAndCreateRefreshTokenKeepItUnredeemable
+// revokes while they're being stored, one race after another.
+const contractRevokeCreateRaces = 32
+
+// revokeCreateRace is one race of a refresh token's revocation against
+// its creation, with a control token created alongside and never
+// revoked, and what each of the three calls returned.
+type revokeCreateRace struct {
+	raced, control                   NewRefreshToken
+	revokeErr, createErr, controlErr error
+}
+
+// testGrantStoreConcurrentRevokeAndCreateRefreshTokenKeepItUnredeemable
+// checks that a refresh token whose hash is revoked while it's being
+// stored is never redeemed. For each of contractRevokeCreateRaces
+// tokens, it runs RevokeRefreshToken of the token's hash,
+// CreateRefreshToken of the token and CreateRefreshToken of a control
+// token from a common start. Once all three have returned, the token
+// must not redeem if RevokeRefreshToken returned nil, whatever
+// CreateRefreshToken returned, and the control, never revoked, must, so
+// a store that refuses every token fails. Every other race's tokens
+// carry a grant key, as the server's do when their grant can be
+// revoked, so a store that writes those another way races both ways. A
+// race whose RevokeRefreshToken failed checks nothing (an error only
+// says the revocation wasn't recorded), but they mustn't all fail.
+func testGrantStoreConcurrentRevokeAndCreateRefreshTokenKeepItUnredeemable(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	checked := 0
+	for i := range contractRevokeCreateRaces {
+		if checkRevokeCreateRace(t, store, i, raceRevokeAndCreate(store, i)) {
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Errorf("RevokeRefreshToken failed in all %d races with CreateRefreshToken, so none was checked; want nil", contractRevokeCreateRaces)
+	}
+}
+
+// raceRevokeAndCreate runs race i: RevokeRefreshToken of its token's
+// hash, CreateRefreshToken of the token and CreateRefreshToken of its
+// control token, from a common start, and returns once all three have,
+// with what each returned.
+func raceRevokeAndCreate(store GrantStore, i int) revokeCreateRace {
+	ctx := context.Background()
+	race := revokeCreateRace{
+		raced:   contractRefreshToken(fmt.Sprintf("raced-refresh-%d", i), raceGrantKeys(i)...),
+		control: contractRefreshToken(fmt.Sprintf("race-control-refresh-%d", i), raceGrantKeys(i)...),
+	}
+	runFromCommonStart(
+		func() { race.revokeErr = store.RevokeRefreshToken(ctx, race.raced.TokenHash) },
+		func() { race.createErr = store.CreateRefreshToken(ctx, race.raced) },
+		func() { race.controlErr = store.CreateRefreshToken(ctx, race.control) },
+	)
+	return race
+}
+
+// raceGrantKeys is the grant keys of race i's tokens: one for every
+// other race, none for the rest.
+func raceGrantKeys(i int) []string {
+	if i%2 == 0 {
+		return []string{contractGrantKey(fmt.Sprintf("raced-grant-%d", i))}
+	}
+	return nil
+}
+
+// checkRevokeCreateRace checks race i once its three calls have
+// returned: its control token redeems, and, if its RevokeRefreshToken
+// returned nil, its token doesn't. It reports whether
+// RevokeRefreshToken returned nil, and so the token was checked.
+func checkRevokeCreateRace(t *testing.T, store GrantStore, i int, race revokeCreateRace) bool {
+	t.Helper()
+	if race.controlErr != nil {
+		t.Errorf("race %d: CreateRefreshToken of the control token: %v", i, race.controlErr)
+	} else {
+		checkRefreshTokenRedeems(t, store, fmt.Sprintf("race %d's control token", i), race.control.TokenHash)
+	}
+	if race.revokeErr != nil {
+		t.Logf("race %d: RevokeRefreshToken: %v, so its token isn't checked", i, race.revokeErr)
+		return false
+	}
+	if refreshTokenRedeems(store, race.raced.TokenHash) {
+		t.Errorf("race %d: RedeemRefreshToken of a token whose hash was revoked while it was being stored = nil error, want error (its CreateRefreshToken returned %v)", i, race.createErr)
+	}
+	return true
+}
+
+// runFromCommonStart runs each of calls in a goroutine of its own,
+// releasing them together once all are waiting, and returns once all
+// have returned.
+func runFromCommonStart(calls ...func()) {
+	var ready, done sync.WaitGroup
+	start := make(chan struct{})
+	ready.Add(len(calls))
+	done.Add(len(calls))
+	for _, call := range calls {
+		go func() {
+			defer done.Done()
+			ready.Done()
+			<-start
+			call()
+		}()
+	}
+	ready.Wait()
+	close(start)
+	done.Wait()
+}
+
+// contractRefreshToken is the refresh token named name that the
+// revocation subtests store: valid for an hour, with grantKeys.
+func contractRefreshToken(name string, grantKeys ...string) NewRefreshToken {
+	return NewRefreshToken{
+		TokenHash: sha256.Sum256([]byte(name)), ClientID: "revocation-client", Grant: contractPayload,
+		ExpiresAt: time.Now().Add(time.Hour), GrantKeys: grantKeys,
+	}
+}
+
+// refreshTokenRedeems reports whether store redeems the refresh token
+// stored under hash.
+func refreshTokenRedeems(store GrantStore, hash [32]byte) bool {
+	_, err := store.RedeemRefreshToken(context.Background(), RefreshTokenRedemption{TokenHash: hash})
+	return err == nil
+}
+
+// checkRefreshTokenRedeems reports, with t.Errorf, a failure to redeem
+// what, the refresh token stored under hash, which was never revoked: a
+// store refusing every token would pass each check that a revoked one
+// is refused.
+func checkRefreshTokenRedeems(t *testing.T, store GrantStore, what string, hash [32]byte) {
+	t.Helper()
+	if _, err := store.RedeemRefreshToken(context.Background(), RefreshTokenRedemption{TokenHash: hash}); err != nil {
+		t.Errorf("RedeemRefreshToken(%s, never revoked): %v, want it redeemed", what, err)
 	}
 }
 

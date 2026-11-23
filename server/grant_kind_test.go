@@ -42,10 +42,15 @@ type unifiedGrantStore struct {
 	mu                    sync.Mutex
 	rows                  map[[32]byte]*unifiedGrantRow
 	lastCode, lastRefresh *unifiedGrantRow
+
+	// revokedRefresh holds each hash RevokeRefreshToken was given,
+	// whether or not a row was stored under it, so a refresh token
+	// stored under one afterwards is refused too.
+	revokedRefresh map[[32]byte]bool
 }
 
 func newUnifiedGrantStore(crossed bool) *unifiedGrantStore {
-	return &unifiedGrantStore{crossed: crossed, rows: map[[32]byte]*unifiedGrantRow{}}
+	return &unifiedGrantStore{crossed: crossed, rows: map[[32]byte]*unifiedGrantRow{}, revokedRefresh: map[[32]byte]bool{}}
 }
 
 func (s *unifiedGrantStore) lookup(hash [32]byte, fallback *unifiedGrantRow) (*unifiedGrantRow, bool) {
@@ -117,7 +122,7 @@ func (s *unifiedGrantStore) RedeemRefreshToken(_ context.Context, r storage.Refr
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row, ok := s.lookup(r.TokenHash, s.lastCode)
-	if !ok || row.revoked {
+	if !ok || row.revoked || s.revokedRefresh[r.TokenHash] {
 		return storage.RedeemedRefreshToken{}, errors.New("unknown or revoked refresh token")
 	}
 	return storage.RedeemedRefreshToken{ClientID: row.clientID, Grant: append([]byte(nil), row.grant...), ExpiresAt: row.expiresAt}, nil
@@ -126,6 +131,7 @@ func (s *unifiedGrantStore) RedeemRefreshToken(_ context.Context, r storage.Refr
 func (s *unifiedGrantStore) RevokeRefreshToken(_ context.Context, hash [32]byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.revokedRefresh[hash] = true
 	if row, ok := s.rows[hash]; ok {
 		row.revoked = true
 	}

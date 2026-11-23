@@ -127,7 +127,10 @@ func (s *GrantStore) RedeemRefreshToken(_ context.Context, redemption storage.Re
 	}, nil
 }
 
-// RevokeRefreshToken implements storage.GrantStore.
+// RevokeRefreshToken implements storage.GrantStore. It marks tokenHash
+// revoked whether or not a token is stored under it, and keeps the mark
+// for as long as the store lasts, so a token stored under the hash
+// afterwards is refused too, and revoking a hash again succeeds.
 func (s *GrantStore) RevokeRefreshToken(_ context.Context, tokenHash [32]byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

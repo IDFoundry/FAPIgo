@@ -282,7 +282,10 @@ type GrantStore interface {
 
 	// CreateRefreshToken persists token under its TokenHash until at
 	// least its ExpiresAt. An error fails the token request that issued
-	// it.
+	// it. For the first token stored under a hash RevokeRefreshToken
+	// revoked less than an hour before, it must instead either fail or
+	// store the token so that RedeemRefreshToken refuses it: see
+	// RevokeRefreshToken.
 	CreateRefreshToken(ctx context.Context, token NewRefreshToken) error
 
 	// RedeemRefreshToken retrieves the refresh token identified by
@@ -292,23 +295,69 @@ type GrantStore interface {
 	// in extraordinary circumstances", so RefreshAccessToken never
 	// consumes or replaces the presented token — it stays valid for
 	// repeated use until it expires (or is otherwise revoked). It
-	// returns an error only if TokenHash is unknown or has been
-	// revoked (see RevokeRefreshToken — RFC 6749 doesn't need a
-	// distinct error code for "revoked" vs "invalid"); the caller
-	// checks the returned record's own expiry (ExpiresAt) itself, the
-	// same way BeginAuthorization and CompleteAuthorization do for
-	// their own redemptions.
+	// returns an error only if TokenHash is unknown or has been revoked,
+	// after the token was stored or before (RFC 6749 doesn't need a
+	// distinct error code for "revoked" vs "invalid"), though a
+	// revocation made before the token was stored need only hold for
+	// the hour RevokeRefreshToken requires; the caller checks the
+	// returned record's own expiry (ExpiresAt) itself, the same way
+	// BeginAuthorization and CompleteAuthorization do for their own
+	// redemptions.
 	RedeemRefreshToken(ctx context.Context, redemption RefreshTokenRedemption) (RedeemedRefreshToken, error)
 
-	// RevokeRefreshToken marks a previously-created refresh token (by
-	// the same hash CreateRefreshToken stored it under) as no longer
-	// redeemable. The server relies on it when its originating
-	// authorization code is detected being reused (RFC 6749 §4.1.2's
-	// "all tokens") and in Server.RevokeToken (RFC 7009), which reports
-	// the token revoked once this returns nil. A subsequent
-	// RedeemRefreshToken for tokenHash must fail; a no-op
-	// implementation is NOT valid — it would let RevokeToken report a
-	// token revoked that still works. Return an error if the
-	// revocation can't be recorded.
+	// RevokeRefreshToken marks the refresh token under tokenHash (the
+	// hash CreateRefreshToken stores it under) as no longer redeemable: a
+	// subsequent RedeemRefreshToken for tokenHash must fail, for a token
+	// already stored and, as below, for one stored while or after it
+	// runs. The server relies on it when the token's originating
+	// authorization code is detected being reused (RFC 6749 §4.1.2's "all
+	// tokens"), in Server.RevokeToken (RFC 7009), which reports the token
+	// revoked once this returns nil, and when it revokes a grant through
+	// its GrantRegistry. A no-op implementation is NOT valid — it would
+	// let RevokeToken report a token revoked that still works.
+	//
+	// It returns nil for a hash no token is stored under — one not
+	// stored yet, already revoked, or removed once it expired — as for
+	// one revoked before: an error means only that the revocation
+	// couldn't be recorded, which the server reports as a failure to
+	// revoke. The server revokes such hashes in the normal course.
+	// Server.RevokeToken revokes a token's grant first, which, for a
+	// grant with a GrantID and a GrantRefreshTokenRevoker store, has
+	// revoked the token by the time RevokeToken revokes it itself.
+	// Server.RevokeListedGrant and RevokeSubjectGrants revoke a token
+	// again once they have deleted its grant's registry entry, and,
+	// before deleting the entries of grants revoked another way, revoke
+	// those grants' tokens, which may be gone already. A reused code's
+	// token, and one an issuance withdraws, may be revoked already too.
+	// An error for any of these would make the server report a failure
+	// for a token that is revoked: RevokeToken would answer server_error,
+	// and RevokeListedGrant and RevokeSubjectGrants would fail on every
+	// call, keeping the entry.
+	//
+	// A token revoked before it's stored must stay revoked. The server
+	// stores each refresh token under a hash of its own, with one
+	// CreateRefreshToken, but a revocation through the registry reads the
+	// hash from the grant's entry, which the token's issuance records
+	// before storing the token, so its RevokeRefreshToken can come first.
+	// So once RevokeRefreshToken has returned nil, the token under
+	// tokenHash must never be redeemable if its CreateRefreshToken
+	// returns after RevokeRefreshToken was called — running concurrently
+	// or afterwards — and within an hour of that call, by the store's
+	// clock: CreateRefreshToken may fail, as sqlstore's does on the
+	// tombstone its RevokeRefreshToken leaves, or store the token so that
+	// RedeemRefreshToken refuses it, as memstore's does. This covers the
+	// one CreateRefreshToken the server makes for a hash: a store needn't
+	// refuse a token stored again under a hash whose stored token
+	// RevokeRefreshToken found and removed. An hour outlasts any issuance
+	// in flight: the server stores the token straight after recording its
+	// entry. A store that only deleted a stored token would keep nothing
+	// of a revocation that found none, and the token stored afterwards
+	// would be live, and, once the revocation deletes the entry,
+	// unlisted. The server checks again once it has stored the token,
+	// and withdraws it if the grant's entry is gone or the grant is
+	// revoked, but that's a second layer, resting on the GrantRegistry
+	// and the revocation store, not a reason for a store to forget.
+	// TestGrantStoreContract checks both requirements, with revocations
+	// racing creations, but not how long a revocation lasts.
 	RevokeRefreshToken(ctx context.Context, tokenHash [32]byte) error
 }

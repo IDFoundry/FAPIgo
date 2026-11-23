@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // FuzzParseBackchannelNotification checks ParseBackchannelNotification
@@ -87,17 +89,17 @@ func checkAcceptedNotification(t *testing.T, n BackchannelNotification, authoriz
 	scheme, token, _ := strings.Cut(authorization, " ")
 	if twice || !strings.EqualFold(scheme, "Bearer") || token == "" {
 		for _, candidate := range []string{token, authorization} {
-			if candidate != "" && n.Authenticates(BackchannelAuthenticationSession{authReqID: want, notificationToken: candidate}) {
+			if candidate != "" && n.Authenticates(BackchannelAuthenticationSession{authReqID: fapi.NewSecret(want), notificationToken: fapi.NewSecret(candidate)}) {
 				t.Fatalf("Authorization %q (twice: %v) authenticates for token %q", authorization, twice, candidate)
 			}
 		}
 		return
 	}
-	if !n.Authenticates(BackchannelAuthenticationSession{authReqID: want, notificationToken: token}) {
+	if !n.Authenticates(BackchannelAuthenticationSession{authReqID: fapi.NewSecret(want), notificationToken: fapi.NewSecret(token)}) {
 		t.Fatalf("notification doesn't authenticate for its own auth_req_id %q and token %q", want, token)
 	}
-	if n.Authenticates(BackchannelAuthenticationSession{authReqID: want, notificationToken: token + "x"}) ||
-		n.Authenticates(BackchannelAuthenticationSession{authReqID: want}) {
+	if n.Authenticates(BackchannelAuthenticationSession{authReqID: fapi.NewSecret(want), notificationToken: fapi.NewSecret(token + "x")}) ||
+		n.Authenticates(BackchannelAuthenticationSession{authReqID: fapi.NewSecret(want)}) {
 		t.Fatalf("notification authenticates for another token, or for a poll session")
 	}
 }

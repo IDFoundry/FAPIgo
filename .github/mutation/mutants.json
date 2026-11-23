@@ -1716,8 +1716,8 @@
   {
     "id": "client-callback-binding-digest",
     "file": "client/authorization_response.go",
-    "old": "subtle.ConstantTimeCompare([]byte(state), []byte(stateForHandle(cb.Session.value))) != 1",
-    "new": "subtle.ConstantTimeCompare([]byte(state), []byte(cb.Session.value)) != 1",
+    "old": "subtle.ConstantTimeCompare([]byte(state), []byte(stateForHandle(cb.Session.value.Reveal()))) != 1",
+    "new": "subtle.ConstantTimeCompare([]byte(state), []byte(cb.Session.value.Reveal())) != 1",
     "module": "root",
     "packages": [
       "./client"
@@ -1728,7 +1728,7 @@
   {
     "id": "client-callback-binding-compare",
     "file": "client/authorization_response.go",
-    "old": "if subtle.ConstantTimeCompare([]byte(state), []byte(stateForHandle(cb.Session.value))) != 1 {",
+    "old": "if subtle.ConstantTimeCompare([]byte(state), []byte(stateForHandle(cb.Session.value.Reveal()))) != 1 {",
     "new": "if _ = subtle.ConstantTimeCompare; false {",
     "module": "root",
     "packages": [

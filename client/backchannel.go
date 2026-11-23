@@ -111,6 +111,10 @@ type BeginBackchannelAuthenticationRequest struct {
 // callback; the sealing keeps a stored session from being edited, and
 // binds it to the owner it was sealed for.
 //
+// It prints and logs without its auth_req_id and notification token,
+// which show as [REDACTED] under every fmt verb and in log/slog; read
+// them with AuthReqID and NotificationToken.
+//
 // A session is bound to the Client that began it:
 // PollBackchannelAuthentication on a Client for another issuer or
 // client ID, or with the zero value, fails without sending anything, and
@@ -121,10 +125,10 @@ type BackchannelAuthenticationSession struct {
 	// polling it sends, go only to that issuer's token endpoint.
 	issuer            string
 	clientID          string
-	authReqID         string
+	authReqID         fapi.Secret
 	interval          time.Duration
 	expiresAt         time.Time
-	notificationToken string
+	notificationToken fapi.Secret
 	// openID is whether the request's scope included "openid": an
 	// approval must then carry an ID token.
 	openID bool
@@ -140,7 +144,7 @@ type BackchannelAuthenticationSession struct {
 }
 
 // AuthReqID is the auth_req_id the authorization server issued.
-func (s BackchannelAuthenticationSession) AuthReqID() string { return s.authReqID }
+func (s BackchannelAuthenticationSession) AuthReqID() string { return s.authReqID.Reveal() }
 
 // Interval is the minimum time to wait between polls (CIBA §7.3's
 // "interval") — defaultBackchannelAuthenticationPollInterval if the
@@ -159,7 +163,9 @@ func (s BackchannelAuthenticationSession) ExpiresAt() time.Time { return s.expir
 // callback: ParseBackchannelNotification reads it, and
 // BackchannelNotification.Authenticates checks it against this session
 // before the caller calls PollBackchannelAuthentication.
-func (s BackchannelAuthenticationSession) NotificationToken() string { return s.notificationToken }
+func (s BackchannelAuthenticationSession) NotificationToken() string {
+	return s.notificationToken.Reveal()
+}
 
 // BeginBackchannelAuthentication builds and signs a CIBA backchannel
 // authentication request (FAPI-CIBA always requires a signed request —
@@ -179,19 +185,9 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return BackchannelAuthenticationSession{}, err
 	}
 
-	// notificationToken is exposed on the returned session (see
-	// BackchannelAuthenticationSession.NotificationToken's own doc
-	// comment) — generated fresh per call, the same way state/nonce/
-	// SessionHandle values are, never reused across requests.
-	var notificationToken string
-	if c.cfg.BackchannelTokenDeliveryMode == storage.BackchannelTokenDeliveryModePing {
-		var err error
-		notificationToken, err = generateRandomToken(c.deps.Random)
-		if err != nil {
-			return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to generate client notification token", err)
-		}
-		encoded, _ := json.Marshal(notificationToken)
-		objectParams["client_notification_token"] = encoded
+	notificationToken, err := c.addNotificationToken(objectParams)
+	if err != nil {
+		return BackchannelAuthenticationSession{}, err
 	}
 
 	objectSigner, objectKID, err := c.newSigner(ctx, keys.BackchannelAuthenticationRequestSigning, c.cfg.Algorithms.BackchannelAuthenticationRequest)
@@ -256,15 +252,34 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	return BackchannelAuthenticationSession{
 		issuer:            c.cfg.Issuer.String(),
 		clientID:          c.cfg.ClientID.String(),
-		authReqID:         raw.AuthReqID,
+		authReqID:         fapi.NewSecret(raw.AuthReqID),
 		interval:          interval,
 		expiresAt:         c.deps.Clock.Now().Add(expiresIn),
-		notificationToken: notificationToken,
+		notificationToken: fapi.NewSecret(notificationToken),
 		openID:            slices.Contains(req.Scope, "openid"),
 		scope:             slices.Clone(req.Scope),
 		essentialACR:      slices.Clone(req.EssentialACRValues),
 		resource:          slices.Clone(req.Resource),
 	}, nil
+}
+
+// addNotificationToken generates the client_notification_token a request
+// under ping delivery carries, sets it in objectParams and returns it, or
+// returns "" under poll delivery. It is exposed on the returned session
+// (see BackchannelAuthenticationSession.NotificationToken) and generated
+// fresh per call, the same way state, nonce and SessionHandle values are,
+// never reused across requests.
+func (c *Client) addNotificationToken(objectParams map[string]json.RawMessage) (string, error) {
+	if c.cfg.BackchannelTokenDeliveryMode != storage.BackchannelTokenDeliveryModePing {
+		return "", nil
+	}
+	token, err := generateRandomToken(c.deps.Random)
+	if err != nil {
+		return "", newError(ErrorInternal, "failed to generate client notification token", err)
+	}
+	encoded, _ := json.Marshal(token)
+	objectParams["client_notification_token"] = encoded
+	return token, nil
 }
 
 // checkBackchannelAuthenticationRequest refuses a request
@@ -532,7 +547,7 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 	buildPollForm := func() ([]byte, map[string]string, error) {
 		form := map[string]string{
 			"grant_type":  cibaGrantType,
-			"auth_req_id": session.authReqID,
+			"auth_req_id": session.authReqID.Reveal(),
 		}
 		setResources(form, session.resource)
 		headers, err := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)

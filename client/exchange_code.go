@@ -258,9 +258,9 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	// Dependencies.HTTP's own transport presents is the credential.
 	params := map[string]string{
 		"grant_type":    "authorization_code",
-		"code":          resp.code,
+		"code":          resp.code.Reveal(),
 		"redirect_uri":  resp.redirectURI,
-		"code_verifier": resp.pkceVerifier,
+		"code_verifier": resp.pkceVerifier.Reveal(),
 	}
 	// RFC 8707 §2.2: the token request names the resources again.
 	setResources(params, resp.resource)
@@ -273,7 +273,7 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	if tokenErr != nil {
 		return TokenSet{}, tokenErr
 	}
-	result, idErr := c.tokenSetFromResponse(ctx, body, resp.nonce)
+	result, idErr := c.tokenSetFromResponse(ctx, body, resp.nonce.Reveal())
 	if idErr != nil {
 		return TokenSet{}, idErr
 	}

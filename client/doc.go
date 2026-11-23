@@ -103,7 +103,16 @@
 // constructs, holds or is handed a crypto.PrivateKey, the same model
 // server uses for its own signing keys; TokenSet fields that carry raw
 // token values use fapi.Secret so they can't leak into a log line by
-// accident; and a failure is a typed Error — with the server's own
+// accident, and so does every other result holding a code, PKCE
+// verifier, pending nonce, token, auth_req_id, notification token or
+// request_uri, which prints and logs it as [REDACTED] (a SessionHandle's
+// String is its wire value, for a cookie or form, which log/slog's text
+// handler prints for one in an exported field of a struct, though it
+// logs one given as an attribute as [REDACTED]; IDTokenClaims.Nonce, the
+// validated claim of a completed flow, is a plain string, which TokenSet
+// and the results holding one print); and
+// a failure is a
+// typed Error — with the server's own
 // error response, when there was one, available through
 // Error.ServerResponse — not a bare error the caller has to
 // string-match.

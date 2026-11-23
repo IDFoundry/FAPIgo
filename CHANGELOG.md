@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.81.0](https://github.com/IDFoundry/FAPIgo/compare/v0.80.0...v0.81.0) (2026-11-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* a peer that writes an EC key's x or y in other than the 32 octets of a P-256 coordinate, in a JWK or a JWE epk, is now refused. The server refuses its DPoP proofs with invalid_dpop_proof, as a resource server does, and its client attestations with invalid_client, and the client refuses its encrypted ID tokens and UserInfo responses with invalid_response. A JWK Set entry holding such a key is skipped, so what only that key signed fails as signed with an unknown key, and a response the server could encrypt only to it fails with server_error. keys.NewStaticClientKeys fails, so the server built on it doesn't start, when no other key in a client's jwks is usable. See UPGRADING.md.
+* a peer that repeats a member name, at any depth, in a JWS or JWE header, a client attestation's claims or an authorization server's metadata, or nests objects and arrays there more than 64 deep, is now refused, as is one writing two names that differ only in case there or in an Entity Statement, private names included. The server and a resource server refuse its request objects, client assertions, attestations, DPoP proofs, signed CIBA requests and access tokens with the error each path already gives a malformed message. The client refuses its ID tokens and its JARM and UserInfo responses with invalid_response, client.Discover fails for its discovery document, naming the member, and no Trust Chain through such an Entity Statement resolves. See UPGRADING.md.
+* **server:** a client assertion naming an endpoint URL as its aud is refused with invalid_client at revocation and when refreshing a grant CIBA didn't issue, and, unless Config.CIBAEndpointURLAudiences is set, at the backchannel authentication endpoint, in the CIBA token request and when refreshing a CIBA grant. See UPGRADING.md.
+* **federation:** an automatically registered Relying Party whose resolved metadata leaves grant_types out is registered for the authorization code flow alone, so it gets unauthorized_client for client_credentials and CIBA whatever AllowsClientCredentialsGrant and AllowsCIBA say (invalid_client where its client assertion names an endpoint URL, which only a CIBA client may, at refresh and revocation too). One registering for CIBA without a backchannel_token_delivery_mode fails to register instead of getting poll. See UPGRADING.md.
+
+### Bug Fixes
+
+* **federation:** contain a panic in the trust-chain resolution goroutine ([39e4af9](https://github.com/IDFoundry/FAPIgo/commit/39e4af99a28f0b4e927ba4dd4f1135e1ce89bbfd))
+* **federation:** default grant_types to authorization_code; CIBA needs a delivery mode ([f7248b6](https://github.com/IDFoundry/FAPIgo/commit/f7248b68e74df06b1f78880dcc7002cab26b0b80))
+* **keys:** contain a panic in the JWKS cache's refresh goroutine ([8d41db8](https://github.com/IDFoundry/FAPIgo/commit/8d41db8f989a942afd47b19d5df4bf4791ba875c))
+* refuse duplicate member names in JOSE headers and metadata ([5902127](https://github.com/IDFoundry/FAPIgo/commit/5902127d0ec3bcaef1b55ff1518dfecfd994ba8c))
+* refuse EC coordinates that are not full length in JWKs and JWE epk ([9f26b3e](https://github.com/IDFoundry/FAPIgo/commit/9f26b3eda809aa42a73e2d73d4a008cff258218d))
+* **server:** accept an endpoint URL as a client assertion's aud only for CIBA, on opt-in ([90945c0](https://github.com/IDFoundry/FAPIgo/commit/90945c00bec06c0ef73b8a50181d5ff0dcb87eaa))
+* **server:** match a client key registered without a kid by its RFC 7638 thumbprint ([d27c68d](https://github.com/IDFoundry/FAPIgo/commit/d27c68deaa88e8fc8b390ac6ca9fdcb708ab1687))
+* **server:** refuse a CRL with a critical extension it does not process ([18547dd](https://github.com/IDFoundry/FAPIgo/commit/18547dd4779e7ef14b542dbaebfc3741de9ffb17))
+* **storage:** require a refresh token revoked before it's stored to stay revoked ([d6c357d](https://github.com/IDFoundry/FAPIgo/commit/d6c357d14a7750a4006af8780ff52509dd669253))
+
 ## [0.80.0](https://github.com/IDFoundry/FAPIgo/compare/v0.79.0...v0.80.0) (2026-11-23)
 
 

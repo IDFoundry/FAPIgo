@@ -60,40 +60,211 @@
     "why": "a tls_client_auth RP must publish a signing key its certificate can carry"
   },
   {
-    "id": "fed-json-depth-cap",
-    "file": "internal/federation/claims_validation.go",
-    "old": "depth >= maxJSONDepth",
+    "id": "strictjson-depth-cap",
+    "file": "internal/strictjson/members.go",
+    "old": "depth >= MaxNestingDepth",
     "new": "false",
     "module": "root",
     "packages": [
+      "./internal/strictjson",
       "./internal/federation"
     ],
-    "run": "^TestParseRefusesStatementsSection32Rejects$",
-    "why": "entity statement JSON nesting is capped at maxJSONDepth"
+    "run": "^(TestCheckDuplicateMembersBoundsNesting|TestParseRefusesStatementsSection32Rejects)$",
+    "why": "JSON nesting is capped at MaxNestingDepth, for entity statements and JOSE headers alike"
   },
   {
-    "id": "fed-json-depth-cap-boundary",
+    "id": "strictjson-depth-cap-boundary",
+    "file": "internal/strictjson/members.go",
+    "old": "depth >= MaxNestingDepth",
+    "new": "depth > MaxNestingDepth",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson",
+      "./internal/federation"
+    ],
+    "run": "^(TestCheckDuplicateMembersBoundsNesting|TestParseRefusesStatementsSection32Rejects)$",
+    "why": "the JSON nesting cap applies at exactly MaxNestingDepth"
+  },
+  {
+    "id": "strictjson-depth-cap-below",
+    "file": "internal/strictjson/members.go",
+    "old": "depth >= MaxNestingDepth",
+    "new": "depth >= MaxNestingDepth-1",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson",
+      "./internal/federation"
+    ],
+    "run": "^(TestCheckDuplicateMembersBoundsNesting|TestParseRefusesStatementsSection32Rejects)$",
+    "why": "JSON nested one level below MaxNestingDepth is accepted"
+  },
+  {
+    "id": "strictjson-duplicate-member",
+    "file": "internal/strictjson/members.go",
+    "old": "if first, repeated := seen[key]; repeated {",
+    "new": "if first, repeated := seen[key]; repeated && false {",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^TestCheckDuplicateMembersRefusesRepeatedNames$",
+    "why": "an object that repeats a member name, at any depth, is refused"
+  },
+  {
+    "id": "strictjson-duplicate-member-case-fold",
+    "file": "internal/strictjson/members.go",
+    "old": "key := FoldKey(name)",
+    "new": "key := name",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^TestCheckDuplicateMembersRefusesRepeatedNames$",
+    "why": "two member names that differ only in case count as one name repeated"
+  },
+  {
+    "id": "jose-header-duplicate-members",
+    "file": "internal/jose/header.go",
+    "old": "if err := strictjson.CheckDuplicateMembers(data); err != nil {",
+    "new": "if err := strictjson.CheckDuplicateMembers(data); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/jose"
+    ],
+    "run": "^TestParseHeaderRefusesDuplicateMembers$",
+    "why": "a JWS header that repeats a member name, inside its jwk too, is refused"
+  },
+  {
+    "id": "jwe-header-duplicate-members",
+    "file": "internal/jwe/header.go",
+    "old": "if err := strictjson.CheckDuplicateMembers(data); err != nil {",
+    "new": "if err := strictjson.CheckDuplicateMembers(data); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/jwe"
+    ],
+    "run": "^(TestParseHeaderRefusesDuplicateMembers|TestDecryptRefusesDuplicateEPK)$",
+    "why": "a JWE header that repeats a member name, epk among them, is refused before decryption"
+  },
+  {
+    "id": "attestation-claims-duplicate-members",
+    "file": "internal/clientattestation/claims.go",
+    "old": "if err := strictjson.CheckDuplicateMembers(payload); err != nil {",
+    "new": "if err := strictjson.CheckDuplicateMembers(payload); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/clientattestation"
+    ],
+    "run": "^(TestParseAttestationClaimsRefusesDuplicateMembers|TestParseRefusesDuplicateConfirmation)$",
+    "why": "a client attestation whose claims repeat a member name, cnf among them, is refused"
+  },
+  {
+    "id": "metadata-duplicate-members",
+    "file": "internal/metadata/document.go",
+    "old": "if err := strictjson.CheckDuplicateMembers(body); err != nil {",
+    "new": "if err := strictjson.CheckDuplicateMembers(body); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/metadata"
+    ],
+    "run": "^TestParseAndValidateRefusesDuplicateMembers$",
+    "why": "a metadata document that repeats a member name, mtls_endpoint_aliases among them, is refused"
+  },
+  {
+    "id": "fed-statement-duplicate-members",
     "file": "internal/federation/claims_validation.go",
-    "old": "depth >= maxJSONDepth",
-    "new": "depth > maxJSONDepth",
+    "old": "if err := strictjson.CheckDuplicateMembers(payload); err != nil {",
+    "new": "if err := strictjson.CheckDuplicateMembers(payload); err != nil && false {",
     "module": "root",
     "packages": [
       "./internal/federation"
     ],
     "run": "^TestParseRefusesStatementsSection32Rejects$",
-    "why": "the JSON nesting cap applies at exactly maxJSONDepth"
+    "why": "an entity statement that repeats a member name at any depth is refused"
   },
   {
-    "id": "fed-json-depth-cap-below",
-    "file": "internal/federation/claims_validation.go",
-    "old": "depth >= maxJSONDepth",
-    "new": "depth >= maxJSONDepth-1",
+    "id": "jose-ec-coordinate-length",
+    "file": "internal/jose/jwk.go",
+    "old": "if len(b) != size {",
+    "new": "if false {",
     "module": "root",
     "packages": [
-      "./internal/federation"
+      "./internal/jose"
     ],
-    "run": "^TestParseRefusesStatementsSection32Rejects$",
-    "why": "JSON nested one level below maxJSONDepth is accepted"
+    "run": "^TestECCoordinatesMustBeFullLength$",
+    "why": "an EC JWK coordinate that isn't its curve's full size is refused, even when it names a point"
+  },
+  {
+    "id": "jose-ec-x-full-length",
+    "file": "internal/jose/jwk.go",
+    "old": "x, err := decodeFullCoordinate(raw.X, coordinateSize(curve))",
+    "new": "x, err := decodeUInt(raw.X)",
+    "module": "root",
+    "packages": [
+      "./internal/jose"
+    ],
+    "run": "^TestECCoordinatesMustBeFullLength$",
+    "why": "an EC JWK's x is held to its curve's full size"
+  },
+  {
+    "id": "jose-ec-y-full-length",
+    "file": "internal/jose/jwk.go",
+    "old": "y, err := decodeFullCoordinate(raw.Y, coordinateSize(curve))",
+    "new": "y, err := decodeUInt(raw.Y)",
+    "module": "root",
+    "packages": [
+      "./internal/jose"
+    ],
+    "run": "^TestECCoordinatesMustBeFullLength$",
+    "why": "an EC JWK's y is held to its curve's full size"
+  },
+  {
+    "id": "jwe-epk-coordinate-length",
+    "file": "internal/jwe/header.go",
+    "old": "if len(b) != p256CoordinateSize {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./internal/jwe"
+    ],
+    "run": "^TestParseHeaderRefusesEPKCoordinatesNotFullLength$",
+    "why": "an epk coordinate that isn't 32 octets is refused, even when the pair's 64 octets name the point"
+  },
+  {
+    "id": "jwe-epk-on-curve",
+    "file": "internal/jwe/header.go",
+    "old": "return nil, fmt.Errorf(\"invalid epk point: %w\", err)",
+    "new": "return nil, nil",
+    "module": "root",
+    "packages": [
+      "./internal/jwe"
+    ],
+    "run": "^TestParseHeaderRejectsMalformedEPK$",
+    "why": "a full-length epk that isn't a point on P-256 is refused, keeping an invalid-curve point out of ECDH-ES"
+  },
+  {
+    "id": "jose-rsa-marshal-n-minimal",
+    "file": "internal/jose/jwk.go",
+    "old": "N:   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),",
+    "new": "N:   base64.RawURLEncoding.EncodeToString(append([]byte{0}, pub.N.Bytes()...)),",
+    "module": "root",
+    "packages": [
+      "./internal/jose"
+    ],
+    "run": "^TestRSALeadingZerosAreReadAsTheInteger$",
+    "why": "MarshalJSON writes an RSA key's n minimally, as RFC 7518 requires, whatever spelling it was parsed from"
+  },
+  {
+    "id": "jose-rsa-marshal-e-minimal",
+    "file": "internal/jose/jwk.go",
+    "old": "E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),",
+    "new": "E:   base64.RawURLEncoding.EncodeToString(append([]byte{0}, big.NewInt(int64(pub.E)).Bytes()...)),",
+    "module": "root",
+    "packages": [
+      "./internal/jose"
+    ],
+    "run": "^TestRSALeadingZerosAreReadAsTheInteger$",
+    "why": "MarshalJSON writes an RSA key's e minimally, as AQAB, whatever spelling it was parsed from"
   },
   {
     "id": "fed-registration-config-copied",

@@ -1,6 +1,7 @@
 package strictjson
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -87,9 +88,19 @@ func TestCheckDuplicateMembersReportsMalformedJSON(t *testing.T) {
 			t.Errorf("CheckDuplicateMembers(%q) = %v, want a syntax error", data, err)
 		}
 	}
-	for _, data := range []string{``, `{"a":1`, `[{"a":[1`} {
-		if err := CheckDuplicateMembers([]byte(data)); !errors.Is(err, io.ErrUnexpectedEOF) {
-			t.Errorf("CheckDuplicateMembers(%q) = %v, want io.ErrUnexpectedEOF", data, err)
+	// Empty input is io.EOF to every json.Decoder, and
+	// CheckDuplicateMembers reports it as io.ErrUnexpectedEOF.
+	if err := CheckDuplicateMembers([]byte(``)); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("CheckDuplicateMembers(``) = %v, want io.ErrUnexpectedEOF", err)
+	}
+	// A value cut off part-way is reported as encoding/json reports it.
+	// Go 1.26's json.Decoder returns io.EOF there, which becomes
+	// io.ErrUnexpectedEOF; Go 1.27's returns a *json.SyntaxError.
+	for _, data := range []string{`{"a":1`, `[{"a":[1`, `[1,`} {
+		err := CheckDuplicateMembers([]byte(data))
+		var syntax *json.SyntaxError
+		if !errors.Is(err, io.ErrUnexpectedEOF) && !errors.As(err, &syntax) {
+			t.Errorf("CheckDuplicateMembers(%q) = %v, want io.ErrUnexpectedEOF or a *json.SyntaxError", data, err)
 		}
 	}
 }

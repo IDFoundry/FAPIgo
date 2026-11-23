@@ -736,10 +736,10 @@ apps, under HAIP or OpenID4VCI) also needs a
 `TrustedClientCAs`: `server.ClientCertificateCRLs{...}` with the CRLs of
 the CAs issuing attester certificates, or
 `server.NoClientCertificateRevocationCheck{}` to decline. A certificate
-a CRL names is refused with `invalid_client`; a CA with no current CRL
-is a check that couldn't decide, refused with `server_error` (500). A
-`ClientCertificateRevocation` of your own reports a revoked certificate
-by wrapping `server.ErrCertificateRevoked`.
+a usable CRL names is refused with `invalid_client`; a CA with no usable
+current CRL is a check that couldn't decide, refused with `server_error`
+(500). A `ClientCertificateRevocation` of your own reports a revoked
+certificate by wrapping `server.ErrCertificateRevoked`.
 
 `ClientAttestationStatus` decides whether an attestation that verified
 has since been withdrawn by its attester. Every instance of a wallet

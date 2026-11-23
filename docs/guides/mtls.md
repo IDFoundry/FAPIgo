@@ -83,9 +83,11 @@ srv, err := server.New(server.Config{
   `ClientCertificateChainVerifiedUpstream{}` declares that something
   before FAPIgo already verified the chain (your TLS listener's
   `ClientCAs` with `RequireAndVerifyClientCert`, or a gateway). A
-  revoked certificate is refused with `invalid_client`. A missing or
-  stale CRL fails closed too, but with `server_error` (500): the server
-  couldn't decide, and the client isn't told its certificate is revoked.
+  revoked certificate is refused with `invalid_client`. A CA with no
+  current CRL FAPIgo can use (a missing or stale one, or one carrying
+  a critical extension FAPIgo doesn't process) fails closed too, but
+  with `server_error` (500): the server couldn't decide, and the
+  client isn't told its certificate is revoked.
   A custom `Revocation` (OCSP, say) reports a revoked certificate by
   wrapping `server.ErrCertificateRevoked`; any other error it returns
   is `server_error`. A server whose clients use only

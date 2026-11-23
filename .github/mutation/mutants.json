@@ -2871,26 +2871,86 @@
   {
     "id": "secret-new-empty-is-zero",
     "file": "secret.go",
-    "old": "\tif value == \"\" {\n\t\treturn Secret{}\n\t}\n\treturn Secret{h: unique.Make(value)}",
-    "new": "\treturn Secret{h: unique.Make(value)}",
+    "old": "\tif value == \"\" {\n\t\treturn Secret{}\n\t}\n\treturn Secret{v: &value}",
+    "new": "\treturn Secret{v: &value}",
     "module": "root",
     "packages": [
       "."
     ],
-    "run": "^TestSecretComparesByValue$",
-    "why": "NewSecret(\"\") is the zero Secret, as it was when the value sat in a string field"
+    "run": "^TestSecretEqual$",
+    "why": "NewSecret(\"\") is the zero Secret, which IsZero reports and Equal matches with Secret{}"
   },
   {
     "id": "secret-reveal-zero-guard",
     "file": "secret.go",
-    "old": "\tif s.h == (unique.Handle[string]{}) {",
+    "old": "\tif s.v == nil {",
     "new": "\tif false {",
     "module": "root",
     "packages": [
       "."
     ],
-    "run": "^TestSecretComparesByValue$",
-    "why": "the zero Secret reveals \"\" instead of dereferencing the zero handle"
+    "run": "^TestSecretEqual$",
+    "why": "the zero Secret reveals \"\" instead of dereferencing a nil pointer"
+  },
+  {
+    "id": "secret-equal-values",
+    "file": "secret.go",
+    "old": "return subtle.ConstantTimeCompare([]byte(s.Reveal()), []byte(t.Reveal())) == 1",
+    "new": "return subtle.ConstantTimeCompare([]byte(s.Reveal()), []byte(t.Reveal())) == 1 || s.IsZero() == t.IsZero()",
+    "module": "root",
+    "packages": [
+      "."
+    ],
+    "run": "^TestSecretEqual$",
+    "why": "Equal compares two Secrets' values, now that == can't"
+  },
+  {
+    "id": "secret-is-zero",
+    "file": "secret.go",
+    "old": "\treturn s.v == nil\n",
+    "new": "\treturn false\n",
+    "module": "root",
+    "packages": [
+      "."
+    ],
+    "run": "^TestSecretEqual$",
+    "why": "IsZero reports the zero Secret, which the checks that once compared with fapi.Secret{} now rely on"
+  },
+  {
+    "id": "redact-handle-new-empty-is-zero",
+    "file": "internal/redact/handle.go",
+    "old": "\tif value == \"\" {\n\t\treturn Handle{}\n\t}\n",
+    "new": "",
+    "module": "root",
+    "packages": [
+      "./internal/redact"
+    ],
+    "run": "^TestHandleComparesByValue$",
+    "why": "MakeHandle(\"\") is the zero Handle, so a handle type's zero value is the one an empty value parses to"
+  },
+  {
+    "id": "redact-handle-reveal-zero-guard",
+    "file": "internal/redact/handle.go",
+    "old": "\tif h.IsZero() {\n\t\t// The zero unique.Handle",
+    "new": "\tif false {\n\t\t// The zero unique.Handle",
+    "module": "root",
+    "packages": [
+      "./internal/redact"
+    ],
+    "run": "^TestHandleComparesByValue$",
+    "why": "the zero Handle reveals \"\" instead of dereferencing the zero unique.Handle"
+  },
+  {
+    "id": "redact-handle-is-zero",
+    "file": "internal/redact/handle.go",
+    "old": "\treturn h == Handle{}\n",
+    "new": "\treturn false\n",
+    "module": "root",
+    "packages": [
+      "./internal/redact"
+    ],
+    "run": "^TestHandleComparesByValue$",
+    "why": "IsZero reports the zero Handle, by which the client tells a callback that carries no session handle"
   },
   {
     "id": "secret-format-bad-verb",

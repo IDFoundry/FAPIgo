@@ -16,6 +16,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/internal/requestobject"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -268,8 +269,8 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	}
 
 	action := BackchannelInteractionRequired{
-		Handle:      BackchannelAuthenticationHandle{value: fapi.NewSecret(handleRaw)},
-		AuthReqID:   AuthReqID{value: fapi.NewSecret(authReqIDRaw)},
+		Handle:      BackchannelAuthenticationHandle{value: redact.MakeHandle(handleRaw)},
+		AuthReqID:   AuthReqID{value: redact.MakeHandle(authReqIDRaw)},
 		ExpiresIn:   lifetime,
 		Interval:    s.cfg.Limits.BackchannelAuthenticationPollInterval,
 		Interaction: interaction,

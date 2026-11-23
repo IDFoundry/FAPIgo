@@ -8,6 +8,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/redact"
 )
 
 // randomTokenSize is the byte length of a generated nonce or
@@ -82,7 +83,7 @@ func stateForHandle(handle string) string {
 // fallback (a SessionHandle in an unexported field, or under a verb
 // other than v, s, q, x and X) prints an address.
 type SessionHandle struct {
-	value fapi.Secret
+	value redact.Handle
 }
 
 // String returns the handle's opaque wire value, for keeping it with the
@@ -101,7 +102,7 @@ func ParseSessionHandle(s string) (SessionHandle, error) {
 	if err != nil || len(raw) != randomTokenSize {
 		return SessionHandle{}, newError(ErrorInvalidRequest, "session handle is malformed", nil)
 	}
-	return SessionHandle{value: fapi.NewSecret(s)}, nil
+	return SessionHandle{value: redact.MakeHandle(s)}, nil
 }
 
 // AuthorizationSession is returned by BeginAuthorization: the browser URL

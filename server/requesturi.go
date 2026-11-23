@@ -1,6 +1,6 @@
 package server
 
-import fapi "github.com/idfoundry/fapigo"
+import "github.com/idfoundry/fapigo/internal/redact"
 
 // RequestURI is an opaque request_uri value returned by
 // PushAuthorizationRequest. It has no public constructor — only this
@@ -18,7 +18,7 @@ import fapi "github.com/idfoundry/fapigo"
 // fallback (a RequestURI in an unexported field, or under a verb other
 // than v, s, q, x and X) prints an address.
 type RequestURI struct {
-	value fapi.Secret
+	value redact.Handle
 }
 
 // String returns the request_uri's wire value.

@@ -105,7 +105,7 @@ func (s *BackchannelSessionSealer) Seal(session BackchannelAuthenticationSession
 	if owner == "" {
 		return nil, newError(ErrorInvalidRequest, "a backchannel authentication session is sealed for an owner", nil)
 	}
-	if session.authReqID == (fapi.Secret{}) {
+	if session.authReqID.IsZero() {
 		return nil, newError(ErrorInvalidRequest, "a backchannel authentication session without an auth_req_id can't be sealed", nil)
 	}
 	if !s.client.ownsBackchannelSession(session) {

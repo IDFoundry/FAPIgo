@@ -8,6 +8,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -35,7 +36,7 @@ const (
 // [REDACTED], but log/slog's text handler prints a struct with %+v, so
 // one in an exported field of a struct of yours logs its wire value.
 type BackchannelAuthenticationHandle struct {
-	value fapi.Secret
+	value redact.Handle
 }
 
 // String returns the handle's opaque wire value.
@@ -56,7 +57,7 @@ func ParseBackchannelAuthenticationHandle(value string) (BackchannelAuthenticati
 	if value == "" {
 		return BackchannelAuthenticationHandle{}, fmt.Errorf("server: backchannel authentication handle is empty")
 	}
-	return BackchannelAuthenticationHandle{value: fapi.NewSecret(value)}, nil
+	return BackchannelAuthenticationHandle{value: redact.MakeHandle(value)}, nil
 }
 
 func generateBackchannelAuthenticationHandle(random io.Reader) (string, error) {
@@ -80,7 +81,7 @@ func generateBackchannelAuthenticationHandle(random io.Reader) (string, error) {
 // %+v, so one in an exported field of a struct of yours logs its wire
 // value, as a handle's does.
 type AuthReqID struct {
-	value fapi.Secret
+	value redact.Handle
 }
 
 // String returns the auth_req_id's wire value.

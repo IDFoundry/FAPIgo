@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
@@ -76,7 +77,7 @@ func FuzzHandleAuthorizationResponsePlain(f *testing.F) {
 		c := plainCallbackClient(t, iss, requireIss, deviceLocal)
 		cb := AuthorizationCallback{RawQuery: rawQuery}
 		if passHandle {
-			cb.Session = SessionHandle{value: fapi.NewSecret(callbackFuzzHandle)}
+			cb.Session = SessionHandle{value: redact.MakeHandle(callbackFuzzHandle)}
 		}
 		res, err := c.HandleAuthorizationResponse(context.Background(), cb)
 		if err != nil {
@@ -128,7 +129,7 @@ func TestAuthorizationCodeFlowNeedsASessionStore(t *testing.T) {
 		}
 	}()
 	_, callbackErr := c.HandleAuthorizationResponse(context.Background(), AuthorizationCallback{
-		RawQuery: "code=abc&state=" + callbackFuzzState, Session: SessionHandle{value: fapi.NewSecret(callbackFuzzHandle)},
+		RawQuery: "code=abc&state=" + callbackFuzzState, Session: SessionHandle{value: redact.MakeHandle(callbackFuzzHandle)},
 	})
 	_, beginErr := c.BeginAuthorization(context.Background(), BeginAuthorizationRequest{Scope: []string{"openid"}})
 	for name, err := range map[string]error{"HandleAuthorizationResponse": callbackErr, "BeginAuthorization": beginErr} {
@@ -151,7 +152,7 @@ func TestHandleAuthorizationResponseRefusesInvalidUTF8(t *testing.T) {
 	}
 	const valid = "code=abc&iss=https%3A%2F%2Fas.example&state="
 	if _, err := plainCallbackClient(t, iss, true, false).HandleAuthorizationResponse(context.Background(), AuthorizationCallback{
-		RawQuery: valid + callbackFuzzState, Session: SessionHandle{value: fapi.NewSecret(callbackFuzzHandle)},
+		RawQuery: valid + callbackFuzzState, Session: SessionHandle{value: redact.MakeHandle(callbackFuzzHandle)},
 	}); err != nil {
 		t.Fatalf("HandleAuthorizationResponse(valid UTF-8) = %v, want it accepted", err)
 	}
@@ -163,7 +164,7 @@ func TestHandleAuthorizationResponseRefusesInvalidUTF8(t *testing.T) {
 	} {
 		c := plainCallbackClient(t, iss, true, false)
 		res, err := c.HandleAuthorizationResponse(context.Background(), AuthorizationCallback{
-			RawQuery: query, Session: SessionHandle{value: fapi.NewSecret(callbackFuzzHandle)},
+			RawQuery: query, Session: SessionHandle{value: redact.MakeHandle(callbackFuzzHandle)},
 		})
 		var cerr *Error
 		if !errors.As(err, &cerr) || cerr.Code() != ErrorInvalidRequest || cerr.PublicDescription() != "callback query contains a parameter that isn't valid UTF-8" {

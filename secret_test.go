@@ -109,23 +109,17 @@ func TestSecretFormatOtherVerbs(t *testing.T) {
 }
 
 // TestSecretReflectionPrintsAnAddress pins what fmt prints where it
-// calls no method of a Secret: the address of its handle, which equal
-// values share.
+// calls no method of a Secret: the address of its value, never the
+// value.
 func TestSecretReflectionPrintsAnAddress(t *testing.T) {
 	type holder struct{ tok Secret }
-	// The handle's own field is unique.Handle's to name: the pin is that
-	// it prints as an address, and nothing else.
-	addr := regexp.MustCompile(`^\{tok:\{h:\{\w+:0x[0-9a-f]+\}\}\}$`)
-	a, b := holder{NewSecret(secretTestValue)}, holder{NewSecret(strings.Clone(secretTestValue))}
-	got := fmt.Sprintf("%+v", a)
-	if !addr.MatchString(got) {
-		t.Errorf("Sprintf(%%+v) of a Secret in an unexported field = %q, want only its handle's address", got)
-	}
-	if other := fmt.Sprintf("%+v", b); other != got {
-		t.Errorf("equal values printed %q and %q, want the same address", got, other)
+	addr := regexp.MustCompile(`^\{tok:\{_:\[\] v:0x[0-9a-f]+\}\}$`)
+	a := holder{NewSecret(secretTestValue)}
+	if got := fmt.Sprintf("%+v", a); !addr.MatchString(got) {
+		t.Errorf("Sprintf(%%+v) of a Secret in an unexported field = %q, want only its value's address", got)
 	}
 	wrapFormat := "%w"
-	if got := fmt.Errorf(wrapFormat, a.tok).Error(); !strings.HasPrefix(got, "%!w(fapi.Secret={{0x") {
+	if got := fmt.Errorf(wrapFormat, a.tok).Error(); !strings.HasPrefix(got, "%!w(fapi.Secret={[] 0x") {
 		t.Errorf("Errorf(%%w) of a Secret = %q, want fmt's wrong-verb shape with an address", got)
 	}
 }
@@ -143,29 +137,43 @@ func TestSecretLogValue(t *testing.T) {
 	}
 }
 
-// TestSecretComparesByValue pins that a Secret stays comparable by
-// value: ==, map keys and reflect.DeepEqual give what they gave when the
-// value sat in a string field, so code comparing Secrets is unaffected.
-func TestSecretComparesByValue(t *testing.T) {
+// TestSecretEqual pins how Secrets compare: by value through Equal and
+// reflect.DeepEqual, never through ==, which doesn't compile.
+func TestSecretEqual(t *testing.T) {
 	a, b := NewSecret(secretTestValue), NewSecret(strings.Clone(secretTestValue))
-	if a != b || !reflect.DeepEqual(a, b) {
+	if !a.Equal(b) || !b.Equal(a) || !reflect.DeepEqual(a, b) {
 		t.Error("two Secrets of one value compare unequal")
 	}
-	if a == NewSecret(secretTestValue+"x") {
-		t.Error("Secrets of different values compare equal")
+	for _, other := range []Secret{NewSecret(secretTestValue + "x"), NewSecret(strings.ToUpper(secretTestValue)), {}} {
+		if a.Equal(other) || other.Equal(a) {
+			t.Errorf("Secrets of %q and %q compare equal", a.Reveal(), other.Reveal())
+		}
 	}
-	if NewSecret("") != (Secret{}) || (Secret{}).Reveal() != "" {
-		t.Error(`NewSecret("") isn't the zero Secret, or the zero Secret reveals a value`)
+	if !NewSecret("").IsZero() || !(Secret{}).IsZero() || a.IsZero() {
+		t.Error(`IsZero isn't true exactly for NewSecret("") and the zero Secret`)
 	}
-	if got := map[Secret]int{a: 1}[b]; got != 1 {
-		t.Error("a map keyed by a Secret doesn't find an equal one")
+	if !NewSecret("").Equal(Secret{}) || (Secret{}).Reveal() != "" {
+		t.Error(`NewSecret("") isn't equal to the zero Secret, or the zero Secret reveals a value`)
 	}
-	if !reflect.TypeFor[Secret]().Comparable() {
-		t.Error("Secret is no longer comparable: making it so breaks every embedder comparing one")
+	if reflect.TypeFor[Secret]().Comparable() {
+		t.Error("Secret is comparable: == would compare pointers, and stop matching equal values")
 	}
 	if got := b.Reveal(); got != secretTestValue {
 		t.Errorf("Reveal() = %q, want %q", got, secretTestValue)
 	}
+}
+
+// TestSecretComparedThroughAnInterfacePanics pins the failure the
+// documentation names for a comparison that compiles: one through an
+// interface.
+func TestSecretComparedThroughAnInterfacePanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("comparing two Secrets through an interface didn't panic")
+		}
+	}()
+	var x, y any = NewSecret(secretTestValue), NewSecret(secretTestValue)
+	_ = x == y
 }
 
 func TestSecretEncodersFail(t *testing.T) {

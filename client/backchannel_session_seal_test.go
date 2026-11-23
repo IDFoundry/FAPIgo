@@ -72,8 +72,8 @@ func checkSealedOpaque(t *testing.T, sealed []byte, session BackchannelAuthentic
 
 // sameSealedFields reports whether got has want's sealed fields.
 func sameSealedFields(got, want BackchannelAuthenticationSession) bool {
-	return got.authReqID == want.authReqID && got.interval == want.interval && got.expiresAt.Equal(want.expiresAt) &&
-		got.notificationToken == want.notificationToken && got.openID == want.openID
+	return got.authReqID.Equal(want.authReqID) && got.interval == want.interval && got.expiresAt.Equal(want.expiresAt) &&
+		got.notificationToken.Equal(want.notificationToken) && got.openID == want.openID
 }
 
 // TestOpenedSessionAuthenticatesPing covers the reason to restore a

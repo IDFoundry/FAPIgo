@@ -28,7 +28,7 @@ func FuzzOpenBackchannelSession(f *testing.F) {
 		if owner != "user-1" {
 			t.Fatalf("opened a session for owner %q, sealed for user-1", owner)
 		}
-		if got.authReqID != begun.authReqID || got.notificationToken != begun.notificationToken {
+		if !got.authReqID.Equal(begun.authReqID) || !got.notificationToken.Equal(begun.notificationToken) {
 			t.Fatalf("opened a session nobody sealed: %+v", got)
 		}
 	})

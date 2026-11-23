@@ -84,7 +84,8 @@ func (s *Server) grantRevocationReader() (revocationReader, bool) {
 // a resource server must read the same revocation store the
 // authorization server writes, as it must for access token revocation
 // already. Then, when Dependencies.Grants is a
-// storage.GrantRefreshTokenRevoker (memstore's GrantStore is), it
+// storage.GrantRefreshTokenRevoker (memstore's GrantStore is, as are
+// sqlstore's DB.Grants and DB.BatchingGrants from sqlstore v0.10), it
 // revokes the grant's refresh tokens in that store as well, and removes
 // them from Dependencies.GrantRegistry. If revoking them fails, the
 // grant is revoked all the same, and the error says its refresh tokens

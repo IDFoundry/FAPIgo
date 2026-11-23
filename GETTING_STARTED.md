@@ -948,7 +948,8 @@ the grant as revoked for at least 400 days, longer when the current
 authorization code's grant is recorded the same way, as is the code or
 CIBA grant of a refresh token revoked at the revocation endpoint or
 through the registry. When `Dependencies.Grants` implements
-`storage.GrantRefreshTokenRevoker` (`memstore`'s does), the grant's
+`storage.GrantRefreshTokenRevoker` (`memstore`'s does, and so, from
+sqlstore v0.10, do `db.Grants()` and `db.BatchingGrants()`), the grant's
 refresh tokens are revoked in the store too, so nothing can redeem them
 again, whatever lifetimes apply later; if that fails, `RevokeGrant` says
 the grant is revoked but its refresh tokens couldn't all be revoked, and
@@ -960,7 +961,10 @@ again once it has stored the token, and withdraws it instead if the
 record is there by then): raising
 `Limits.RefreshTokenLifetime` later, or running instances with longer
 `Limits`, can't bring a revoked grant back unless a refresh token
-lifetime over 400 days applies. With longer lifetimes, withdraw grants
+lifetime over 400 days applies. With sqlstore, refresh tokens stored
+before its migration 0005, or by a v0.9 instance during the deploy
+that applies it, aren't indexed by their grants, so `RevokeGrant`
+leaves them to the record too. With longer lifetimes, withdraw grants
 with `RevokeListedGrant`, which revokes the refresh token itself, or
 call `RevokeGrant` again once the longer lifetime is in force;
 `RevokeSubjectGrants` also revokes the refresh tokens of the user's

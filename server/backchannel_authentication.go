@@ -160,12 +160,13 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if err != nil {
 		return s.backchannelBeginFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err)), nil
 	}
-	// CIBA Core 1.0 §7.1 explicitly widens the backchannel authentication
-	// endpoint's own accepted audiences beyond just its own URL: "the OP
-	// MUST accept its Issuer Identifier, Token Endpoint URL, or
-	// Backchannel Authentication Endpoint URL" — confirmed live via the
-	// OIDF conformance suite's own fapi-ciba-id1/-refresh-token modules,
-	// which deliberately sign "aud" as the token endpoint's URL here.
+	// Under Config.CIBAEndpointURLAudiences, CIBA Core 1.0 §7.1's widened
+	// audiences for this endpoint: "the OP MUST accept its Issuer
+	// Identifier, Token Endpoint URL, or Backchannel Authentication
+	// Endpoint URL" — the OIDF conformance suite names this endpoint's
+	// URL here, or, for the second client of fapi-ciba-id1/-refresh-token,
+	// the token endpoint's. Without it, the issuer alone (see
+	// acceptableClientAssertionAudiences).
 	client, dpopProof, authn, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
 	},

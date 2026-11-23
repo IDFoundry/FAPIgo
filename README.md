@@ -335,11 +335,15 @@ Not implemented, by design:
 
 Where FAPIgo departs from a specification on purpose:
 
-- A client assertion's `aud` must be the issuer, as a single string: an
-  array, or the token endpoint URL, is refused, although RFC 7523 §3
-  allows both. FAPI 2.0 Final requires the issuer. A client registered
-  for CIBA may still use the token or revocation endpoint URL as `aud`
-  at the refresh and revocation endpoints.
+- A client assertion's `aud` must be the issuer (RFC 10070 and FAPI 2.0
+  Final), as a single string (FAPI 2.0 Final): an array is refused,
+  although JWT allows one, and so is an endpoint URL, although CIBA
+  Core 1.0 §7.1 has the server accept the token and backchannel
+  authentication endpoint URLs at the backchannel authentication
+  endpoint.
+  `Config.CIBAEndpointURLAudiences` accepts those there from CIBA
+  clients, and the token endpoint URL in the CIBA token request and to
+  refresh a CIBA grant, which RFC 10070 forbids.
 - FAPI-CIBA §7.10 allows only PS256 and ES256. FAPIgo also allows EdDSA
   for CIBA, since FAPI 2.0 permits it and FAPI-CIBA (Implementer's Draft
   1) predates FAPI 2.0.

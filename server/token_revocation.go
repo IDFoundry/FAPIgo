@@ -67,11 +67,14 @@ type TokenRevocationResult struct {
 // *Error as the response. The result tells the embedder what was
 // revoked, and is never for the client.
 //
-// It authenticates the client by its registered method, exactly as the
-// token endpoint does, then revokes the refresh token in "token" if this
-// client may: one issued to it and, for a client authenticated by Client
-// Attestation, bound to the same Client Instance Key (as
-// RefreshAccessToken requires — draft-ietf-oauth-attestation-based-client-auth-12
+// It authenticates the client by its registered method, as the token
+// endpoint does, except that a client assertion's aud must be the issuer
+// identifier even under Config.CIBAEndpointURLAudiences (RFC 10070 §4):
+// CIBA Core 1.0 §7.1 names no revocation endpoint. It then revokes the
+// refresh token in "token" if this client may: one issued to it and, for
+// a client authenticated by Client Attestation, bound to the same Client
+// Instance Key (as RefreshAccessToken requires —
+// draft-ietf-oauth-attestation-based-client-auth-12
 // §10.3; see checkRefreshInstance). Revoking a refresh token also revokes the authorization grant
 // it came from, so the access tokens issued under it stop working too
 // (RFC 7009 §2.1): the grant's GrantID if it has one (RevokeGrant) —
@@ -118,9 +121,11 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 	if err != nil {
 		return TokenRevocationResult{}, s.revocationFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err))
 	}
+	// The issuer is the only client assertion audience (nil endpoints):
+	// see this method's doc comment.
 	client, _, authn, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
-	}, []fapi.URL{s.cfg.Endpoints.Revocation}, []fapi.URL{s.cfg.MTLSEndpoints.Revocation})
+	}, nil, nil)
 	if authErr != nil {
 		return TokenRevocationResult{}, s.revocationFail(ctx, "", authErr)
 	}

@@ -93,11 +93,10 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 
 	// CIBA's own token-polling step (CIBA §10.1) is a grant_type on the
 	// physical token endpoint, not a separate endpoint of its own — see
-	// CIBAGrantType's own doc comment — so this authenticates against
-	// the Token endpoint's audiences, the same as
-	// ExchangeAuthorizationCode/RefreshAccessToken. Only a CIBA-registered
-	// client can hold an auth_req_id, and such a client keeps CIBA Core
-	// §7.1's endpoint-URL audiences — see
+	// CIBAGrantType's own doc comment — so its endpoint-URL audience is
+	// the token endpoint's. Only a CIBA-registered client can hold an
+	// auth_req_id, so under Config.CIBAEndpointURLAudiences it may name
+	// that URL; otherwise the issuer alone — see
 	// acceptableClientAssertionAudiences.
 	client, dpopProof, authn, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,

@@ -1100,12 +1100,33 @@ claim received in client authentication assertions", overriding RFC
 7523 §3's token-endpoint-URL allowance, and the suite's
 `ensure-invalid-client-assertions-fail` module began enforcing it at the
 token endpoint for the client-credentials variant. Endpoint-URL
-audiences are now accepted only for a client registered for CIBA
-(`BackchannelAuthenticationRequestAlgorithm` set), which keeps CIBA Core
+audiences were then accepted only for a client registered for CIBA
+(`BackchannelAuthenticationRequestAlgorithm` set), which kept CIBA Core
 1.0 §7.1's widened set at the token and backchannel authentication
 endpoints — the FAPI-CIBA-ID1 suite signs every token-endpoint
-assertion, refresh included, with the token endpoint URL. Every other
-client is issuer-only at every endpoint.
+assertion, refresh included, with the token endpoint URL or its mTLS
+alias. Every other client was issuer-only at every endpoint.
+
+RFC 10070 §4 (November 2026) then made the issuer identifier the only
+`aud` a client assertion may carry ("the token endpoint URL ... MUST
+NOT be used as an audience value"), to close audience injection: a
+client that takes `aud` from each server's metadata signs, for a
+malicious server whose metadata lists this server's token endpoint, an
+assertion that server can present here. The CIBA set had also applied
+where CIBA doesn't reach: to a CIBA client refreshing an authorization
+code grant, to revocation, and on a server serving no CIBA at all. It
+is now an opt-in, `Config.CIBAEndpointURLAudiences`, off by default,
+so every client is issuer-only at every endpoint unless it's set. Set,
+it accepts the token and backchannel authentication endpoint URLs at
+the backchannel authentication endpoint, and the token endpoint URL in
+the CIBA token request and to refresh a grant recorded as CIBA, each
+with its mTLS alias for an mTLS-bound client, only while the server
+serves CIBA, and never from an assertion typed
+`client-authentication+jwt`, with which a client says it follows
+RFC 10070 (no other `typ` counts). A refresh can't tell
+which grant it's for until the refresh token is redeemed, so the
+verified `aud` is carried out of `clientassertion.Verify` and checked
+again then. Revocation is issuer-only either way.
 
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -85,6 +86,12 @@ type RefreshTokenRequest struct {
 // Config.AdditionalGrantTypes. A refresh token whose grant type was
 // never recorded (see checkGrantTypeStillAllowed) is refused with
 // invalid_grant.
+//
+// The client assertion's aud must be the issuer identifier. Only under
+// Config.CIBAEndpointURLAudiences may a CIBA client name the token
+// endpoint URL instead, and only to refresh a grant CIBA issued: for
+// any other grant that assertion is refused with invalid_client, once
+// the refresh token shows which grant it is.
 func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest) (_ TokenResult, retErr error) {
 	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
 	params, err := formParametersToMap(formParams)
@@ -95,6 +102,10 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be refresh_token", nil))
 	}
 
+	// The token endpoint URL is a candidate for a CIBA grant's refresh
+	// only: redeemRefreshGrantFor refuses it for any other grant, once
+	// the refresh token tells which it is (see
+	// acceptableClientAssertionAudiences).
 	client, dpopProof, authn, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
 	}, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
@@ -115,7 +126,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	// attachNextDPoPNonceOnFailure.
 	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
 
-	grant, now, grantErr := s.redeemRefreshGrantFor(ctx, client, authn.InstanceKey, rawToken)
+	grant, now, grantErr := s.redeemRefreshGrantFor(ctx, client, authn, rawToken)
 	if grantErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), grantErr)
 	}
@@ -192,19 +203,43 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	return result, nil
 }
 
-// redeemRefreshGrantFor is redeemRefreshGrant for a refresh, which also
-// refuses a grant from a grant type client is no longer registered for
-// (checkGrantTypeStillAllowed). RevokeToken redeems without it: a client
-// may still revoke what it can no longer refresh.
-func (s *Server) redeemRefreshGrantFor(ctx context.Context, client storage.RegisteredClient, instanceKey, rawToken string) (grantRecord, time.Time, *Error) {
-	grant, now, err := s.redeemRefreshGrant(ctx, client.ID(), instanceKey, rawToken)
+// redeemRefreshGrantFor is redeemRefreshGrant for a refresh by client,
+// authenticated as authn, which also refuses an assertion aud the grant
+// doesn't accept (checkRefreshAssertionAudience), and a grant from a
+// grant type client is no longer registered for
+// (checkGrantTypeStillAllowed). RevokeToken redeems without them: its
+// assertion names the issuer alone, and a client may still revoke what
+// it can no longer refresh.
+func (s *Server) redeemRefreshGrantFor(ctx context.Context, client storage.RegisteredClient, authn clientassertion.VerifiedAssertion, rawToken string) (grantRecord, time.Time, *Error) {
+	grant, now, err := s.redeemRefreshGrant(ctx, client.ID(), authn.InstanceKey, rawToken)
 	if err != nil {
 		return grantRecord{}, time.Time{}, err
+	}
+	if audErr := s.checkRefreshAssertionAudience(grant, authn.Audience); audErr != nil {
+		return grantRecord{}, time.Time{}, audErr
 	}
 	if typeErr := s.checkGrantTypeStillAllowed(client, grant); typeErr != nil {
 		return grantRecord{}, time.Time{}, typeErr
 	}
 	return grant, now, nil
+}
+
+// checkRefreshAssertionAudience refuses, with invalid_client, a refresh
+// of grant whose client assertion named aud, an endpoint URL, rather
+// than the issuer identifier, unless grant is a CIBA one. Client
+// authentication accepted the token endpoint URL only as a candidate
+// (acceptableClientAssertionAudiences): CIBA Core 1.0 §7.1's audiences
+// are CIBA's, so every other grant's assertion names the issuer alone
+// (RFC 10070 §4), whether it is an authorization code grant (FAPI 2.0
+// Security Profile §5.3.2.1), one the embedder served
+// (IssueRefreshToken), or one whose grant type was never recorded,
+// which may be either kind. aud is empty for a client authenticated
+// without an assertion.
+func (s *Server) checkRefreshAssertionAudience(grant grantRecord, aud string) *Error {
+	if aud == "" || aud == s.cfg.Issuer.String() || grant.GrantType == CIBAGrantType {
+		return nil
+	}
+	return newError(ErrorInvalidClient, 401, issuerAudienceDescription, nil)
 }
 
 // checkGrantTypeStillAllowed refuses a refresh of a grant made under a

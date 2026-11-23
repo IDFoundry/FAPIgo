@@ -3,7 +3,9 @@ package keys
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -234,18 +236,69 @@ func (c *jwksCache[V]) refreshSingleflight(ctx context.Context) (V, error) {
 	c.inflight = call
 	c.mu.Unlock()
 
-	go func() {
-		// Detached: fapihttp.Client.Fetch applies its own RequestTimeout,
-		// so the fetch still cannot hang forever; WithoutCancel only
-		// stops one caller's cancellation from aborting a fetch shared
-		// by others.
-		call.keys, call.err = c.refresh(context.WithoutCancel(ctx))
-		c.mu.Lock()
-		c.inflight = nil
-		c.mu.Unlock()
-		close(call.done)
-	}()
+	// Detached: fapihttp.Client.Fetch applies its own RequestTimeout, so
+	// the fetch still cannot hang forever; WithoutCancel only stops one
+	// caller's cancellation from aborting a fetch shared by others.
+	go c.runRefresh(context.WithoutCancel(ctx), call)
 	return waitRefresh(ctx, call)
+}
+
+// runRefresh runs call, on the goroutine refreshSingleflight starts for
+// it, then hands its outcome to finishRefresh. That goroutine is this
+// package's own, so no caller can recover a panic on it, and an
+// unrecovered one ends the process: a panic in the fetcher's transport,
+// or in parsing the set it fetched, for ClientJWKSSource whatever a
+// client's jwks_uri serves. It is recovered here instead and fails the
+// refresh. call.err starts as errRefreshUnfinished, so a refresh whose
+// goroutine exits without returning or panicking (runtime.Goexit) fails
+// too.
+func (c *jwksCache[V]) runRefresh(ctx context.Context, call *refreshCall[V]) {
+	call.err = errRefreshUnfinished
+	defer func() { c.finishRefresh(call, recover()) }()
+	call.keys, call.err = c.refresh(ctx)
+}
+
+// finishRefresh records call's outcome for every caller waiting on it —
+// what refresh returned, or, when panicked (what a panic in the refresh
+// was recovered with) isn't nil, no keys and a refreshPanicError — then
+// lets the next refresh start and wakes the waiters. A refresh that
+// panicked isn't remembered as the set's last failure (see current):
+// the next request may fetch again. finishRefresh runs deferred, after
+// a panic too, so it calls nothing that could panic again.
+func (c *jwksCache[V]) finishRefresh(call *refreshCall[V], panicked any) {
+	if panicked != nil {
+		var zero V
+		call.keys, call.err = zero, newRefreshPanicError(panicked)
+	}
+	c.mu.Lock()
+	c.inflight = nil
+	c.mu.Unlock()
+	close(call.done)
+}
+
+// errRefreshUnfinished is what a refresh's callers get when its
+// goroutine ends without the refresh returning or panicking (see
+// runRefresh).
+var errRefreshUnfinished = errors.New("keys: jwks refresh ended without a result")
+
+// refreshPanicError is what every caller waiting on a refresh that
+// panicked gets: the panic's value and the stack it was recovered on,
+// for the log. A caller treats it as it does a failed fetch.
+type refreshPanicError struct {
+	value any
+	stack []byte
+}
+
+// newRefreshPanicError records value, recovered while refreshing a set,
+// with the stack it was recovered on.
+func newRefreshPanicError(value any) *refreshPanicError {
+	return &refreshPanicError{value: value, stack: debug.Stack()}
+}
+
+// Error names the panic's value, followed by the stack the panic was
+// recovered on.
+func (e *refreshPanicError) Error() string {
+	return fmt.Sprintf("keys: jwks refresh panicked: %v\n\n%s", e.value, e.stack)
 }
 
 // waitRefresh waits for call, or for ctx to be done first.

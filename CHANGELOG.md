@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.82.0](https://github.com/IDFoundry/FAPIgo/compare/v0.81.0...v0.82.0) (2026-11-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* fapi.Secret is no longer comparable. Code that compares two with == or !=, compares one with the zero Secret, uses one as a map key, in a switch or as a comparable type argument, or compares a struct holding one (client.ResourceClient, client.AuthorizationSession, server.AuthorizationRedirect, server.BackchannelNotification or storage.DecidedBackchannelAuthentication) no longer compiles, and a comparison through an interface panics. Use Equal in place of ==, use IsZero in place of a comparison with the zero Secret, and key a map by the revealed value or a hash of it. See UPGRADING.md.
+* **extension:** extension.NewRegistry refuses a Definition that is both Sensitive and returned in token claims, and AsParameters leaves a Sensitive value out. See UPGRADING.md.
+
+### Features
+
+* **extension:** report a parameter's sensitivity, and match value errors with errors.Is ([849ade2](https://github.com/IDFoundry/FAPIgo/commit/849ade26f7c74c179fcfacd3b6b3d5f61ee87e6e))
+
+
+### Bug Fixes
+
+* **client:** keep codes, verifiers, nonces, tokens and CIBA values out of renderings ([e8cfd0b](https://github.com/IDFoundry/FAPIgo/commit/e8cfd0bebc6f4845005ee83028428dff97356c97))
+* **extension:** print no extension value, and quote no Sensitive value in an error ([d010e2a](https://github.com/IDFoundry/FAPIgo/commit/d010e2a3930a3474cf7d7e2c0acb2abf5af4325d))
+* **extension:** refuse a Sensitive definition's ReturnInTokenClaims ([2110bd5](https://github.com/IDFoundry/FAPIgo/commit/2110bd5b03b556895c9319c1d5bcb88a32faa424))
+* hold a Secret's value by its canonical handle, and redact it under every verb ([f9bc523](https://github.com/IDFoundry/FAPIgo/commit/f9bc523c0fe897d3c8f7d7d200251d17da0040c3))
+* hold fapi.Secret's value behind a pointer, and make it incomparable ([bfe886f](https://github.com/IDFoundry/FAPIgo/commit/bfe886f70f0ea00cf8c2104f7bdf1b52dd5f5f7b))
+* **resource:** print verify requests without the access token ([7110c92](https://github.com/IDFoundry/FAPIgo/commit/7110c923ed688e54dd25cab2ac6f7320def309ec))
+* **server:** keep codes, handles and auth_req_ids out of server results' renderings ([f210de5](https://github.com/IDFoundry/FAPIgo/commit/f210de529ebe7e79b164342a62f994898a21ec77))
+* **server:** print inbound requests without their credentials ([753c523](https://github.com/IDFoundry/FAPIgo/commit/753c5235aef461340cf5041c862b00f87b4e7d5a))
+
 ## [0.81.0](https://github.com/IDFoundry/FAPIgo/compare/v0.80.0...v0.81.0) (2026-11-23)
 
 

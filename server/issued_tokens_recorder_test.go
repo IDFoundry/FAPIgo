@@ -71,7 +71,7 @@ func (r *recordingGrantStore) RecordIssuedAccessToken(ctx context.Context, codeH
 	return r.fakeGrantStore.RecordIssuedAccessToken(ctx, codeHash, key, expiresAt)
 }
 
-func (r *recordingGrantStore) RecordIssuedRefreshToken(ctx context.Context, codeHash [32]byte, refreshTokenHash [32]byte, expiresAt time.Time) error {
+func (r *recordingGrantStore) RecordIssuedRefreshToken(ctx context.Context, codeHash, refreshTokenHash [32]byte, expiresAt time.Time) error {
 	r.log("RecordIssuedRefreshToken")
 	return r.fakeGrantStore.RecordIssuedRefreshToken(ctx, codeHash, refreshTokenHash, expiresAt)
 }

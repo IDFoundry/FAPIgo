@@ -146,7 +146,7 @@ func PublicJWKS(ctx context.Context, signing []SigningKeyUse, encryption []Encry
 // encryption loops both need, identically apart from which jose
 // constructor builds the JWK. seen holds each published kid's encoded
 // JWK.
-func appendPublicJWK(result *PublicKeySet, seen map[string][]byte, keyID string, emptyKidMsg string, build func() (jose.JWK, error)) error {
+func appendPublicJWK(result *PublicKeySet, seen map[string][]byte, keyID, emptyKidMsg string, build func() (jose.JWK, error)) error {
 	if keyID == "" {
 		return fmt.Errorf("keys: %s", emptyKidMsg)
 	}

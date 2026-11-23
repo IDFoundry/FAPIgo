@@ -1305,7 +1305,7 @@ func certPEMThumbprint(certPEM string) (string, error) {
 // redirect_uris, client_auth_method, allowed_scopes — exactly as
 // already committed, the same preserve-what-this-tool-doesn't-own
 // approach patchConformanceASConfig/patchCIBAMTLSConfig use.
-func patchClientAuthMTLSConfig(path string, thumb1, thumb2 string) (clientIDs [2]string, err error) {
+func patchClientAuthMTLSConfig(path, thumb1, thumb2 string) (clientIDs [2]string, err error) {
 	top, clients, err := readConfigClients(path)
 	if err != nil {
 		return clientIDs, err

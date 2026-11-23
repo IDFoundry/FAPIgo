@@ -253,7 +253,7 @@ func TestNewJWTAccessTokensRejectsInvalid(t *testing.T) {
 // a fixed order) plus one real signing key, and issues a token signed
 // with that real key — for exercising MaxKeyCandidates directly, not
 // through the full Verifier/DPoP flow.
-func jwtAccessTokensWithCandidateKeys(t *testing.T, decoyCount, maxKeyCandidates int, signingKeyIndex int) (resource.JWTAccessTokens, string) {
+func jwtAccessTokensWithCandidateKeys(t *testing.T, decoyCount, maxKeyCandidates, signingKeyIndex int) (resource.JWTAccessTokens, string) {
 	t.Helper()
 	issuerURL, err := fapi.ParseIssuerURL(testIssuer)
 	if err != nil {

@@ -87,7 +87,7 @@ func (s *GrantStore) RecordIssuedAccessToken(_ context.Context, codeHash [32]byt
 }
 
 // RecordIssuedRefreshToken implements storage.GrantStore.
-func (s *GrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash [32]byte, refreshTokenHash [32]byte, _ time.Time) error {
+func (s *GrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash, refreshTokenHash [32]byte, _ time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.codeRefreshHash[codeHash] = refreshTokenHash

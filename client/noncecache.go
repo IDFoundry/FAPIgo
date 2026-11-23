@@ -56,7 +56,7 @@ type DPoPNonceCache interface {
 	// an error response that wasn't a challenge, so a nonce the server
 	// refused, or one that made the request too large to accept, isn't
 	// presented again.
-	Set(ctx context.Context, scope string, nonce string)
+	Set(ctx context.Context, scope, nonce string)
 }
 
 // InMemoryDPoPNonceCache is a DPoPNonceCache backed by a plain map, safe
@@ -81,7 +81,7 @@ func (c *InMemoryDPoPNonceCache) Get(_ context.Context, scope string) (string, b
 }
 
 // Set implements DPoPNonceCache.
-func (c *InMemoryDPoPNonceCache) Set(_ context.Context, scope string, nonce string) {
+func (c *InMemoryDPoPNonceCache) Set(_ context.Context, scope, nonce string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if nonce == "" {

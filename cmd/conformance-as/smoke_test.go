@@ -156,7 +156,7 @@ func newSmokeHarnessWithNonceChallenge(t *testing.T, format AccessTokenFormat, d
 // newSmokeHarnessWithOptions builds the harness; each of mutate, if
 // any, adjusts the ResolvedConfig before the server is built, for the
 // runtime flags main.go sets there itself (-pairwise-subjects, say).
-func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, cibaApprovalUIToken string, mutate ...func(*ResolvedConfig)) *smokeHarness {
+func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonceChallenge, userinfoSigning, ciba bool, cibaApprovalUIToken string, mutate ...func(*ResolvedConfig)) *smokeHarness {
 	t.Helper()
 
 	cert, pool := selfSignedCert(t)

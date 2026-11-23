@@ -116,7 +116,7 @@ func buildFederationFetcher(resolved ResolvedConfig, allowLoopbackHTTP, federati
 // Factored out so the end-to-end smoke test can stand up the exact same
 // wiring main.go uses, against its own TLS listener, without going
 // through flags or a config file on disk.
-func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, clientCredentialsGrant bool, cibaApprovalUIToken string, federationTrustAnchorAdminToken string) (*http.ServeMux, error) {
+func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP, dpopNonceChallenge, userinfoSigning, ciba, clientCredentialsGrant bool, cibaApprovalUIToken, federationTrustAnchorAdminToken string) (*http.ServeMux, error) {
 	// The admin endpoint is on exactly when it has a token to check —
 	// see federationTrustAnchorAdminHandler.
 	federationTrustAnchorAdmin := federationTrustAnchorAdminToken != ""

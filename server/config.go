@@ -858,8 +858,13 @@ type AutomaticRegistrationConfig struct {
 	// OnResolutionFailure, if set, is told why a would-be
 	// automatically-registered client was refused — the client itself
 	// only sees invalid_client. See
-	// federation.AutomaticRegistrationConfig.OnResolutionFailure: log
-	// err, never return it to the client, and don't block. Optional.
+	// federation.AutomaticRegistrationConfig.OnResolutionFailure: it
+	// runs on a goroutine of the library's own, not the request's, and
+	// can run after the request that triggered the resolution has
+	// returned. Log err, never return it to the client, and don't block,
+	// panic, or resolve the same client_id from it. A panic is recovered,
+	// and the requests waiting on that resolution get server_error.
+	// Optional.
 	OnResolutionFailure func(ctx context.Context, clientID fapi.ClientID, err error)
 }
 

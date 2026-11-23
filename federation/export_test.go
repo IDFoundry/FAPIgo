@@ -47,3 +47,17 @@ func RetainedStrings(r *AutomaticClientRepository) []string {
 	}
 	return kept
 }
+
+// ResolutionState is what r holds for its Trust Chain resolutions, for
+// tests in package federation_test: how many are running, how many are
+// in flight, how many callers wait on id's, and whether a failure is
+// remembered for id.
+func ResolutionState(r *AutomaticClientRepository, id fapi.ClientID) (running, inflight, waiters int, remembered bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if call, ok := r.inflight[id]; ok {
+		waiters = call.waiters
+	}
+	_, remembered = r.failures[id]
+	return r.running, len(r.inflight), waiters, remembered
+}

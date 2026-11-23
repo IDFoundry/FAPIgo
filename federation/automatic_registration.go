@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -236,20 +237,34 @@ type AutomaticRegistrationConfig struct {
 	// openid_relying_party metadata, or that metadata can't be used
 	// (e.g. no client authentication method this package implements, or
 	// a token_endpoint_auth_method outside AllowedClientAuthMethods).
-	// The client itself only ever sees a generic invalid-client error,
-	// so this is how an operator finds out why.
+	// The client itself only ever sees a generic invalid-client error
+	// (server_error if this hook panics, below), so this is how an
+	// operator finds out why.
 	//
 	// err can carry text from the RP's own statements and metadata: log
-	// it, never return it to the client. It is called synchronously, on
-	// the request that triggered the resolution — concurrent requests
-	// for the same client_id share that one call — so it must not
-	// block. A failure is remembered for FailureCacheAge, so an RP that
-	// keeps retrying is reported once per resolution attempted, not once
-	// per request; the requests answered from that memory get the
-	// failure's message only, cut to its first KiB. Optional. A
-	// resolution abandoned because every request waiting on it went away
-	// (see MaxConcurrentResolutions) isn't reported: it says nothing
-	// about the client_id.
+	// it, never return it to the client. It runs on the goroutine this
+	// package resolves the client_id on, not on a request's: the
+	// requests for that client_id made while it resolves share that one
+	// resolution and this one call, which can come after the request
+	// that started the resolution has returned, while another still
+	// waits. ctx keeps that first request's values but not its
+	// cancellation, and is cancelled once no request waits on the
+	// resolution any more. So it must not block, must not panic, and
+	// must not call ResolveClient for the same client_id, which could
+	// wait on the very resolution calling it. The failure is remembered,
+	// as FailureCacheAge sets out, before it is called, so a request
+	// arriving while it runs is answered from that memory instead of
+	// joining the resolution. A panic in it is recovered rather than
+	// ending the process: every request waiting on the resolution gets
+	// an error wrapping storage.ErrStoreUnavailable (the server answers
+	// 500 server_error), and the failure it was called for is remembered
+	// as if it had returned. A failure is remembered for FailureCacheAge,
+	// so an RP that keeps retrying is reported once per resolution
+	// attempted, not once per request; the requests answered from that
+	// memory get the failure's message only, cut to its first KiB.
+	// Optional. A resolution abandoned because every request waiting on
+	// it went away (see MaxConcurrentResolutions) isn't reported: it says
+	// nothing about the client_id.
 	OnResolutionFailure func(ctx context.Context, clientID fapi.ClientID, err error)
 
 	// MaxConcurrentResolutions bounds how many Trust Chain resolutions
@@ -381,7 +396,14 @@ func newRememberedFailure(err error) error {
 // trusted (see Resolver.Resolve and Dependencies.HTTP). The fetcher
 // bounds which hosts that can reach; a host listed in its
 // fapihttp.Config.AllowedPrivateHosts is reachable by unauthenticated
-// callers this way.
+// callers this way. Each resolution runs on a goroutine of this
+// package's own, which the requests naming that client_id wait on,
+// except those answered from a registration it has cached or a failure
+// it has remembered (see AutomaticRegistrationConfig.FailureCacheAge).
+// A panic there, in AutomaticRegistrationConfig.OnResolutionFailure,
+// the fetcher's transport or the Clock, is recovered: every request
+// waiting on the resolution gets an error wrapping
+// storage.ErrStoreUnavailable, and no registration is cached.
 //
 // The client_credentials grant and CIBA are each gated by their own
 // config-level switch (AutomaticRegistrationConfig.AllowsClientCredentialsGrant/
@@ -734,20 +756,83 @@ func (a *AutomaticClientRepository) startResolution(ctx context.Context, id fapi
 	call := &inflightResolution{done: make(chan struct{}), cancel: cancel}
 	a.inflight[id] = call
 	a.running++
-	go func() {
-		defer cancel()
-		entry, err := a.resolveUncached(resolveCtx, id)
-		a.mu.Lock()
-		call.entry, call.err = entry, err
-		if a.inflight[id] == call {
-			delete(a.inflight, id)
-		}
-		a.running--
-		a.mu.Unlock()
-		close(call.done)
-	}()
+	go a.runResolution(resolveCtx, id, call)
 	return call
 }
+
+// runResolution resolves id for call, on the goroutine startResolution
+// starts for it, then hands the outcome to finishResolution. That
+// goroutine is this package's own, so no caller can recover a panic on
+// it, and an unrecovered one ends the process: a panic in
+// OnResolutionFailure, in the fetcher's transport or the Clock, or in
+// this package, any of which a request naming an unresolvable Entity
+// Identifier can reach before its client is authenticated. It is
+// recovered here instead and fails the resolution. err starts as
+// errResolutionUnfinished, so a resolution whose goroutine exits without
+// returning or panicking (runtime.Goexit) fails too.
+func (a *AutomaticClientRepository) runResolution(ctx context.Context, id fapi.ClientID, call *inflightResolution) {
+	entry, err := cachedClient{}, errResolutionUnfinished
+	defer func() { a.finishResolution(id, call, entry, err, recover()) }()
+	entry, err = a.resolveUncached(ctx, id)
+}
+
+// finishResolution records call's outcome for every caller waiting on
+// it — entry and err as resolveUncached returned them, or, when
+// panicked (what a panic in the resolution was recovered with) isn't
+// nil, no registration and a resolutionPanicError — forgets call as
+// id's resolution in flight, frees its place under
+// MaxConcurrentResolutions, wakes its waiters and releases its context.
+// It runs deferred, after a panic too, so it calls nothing that could
+// panic again.
+func (a *AutomaticClientRepository) finishResolution(id fapi.ClientID, call *inflightResolution, entry cachedClient, err error, panicked any) {
+	if panicked != nil {
+		entry, err = cachedClient{}, newResolutionPanicError(id, panicked)
+	}
+	a.mu.Lock()
+	call.entry, call.err = entry, err
+	if a.inflight[id] == call {
+		delete(a.inflight, id)
+	}
+	a.running--
+	a.mu.Unlock()
+	close(call.done)
+	call.cancel()
+}
+
+// errResolutionUnfinished is what a resolution's callers get when its
+// goroutine ends without the resolution returning or panicking (see
+// runResolution). Like resolutionPanicError, it wraps
+// storage.ErrStoreUnavailable: the repository couldn't answer.
+var errResolutionUnfinished = fmt.Errorf("federation: the client_id resolution ended without a result: %w", storage.ErrStoreUnavailable)
+
+// resolutionPanicError is what every caller waiting on a resolution that
+// panicked gets: the panic's value and the stack it was recovered on,
+// for the log. It wraps storage.ErrStoreUnavailable, as
+// ErrTooManyResolutions does, since the repository couldn't answer and
+// that says nothing about the client_id: the server answers 500
+// server_error, and the failure isn't remembered against the client_id,
+// beyond what the resolution itself remembered before it panicked (see
+// resolveUncached).
+type resolutionPanicError struct {
+	id    fapi.ClientID
+	value any
+	stack []byte
+}
+
+// newResolutionPanicError records value, recovered while resolving id,
+// with the stack it was recovered on.
+func newResolutionPanicError(id fapi.ClientID, value any) *resolutionPanicError {
+	return &resolutionPanicError{id: id, value: value, stack: debug.Stack()}
+}
+
+// Error names the client_id and the panic's value, followed by the
+// stack the panic was recovered on.
+func (e *resolutionPanicError) Error() string {
+	return fmt.Sprintf("federation: resolve client %s: the resolution panicked: %v\n\n%s", quoteEntityID(string(e.id)), e.value, e.stack)
+}
+
+// Unwrap returns storage.ErrStoreUnavailable.
+func (e *resolutionPanicError) Unwrap() error { return storage.ErrStoreUnavailable }
 
 // leaveResolution records that a caller waiting on call (id's
 // resolution) has gone. When it was the last, the resolution is
@@ -785,16 +870,15 @@ func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi
 		if ctx.Err() != nil {
 			return cachedClient{}, err
 		}
+		// Remembered before the hook runs, so a hook that panics (see
+		// runResolution) still leaves the failure remembered.
+		a.rememberFailure(id, err, a.clock.Now())
 		if a.cfg.OnResolutionFailure != nil {
 			a.cfg.OnResolutionFailure(ctx, id, err)
 		}
-		a.rememberFailure(id, err, a.clock.Now())
 		return cachedClient{}, err
 	}
-	a.mu.Lock()
-	a.cacheRegistration(id, entry, a.clock.Now())
-	delete(a.failures, id)
-	a.mu.Unlock()
+	a.rememberRegistration(id, entry, a.clock.Now())
 	return entry, nil
 }
 
@@ -802,6 +886,18 @@ func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi
 // limits registrationCache's doc comment sets out. a.mu must be held.
 func (a *AutomaticClientRepository) cacheRegistration(id fapi.ClientID, entry cachedClient, now time.Time) {
 	a.cache.put(id, entry, now)
+}
+
+// rememberRegistration caches entry as id's registration and forgets
+// any failure remembered for id. It holds a.mu only while it updates
+// both, and releases it by a deferred call, so a panic can't leave it
+// held: the resolution's goroutine recovers one (see runResolution),
+// and every later request would otherwise wait on a.mu for ever.
+func (a *AutomaticClientRepository) rememberRegistration(id fapi.ClientID, entry cachedClient, now time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cacheRegistration(id, entry, now)
+	delete(a.failures, id)
 }
 
 // rememberFailure records err as id's registration failure until

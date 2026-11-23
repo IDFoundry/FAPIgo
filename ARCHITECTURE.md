@@ -135,11 +135,17 @@ Two more value types belong here because every role needs them
 identically:
 
 - **`Secret`** — wraps any token, code or credential value that could
-  end up in a log line by accident. `String()`, `GoString()` and
-  `MarshalText()` all redact; `Reveal()` is the only way to get the raw
-  value out. `client.TokenSet` and `server.TokenResult` use it for every
-  token they carry; `resource.AuthorizationContext` carries no raw token
-  value at all.
+  end up in a log line by accident. fmt prints `[REDACTED]` under every
+  verb and flag (`Format`), log/slog logs it (`LogValue`), and
+  `String()`, `GoString()` and `MarshalText()` all redact; `Reveal()` is
+  the only way to get the raw value out. The value sits in no string
+  field: a `Secret` holds the canonical `unique.Handle` of its value, so
+  where fmt calls no method — `%p`, `%w` on a non-error, a `Secret` in
+  an unexported field at any depth, which is also how slog's text
+  handler prints a struct — it prints only an address, while `==` and
+  map keys still compare `Secret`s by value. `client.TokenSet` and
+  `server.TokenResult` use it for every token they carry;
+  `resource.AuthorizationContext` carries no raw token value at all.
 - **`URL`** (constructed via `ParseIssuerURL` / `ParseEndpointURL` /
   `ParseRedirectURL`, not a bare `string`) — enforces absolute, HTTPS
   (except an explicitly enabled loopback exception, or, for a native

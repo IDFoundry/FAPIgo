@@ -1126,7 +1126,11 @@ serves CIBA, and never from an assertion typed
 RFC 10070 (no other `typ` counts). A refresh can't tell
 which grant it's for until the refresh token is redeemed, so the
 verified `aud` is carried out of `clientassertion.Verify` and checked
-again then. Revocation is issuer-only either way.
+again then. Revocation is issuer-only either way. `cmd/conformance-as`
+sets the opt-in with `-ciba`, since the FAPI-CIBA suite's client
+assertions name endpoint URLs: the backchannel authentication
+endpoint's at that endpoint, and the token endpoint's, or its mTLS
+alias, in token requests.
 
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was

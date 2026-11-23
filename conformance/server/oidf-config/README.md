@@ -612,14 +612,27 @@ surfaced seven real, since-fixed library/harness gaps:
   client-authenticated endpoint URL this server exposes (Token, PAR,
   BackchannelAuthentication), plus their mTLS aliases for an
   mTLS-bound client. This is not mTLS-specific — a DPoP-bound client
-  gets the same widened set now too. **Since narrowed twice:** PAR
+  gets the same widened set now too. **Since narrowed three times:** PAR
   became issuer-only (FAPI2's `par-test-{par,token}-endpoint-url-as-audience-fails`),
   then FAPI 2.0 SP Final §5.3.2.1's issuer-only rule was applied at
   every endpoint for non-CIBA clients (FAPI2's
-  `ensure-invalid-client-assertions-fail`, client-credentials variant).
-  The widened set above now applies only to CIBA-registered clients —
-  which is all this CIBA plan's clients are, so this plan is
-  unaffected. See `acceptableClientAssertionAudiences`' doc comment.
+  `ensure-invalid-client-assertions-fail`, client-credentials variant),
+  and then, following RFC 10070 §4, the issuer became the only audience
+  for every client by default. CIBA's endpoint URLs are now the opt-in
+  `server.Config.CIBAEndpointURLAudiences`, for CIBA clients only: the
+  token and backchannel authentication endpoint URLs at the backchannel
+  authentication endpoint, and the token endpoint URL in the CIBA token
+  request and to refresh a CIBA grant, each with its mTLS alias for an
+  mTLS-bound client, but never at revocation or from an assertion
+  typed `client-authentication+jwt`. `cmd/conformance-as` sets it with
+  `-ciba`, since this plan's suite names endpoint URLs in its client
+  assertions, which carry no `typ`: the backchannel authentication
+  endpoint URL at that endpoint (the issuer for the first client, and
+  the token endpoint URL for the second, in `fapi-ciba-id1` and
+  `-refresh-token`), and the token endpoint's mTLS alias, or its URL
+  where none is published, in every token request, refresh included;
+  so the plan is unaffected. See `acceptableClientAssertionAudiences`'
+  doc comment.
 - **Fixed: FAPI-RW-8.5-1/8.5-2 ("Server accepted a cipher that is not
   on the list of permitted ciphers") — two distinct causes, both
   resolved.** First cause: `cmd/conformance-as/main.go`'s own cipher
@@ -834,7 +847,9 @@ directly above:
   `server/par.go`'s `acceptableClientAssertionAudiences` and
   ARCHITECTURE.md's own account of this fix, which also covers a
   related, more consequential bug this same investigation found at the
-  PAR endpoint on the baseline/message-signing profiles).
+  PAR endpoint on the baseline/message-signing profiles). The widening
+  is now an opt-in, `server.Config.CIBAEndpointURLAudiences`, which
+  `cmd/conformance-as` sets with `-ciba` for these modules.
 
 Confirmed live with both fixes: all nine `run-all.sh` suites (AS
 baseline/message-signing/ciba-mtls/ciba-ping/client-auth-mtls, RP

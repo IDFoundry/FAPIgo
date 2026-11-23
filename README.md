@@ -250,7 +250,9 @@ The client is also interop-tested daily against Keycloak 26.8.2 (Java).
 > runs, including the 0.25.0 certification, used a
 > `MaxRequestObjectLifetime` of 600 seconds, above the suite's
 > 300-second request objects; that is now `server.RecommendedLimits()`'s
-> own value. Rich Authorization
+> own value. The CIBA runs set `server.Config.CIBAEndpointURLAudiences`
+> (`cmd/conformance-as -ciba` does), since the suite's CIBA client
+> assertions name endpoint URLs. Rich Authorization
 > Requests (RFC 9396) are implemented end-to-end across the PAR-fed
 > authorization-code flow, CIBA, and the client_credentials grant (RFC
 > 9396 §6), including a per-type narrowing hook so a resource owner can

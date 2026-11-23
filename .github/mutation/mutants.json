@@ -2335,5 +2335,282 @@
     ],
     "run": "^TestProductionServerAcceptsPushedRequestLookup$",
     "why": "SQLite's lookup doesn't declare CrossInstanceConsistent, so server.New refuses it horizontally scaled"
+  },
+  {
+    "id": "fed-resolution-panic-recovered",
+    "file": "federation/automatic_registration.go",
+    "old": "defer func() { a.finishResolution(id, call, entry, err, recover()) }()",
+    "new": "defer func() { a.finishResolution(id, call, entry, err, nil) }()",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestResolutionPanicLeavesProcessAlive$",
+    "why": "a panic on a Trust Chain resolution's goroutine, in OnResolutionFailure, the transport or the Clock, is recovered rather than ending the process"
+  },
+  {
+    "id": "fed-resolution-panic-fails-waiters",
+    "file": "federation/automatic_registration.go",
+    "old": "entry, err = cachedClient{}, newResolutionPanicError(id, panicked)",
+    "new": "entry, err = cachedClient{}, nil",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestResolutionPanicLeavesProcessAlive$",
+    "why": "every caller waiting on a resolution that panicked gets an error, never a zero registration"
+  },
+  {
+    "id": "fed-resolution-panic-store-unavailable",
+    "file": "federation/automatic_registration.go",
+    "old": "func (e *resolutionPanicError) Unwrap() error { return storage.ErrStoreUnavailable }",
+    "new": "func (e *resolutionPanicError) Unwrap() error { return nil }",
+    "module": "root",
+    "packages": [
+      "./federation",
+      "./server"
+    ],
+    "run": "^(TestResolutionPanicLeavesProcessAlive|TestAutomaticRegistrationHookPanicAnswersServerError)$",
+    "why": "a resolution that panicked fails its callers with storage.ErrStoreUnavailable, which the server answers 500 server_error"
+  },
+  {
+    "id": "fed-resolution-failure-remembered-before-hook",
+    "file": "federation/automatic_registration.go",
+    "old": "a.rememberFailure(id, err, a.clock.Now())\n\t\tif a.cfg.OnResolutionFailure != nil {\n\t\t\ta.cfg.OnResolutionFailure(ctx, id, err)\n\t\t}",
+    "new": "if a.cfg.OnResolutionFailure != nil {\n\t\t\ta.cfg.OnResolutionFailure(ctx, id, err)\n\t\t}\n\t\ta.rememberFailure(id, err, a.clock.Now())",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestResolutionPanicLeavesProcessAlive|TestResolutionEndingWithoutResultFailsClosed)$",
+    "why": "a resolution's failure is remembered before OnResolutionFailure runs, so a hook that panics still leaves it remembered"
+  },
+  {
+    "id": "fed-resolution-unfinished-fails-closed",
+    "file": "federation/automatic_registration.go",
+    "old": "entry, err := cachedClient{}, errResolutionUnfinished",
+    "new": "entry, err := cachedClient{}, error(nil)",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestResolutionEndingWithoutResultFailsClosed$",
+    "why": "a resolution whose goroutine ends without a result (runtime.Goexit) fails its callers rather than handing them a zero registration"
+  },
+  {
+    "id": "fed-resolution-cache-lock-released-on-panic",
+    "file": "federation/automatic_registration.go",
+    "old": "a.rememberRegistration(id, entry, a.clock.Now())",
+    "new": "a.mu.Lock(); a.cacheRegistration(id, entry, a.clock.Now()); delete(a.failures, id); a.mu.Unlock()",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestResolutionPanicLeavesProcessAlive$",
+    "why": "the Clock is read before the repository's lock is taken to cache a registration, so a panic there can't leave the lock held and every later resolution waiting on it"
+  },
+  {
+    "id": "fed-resolution-abandoned-frees-place",
+    "file": "federation/automatic_registration.go",
+    "old": "if a.inflight[id] == call {\n\t\tdelete(a.inflight, id)\n\t}\n\ta.running--",
+    "new": "if a.inflight[id] == call {\n\t\tdelete(a.inflight, id)\n\t\ta.running--\n\t}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestAbandonedResolutionFreesItsPlace$",
+    "why": "a resolution every caller abandoned still frees its place under MaxConcurrentResolutions when its goroutine ends, whether it returned or panicked, so callers cancelling their own requests can't use the places up"
+  },
+  {
+    "id": "fed-rp-key-thumbprint-kid",
+    "file": "federation/automatic_registration.go",
+    "old": "return err == nil && thumbprint == kid",
+    "new": "return err == nil && thumbprint == kid && false",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestAutomaticClientKeySourceMatchesThumbprintOfKeyWithoutKeyID$",
+    "why": "an automatically registered RP's key published without a kid answers to a request naming its RFC 7638 thumbprint"
+  },
+  {
+    "id": "fed-rp-key-thumbprint-own-algorithm",
+    "file": "federation/automatic_registration.go",
+    "old": "jose.ThumbprintKeyID(c.PublicKey, c.Algorithm)",
+    "new": "jose.ThumbprintKeyID(c.PublicKey, fapi.ES256)",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestAutomaticClientKeySourceMatchesThumbprintOfKeyWithoutKeyID$",
+    "why": "an automatically registered RP's key published without a kid answers to its thumbprint whatever its algorithm, an RSA or Ed25519 key's as well as a P-256 one's"
+  },
+  {
+    "id": "keys-jwks-refresh-panic-recovered",
+    "file": "keys/jwkscache.go",
+    "old": "defer func() { c.finishRefresh(call, recover()) }()",
+    "new": "defer func() { c.finishRefresh(call, nil) }()",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestJWKSRefreshPanicLeavesProcessAlive$",
+    "why": "a panic on a JWK Set refresh's goroutine, in the fetcher's transport or the set's parsing, is recovered rather than ending the process"
+  },
+  {
+    "id": "keys-jwks-refresh-panic-fails-waiters",
+    "file": "keys/jwkscache.go",
+    "old": "call.keys, call.err = zero, newRefreshPanicError(panicked)",
+    "new": "call.keys, call.err = zero, nil",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestJWKSRefreshPanicLeavesProcessAlive$",
+    "why": "every caller waiting on a JWK Set refresh that panicked gets an error, never an empty set and no error"
+  },
+  {
+    "id": "keys-jwks-refresh-unfinished-fails-closed",
+    "file": "keys/jwkscache.go",
+    "old": "call.err = errRefreshUnfinished",
+    "new": "call.err = nil",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestJWKSRefreshEndingWithoutResultFailsClosed$",
+    "why": "a JWK Set refresh whose goroutine ends without a result (runtime.Goexit) fails its callers"
+  },
+  {
+    "id": "srv-crl-unprocessed-critical-extension",
+    "file": "server/client_certificate_crl.go",
+    "old": "if ext.Critical && !ext.Id.Equal(oidAuthorityKeyIdentifier) && !ext.Id.Equal(oidCRLNumber) {",
+    "new": "if ext.Critical && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestClientCertificateCRLsCriticalExtensions|TestTLSClientAuthRefusesUnreadableCRL|TestX5CAttesterChainRevocationRefusesUnreadableCRL)$",
+    "why": "a CRL carrying a critical extension ClientCertificateCRLs doesn't process decides no certificate's status (RFC 5280 §5.2)"
+  },
+  {
+    "id": "srv-crl-unprocessed-critical-entry-extension",
+    "file": "server/client_certificate_crl.go",
+    "old": "if ext.Critical && !ext.Id.Equal(oidReasonCode) && !ext.Id.Equal(oidInvalidityDate) {",
+    "new": "if ext.Critical && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestClientCertificateCRLsCriticalExtensions|TestTLSClientAuthRefusesUnreadableCRL)$",
+    "why": "a CRL with an entry carrying a critical extension ClientCertificateCRLs doesn't process decides no certificate's status (RFC 5280 §5.3)"
+  },
+  {
+    "id": "srv-crl-unprocessed-critical-extension-on-any-entry",
+    "file": "server/client_certificate_crl.go",
+    "old": "for _, entry := range entries {",
+    "new": "for _, entry := range entries[:min(1, len(entries))] {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestClientCertificateCRLsCriticalExtensions$",
+    "why": "a CRL with a critical extension ClientCertificateCRLs doesn't process on any of its entries, not only the first, decides no certificate's status (RFC 5280 §5.3)"
+  },
+  {
+    "id": "srv-crl-delta-or-partition-incomplete",
+    "file": "server/client_certificate_crl.go",
+    "old": "if ext.Id.Equal(oidDeltaCRLIndicator) || ext.Id.Equal(oidIssuingDistributionPoint) {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestClientCertificateCRLs|TestClientCertificateCRLsCriticalExtensions)$",
+    "why": "a delta CRL, or one with an issuing distribution point, decides no certificate's status, critical or not"
+  },
+  {
+    "id": "srv-client-key-thumbprint-kid",
+    "file": "server/key_candidates.go",
+    "old": "return err == nil && thumbprint == kid",
+    "new": "return err == nil && thumbprint == kid && false",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestClientKeyWithoutKeyIDMatchesItsThumbprint|TestKeyCandidatesMatchKeyIDs)$",
+    "why": "a client key registered without a kid answers to a JWT naming its RFC 7638 thumbprint, the kid keys.NewKeyManagerFromSigners derives for it"
+  },
+  {
+    "id": "srv-client-key-thumbprint-kid-its-own",
+    "file": "server/key_candidates.go",
+    "old": "return err == nil && thumbprint == kid",
+    "new": "return err == nil && thumbprint != \"\"",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestClientKeyWithoutKeyIDMatchesItsThumbprint|TestKeyCandidatesMatchKeyIDs)$",
+    "why": "a client key registered without a kid answers only to its own thumbprint, so a kid naming another key, another client's included, finds none"
+  },
+  {
+    "id": "srv-client-key-thumbprint-own-algorithm",
+    "file": "server/key_candidates.go",
+    "old": "jose.ThumbprintKeyID(k.PublicKey, k.Algorithm)",
+    "new": "jose.ThumbprintKeyID(k.PublicKey, fapi.ES256)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestKeyCandidatesMatchKeyIDs$",
+    "why": "a client key registered without a kid answers to its thumbprint whatever its algorithm, a PS256 or EdDSA key's as well as an ES256 one's"
+  },
+  {
+    "id": "srv-client-key-named-kid-exact",
+    "file": "server/key_candidates.go",
+    "old": "if k.KeyID != \"\" {\n\t\treturn k.KeyID == kid",
+    "new": "if k.KeyID != \"\" {\n\t\treturn k.KeyID == kid || true",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestKeyCandidatesMatchKeyIDs$",
+    "why": "a client key registered with a kid answers to that kid alone, never to its thumbprint"
+  },
+  {
+    "id": "srv-attester-key-exact-kid",
+    "file": "server/key_candidates.go",
+    "old": "return keyCandidates(set, alg, kid, hasKeyID)",
+    "new": "return keyCandidates(set, alg, kid, answersToKeyID)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestAttesterKeyWithoutKeyIDDoesNotMatchItsThumbprint|TestKeyCandidatesMatchKeyIDs)$",
+    "why": "an attester's key answers to an attestation's kid by its KeyID alone, never by its thumbprint"
+  },
+  {
+    "id": "keys-ephemeral-client-key-thumbprint-kid",
+    "file": "keys/ephemeral/clientkeysource.go",
+    "old": "out.verificationKeyIDs = append(out.verificationKeyIDs, answeredKeyID(k))",
+    "new": "out.verificationKeyIDs = append(out.verificationKeyIDs, k.KeyID)",
+    "module": "root",
+    "packages": [
+      "./keys/ephemeral"
+    ],
+    "run": "^(TestClientKeySourceMatchesThumbprintOfKeyWithoutKeyID|TestClientKeySourceServesThumbprintKeyIDFromFreshCache)$",
+    "why": "keys/ephemeral's ClientKeySource matches a key without a kid to a request naming its RFC 7638 thumbprint, and a fresh set answers it without fetching again"
+  },
+  {
+    "id": "keys-ephemeral-client-key-thumbprint-own-algorithm",
+    "file": "keys/ephemeral/clientkeysource.go",
+    "old": "jose.ThumbprintKeyID(k.PublicKey, k.Algorithm)",
+    "new": "jose.ThumbprintKeyID(k.PublicKey, fapi.ES256)",
+    "module": "root",
+    "packages": [
+      "./keys/ephemeral"
+    ],
+    "run": "^TestClientKeySourceMatchesThumbprintOfKeyWithoutKeyID$",
+    "why": "keys/ephemeral's ClientKeySource matches a key without a kid to its thumbprint whatever its algorithm, an RSA or Ed25519 key's as well as a P-256 one's"
   }
 ]

@@ -629,7 +629,8 @@ func (a *AutomaticClientRepository) staticallyRegistered(ctx context.Context, id
 // from its cached (or freshly resolved) openid_relying_party metadata —
 // the shared implementation behind AutomaticClientKeySource, factored
 // here so it can reuse this type's own cache directly instead of each
-// resolving the same Trust Chain independently.
+// resolving the same Trust Chain independently. A key matches a
+// requested kid as keys.VerificationKey.KeyID sets out (answersToKeyID).
 func (a *AutomaticClientRepository) resolveVerificationKeys(ctx context.Context, req keys.ClientKeyRequest) (keys.VerificationKeySet, error) {
 	entry, err := a.resolve(ctx, req.ClientID)
 	if err != nil {
@@ -644,12 +645,24 @@ func (a *AutomaticClientRepository) resolveVerificationKeys(ctx context.Context,
 		if c.Algorithm != req.Algorithm {
 			continue
 		}
-		if req.KeyID != "" && c.KeyID != req.KeyID {
+		if req.KeyID != "" && !answersToKeyID(c, req.KeyID) {
 			continue
 		}
 		matched = append(matched, keys.VerificationKey{KeyID: c.KeyID, Algorithm: c.Algorithm, PublicKey: c.PublicKey})
 	}
 	return keys.VerificationKeySet{Keys: matched}, nil
+}
+
+// answersToKeyID reports whether c, a key of an RP's JWK Set, answers
+// to kid: its "kid" is kid, or it has none and kid is its RFC 7638
+// thumbprint, the kid keys.NewKeyManagerFromSigners derives for such a
+// key. A key whose thumbprint can't be computed answers to no kid.
+func answersToKeyID(c jose.ParsedJWK, kid string) bool {
+	if c.KeyID != "" {
+		return c.KeyID == kid
+	}
+	thumbprint, err := jose.ThumbprintKeyID(c.PublicKey, c.Algorithm)
+	return err == nil && thumbprint == kid
 }
 
 // resolve returns id's cached entry if still fresh, or resolves (via

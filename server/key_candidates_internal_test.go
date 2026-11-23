@@ -3,8 +3,10 @@ package server
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"errors"
 	"fmt"
 	"testing"
@@ -96,5 +98,66 @@ func TestVerifyWithCandidates(t *testing.T) {
 	}
 	if _, err := verifyWithCandidates(nil, verify(a, nil)); err == nil {
 		t.Error("no candidates: nil error, want error")
+	}
+}
+
+// thumbprintOf is pub's RFC 7638 thumbprint kid as a key for alg.
+func thumbprintOf(t *testing.T, pub crypto.PublicKey, alg fapi.SignatureAlgorithm) string {
+	t.Helper()
+	thumbprint, err := jose.ThumbprintKeyID(pub, alg)
+	if err != nil {
+		t.Fatalf("ThumbprintKeyID(%v): %v", alg, err)
+	}
+	return thumbprint
+}
+
+// TestKeyCandidatesMatchKeyIDs: a client's key with no KeyID answers to
+// its RFC 7638 thumbprint, computed for the key's own algorithm (ES256,
+// PS256 or EdDSA), as well as to a request naming no kid; one with a
+// KeyID answers to that alone, and one whose thumbprint can't be
+// computed for its algorithm to no kid. An attester's keys
+// (verificationKeyCandidates) answer to their KeyID alone. Each key is
+// asked for under its own algorithm.
+func TestKeyCandidatesMatchKeyIDs(t *testing.T) {
+	pub := newTestPublicKey(t)
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	edPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	thumbprint := thumbprintOf(t, pub, fapi.ES256)
+	edThumbprint := thumbprintOf(t, edPub, fapi.EdDSA)
+	kidless := keys.VerificationKey{Algorithm: fapi.ES256, PublicKey: pub}
+	named := keys.VerificationKey{KeyID: "named", Algorithm: fapi.ES256, PublicKey: pub}
+	rsaKidless := keys.VerificationKey{Algorithm: fapi.PS256, PublicKey: &rsaKey.PublicKey}
+	edKidless := keys.VerificationKey{Algorithm: fapi.EdDSA, PublicKey: edPub}
+	unfit := keys.VerificationKey{Algorithm: fapi.ES256, PublicKey: edPub}
+	for _, tc := range []struct {
+		name             string
+		key              keys.VerificationKey
+		kid              string
+		client, attester bool
+	}{
+		{"no KeyID, no kid named", kidless, "", true, true},
+		{"no KeyID, its thumbprint", kidless, thumbprint, true, false},
+		{"no KeyID, RSA, its thumbprint", rsaKidless, thumbprintOf(t, &rsaKey.PublicKey, fapi.PS256), true, false},
+		{"no KeyID, Ed25519, its thumbprint", edKidless, edThumbprint, true, false},
+		{"no KeyID, another kid", kidless, "other", false, false},
+		{"KeyID, itself", named, "named", true, true},
+		{"KeyID, its thumbprint", named, thumbprint, false, false},
+		{"no KeyID, unfit for its algorithm", unfit, edThumbprint, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			set := keys.VerificationKeySet{Keys: []keys.VerificationKey{tc.key}}
+			if _, err := clientKeyCandidates(set, tc.key.Algorithm, tc.kid); (err == nil) != tc.client {
+				t.Errorf("clientKeyCandidates: %v, want a match %v", err, tc.client)
+			}
+			if _, err := verificationKeyCandidates(set, tc.key.Algorithm, tc.kid); (err == nil) != tc.attester {
+				t.Errorf("verificationKeyCandidates: %v, want a match %v", err, tc.attester)
+			}
+		})
 	}
 }

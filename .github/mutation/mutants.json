@@ -2612,5 +2612,89 @@
     ],
     "run": "^TestClientKeySourceMatchesThumbprintOfKeyWithoutKeyID$",
     "why": "keys/ephemeral's ClientKeySource matches a key without a kid to its thumbprint whatever its algorithm, an RSA or Ed25519 key's as well as a P-256 one's"
+  },
+  {
+    "id": "memstore-refresh-token-revoked-before-stored",
+    "file": "storage/memstore/grant_store.go",
+    "old": "s.refreshRevoked[tokenHash] = true",
+    "new": "if _, stored := s.refresh[tokenHash]; stored {\n\t\ts.refreshRevoked[tokenHash] = true\n\t}",
+    "module": "root",
+    "packages": [
+      "./storage/memstore"
+    ],
+    "run": "^TestGrantStoreContract$",
+    "why": "a refresh token revoked before it's stored is refused once it is"
+  },
+  {
+    "id": "memstore-refresh-token-create-keeps-revocation",
+    "file": "storage/memstore/grant_store.go",
+    "old": "s.refresh[token.TokenHash] = token",
+    "new": "s.refresh[token.TokenHash] = token\n\tdelete(s.refreshRevoked, token.TokenHash)",
+    "module": "root",
+    "packages": [
+      "./storage/memstore"
+    ],
+    "run": "^TestGrantStoreContract$",
+    "why": "storing a refresh token keeps an earlier revocation of its hash"
+  },
+  {
+    "id": "memstore-refresh-token-revoke-unstored",
+    "file": "storage/memstore/grant_store.go",
+    "old": "s.refreshRevoked[tokenHash] = true\n\treturn nil",
+    "new": "s.refreshRevoked[tokenHash] = true\n\tif _, stored := s.refresh[tokenHash]; !stored {\n\t\treturn fmt.Errorf(\"memstore: unknown refresh token\")\n\t}\n\treturn nil",
+    "module": "root",
+    "packages": [
+      "./storage/memstore"
+    ],
+    "run": "^TestGrantStoreContract$",
+    "why": "revoking a hash no refresh token is stored under succeeds"
+  },
+  {
+    "id": "memstore-refresh-token-revoke-again",
+    "file": "storage/memstore/grant_store.go",
+    "old": "s.refreshRevoked[tokenHash] = true\n\treturn nil",
+    "new": "if s.refreshRevoked[tokenHash] {\n\t\treturn fmt.Errorf(\"memstore: refresh token already revoked\")\n\t}\n\ts.refreshRevoked[tokenHash] = true\n\treturn nil",
+    "module": "root",
+    "packages": [
+      "./storage/memstore"
+    ],
+    "run": "^TestGrantStoreContract$",
+    "why": "revoking a refresh token's hash again succeeds"
+  },
+  {
+    "id": "memstore-refresh-token-create-loses-revocation",
+    "file": "storage/memstore/grant_store.go",
+    "old": "token.GrantKeys = cloneStrings(token.GrantKeys)\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\ts.refresh[token.TokenHash] = token",
+    "new": "token.GrantKeys = cloneStrings(token.GrantKeys)\n\ts.mu.Lock()\n\twasRevoked := s.refreshRevoked[token.TokenHash]\n\ts.mu.Unlock()\n\ttime.Sleep(time.Millisecond)\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\ts.refreshRevoked[token.TokenHash] = wasRevoked\n\ts.refresh[token.TokenHash] = token",
+    "module": "root",
+    "packages": [
+      "./storage/memstore"
+    ],
+    "run": "^TestGrantStoreContract$",
+    "why": "a revocation made while a refresh token is being stored is kept"
+  },
+  {
+    "id": "memstore-refresh-token-revoke-every-token",
+    "file": "storage/memstore/grant_store.go",
+    "old": "s.refreshRevoked[tokenHash] = true\n\treturn nil",
+    "new": "s.refreshRevoked[tokenHash] = true\n\tfor hash := range s.refresh {\n\t\ts.refreshRevoked[hash] = true\n\t}\n\treturn nil",
+    "module": "root",
+    "packages": [
+      "./storage/memstore"
+    ],
+    "run": "^TestGrantStoreContract$",
+    "why": "revoking one refresh token leaves the others redeemable"
+  },
+  {
+    "id": "memstore-refresh-token-keyed-create-keeps-revocation",
+    "file": "storage/memstore/grant_store.go",
+    "old": "s.refreshByGrant[key] = append(s.refreshByGrant[key], token.TokenHash)",
+    "new": "s.refreshByGrant[key] = append(s.refreshByGrant[key], token.TokenHash)\n\t\tdelete(s.refreshRevoked, token.TokenHash)",
+    "module": "root",
+    "packages": [
+      "./storage/memstore"
+    ],
+    "run": "^TestGrantStoreContract$",
+    "why": "storing a refresh token with grant keys keeps an earlier revocation of its hash"
   }
 ]

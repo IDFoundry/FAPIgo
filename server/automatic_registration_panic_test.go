@@ -146,7 +146,7 @@ func newHookPanicServer(t *testing.T) *server.Server {
 func recoverPanics(recovered *atomic.Int32, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			if p := recover(); p != nil {
+			if recover() != nil {
 				recovered.Add(1)
 				http.Error(w, "internal error", http.StatusInternalServerError)
 			}

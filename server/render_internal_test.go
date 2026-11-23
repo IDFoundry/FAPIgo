@@ -273,7 +273,7 @@ func TestRedirectSummaryOfANonURL(t *testing.T) {
 // TestShadowsKeepTheirTypesFields checks each rendering's shadow has the
 // fields of the type it prints for, in order.
 func TestShadowsKeepTheirTypesFields(t *testing.T) {
-	for real, shadow := range map[reflect.Type]reflect.Type{
+	for typ, shadow := range map[reflect.Type]reflect.Type{
 		reflect.TypeFor[InteractionRequired]():                      reflect.TypeFor[interactionRequiredShadow](),
 		reflect.TypeFor[BackchannelInteractionRequired]():           reflect.TypeFor[backchannelInteractionRequiredShadow](),
 		reflect.TypeFor[PendingBackchannelInteraction]():            reflect.TypeFor[pendingBackchannelInteractionShadow](),
@@ -298,7 +298,7 @@ func TestShadowsKeepTheirTypesFields(t *testing.T) {
 		reflect.TypeFor[CompleteBackchannelAuthenticationRequest](): reflect.TypeFor[completeAuthorizationRequestShadow](),
 		reflect.TypeFor[BackchannelNotification]():                  reflect.TypeFor[backchannelNotificationShadow](),
 	} {
-		rendertest.CheckShadow(t, real, shadow)
+		rendertest.CheckShadow(t, typ, shadow)
 	}
 }
 

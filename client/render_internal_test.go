@@ -249,7 +249,7 @@ func TestBeginAuthorizationRequestLogsNoExtensionValue(t *testing.T) {
 // TestShadowsKeepTheirTypesFields checks each rendering's shadow has the
 // fields of the type it prints for, in order.
 func TestShadowsKeepTheirTypesFields(t *testing.T) {
-	for real, shadow := range map[reflect.Type]reflect.Type{
+	for typ, shadow := range map[reflect.Type]reflect.Type{
 		reflect.TypeFor[ValidatedAuthorizationResponse]():        reflect.TypeFor[validatedAuthorizationResponseShadow](),
 		reflect.TypeFor[ResourceClient]():                        reflect.TypeFor[resourceClientShadow](),
 		reflect.TypeFor[BackchannelAuthenticationSession]():      reflect.TypeFor[backchannelAuthenticationSessionShadow](),
@@ -258,7 +258,7 @@ func TestShadowsKeepTheirTypesFields(t *testing.T) {
 		reflect.TypeFor[AuthorizationCallback]():                 reflect.TypeFor[authorizationCallbackShadow](),
 		reflect.TypeFor[BeginBackchannelAuthenticationRequest](): reflect.TypeFor[beginBackchannelAuthenticationRequestShadow](),
 	} {
-		rendertest.CheckShadow(t, real, shadow)
+		rendertest.CheckShadow(t, typ, shadow)
 	}
 }
 

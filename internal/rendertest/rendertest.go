@@ -128,13 +128,13 @@ func Check[T any](t testing.TB, v T, secrets []string, opts ...Option) {
 }
 
 // CheckShadow fails t unless shadow, the struct a redacting type prints
-// in its place, has real's field names in real's order: a field added to
+// in its place, has typ's field names in typ's order: a field added to
 // a type and not to its shadow would never print, and a shadow that
 // drifted would print fields under the wrong names.
-func CheckShadow(t Reporter, real, shadow reflect.Type) {
+func CheckShadow(t Reporter, typ, shadow reflect.Type) {
 	t.Helper()
-	if got, want := fieldNames(shadow), fieldNames(real); !slices.Equal(got, want) {
-		t.Errorf("%v shadows %v with fields %v, want %v", shadow, real, got, want)
+	if got, want := fieldNames(shadow), fieldNames(typ); !slices.Equal(got, want) {
+		t.Errorf("%v shadows %v with fields %v, want %v", shadow, typ, got, want)
 	}
 }
 

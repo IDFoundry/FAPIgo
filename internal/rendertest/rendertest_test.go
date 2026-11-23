@@ -260,12 +260,12 @@ func TestReportListsTheFirstLeaks(t *testing.T) {
 }
 
 func TestCheckShadowComparesFieldNames(t *testing.T) {
-	type real struct{ A, B string }
+	type original struct{ A, B string }
 	type shadow struct{ A, B int }
 	type drifted struct{ B, A string }
-	CheckShadow(t, reflect.TypeFor[real](), reflect.TypeFor[shadow]())
+	CheckShadow(t, reflect.TypeFor[original](), reflect.TypeFor[shadow]())
 	var r fakeReporter
-	CheckShadow(&r, reflect.TypeFor[real](), reflect.TypeFor[drifted]())
+	CheckShadow(&r, reflect.TypeFor[original](), reflect.TypeFor[drifted]())
 	if len(r.errors) != 1 {
 		t.Errorf("a shadow with its fields in another order passed: %v", r.errors)
 	}

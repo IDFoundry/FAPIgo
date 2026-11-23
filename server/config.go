@@ -556,10 +556,14 @@ type Config struct {
 	// token or backchannel authentication endpoint URL at the
 	// backchannel authentication endpoint, as CIBA Core 1.0 §7.1 has the
 	// server accept, and the token endpoint URL in the CIBA token
-	// request and when refreshing a grant CIBA issued. Some CIBA clients
-	// sign with these URLs, among them the OpenID Foundation's FAPI-CIBA
-	// conformance suite. For a client registered SenderConstrainMTLS,
-	// each URL's MTLSEndpoints alias is accepted too.
+	// request and when refreshing a grant recorded as a CIBA grant (one
+	// from before v0.61.0 recorded no grant type, so refreshing it needs
+	// the issuer identifier). Whether a client is registered for CIBA is
+	// read from its registration when it makes the request. Some CIBA
+	// clients sign with these URLs, among them the OpenID Foundation's
+	// FAPI-CIBA conformance suite. For a client registered
+	// SenderConstrainMTLS, each URL's MTLSEndpoints alias is accepted
+	// too.
 	//
 	// False (the default) accepts only the issuer identifier, at every
 	// endpoint and for every client, as RFC 10070 §4 requires: the

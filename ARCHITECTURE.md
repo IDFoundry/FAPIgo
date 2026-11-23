@@ -1117,11 +1117,12 @@ where CIBA doesn't reach: to a CIBA client refreshing an authorization
 code grant, to revocation, and on a server serving no CIBA at all. It
 is now an opt-in, `Config.CIBAEndpointURLAudiences`, off by default,
 so every client is issuer-only at every endpoint unless it's set. Set,
-it accepts the token and backchannel authentication endpoint URLs at
-the backchannel authentication endpoint, and the token endpoint URL in
-the CIBA token request and to refresh a grant recorded as CIBA, each
-with its mTLS alias for an mTLS-bound client, only while the server
-serves CIBA, and never from an assertion typed
+it accepts, from a client registered for CIBA as its registration
+stands at the request, the token and backchannel authentication
+endpoint URLs at the backchannel authentication endpoint, and the
+token endpoint URL in the CIBA token request and to refresh a grant
+recorded as CIBA, each with its mTLS alias for an mTLS-bound client,
+only while the server serves CIBA, and never from an assertion typed
 `client-authentication+jwt`, with which a client says it follows
 RFC 10070 (no other `typ` counts). A refresh can't tell
 which grant it's for until the refresh token is redeemed, so the

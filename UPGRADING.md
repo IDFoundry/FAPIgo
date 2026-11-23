@@ -17,62 +17,6 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.81.0
 
-### Client assertions name the issuer; CIBA's endpoint URLs are an opt-in (server)
-
-**Affects:** a server with CIBA enabled whose CIBA clients sign client
-assertions with the token endpoint URL or the backchannel
-authentication endpoint URL (or one's mTLS alias) as `aud`, as CIBA
-Core 1.0 §7.1 allowed and the OpenID Foundation's FAPI-CIBA conformance
-suite does; and any client registered for CIBA that refreshes an
-authorization code grant, or revokes a token, with an assertion naming
-an endpoint URL. Clients whose assertions name the issuer identifier,
-as FAPIgo's `client` always does, are unaffected.
-
-**Why:** RFC 10070 §4 requires the authorization server to "reject any
-JWT that does not contain its issuer identifier as its sole audience
-value". An endpoint URL in `aud` is what audience injection exploits:
-a client that takes `aud` from each server's metadata signs, for a
-malicious server whose metadata lists this server's token endpoint, an
-assertion that server can present here. Until now a client registered
-for CIBA could name the token endpoint URL (or its mTLS alias) to
-refresh any grant, an authorization code grant included, and the
-revocation endpoint URL (or its mTLS alias) at revocation, even on a
-server serving no CIBA endpoint: with a leaked refresh token, such an
-assertion got an access token bound to the attacker's own key.
-
-**What fails:** nothing at startup. A client assertion whose `aud` is
-an endpoint URL is refused with `invalid_client` (HTTP 401, with the
-error_description "client assertion aud must be the authorization
-server's issuer identifier"):
-
-- at the backchannel authentication endpoint and in the CIBA token
-  request, unless `Config.CIBAEndpointURLAudiences` is set;
-- to refresh a grant, unless the option is set and the refresh token is
-  from a CIBA grant. A CIBA grant issued before v0.61.0, which didn't
-  record its grant type, isn't known to be one, so refreshing it needs
-  the issuer, where such a grant can be refreshed at all;
-- at revocation, always.
-
-With the option set, an assertion typed `client-authentication+jwt`
-must still name the issuer (any other `typ`, or none, doesn't count),
-and the option has no effect while
-`Config.Endpoints.BackchannelAuthentication` is unset.
-
-**What to change:** have every client put the issuer identifier in a
-client assertion's `aud`, as RFC 10070 requires. Where CIBA clients
-you can't change sign with an endpoint URL, set:
-
-```go
-cfg.CIBAEndpointURLAudiences = true
-```
-
-That accepts the token and backchannel authentication endpoint URLs at
-the backchannel authentication endpoint, and the token endpoint URL in
-the CIBA token request and to refresh a CIBA grant, each with its mTLS
-alias for a client registered `SenderConstrainMTLS`. A client that
-names an endpoint URL at revocation, or to refresh an authorization
-code grant, must name the issuer instead: no setting restores those.
-
 ### Automatic registration: an omitted `grant_types` means the authorization code flow alone, and CIBA needs a delivery mode (federation, server)
 
 **Affects:** a server with `AutomaticRegistration.TrustAnchors` set and
@@ -83,8 +27,8 @@ federation Relying Parties that use `client_credentials` or CIBA there,
 or that publish `backchannel_authentication_request_signing_alg` while
 leaving `grant_types` out and name an endpoint URL as their client
 assertions' `aud` on a server that sets
-`Config.CIBAEndpointURLAudiences`. With neither switch on, nothing
-changes:
+`Config.CIBAEndpointURLAudiences`. With neither
+`AllowsClientCredentialsGrant` nor `AllowsCIBA` on, nothing changes:
 automatically registered clients already get the authorization code
 flow alone.
 
@@ -113,8 +57,8 @@ whose resolved metadata leaves `grant_types` out:
   answers to a client assertion whose `aud` is the issuer identifier.
 - An RP the old default registered for CIBA, because it named
   `backchannel_authentication_request_signing_alg`, is no longer a CIBA
-  client, so `Config.CIBAEndpointURLAudiences` (see the section above)
-  no longer applies to it: a client assertion of its naming an endpoint
+  client, so `Config.CIBAEndpointURLAudiences` (see the next section)
+  doesn't apply to it: a client assertion of its naming an endpoint
   URL rather than the issuer identifier as `aud` gets `invalid_client`
   (HTTP 401, `client assertion aud must be the authorization server's
   issuer identifier`) at every endpoint, as for any client not
@@ -165,6 +109,66 @@ delivery mode can't use any flow meanwhile. Once it publishes one, its
 first request after the server's memory of the failure lapses
 registers it; the server remembers a failure for
 `AutomaticRegistration.FailureCacheAge` (10 seconds by default).
+
+### Client assertions name the issuer; CIBA's endpoint URLs are an opt-in (server)
+
+**Affects:** a server with CIBA enabled whose CIBA clients sign client
+assertions with the token endpoint URL or the backchannel
+authentication endpoint URL (or one's mTLS alias) as `aud`, as CIBA
+Core 1.0 §7.1 allowed and the OpenID Foundation's FAPI-CIBA conformance
+suite does; and any client registered for CIBA that refreshes an
+authorization code grant, or revokes a token, with an assertion naming
+an endpoint URL. Clients whose assertions name the issuer identifier,
+as FAPIgo's `client` always does, are unaffected.
+
+**Why:** RFC 10070 §4 requires the authorization server to "reject any
+JWT that does not contain its issuer identifier as its sole audience
+value". An endpoint URL in `aud` is what audience injection exploits:
+a client that takes `aud` from each server's metadata signs, for a
+malicious server whose metadata lists this server's token endpoint, an
+assertion that server can present here. Until now a client registered
+for CIBA could name the token endpoint URL (or its mTLS alias) to
+refresh any grant, an authorization code grant included, and the
+revocation endpoint URL (or its mTLS alias) at revocation, even on a
+server serving no CIBA endpoint: with a leaked refresh token, such an
+assertion got an access token bound to the attacker's own key.
+
+**What fails:** nothing at startup. A client assertion whose `aud` is
+an endpoint URL is refused with `invalid_client` (HTTP 401, with the
+error_description "client assertion aud must be the authorization
+server's issuer identifier"):
+
+- at the backchannel authentication endpoint and in the CIBA token
+  request, unless `Config.CIBAEndpointURLAudiences` is set;
+- to refresh a grant, unless the option is set and the refresh token is
+  from a CIBA grant. A CIBA grant issued before v0.61.0, which didn't
+  record its grant type, isn't known to be one, so refreshing it needs
+  the issuer, where such a grant can be refreshed at all;
+- at revocation, always.
+
+The option covers only a client registered for CIBA, as its
+registration stands when it makes the request: an assertion naming an
+endpoint URL from a client no longer registered for CIBA gets
+`invalid_client`, even in a CIBA token request or to refresh a CIBA
+grant. With the option set, an assertion typed
+`client-authentication+jwt` must still name the issuer (any other
+`typ`, or none, doesn't count), and the option has no effect while
+`Config.Endpoints.BackchannelAuthentication` is unset.
+
+**What to change:** have every client put the issuer identifier in a
+client assertion's `aud`, as RFC 10070 requires. Where CIBA clients
+you can't change sign with an endpoint URL, set:
+
+```go
+cfg.CIBAEndpointURLAudiences = true
+```
+
+That accepts the token and backchannel authentication endpoint URLs at
+the backchannel authentication endpoint, and the token endpoint URL in
+the CIBA token request and to refresh a CIBA grant, each with its mTLS
+alias for a client registered `SenderConstrainMTLS`. A client that
+names an endpoint URL at revocation, or to refresh an authorization
+code grant, must name the issuer instead: no setting restores those.
 
 ## v0.79.0
 

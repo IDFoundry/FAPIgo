@@ -203,6 +203,7 @@ func TestAutomaticRegistrationPairwiseRefusesAnotherRPsHost(t *testing.T) {
 	for name, extra := range map[string]map[string]any{
 		"code flow": {},
 		"CIBA": {
+			"grant_types": []string{"authorization_code", cibaGrantType},
 			"backchannel_authentication_request_signing_alg": "ES256",
 			"backchannel_token_delivery_mode":                "poll",
 		},
@@ -230,6 +231,7 @@ func TestAutomaticRegistrationPairwiseRefusesAnotherRPsHost(t *testing.T) {
 func TestAutomaticRegistrationPairwiseCIBAUsesEntityHost(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, rpMetadataWith(t, map[string]any{
 		"subject_type": "pairwise",
+		"grant_types":  []string{cibaGrantType},
 		"backchannel_authentication_request_signing_alg": "ES256",
 		"backchannel_token_delivery_mode":                "poll",
 	}))

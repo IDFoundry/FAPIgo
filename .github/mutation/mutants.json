@@ -168,6 +168,56 @@
     "why": "NewSelfIssuer's copy of trust_mark_issuers includes each list in it"
   },
   {
+    "id": "fed-omitted-grant-types-no-client-credentials",
+    "file": "federation/automatic_registration.go",
+    "old": "cfg.AllowsClientCredentialsGrant = a.cfg.AllowsClientCredentialsGrant && grantTypePermitted(m.GrantTypes, limits.grantTypes, clientCredentialsGrantType)",
+    "new": "cfg.AllowsClientCredentialsGrant = a.cfg.AllowsClientCredentialsGrant && (m.GrantTypes == nil || grantTypePermitted(m.GrantTypes, limits.grantTypes, clientCredentialsGrantType))",
+    "module": "root",
+    "packages": [
+      "./federation",
+      "./server"
+    ],
+    "run": "^TestAutomaticRegistrationOmittedGrantTypesMeansCodeFlowOnly$",
+    "why": "an automatically registered RP leaving grant_types out gets no client_credentials grant, though the operator allows it and no policy bounds grant_types"
+  },
+  {
+    "id": "fed-omitted-grant-types-no-ciba",
+    "file": "federation/automatic_registration.go",
+    "old": "!grantTypePermitted(m.GrantTypes, permittedGrants, cibaGrantType)",
+    "new": "!(m.GrantTypes == nil || grantTypePermitted(m.GrantTypes, permittedGrants, cibaGrantType))",
+    "module": "root",
+    "packages": [
+      "./federation",
+      "./server"
+    ],
+    "run": "^TestAutomaticRegistrationOmittedGrantTypesMeansCodeFlowOnly$",
+    "why": "an automatically registered RP leaving grant_types out gets no CIBA, though the operator allows it, no policy bounds grant_types and the RP publishes CIBA's signing algorithm and delivery mode"
+  },
+  {
+    "id": "fed-ciba-delivery-mode-required",
+    "file": "federation/automatic_registration.go",
+    "old": "if m.BackchannelTokenDeliveryMode == \"\" {\n\t\treturn errors.New(\"backchannel_token_delivery_mode is required to register for CIBA\")\n\t}",
+    "new": "if m.BackchannelTokenDeliveryMode == \"\" {\n\t\tm.BackchannelTokenDeliveryMode = \"poll\"\n\t}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestAutomaticRegistrationRequiresCIBADeliveryMode|TestRegisteredClientConfigFromMetadataRequiresCIBADeliveryMode)$",
+    "why": "an RP registering for CIBA without a backchannel_token_delivery_mode is refused, not registered for poll"
+  },
+  {
+    "id": "fed-grant-types-policy-bound",
+    "file": "federation/automatic_registration.go",
+    "old": "return slices.Contains(grantTypes, grant) && permitted.allows(grant)",
+    "new": "return slices.Contains(grantTypes, grant)",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestGrantTypePermittedHoldsListedGrantsToPolicy$",
+    "why": "a grant an RP's grant_types lists is still withheld when the Trust Chain's metadata policy on grant_types doesn't permit it, however the parameter came to list it"
+  },
+  {
     "id": "rar-unregistered-granted-type",
     "file": "extension/rar.go",
     "old": "def, ok := r.byType[typ]\n\t\tif !ok {\n\t\t\treturn nil, fmt.Errorf(\"%w: %q\", ErrRARUnregisteredType, typ)",

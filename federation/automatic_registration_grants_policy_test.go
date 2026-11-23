@@ -34,7 +34,8 @@ type grantsPolicyCase struct {
 // the operator's AllowedScopes, AllowsClientCredentialsGrant and
 // AllowsCIBA are narrowed by the RP's resolved scope and grant_types —
 // its metadata after every superior's metadata policy (OpenID Federation
-// 1.0 §6.1) — and that leaving either out narrows nothing.
+// 1.0 §6.1) — that leaving scope out narrows nothing, and that leaving
+// grant_types out means the authorization code flow alone.
 func TestAutomaticRegistrationNarrowsGrantsByResolvedMetadata(t *testing.T) {
 	base := func(extra map[string]any) map[string]any {
 		m := map[string]any{
@@ -42,6 +43,7 @@ func TestAutomaticRegistrationNarrowsGrantsByResolvedMetadata(t *testing.T) {
 			"token_endpoint_auth_method":                     "private_key_jwt",
 			"token_endpoint_auth_signing_alg":                "ES256",
 			"backchannel_authentication_request_signing_alg": "ES256",
+			"backchannel_token_delivery_mode":                "poll",
 		}
 		for k, v := range extra {
 			m[k] = v
@@ -57,11 +59,9 @@ func TestAutomaticRegistrationNarrowsGrantsByResolvedMetadata(t *testing.T) {
 			policy:     `{"openid_relying_party":{"scope":{"subset_of":["openid"]},"grant_types":{"subset_of":["authorization_code"]}}}`,
 			wantScopes: map[string]bool{"openid": true, "payments": false},
 		},
-		"absent scope and grant_types narrow nothing": {
-			members:           base(nil),
-			wantScopes:        map[string]bool{"openid": true, "payments": true},
-			wantClientCreds:   true,
-			wantCIBAPermitted: true,
+		"absent scope narrows nothing, absent grant_types means the code flow alone": {
+			members:    base(nil),
+			wantScopes: map[string]bool{"openid": true, "payments": true},
 		},
 		"listed grants and scopes are kept": {
 			members: base(map[string]any{
@@ -212,11 +212,14 @@ func policyOrNil(t *testing.T, raw string) intfed.MetadataPolicy {
 
 // TestAutomaticRegistrationHoldsGrantsToGrantTypesPolicy: a superior's
 // subset_of (or value) on grant_types withholds client_credentials and
-// CIBA from an RP that leaves grant_types out — which the policy's
-// operators leave absent — as it does from one that publishes it,
-// wherever in the Trust Chain the policy is, and also when an
+// CIBA from an RP that publishes grant_types, wherever in the Trust
+// Chain the policy is, and an RP that leaves grant_types out (which the
+// policy's operators leave absent) gets neither under it, nor when an
 // Intermediate's value null removes what the RP published. The operator
-// allows both grants; an RP under no grant_types policy still gets them.
+// allows both grants; an RP listing them under a policy permitting them,
+// or under no grant_types policy, still gets them, while an
+// Intermediate's value null alone removes them with the rest of the RP's
+// grant_types, leaving it the authorization code flow.
 func TestAutomaticRegistrationHoldsGrantsToGrantTypesPolicy(t *testing.T) {
 	const cibaGrant = "urn:openid:params:grant-type:ciba"
 	policy := func(grantTypes string) string {
@@ -224,6 +227,7 @@ func TestAutomaticRegistrationHoldsGrantsToGrantTypesPolicy(t *testing.T) {
 	}
 	// The shape OpenID Federation 1.0's own examples use (§6.1.5).
 	codeFlowOnly := policy(`{"subset_of":["authorization_code","refresh_token"]}`)
+	allGrants := []string{"authorization_code", "client_credentials", cibaGrant}
 	for _, tc := range []struct {
 		name               string
 		taPolicy, imPolicy string
@@ -240,13 +244,12 @@ func TestAutomaticRegistrationHoldsGrantsToGrantTypesPolicy(t *testing.T) {
 		{name: "subset_of, grant_types published", taPolicy: codeFlowOnly, grantTypes: []string{"authorization_code", "client_credentials", cibaGrant}},
 		{name: "value", taPolicy: policy(`{"value":["authorization_code","client_credentials"]}`), wantClientCreds: true},
 		{name: "subset_of permitting both",
-			taPolicy:        policy(`{"subset_of":["authorization_code","client_credentials","` + cibaGrant + `"]}`),
-			wantClientCreds: true, wantCIBA: true},
-		{name: "value null alone", imPolicy: policy(`{"value":null}`), grantTypes: []string{"authorization_code"},
-			wantClientCreds: true, wantCIBA: true},
+			taPolicy:   policy(`{"subset_of":["authorization_code","client_credentials","` + cibaGrant + `"]}`),
+			grantTypes: allGrants, wantClientCreds: true, wantCIBA: true},
+		{name: "value null alone", imPolicy: policy(`{"value":null}`), grantTypes: allGrants},
 		{name: "a policy on another parameter only",
-			taPolicy:        `{"openid_relying_party":{"token_endpoint_auth_method":{"one_of":["private_key_jwt"]}}}`,
-			wantClientCreds: true, wantCIBA: true},
+			taPolicy:   `{"openid_relying_party":{"token_endpoint_auth_method":{"one_of":["private_key_jwt"]}}}`,
+			grantTypes: allGrants, wantClientCreds: true, wantCIBA: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client, err := resolveWithGrantTypes(t, tc.taPolicy, tc.imPolicy, tc.grantTypes)
@@ -264,9 +267,9 @@ func TestAutomaticRegistrationHoldsGrantsToGrantTypesPolicy(t *testing.T) {
 }
 
 // resolveWithGrantTypes registers the RP publishing grantTypes (nil
-// leaves grant_types out) under taPolicy and imPolicy (see
-// setupAutomaticRegistrationFixtureUnderIntermediate), with the operator
-// allowing client_credentials and CIBA.
+// leaves grant_types out) and poll delivery for CIBA under taPolicy and
+// imPolicy (see setupAutomaticRegistrationFixtureUnderIntermediate), with
+// the operator allowing client_credentials and CIBA.
 func resolveWithGrantTypes(t *testing.T, taPolicy, imPolicy string, grantTypes []string) (storage.RegisteredClient, error) {
 	t.Helper()
 	members := map[string]any{
@@ -274,6 +277,7 @@ func resolveWithGrantTypes(t *testing.T, taPolicy, imPolicy string, grantTypes [
 		"token_endpoint_auth_method":                     "private_key_jwt",
 		"token_endpoint_auth_signing_alg":                "ES256",
 		"backchannel_authentication_request_signing_alg": "ES256",
+		"backchannel_token_delivery_mode":                "poll",
 	}
 	if grantTypes != nil {
 		members["grant_types"] = grantTypes
@@ -377,14 +381,15 @@ func resolveWithRARTypes(t *testing.T, taPolicy, imPolicy string, members map[st
 
 // TestAutomaticRegistrationWithdrawalTakesEffectWhenTheCacheExpires: a
 // Trust Anchor that starts withholding a RAR type and a grant from a
-// branch, by policy on parameters its RP leaves out, takes them from the
-// RP's registration once its cached registration expires (MaxCacheAge),
-// not before. That is the registration the server checks a grant
-// against again on refresh, so the RP's refresh tokens for the withdrawn
-// type stop working then too.
+// branch, by policy on the RAR types its RP leaves out and the grant
+// types it lists, takes them from the RP's registration once its cached
+// registration expires (MaxCacheAge), not before. That is the
+// registration the server checks a grant against again on refresh, so
+// the RP's refresh tokens for the withdrawn type stop working then too.
 func TestAutomaticRegistrationWithdrawalTakesEffectWhenTheCacheExpires(t *testing.T) {
 	f := setupAutomaticRegistrationFixtureUnderIntermediate(t, rpMetadataMembers(t, map[string]any{
 		"redirect_uris":                   []string{"https://rp.example.org/cb"},
+		"grant_types":                     []string{"authorization_code", "client_credentials"},
 		"token_endpoint_auth_method":      "private_key_jwt",
 		"token_endpoint_auth_signing_alg": "ES256",
 	}), nil, nil)

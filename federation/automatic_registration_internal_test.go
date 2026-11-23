@@ -468,8 +468,21 @@ func TestRegisteredClientConfigFromMetadataMapsMTLSSenderConstrain(t *testing.T)
 	}
 }
 
+// clientCredentialsRPMetadataJSON is validRPMetadataJSON listing the
+// client_credentials grant in grant_types, as an RP must to be
+// registered for it.
+func clientCredentialsRPMetadataJSON() string {
+	return `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"grant_types": ["authorization_code", "client_credentials"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"jwks": ` + testRPJWKS + `
+	}`
+}
+
 func TestRegisteredClientConfigFromMetadataDoesNotGrantClientCredentialsByDefault(t *testing.T) {
-	cfg, _, err := call(t, newTestAutomaticClientRepository(AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}}), validRPMetadataJSON())
+	cfg, _, err := call(t, newTestAutomaticClientRepository(AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}}), clientCredentialsRPMetadataJSON())
 	if err != nil {
 		t.Fatalf("registeredClientConfigFromMetadata: %v", err)
 	}
@@ -481,12 +494,33 @@ func TestRegisteredClientConfigFromMetadataDoesNotGrantClientCredentialsByDefaul
 func TestRegisteredClientConfigFromMetadataGrantsClientCredentialsWhenConfigured(t *testing.T) {
 	cfg, _, err := call(t, newTestAutomaticClientRepository(AutomaticRegistrationConfig{
 		AllowedScopes: []string{"openid"}, AllowsClientCredentialsGrant: true,
-	}), validRPMetadataJSON())
+	}), clientCredentialsRPMetadataJSON())
 	if err != nil {
 		t.Fatalf("registeredClientConfigFromMetadata: %v", err)
 	}
 	if !cfg.AllowsClientCredentialsGrant {
 		t.Errorf("AllowsClientCredentialsGrant = false, want true (AutomaticRegistrationConfig.AllowsClientCredentialsGrant is set)")
+	}
+}
+
+// grantTypePermitted holds a grant that grant_types lists to what the
+// Trust Chain's metadata policy on grant_types permits. Resolution
+// applies a superior's subset_of or value to a grant_types that is
+// present before registration reads it, so this bound is defence in
+// depth that only a direct call reaches.
+func TestGrantTypePermittedHoldsListedGrantsToPolicy(t *testing.T) {
+	listed := []string{"authorization_code", clientCredentialsGrantType, cibaGrantType}
+	codeFlowOnly := &permittedValues{values: []string{"authorization_code"}}
+	for _, grant := range []string{clientCredentialsGrantType, cibaGrantType} {
+		if grantTypePermitted(listed, codeFlowOnly, grant) {
+			t.Errorf("grantTypePermitted(%q listed, a policy permitting authorization_code alone) = true, want false", grant)
+		}
+		if !grantTypePermitted(listed, nil, grant) {
+			t.Errorf("grantTypePermitted(%q listed, no policy) = false, want true", grant)
+		}
+		if grantTypePermitted(nil, nil, grant) {
+			t.Errorf("grantTypePermitted(%q, grant_types left out) = true, want false", grant)
+		}
 	}
 }
 
@@ -498,9 +532,11 @@ func TestRegisteredClientConfigFromMetadataGrantsClientCredentialsWhenConfigured
 func TestRegisteredClientConfigFromMetadataIgnoresCIBAMetadataWhenNotAllowed(t *testing.T) {
 	raw := `{
 		"redirect_uris": ["https://rp.example.org/cb"],
+		"grant_types": ["urn:openid:params:grant-type:ciba"],
 		"token_endpoint_auth_method": "private_key_jwt",
 		"token_endpoint_auth_signing_alg": "ES256",
 		"backchannel_authentication_request_signing_alg": "ES256",
+		"backchannel_token_delivery_mode": "poll",
 		"jwks": ` + testRPJWKS + `
 	}`
 	cfg, _, err := call(t, newTestAutomaticClientRepository(AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}}), raw)
@@ -515,6 +551,7 @@ func TestRegisteredClientConfigFromMetadataIgnoresCIBAMetadataWhenNotAllowed(t *
 func TestRegisteredClientConfigFromMetadataMapsCIBAMetadataWhenAllowed(t *testing.T) {
 	raw := `{
 		"redirect_uris": ["https://rp.example.org/cb"],
+		"grant_types": ["urn:openid:params:grant-type:ciba"],
 		"token_endpoint_auth_method": "private_key_jwt",
 		"token_endpoint_auth_signing_alg": "ES256",
 		"backchannel_authentication_request_signing_alg": "ES256",
@@ -539,9 +576,13 @@ func TestRegisteredClientConfigFromMetadataMapsCIBAMetadataWhenAllowed(t *testin
 	}
 }
 
-func TestRegisteredClientConfigFromMetadataDefaultsCIBADeliveryModeToPoll(t *testing.T) {
+// An RP registering for CIBA must name its delivery mode (CIBA Core 1.0
+// §4: backchannel_token_delivery_mode is REQUIRED), so one that doesn't
+// is refused rather than registered for poll.
+func TestRegisteredClientConfigFromMetadataRequiresCIBADeliveryMode(t *testing.T) {
 	raw := `{
 		"redirect_uris": ["https://rp.example.org/cb"],
+		"grant_types": ["urn:openid:params:grant-type:ciba"],
 		"token_endpoint_auth_method": "private_key_jwt",
 		"token_endpoint_auth_signing_alg": "ES256",
 		"backchannel_authentication_request_signing_alg": "ES256",
@@ -550,20 +591,19 @@ func TestRegisteredClientConfigFromMetadataDefaultsCIBADeliveryModeToPoll(t *tes
 	cfg, _, err := call(t, newTestAutomaticClientRepository(AutomaticRegistrationConfig{
 		AllowedScopes: []string{"openid"}, AllowsCIBA: true,
 	}), raw)
-	if err != nil {
-		t.Fatalf("registeredClientConfigFromMetadata: %v", err)
-	}
-	if cfg.BackchannelTokenDeliveryMode != storage.BackchannelTokenDeliveryModePoll {
-		t.Errorf("BackchannelTokenDeliveryMode = %v, want poll (default)", cfg.BackchannelTokenDeliveryMode)
+	if err == nil || !strings.Contains(err.Error(), "backchannel_token_delivery_mode") {
+		t.Fatalf("registeredClientConfigFromMetadata(no backchannel_token_delivery_mode) = %v delivery, error %v; want the missing delivery mode refused", cfg.BackchannelTokenDeliveryMode, err)
 	}
 }
 
 func TestRegisteredClientConfigFromMetadataRejectsInvalidCIBASigningAlg(t *testing.T) {
 	raw := `{
 		"redirect_uris": ["https://rp.example.org/cb"],
+		"grant_types": ["urn:openid:params:grant-type:ciba"],
 		"token_endpoint_auth_method": "private_key_jwt",
 		"token_endpoint_auth_signing_alg": "ES256",
 		"backchannel_authentication_request_signing_alg": "bogus",
+		"backchannel_token_delivery_mode": "poll",
 		"jwks": ` + testRPJWKS + `
 	}`
 	if _, _, err := call(t, newTestAutomaticClientRepository(AutomaticRegistrationConfig{
@@ -576,6 +616,7 @@ func TestRegisteredClientConfigFromMetadataRejectsInvalidCIBASigningAlg(t *testi
 func TestRegisteredClientConfigFromMetadataRejectsInvalidCIBADeliveryMode(t *testing.T) {
 	raw := `{
 		"redirect_uris": ["https://rp.example.org/cb"],
+		"grant_types": ["urn:openid:params:grant-type:ciba"],
 		"token_endpoint_auth_method": "private_key_jwt",
 		"token_endpoint_auth_signing_alg": "ES256",
 		"backchannel_authentication_request_signing_alg": "ES256",
@@ -592,6 +633,7 @@ func TestRegisteredClientConfigFromMetadataRejectsInvalidCIBADeliveryMode(t *tes
 func TestRegisteredClientConfigFromMetadataRejectsInvalidCIBANotificationEndpoint(t *testing.T) {
 	raw := `{
 		"redirect_uris": ["https://rp.example.org/cb"],
+		"grant_types": ["urn:openid:params:grant-type:ciba"],
 		"token_endpoint_auth_method": "private_key_jwt",
 		"token_endpoint_auth_signing_alg": "ES256",
 		"backchannel_authentication_request_signing_alg": "ES256",

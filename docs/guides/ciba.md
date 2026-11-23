@@ -98,7 +98,12 @@ if its registration says so:
   client also needs `BackchannelClientNotificationEndpoint`, which a poll
   client must leave unset.
 - An automatically registered OpenID Federation client may use CIBA only
-  with `AutomaticRegistration.AllowsCIBA`.
+  with `AutomaticRegistration.AllowsCIBA`, and only when its metadata
+  lists `urn:openid:params:grant-type:ciba` in `grant_types` and names
+  its `backchannel_token_delivery_mode`, as CIBA §4 requires. Its
+  delivery mode has no default: with `AllowsCIBA` on, one listing the
+  grant and its signing algorithm without a delivery mode isn't
+  registered.
 
 ```go
 func backchannelAuthentication(w http.ResponseWriter, r *http.Request) {

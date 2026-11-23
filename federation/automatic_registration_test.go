@@ -193,8 +193,13 @@ func rpMetadataBuilderWithJWKSURI(t *testing.T) func(rpID string, rpOIDCKey *ecd
 	}
 }
 
+// cibaGrantType is the grant_types value an RP lists to register for
+// CIBA (CIBA Core 1.0 §4).
+const cibaGrantType = "urn:openid:params:grant-type:ciba"
+
 // rpMetadataBuilderWithCIBA mirrors rpMetadataBuilder, but additionally
-// declares backchannel_authentication_request_signing_alg/
+// lists the CIBA grant in grant_types and declares
+// backchannel_authentication_request_signing_alg/
 // backchannel_token_delivery_mode/backchannel_client_notification_endpoint —
 // exercised only when the fixture's AutomaticRegistrationConfig also
 // sets AllowsCIBA (see registeredClientConfigFromMetadata's own "ignore
@@ -204,6 +209,7 @@ func rpMetadataBuilderWithCIBA(t *testing.T) func(rpID string, rpOIDCKey *ecdsa.
 		t.Helper()
 		raw, err := json.Marshal(map[string]any{
 			"redirect_uris":                   []string{rpID + "/cb"},
+			"grant_types":                     []string{"authorization_code", cibaGrantType},
 			"token_endpoint_auth_method":      "private_key_jwt",
 			"token_endpoint_auth_signing_alg": "ES256",
 			"jwks":                            json.RawMessage(jwksFor(t, "rp-oidc", rpOIDCKey)),
@@ -478,8 +484,15 @@ func TestAutomaticClientRepositoryAllowedResourcesComeFromConfig(t *testing.T) {
 	}
 }
 
+// rpListingClientCredentials is rpMetadataBuilder's RP listing the
+// client_credentials grant in grant_types, as it must to be registered
+// for it.
+func rpListingClientCredentials(t *testing.T) func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage {
+	return rpMetadataWith(t, map[string]any{"grant_types": []string{"authorization_code", "client_credentials"}})
+}
+
 func TestAutomaticClientRepositoryResolveClientDoesNotAllowClientCredentialsByDefault(t *testing.T) {
-	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	f := setupAutomaticRegistrationFixture(t, rpListingClientCredentials(t))
 	resolver := f.newResolver(t)
 	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
@@ -496,7 +509,7 @@ func TestAutomaticClientRepositoryResolveClientDoesNotAllowClientCredentialsByDe
 }
 
 func TestAutomaticClientRepositoryResolveClientAllowsClientCredentialsWhenConfigured(t *testing.T) {
-	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	f := setupAutomaticRegistrationFixture(t, rpListingClientCredentials(t))
 	resolver := f.newResolver(t)
 	cfg := validAutomaticRegistrationConfig()
 	cfg.AllowsClientCredentialsGrant = true

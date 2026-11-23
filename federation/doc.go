@@ -187,15 +187,15 @@
 // the certificate to carry a key of that JWK Set, per OpenID
 // Federation 1.0 §12.1.1.2); jwks or jwks_uri; CIBA and
 // client_credentials each gated by their own
-// AutomaticRegistrationConfig switch, off by default. Deliberately not
-// yet implemented: Explicit Registration (§12.2, not implemented by
-// this package at all). Metadata member names are matched exactly, as
-// metadata policy matches them: a member naming a known parameter in a
-// different case is rejected, never read as that parameter. A client_id
-// whose resolution fails is remembered as failed for
-// AutomaticRegistrationConfig.FailureCacheAge (DefaultFailureCacheAge
-// when unset), so a repeating unresolvable client_id doesn't cost a full
-// resolution on every request.
+// AutomaticRegistrationConfig switch, off by default, and by the RP's
+// grant_types listing them. Deliberately not yet implemented: Explicit
+// Registration (§12.2, not implemented by this package at all). Metadata
+// member names are matched exactly, as metadata policy matches them: a
+// member naming a known parameter in a different case is rejected,
+// never read as that parameter. A client_id whose resolution fails is
+// remembered as failed for AutomaticRegistrationConfig.FailureCacheAge
+// (DefaultFailureCacheAge when unset), so a repeating unresolvable
+// client_id doesn't cost a full resolution on every request.
 //
 // An automatically registered Relying Party gets the subject_type its
 // resolved metadata names (OpenID Connect Core §8), or

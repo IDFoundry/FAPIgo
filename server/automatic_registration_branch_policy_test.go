@@ -2,16 +2,14 @@ package server_test
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
-	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	intfed "github.com/idfoundry/fapigo/internal/federation"
 	"github.com/idfoundry/fapigo/internal/requestobject"
@@ -20,28 +18,31 @@ import (
 )
 
 // setupBranchFixture builds a Trust Anchor -> Intermediate -> RP
-// federation over HTTPS test servers, for an RP in a branch of the
-// federation its superiors restrict: the Trust Anchor's Subordinate
-// Statement about the Intermediate carries taPolicy and the
+// federation over HTTPS test servers on loopback, for an RP in a branch
+// of the federation its superiors restrict: the Trust Anchor's
+// Subordinate Statement about the Intermediate carries taPolicy and the
 // Intermediate's about the RP carries imPolicy (each a metadata_policy
 // claim, "" for none). The RP's openid_relying_party metadata registers
-// testRedirectURI, private_key_jwt and CIBA's signing algorithm, plus
-// extra's members. A server trusting only the Trust Anchor
+// testRedirectURI, private_key_jwt, and CIBA's signing algorithm and poll
+// delivery, plus extra's members; it lists no grant_types unless extra
+// does. A server trusting only the Trust Anchor
 // (validAutomaticRegistrationServerConfig) registers the RP under both
 // policies, merged.
 func setupBranchFixture(t *testing.T, taPolicy, imPolicy string, extra map[string]any) *automaticRegistrationFixture {
+	t.Helper()
+	return setupBranchFixtureOn(t, loopbackFederation{}, taPolicy, imPolicy, extra)
+}
+
+// setupBranchFixtureOn is setupBranchFixture with the federation's
+// servers on network, which also supplies the fixture's fetcher.
+func setupBranchFixtureOn(t *testing.T, network federationNetwork, taPolicy, imPolicy string, extra map[string]any) *automaticRegistrationFixture {
 	t.Helper()
 	now := time.Now()
 	taKey, imKey, rpFedKey, rpOIDCKey := generateKey(t), generateKey(t), generateKey(t), generateKey(t)
 	taJWKS, imJWKS, rpFedJWKS := fedJWKS(t, "ta", taKey), fedJWKS(t, "im", imKey), fedJWKS(t, "rp-fed", rpFedKey)
 
 	taMux, imMux, rpMux := http.NewServeMux(), http.NewServeMux(), http.NewServeMux()
-	servers := []*httptest.Server{httptest.NewTLSServer(taMux), httptest.NewTLSServer(imMux), httptest.NewTLSServer(rpMux)}
-	pool := x509.NewCertPool()
-	for _, s := range servers {
-		t.Cleanup(s.Close)
-		pool.AddCert(s.Certificate())
-	}
+	servers := []*httptest.Server{network.serve(t, taMux), network.serve(t, imMux), network.serve(t, rpMux)}
 	taID, imID, rpID := servers[0].URL, servers[1].URL, servers[2].URL
 
 	sign := func(p intfed.CreateParams) string {
@@ -76,6 +77,7 @@ func setupBranchFixture(t *testing.T, taPolicy, imPolicy string, extra map[strin
 		"redirect_uris":                                  []string{testRedirectURI},
 		"token_endpoint_auth_method":                     "private_key_jwt",
 		"token_endpoint_auth_signing_alg":                "ES256",
+		"backchannel_token_delivery_mode":                "poll",
 		"backchannel_authentication_request_signing_alg": "ES256",
 		"jwks": json.RawMessage(fedJWKS(t, "rp-oidc", rpOIDCKey)),
 	}
@@ -121,16 +123,9 @@ func setupBranchFixture(t *testing.T, taPolicy, imPolicy string, extra map[strin
 		Metadata:       map[string]json.RawMessage{"openid_relying_party": rpMetadataJSON},
 	})))
 
-	fetcher, err := fapihttp.New(&http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}, fapihttp.Config{
-		MaxResponseBytes: 1 << 16, RequestTimeout: 5 * time.Second, MaxRedirects: 1,
-		AllowLoopbackHTTP: true,
-	})
-	if err != nil {
-		t.Fatalf("fapihttp.New: %v", err)
-	}
 	return &automaticRegistrationFixture{
 		taID: taID, rpID: rpID, taKey: taKey, taJWKS: taJWKS,
-		rpOIDCKey: rpOIDCKey, fetcher: fetcher, now: now,
+		rpOIDCKey: rpOIDCKey, fetcher: network.fetcher(t, servers), now: now,
 	}
 }
 
@@ -227,13 +222,16 @@ func checkBackchannelRefused(t *testing.T, action server.BackchannelAuthenticati
 // for every automatically registered client — and from one whose
 // grant_types an Intermediate's value null removes, as it does from one
 // publishing grant_types. A policy permitting both grants, or none at
-// all, leaves them.
+// all, leaves them to a Relying Party listing them (one leaving
+// grant_types out never gets them: see
+// TestAutomaticRegistrationOmittedGrantTypesMeansCodeFlowOnly).
 func TestAutomaticRegistrationBranchPolicyWithholdsGrants(t *testing.T) {
 	const cibaGrant = "urn:openid:params:grant-type:ciba"
 	grantTypes := func(operators string) string {
 		return `{"openid_relying_party":{"grant_types":` + operators + `}}`
 	}
 	codeFlowOnly := grantTypes(`{"subset_of":["authorization_code","refresh_token"]}`)
+	listsAll := map[string]any{"grant_types": []string{"authorization_code", "client_credentials", cibaGrant}}
 	for _, tc := range []struct {
 		name               string
 		taPolicy, imPolicy string
@@ -243,33 +241,41 @@ func TestAutomaticRegistrationBranchPolicyWithholdsGrants(t *testing.T) {
 		{name: "grant_types left out", taPolicy: codeFlowOnly},
 		{name: "grant_types removed by the Intermediate's value null", taPolicy: codeFlowOnly, imPolicy: grantTypes(`{"value":null}`),
 			extra: map[string]any{"grant_types": []string{"authorization_code"}}},
-		{name: "grant_types published", taPolicy: codeFlowOnly,
-			extra: map[string]any{"grant_types": []string{"authorization_code", "client_credentials", cibaGrant}}},
+		{name: "grant_types published", taPolicy: codeFlowOnly, extra: listsAll},
 		{name: "a policy permitting both", taPolicy: grantTypes(`{"subset_of":["authorization_code","client_credentials","` + cibaGrant + `"]}`),
-			wantGranted: true},
-		{name: "no policy", wantGranted: true},
+			extra: listsAll, wantGranted: true},
+		{name: "no policy", extra: listsAll, wantGranted: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := setupBranchFixture(t, tc.taPolicy, tc.imPolicy, tc.extra)
 			srv := newAutomaticRegistrationTestServer(t, f, enableFederatedGrants(t))
-
-			err := federatedClientCredentials(t, srv, f, "")
-			action := federatedBackchannelAuthentication(t, srv, f, "")
-			if tc.wantGranted {
-				if err != nil {
-					t.Errorf("client_credentials = %v, want a token", err)
-				}
-				if _, ok := action.(server.BackchannelInteractionRequired); !ok {
-					t.Errorf("backchannel authentication action = %#v, want an interaction", action)
-				}
-				return
-			}
-			if code := serverErrorCode(t, err); code != server.ErrorUnauthorizedClient {
-				t.Errorf("client_credentials error code = %q, want %q", code, server.ErrorUnauthorizedClient)
-			}
-			checkBackchannelRefused(t, action, server.ErrorUnauthorizedClient)
+			checkFederatedGrants(t, srv, f, tc.wantGranted)
 		})
 	}
+}
+
+// checkFederatedGrants fails t unless f's RP gets a client_credentials
+// token and a backchannel authentication interaction from srv when
+// wantGranted, and unauthorized_client at both endpoints otherwise.
+func checkFederatedGrants(t *testing.T, srv *server.Server, f *automaticRegistrationFixture, wantGranted bool) {
+	t.Helper()
+	err := federatedClientCredentials(t, srv, f, "")
+	action := federatedBackchannelAuthentication(t, srv, f, "")
+	if wantGranted {
+		if err != nil {
+			t.Errorf("client_credentials = %v, want a token", err)
+		}
+		if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+			t.Errorf("backchannel authentication action = %#v, want an interaction", action)
+		}
+		return
+	}
+	if err == nil {
+		t.Errorf("client_credentials issued a token, want %s", server.ErrorUnauthorizedClient)
+	} else if code := serverErrorCode(t, err); code != server.ErrorUnauthorizedClient {
+		t.Errorf("client_credentials error code = %q, want %q", code, server.ErrorUnauthorizedClient)
+	}
+	checkBackchannelRefused(t, action, server.ErrorUnauthorizedClient)
 }
 
 // TestAutomaticRegistrationBranchPolicyNarrowsRARTypes: a superior's
@@ -282,7 +288,9 @@ func TestAutomaticRegistrationBranchPolicyWithholdsGrants(t *testing.T) {
 // its types, leaves the parameter out, or has its list removed by an
 // Intermediate's value null — though the operator allows payment and its
 // RARPolicy passes whatever the registration allows. A policy permitting
-// payment, or none at all, leaves it.
+// payment, or none at all, leaves it. The RP lists client_credentials and
+// CIBA in grant_types, so its requests at those endpoints reach the type
+// check.
 func TestAutomaticRegistrationBranchPolicyNarrowsRARTypes(t *testing.T) {
 	rarTypes := func(operators string) string {
 		return `{"openid_relying_party":{"authorization_details_types":` + operators + `}}`
@@ -305,7 +313,9 @@ func TestAutomaticRegistrationBranchPolicyNarrowsRARTypes(t *testing.T) {
 		{name: "no policy", wantAllowed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := setupBranchFixture(t, tc.taPolicy, tc.imPolicy, tc.extra)
+			extra := map[string]any{"grant_types": []string{"authorization_code", "client_credentials", server.CIBAGrantType}}
+			maps.Copy(extra, tc.extra)
+			f := setupBranchFixture(t, tc.taPolicy, tc.imPolicy, extra)
 			srv := newAutomaticRegistrationTestServer(t, f, enableFederatedGrants(t), func(cfg *server.Config, deps *server.Dependencies) {
 				cfg.RAR = newTestRARRegistry(t)
 				cfg.AutomaticRegistration.AuthorizationDetailsTypes = []string{"payment"}

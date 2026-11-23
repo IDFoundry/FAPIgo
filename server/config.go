@@ -754,23 +754,28 @@ type AutomaticRegistrationConfig struct {
 	// invalid.
 	MaxConcurrentResolutions int
 
-	// AllowsClientCredentialsGrant permits every automatically-registered
-	// client to use the client_credentials grant — see
+	// AllowsClientCredentialsGrant permits automatically-registered
+	// clients to use the client_credentials grant — see
 	// federation.AutomaticRegistrationConfig.AllowsClientCredentialsGrant
 	// for why this is a config-level switch, never inferred from an RP's
-	// own metadata, and how the federation can still withhold it: a
-	// superior's metadata policy on grant_types (subset_of, or value)
-	// withholds it even from an RP that leaves grant_types out of its
-	// metadata, though an RP doing so under no such policy gets the grant.
-	// Still also requires Config.ClientCredentialsGrant to be enabled
-	// server-wide.
+	// own metadata. A client gets it only when its resolved metadata lists
+	// client_credentials in grant_types and no superior's metadata policy
+	// on grant_types (subset_of, or value) leaves it out: one leaving
+	// grant_types out is registered for the authorization code flow alone,
+	// Dynamic Client Registration's default. Its refresh tokens still
+	// follow offline_access, as every client's do. Still also requires
+	// Config.ClientCredentialsGrant to be enabled server-wide.
 	AllowsClientCredentialsGrant bool
 
-	// AllowsCIBA permits every automatically-registered client to use
-	// CIBA — see federation.AutomaticRegistrationConfig.AllowsCIBA for
-	// why this is a config-level switch, never inferred from an RP's own
-	// metadata. The federation can withhold it exactly as it can
-	// AllowsClientCredentialsGrant.
+	// AllowsCIBA permits automatically-registered clients to use CIBA —
+	// see federation.AutomaticRegistrationConfig.AllowsCIBA for why this
+	// is a config-level switch, never inferred from an RP's own metadata.
+	// A client gets it only when its grant_types lists
+	// urn:openid:params:grant-type:ciba, exactly as for
+	// AllowsClientCredentialsGrant, and it must name its
+	// backchannel_token_delivery_mode (CIBA Core 1.0 §4): one that would
+	// otherwise get CIBA but names none fails to register, so every
+	// request from it gets invalid_client.
 	AllowsCIBA bool
 
 	// AllowedClientAuthMethods restricts which token_endpoint_auth_method

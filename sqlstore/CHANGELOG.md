@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.9.2...sqlstore/v0.10.0) (2026-11-23)
+
+
+### Features
+
+* **sqlstore:** sqlstore implements storage.GrantRefreshTokenRevoker ([bbc4e7f](https://github.com/IDFoundry/FAPIgo/commit/bbc4e7f4b639aee539b9048d47f754b9cfe579c5))
+
+
+### Bug Fixes
+
+* **sqlstore:** tombstone a refresh token revoked before it is stored ([276f3c4](https://github.com/IDFoundry/FAPIgo/commit/276f3c4babba4d7a677c146b4de4053df3af0ca0))
+
 ## [0.9.2](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.9.1...sqlstore/v0.9.2) (2026-11-22)
 
 

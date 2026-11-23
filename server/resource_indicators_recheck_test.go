@@ -93,7 +93,7 @@ func registerClientResources(t *testing.T, h harness, ciba bool, allowed ...stri
 // resourceB once resourceB is revoked: refused with invalid_target when
 // it names no resource (so all of the grant's), and, when keepsA, a
 // token for resourceA alone when it narrows to that.
-func wantRecheck(t *testing.T, rv resourceRevocation, all func() (server.TokenResult, error), narrowedToA func() (server.TokenResult, error)) {
+func wantRecheck(t *testing.T, rv resourceRevocation, all, narrowedToA func() (server.TokenResult, error)) {
 	t.Helper()
 	_, err := all()
 	wantErrorCode(t, err, server.ErrorInvalidTarget)

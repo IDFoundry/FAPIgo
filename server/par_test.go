@@ -280,7 +280,7 @@ func (f *fakeGrantStore) RecordIssuedAccessToken(_ context.Context, codeHash [32
 	return nil
 }
 
-func (f *fakeGrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash [32]byte, refreshTokenHash [32]byte, _ time.Time) error {
+func (f *fakeGrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash, refreshTokenHash [32]byte, _ time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.codeRefreshHash == nil {

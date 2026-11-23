@@ -627,7 +627,7 @@ func applyClaimPolicy(ops PolicyOperators, crit critSet, value json.RawMessage, 
 // applyOperator applies op to value/present per §6.1.3.1.1's operator
 // table. Each operator's own logic is split into its own function
 // purely to keep this dispatcher's cognitive complexity manageable.
-func applyOperator(op string, operand json.RawMessage, value json.RawMessage, present bool) (json.RawMessage, bool, error) {
+func applyOperator(op string, operand, value json.RawMessage, present bool) (json.RawMessage, bool, error) {
 	switch op {
 	case opValue:
 		return applyValueOperator(operand)

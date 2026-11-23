@@ -278,7 +278,7 @@ type GrantStore interface {
 	// authorization included "offline_access"). Same contract: a no-op
 	// is tolerated, at the cost of a reused code's refresh token
 	// staying usable.
-	RecordIssuedRefreshToken(ctx context.Context, codeHash [32]byte, refreshTokenHash [32]byte, expiresAt time.Time) error
+	RecordIssuedRefreshToken(ctx context.Context, codeHash, refreshTokenHash [32]byte, expiresAt time.Time) error
 
 	// CreateRefreshToken persists token under its TokenHash until at
 	// least its ExpiresAt. An error fails the token request that issued

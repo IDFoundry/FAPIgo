@@ -475,7 +475,10 @@ looks like a normal redirect:
 - `AuthorizationResult` — `AuthorizationRedirect` | `AuthorizationLocalError`,
   returned from `CompleteAuthorization`. Only the engine assembles the
   final redirect destination — the embedding app cannot replace `state`,
-  edit a JARM response, change the redirect URI, or leak a code into logs.
+  edit a JARM response or change the redirect URI. Printing or logging
+  an `AuthorizationRedirect` shows the destination's scheme, host, path
+  and parameter names, never the code; `Destination()` is the full URL
+  to redirect to, so don't log it (see rule 18).
 - `InteractionResult` — built only via constructor functions
   (`Authorize(subject, authContext, grant)`, `Deny(reason)`,
   `AuthenticationFailed(reason)`, and `InteractionNeeded(need, reason)`
@@ -963,6 +966,77 @@ Whatever maps a `sub` back (the reversible deriver's keys, the mapping
 store, a resolver) belongs only to the OP and its own resource servers:
 OpenID Connect Core §8.1 forbids a pairwise identifier being reversible
 by anyone else.
+
+### 18. Bearer values print redacted; only what's named for the wire carries them
+
+Every result a flow hands to its caller keeps the codes, PKCE
+verifiers, pending nonces, tokens, handles, request_uris,
+`auth_req_id`s and notification tokens it holds in a `fapi.Secret`, or
+another holder fmt's reflection can't read through, so no fmt verb, flag
+or position prints one. A result with fields of its own to show prints a
+shadow of itself (its fields, in order, with `[REDACTED]` for each such
+value) under every fmt verb and flag, as `String`, and through
+`LogValue` in log/slog, whose groups hold every value they nest already
+resolved; `TokenSet`, `TokenResult` and the results that wrap them have
+no rendering methods, and print safely through their `Secret` fields.
+A redirect or authorization URL prints its scheme, host, path and
+parameter names. The request types an adapter builds (forms, the token
+endpoint's request, the resource server's `VerifyRequest`), and the
+ping notification a `BackchannelNotifier` is handed, print the same
+way when the request itself is printed or logged, a form showing
+values only for parameters that carry no credential; their exported
+fields hold the raw values. `TokenEndpointRequest` has none, and holds
+its form behind a pointer to a pointer, so it prints no credential in
+any position. `extension.Values` prints its parameter names only,
+whatever their sensitivity, and an error refusing a Sensitive value
+quotes none of it.
+
+What still carries a value, on purpose:
+
+- a handle's `String()` (`client.SessionHandle`,
+  `server.InteractionHandle`, `BackchannelAuthenticationHandle`,
+  `AuthReqID`), and a `server.RequestURI`'s, is its wire value, so a
+  cookie, form field or template built with it works: fmt's `v`, `s`,
+  `q`, `x` and `X` print one on its own or in an exported field of the
+  caller's struct, and so does log/slog's text handler, which prints
+  such a struct with `%+v`; log/slog logs one given as an attribute as
+  `[REDACTED]`, and every library type holding one shows `[REDACTED]`;
+- what is named for the wire or for storage: `Reveal`, `Destination`,
+  `client.AuthorizationSession.URL` (which carries the request_uri),
+  `AuthReqID` and `NotificationToken`, `extension.Snapshot` and
+  `AsParameters`, an interaction's `MarshalText` and the JSON of an
+  interaction or of `Values`, `WriteJSON`, the sealers, and storage
+  records, which a store keeps as they are;
+- the exported string fields of a request type (a form's values,
+  `VerifyRequest.Authorization`, `AuthorizationCallback.RawQuery`,
+  `BeginAuthorizationRequest.RequestURI`, the hint tokens of
+  `client.BeginBackchannelAuthenticationRequest`,
+  `server.BackchannelNotification.AuthReqID`), and the full URL in
+  `server.RedirectResponse.Destination`, which no code path returns
+  yet: they print from an unexported field of the caller's struct,
+  under `%p` and `%w`, through encoding/json, and through log/slog's
+  JSON handler when the value sits inside another;
+- the CIBA hint tokens wherever an interaction holds them
+  (`BackchannelAuthenticationHints`, in `BackchannelInteractionRequired`
+  and `PendingBackchannelInteraction`): plain strings, which fmt's
+  reflection fallback prints (from an unexported field, under `%p` and
+  `%w`, or behind a pointer under a verb fmt rejects for it) and
+  encoding/json encodes;
+- log/slog's JSON handler on a value inside a slice, map or struct,
+  which it encodes with encoding/json rather than through its
+  `LogValue`: the slice `ListBackchannelInteractions` returns, or an
+  interaction in the caller's struct, logs every hint token and
+  extension value, Sensitive ones included;
+- `client.IDTokenClaims.Nonce`, the validated claim of a completed flow.
+
+Log the library's values themselves, never those. fapitest's redaction
+guard checks what each exported struct type of the root package,
+`client`, `client/sessioncookie`, `server`, `server/interactioncookie`,
+`resource`, `storage`, `storage/memstore`, `extension` and `fapitest`
+prints, configuration and engines aside, against
+`fapitest/testdata/redaction.golden`. It doesn't parse `federation`,
+`keys`, `keys/ephemeral`, `pairwise`, `fapihttp`, `serverresource` or
+`backchannelhttp`.
 
 ### Conformance strategy
 

@@ -28,6 +28,12 @@ var (
 	// processes the token (see Definition.ReturnInTokenClaims).
 	ErrReservedTokenClaim = errors.New("extension: ReturnInTokenClaims under a reserved token claim name")
 
+	// ErrSensitiveTokenClaim indicates a Sensitive Definition registered
+	// with ReturnInTokenClaims: a token's claims can be read without a
+	// key by whoever holds the token, and by any log that records one,
+	// so a value that must stay out of logs can't go into them.
+	ErrSensitiveTokenClaim = errors.New("extension: a Sensitive value can't be returned in token claims")
+
 	// ErrDuplicateMember indicates a RAR detail object or an extension
 	// parameter's value, or an object nested at any depth in one, had the
 	// same JSON member name more than once, compared case-insensitively

@@ -277,3 +277,40 @@ func TestSensitiveSetRefusalWithholdsTheValue(t *testing.T) {
 		t.Errorf("NotSensitive Set = %v, want today's text", err)
 	}
 }
+
+// TestNewRegistryRefusesSensitiveTokenClaims checks NewRegistry refuses
+// a Sensitive Definition that sets ReturnInTokenClaims, whose value
+// would sit in tokens anyone holding one can read, and accepts either
+// on its own.
+func TestNewRegistryRefusesSensitiveTokenClaims(t *testing.T) {
+	both := otpDef
+	both.ReturnInTokenClaims = true
+	if _, err := extension.NewRegistry(both); !errors.Is(err, extension.ErrSensitiveTokenClaim) || !strings.Contains(err.Error(), `"x_otp"`) {
+		t.Errorf("NewRegistry(Sensitive, ReturnInTokenClaims) = %v, want ErrSensitiveTokenClaim naming x_otp", err)
+	}
+	claimed := both
+	claimed.Sensitivity = extension.NotSensitive
+	for _, def := range []extension.Definition[string]{otpDef, claimed} {
+		if _, err := extension.NewRegistry(def); err != nil {
+			t.Errorf("NewRegistry(%v, ReturnInTokenClaims %t) = %v, want it accepted", def.Sensitivity, def.ReturnInTokenClaims, err)
+		}
+	}
+}
+
+// TestAsParametersLeavesOutSensitiveValues checks AsParameters returns
+// no Sensitive value, even for a Definition passed to it without being
+// registered, while a NotSensitive one marked ReturnInTokenClaims still
+// goes into the token's claims.
+func TestAsParametersLeavesOutSensitiveValues(t *testing.T) {
+	both := otpDef
+	both.ReturnInTokenClaims = true
+	claimed := purposeDef
+	claimed.ReturnInTokenClaims = true
+	got := extension.AsParameters(sensitiveValues(t), both, claimed)
+	if _, ok := got["x_otp"]; ok {
+		t.Error("AsParameters returned a Sensitive value")
+	}
+	if want := `{"account_id":"` + testPurpose + `"}`; string(got["x_purpose"]) != want {
+		t.Errorf("AsParameters()[x_purpose] = %s, want %s", got["x_purpose"], want)
+	}
+}

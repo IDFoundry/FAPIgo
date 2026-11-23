@@ -33,7 +33,10 @@ const (
 	// the server's refusal of the request carrying it), names the
 	// parameter and its Go type, and never quotes the value, or the text
 	// of a decoder, of Validate or of the duplicate-member check, which
-	// can. Values prints no value of any sensitivity.
+	// can. Values prints no value of any sensitivity. NewRegistry refuses
+	// a Sensitive Definition with ReturnInTokenClaims, and AsParameters
+	// never returns a Sensitive value: a token's claims are readable by
+	// whoever holds it.
 	Sensitive
 )
 

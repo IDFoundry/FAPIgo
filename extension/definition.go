@@ -39,6 +39,8 @@ type Definition[T any] struct {
 	// logged because its Definition forgot to say so. An error refusing
 	// a Sensitive value names the parameter and T, and never quotes the
 	// value (see Sensitive); Values prints no value of any sensitivity.
+	// NewRegistry refuses a Sensitive Definition that sets
+	// ReturnInTokenClaims (ErrSensitiveTokenClaim).
 	Sensitivity Sensitivity
 
 	// ReturnInTokenClaims, if true, means a validated value should be
@@ -62,6 +64,13 @@ type Definition[T any] struct {
 	// itself — server.GrantedAuthorization.IDTokenClaims for an ID
 	// token, or its own server.AccessTokenIssuer for an access token —
 	// never from a client's parameter.
+	//
+	// A token's claims can be read by whoever holds the token, and by
+	// any log that records one, without a key, so NewRegistry refuses
+	// ReturnInTokenClaims on a Sensitive Definition
+	// (ErrSensitiveTokenClaim), and AsParameters never returns a
+	// Sensitive value. Declare the parameter NotSensitive if tokens may
+	// carry it.
 	ReturnInTokenClaims bool
 
 	// Validate, if non-nil, applies extra semantic checks beyond T's JSON
@@ -83,6 +92,7 @@ type Registered interface {
 	name() string
 	cardinalityOK() bool
 	sensitivityOK() bool
+	sensitive() bool
 	returnInTokenClaims() bool
 	validate(raw json.RawMessage, source Source, out *Values) error
 }
@@ -90,6 +100,8 @@ type Registered interface {
 func (d Definition[T]) name() string { return d.Name }
 
 func (d Definition[T]) returnInTokenClaims() bool { return d.ReturnInTokenClaims }
+
+func (d Definition[T]) sensitive() bool { return d.Sensitivity == Sensitive }
 
 func (d Definition[T]) sensitivityOK() bool {
 	return d.Sensitivity == NotSensitive || d.Sensitivity == Sensitive
@@ -147,13 +159,13 @@ func (d Definition[T]) validate(raw json.RawMessage, source Source, out *Values)
 // kind is how, and stage the text a NotSensitive refusal carries before
 // its cause, as it always has.
 func (d Definition[T]) refuse(kind valueErrorKind, stage string, cause error) error {
-	if d.Sensitivity == Sensitive {
+	if d.sensitive() {
 		held := cause
 		cause = &withheldCause{&held}
 	}
 	return &valueError{
 		name: d.Name, kind: kind, stage: stage, typeName: reflect.TypeFor[T]().String(),
-		cause: cause, sensitive: d.Sensitivity == Sensitive,
+		cause: cause, sensitive: d.sensitive(),
 	}
 }
 
@@ -357,13 +369,16 @@ func Snapshot(values Values) map[string]json.RawMessage {
 // AsParameters returns values re-encoded as a map[string]json.RawMessage
 // keyed by wire name — the shape AccessTokenParams.Parameters and
 // IDTokenParams.Parameters (internal/token) expect — restricted to the
-// given Definitions whose ReturnInTokenClaims is true. A caller passes
-// the same Definitions it registered so this package never has to guess
-// which values are claim-eligible from the raw map alone.
+// given Definitions whose ReturnInTokenClaims is true and which aren't
+// Sensitive: NewRegistry refuses a Definition that is both, and a caller
+// passing one here without registering it gets no value for it. A
+// caller passes the same Definitions it registered so this package
+// never has to guess which values are claim-eligible from the raw map
+// alone. The values it returns go into tokens: never log them.
 func AsParameters(values Values, defs ...Registered) map[string]json.RawMessage {
 	out := make(map[string]json.RawMessage, len(defs))
 	for _, d := range defs {
-		if !d.returnInTokenClaims() {
+		if !d.returnInTokenClaims() || d.sensitive() {
 			continue
 		}
 		if raw, ok := values.rawValues()[d.name()]; ok {

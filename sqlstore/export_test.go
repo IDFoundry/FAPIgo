@@ -80,3 +80,14 @@ func SweepBatchSize(d *DB) int64 { return d.sweepBatchSize() }
 
 // CheckIsolation is d's check of the database's default isolation level.
 func CheckIsolation(ctx context.Context, d *DB) error { return d.checkIsolation(ctx) }
+
+// MigrateThrough applies d's migrations up to version, and no further:
+// the schema of a release whose last migration that was.
+func MigrateThrough(ctx context.Context, d *DB, version int) error {
+	for _, m := range migrations[:version] {
+		if err := d.write(ctx, func(q querier) error { return d.apply(ctx, q, m) }); err != nil {
+			return err
+		}
+	}
+	return nil
+}

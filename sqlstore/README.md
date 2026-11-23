@@ -95,8 +95,11 @@ altered, or opened under another key is refused (`ErrRecordFormat`, as
 an outage), as is one whose row's expiry (or an interaction's pushed
 request, or a CIBA request's handle, delivery mode or interval) was
 changed. Lookup keys and digests, client IDs, times, CIBA status,
-replay digests, nonces, revocations, pairwise subjects and the clients
-table stay readable: the stores look rows up by them. The `Sealer`
+replay digests, nonces, revocations, refresh tokens' grant keys,
+pairwise subjects and the clients table stay readable: the stores look
+rows up by them. A grant key is the server's unkeyed digest of its
+issuer and a grant's ID, so a reader who guesses a grant ID can confirm
+it, as the revocations table names revoked grants' IDs outright. The `Sealer`
 interface is OID4VCgo's `verifier.TransactionSealer`, so one sealer
 serves both.
 
@@ -136,6 +139,43 @@ upgrading every instance to re-seal them in the current format (byte 3)
 and bind them too. Upgrade every instance sharing a database at once: a
 v0.2 instance can't open what an upgraded one seals, and rolling back
 to v0.2 leaves the records sealed since unreadable.
+
+## Upgrading from v0.9
+
+v0.10 adds migration 0005, a table indexing each refresh token by the
+grants it was issued from, so `RevokeGrant`, and the reuse of an
+authorization code, revoke the grant's refresh tokens in the store
+(`db.Grants()` and `db.BatchingGrants()` are
+`storage.GrantRefreshTokenRevoker`s) rather than leaving them to the
+grant's revocation record alone. It requires FAPIgo v0.79.0, which
+hands the store each refresh token's grant keys. The migration also
+adds a `revoked` column to `refresh_tokens`: revoking a refresh token
+that isn't stored yet, as a grant registry revocation racing the
+token's issuance can, leaves a tombstone under its hash for an hour,
+so the token is refused when it's stored, and never redeemed.
+
+- **Run `Migrate` before instances start v0.10**, from a deployment step
+  or the first upgraded instance: v0.10's `CheckSchema` refuses a schema
+  without migration 0005. The migration only adds, so v0.9 instances
+  still running keep working on the migrated database while the deploy
+  rolls out. But v0.9's `Migrate` and `CheckSchema`, like every
+  release's, refuse a schema migrated further than they know: a v0.9
+  instance that starts after the migration (restarted, scaled out, or
+  rolled back to) fails at startup, so finish the deploy. On PostgreSQL,
+  adding the column takes `refresh_tokens`' exclusive lock for a moment
+  (it rewrites no rows), waiting for the transactions using the table:
+  a `lock_timeout` on the migrating role keeps it from queueing traffic
+  behind a long one. It also bounds how long one `Migrate` waits for
+  another instance's: with a short one, instances migrating at once can
+  fail too, to be run again.
+- **Refresh tokens stored before the migration**, or by a v0.9 instance
+  during the deploy, aren't indexed: `RevokeGrant` leaves them to the
+  grant's revocation record, which lasts at least 400 days, as before.
+- **During the deploy**, a v0.9 instance can't open a tombstone's record
+  and answers a refresh presenting a tombstoned token with
+  `server_error` (500) rather than `invalid_grant`, never with tokens;
+  its `CreateRefreshToken` fails on one, and its `RevokeRefreshToken`
+  deletes one, as it deletes a token.
 
 ## Upgrading from v0.7
 
@@ -229,6 +269,20 @@ between instances: use SQLite there.
 
 ## Running it
 
+- **Reads go to the primary.** Give `New` a `*sql.DB` that sends reads,
+  not just writes, to the database the writes commit on, never to a
+  replica: several storage contracts hold only because a read sees
+  every write committed before it. A proxy or pooler routing `SELECT`s
+  to a lagging replica would let a refresh token or grant just revoked
+  be accepted again (here and on resource servers), the grant registry
+  miss a grant just issued when `RevokeSubjectGrants` lists it, a CIBA
+  inbox listing miss a completed add (letting requests past the
+  per-user caps), a reused authorization code read as unknown (so its
+  tokens aren't revoked), a pairwise subject just forgotten still
+  resolve, or a forgotten user get their old pairwise subject back, and
+  a removed or rekeyed client still be served. PgBouncer in transaction
+  mode is fine. See the package documentation's "Reading from the
+  primary" section.
 - **Migrations** are embedded and versioned. `Migrate` applies the
   missing ones and is safe to run from several processes at once; nothing
   migrates implicitly. `Options.TablePrefix` (default `fapigo_`)

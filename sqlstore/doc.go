@@ -30,7 +30,9 @@
 //
 // (BatchingGrants and BatchingRevocation add the batch methods the
 // server looks for — see Performance and scaling; db.Grants() and
-// db.Revocation() alone work too, a few statements a request slower.)
+// db.Revocation() alone work too, a few statements a request slower.
+// Either Grants store revokes a revoked grant's refresh tokens — see
+// Grant revocation.)
 //
 // and, for the features that need one, its store:
 //
@@ -141,6 +143,26 @@
 // OID4VCgo's sqlstore among them ("oid4vc_") — can share one database
 // and one *sql.DB.
 //
+// Migration 0005, new in sqlstore v0.10, adds the refresh_token_grants
+// table (see Grant revocation) and a revoked column, defaulting to 0, to
+// refresh_tokens (see Revoked refresh tokens). It only adds: an instance
+// of v0.9 still running keeps working on a database migrated to it,
+// never reading the new table or column, so a rolling deploy can run
+// Migrate first and then replace the instances. But v0.9's Migrate and
+// CheckSchema refuse the newer schema, as every release's refuse one
+// migrated further: once it's migrated, a v0.9 instance that starts —
+// restarted, scaled out, or rolled back to — fails at startup. So
+// migrate from a deployment step, or let the first v0.10 instance do it,
+// and then finish the deploy rather than start v0.9 instances. On
+// PostgreSQL the new column, whose default is a constant, rewrites no
+// rows, but adding it takes refresh_tokens' exclusive lock: Migrate
+// waits for the transactions using the table to end, and holds up those
+// that come after until it's added. A lock_timeout on the role running
+// Migrate makes it give up, to be run again, rather than wait behind a
+// long transaction. It also bounds how long a Migrate waits for another
+// instance's to finish: with a short one, instances migrating at once
+// can fail too, to be run again.
+//
 // # Atomicity
 //
 // Every consume-once operation is one statement or one transaction,
@@ -200,6 +222,75 @@
 // and interaction handles, never the values themselves, and the
 // server's request and grant records as opaque blobs.
 //
+// # Grant revocation
+//
+// GrantStore, and what BatchingGrants returns, are
+// storage.GrantRefreshTokenRevokers. CreateRefreshToken writes a row to
+// the refresh_token_grants table for each of a refresh token's grant
+// keys (storage.NewRefreshToken.GrantKeys: digests the server derives
+// from its issuer and a grant's ID), in the transaction that stores the
+// token, so a failure stores neither. RevokeGrantRefreshTokens deletes
+// every token a key indexes in one DELETE … RETURNING, revoking all of
+// them or none. So server.Server.RevokeGrant, and the reuse of an
+// authorization code, end the grant's refresh tokens in the store, and
+// don't leave them to the grant's revocation record alone: a refresh
+// token lifetime raised after the revocation, or applied by another
+// instance with other Limits, finds nothing to redeem once that record
+// has been swept, unless an issuance raced the revocation. A token whose
+// CreateRefreshToken commits after the DELETE has read the index is left
+// to the record, as the interface allows, like the tokens below.
+//
+// A refresh token stored before migration 0005, or by a v0.9 instance
+// while the deploy that applies it rolls out, has no index row, so
+// RevokeGrant leaves it to the grant's revocation record, which lasts at
+// least 400 days, as before: the token is refused while the record
+// lasts, and revoked when it's next presented or revoked by
+// RevokeListedGrant or RevokeToken. Sweep removes a token's index rows
+// once the token expires.
+//
+// # Revoked refresh tokens
+//
+// RevokeRefreshToken deletes the token or, finding none to delete,
+// writes a tombstone under its hash: a row marked revoked, which
+// RedeemRefreshToken treats as an unknown token and CreateRefreshToken
+// can't store a token over, as it holds the hash's primary key. The
+// server can revoke a refresh token before storing it: a revocation
+// through the grant registry (RevokeListedGrant, RevokeSubjectGrants)
+// reads the token's hash from the entry its issuance records first. So
+// once RevokeRefreshToken returns nil, a token stored under its hash
+// before or while the revocation ran is never redeemable, and one whose
+// CreateRefreshToken runs afterwards fails while the tombstone lasts
+// (an hour, below, which outlasts any issuance in flight): the
+// tombstone is an upsert, which turns a token stored since the DELETE
+// into the tombstone, and waits for one being stored meanwhile before
+// turning it into the tombstone too, or makes it fail. That holds at
+// every isolation level (see Capabilities); on SQLite, whose writes are
+// serialized, a token is stored before the DELETE, between the two, or
+// not at all.
+//
+// A tombstone lasts an hour by the instance's clock, then Sweep removes
+// it: longer, many times over, than an issuance takes between recording
+// its grant and storing its token, which only waits on the store. Each
+// is the hash of a refresh token the server issued, or was issuing,
+// written when it revokes one there's no row for: a token the registry
+// revokes (whose second revocation, after deleting the entry, finds the
+// token gone), one RevokeToken revokes after RevokeGrant has revoked it
+// through its grant, a reused code's token, or one the server withdraws
+// or cleans up after a race. None is a hash a caller chooses, and a
+// client can only revoke the tokens issued to it, so the table holds at
+// most one tombstone for each refresh token revoked in the last hour. A
+// tombstone's record is the byte a sealed record starts with, 3, and
+// nothing else: RedeemRefreshToken never opens it, and SealRecords leaves
+// it alone.
+//
+// While a deploy applying migration 0005 rolls out, a v0.9 instance
+// still running reads a tombstone's record as a sealed record it can't
+// open, with a Sealer or without, and answers a refresh presenting its
+// hash as an outage (500 server_error), never with a token; its
+// CreateRefreshToken fails on a tombstone as on a stored token; and its
+// RevokeRefreshToken deletes a tombstone as it deletes a token, so a
+// revocation made by a v0.9 instance has v0.9's guarantee only.
+//
 // # Sealing
 //
 // Options.Sealer seals every record blob the stores write with an AEAD
@@ -256,9 +347,16 @@
 // digests of, though a session's state is the value itself, which the
 // authorization request carried in the clear), client IDs, expiry and sweep times, CIBA status, delivery
 // mode and poll bookkeeping, replay digests, DPoP nonces, revoked keys,
-// pairwise subjects (the issuer, sector, internal subject and body are
-// every lookup's keys), and the clients table (public client metadata,
-// which the operator edits with SQL; it holds no secret). Sealing gives
+// the grant keys refresh tokens are indexed by, pairwise subjects (the
+// issuer, sector, internal subject and body are every lookup's keys),
+// and the clients table (public client metadata,
+// which the operator edits with SQL; it holds no secret). A grant key is
+// the server's own digest, unkeyed, of its issuer and a grant's ID, so
+// someone who can read the table and guesses a grant ID can confirm it,
+// and tell which of the refresh tokens' rows belong to that grant; the
+// revocations table names each revoked grant's ID outright. A Sealer
+// can't key them: its seals of one value all differ, and a lookup needs
+// the same key every time. Sealing gives
 // confidentiality, and integrity for each blob and the columns bound to
 // it; it doesn't make the database tamper-proof: anyone who can write
 // to it can still delete rows (a revocation, or a pending request),
@@ -376,6 +474,55 @@
 // requires EncryptedAtRest; encrypting the database's storage as well
 // is still worth it.
 //
+// # Reading from the primary
+//
+// Give New a *sql.DB that sends every statement, reads as well as
+// writes, to the database the writes commit on — on PostgreSQL the
+// primary — never to a replica. Several of the storage contracts hold
+// only because a read sees every write committed before it began, and
+// CrossInstanceConsistent says so. A pooler or proxy that routes plain
+// SELECTs to a lagging replica (read/write splitting), or a DSN that can
+// connect to a standby, breaks them without an error, for as long as the
+// replica lags:
+//
+//   - RedeemRefreshToken could redeem a refresh token revoked a moment
+//     before, deleted or tombstoned, and IsRevoked and IsAnyRevoked could
+//     miss a revocation, so a revoked token or grant would be accepted
+//     again, by the server and by resource servers reading the same
+//     tables;
+//   - GrantRegistry's ListGrants could miss an entry just recorded, so
+//     RevokeSubjectGrants leaves a grant just issued unrevoked, or list
+//     one just deleted, so the server's check, after storing a refresh
+//     token, that its grant is still recorded passes once a revocation
+//     has removed it;
+//   - BackchannelInbox's ListBackchannelRequests could miss an add that
+//     had returned, which storage.BackchannelInbox requires it to
+//     include, so the server could admit CIBA requests past its caps on
+//     a user's pending requests;
+//   - a reused authorization code could read as unknown rather than as
+//     redeemed (RedeemAuthorizationCode reads its row once its UPDATE
+//     matched nothing), so the tokens its first redemption issued aren't
+//     revoked (RFC 6749 §4.1.2);
+//   - PairwiseSubjects' Lookup could still find the user of a pairwise
+//     subject ForgetSubject has just retired, and GetOrCreate, whose
+//     first SELECT answers a returning user, could go on giving a user
+//     ForgetSubject has just forgotten the retired body rather than a
+//     new one, so the user's relying parties could link them to their
+//     old identifier again;
+//   - ClientRepository and ClientKeys could go on serving a client the
+//     clients table no longer holds, or keys it has replaced, as
+//     Options.ClientCacheTTL does by design, but for as long as the
+//     replica lags.
+//
+// A read that misses a row just written — a pushed request, an
+// interaction, a DPoP nonce, an opaque access token or a CIBA request
+// the replica hasn't received yet — fails closed, as an unknown key or
+// an outage, and costs only availability. Every write, and every read a
+// consume makes inside its write, already runs on the database the
+// writes go to. PgBouncer in transaction mode (see Performance and
+// scaling) sends each transaction to the one database it pools, so it's
+// fine. A SQLite file has no replicas.
+//
 // # Clients
 //
 // ClientRepository reads the clients table, which the operator manages:
@@ -458,14 +605,17 @@
 // redemption issued expire (so reusing the code still revokes them),
 // and at least RedeemedCodeRetention (an hour) past its own expiry, so
 // that a Sweep running while the server issues those tokens can't
-// remove it before the server records them, and a revocation until the latest expiry it was recorded with. An
-// opaque access token is kept until it expires, and a CIBA request
-// until BackchannelExpiredRetention (an hour) after it does, so a
-// client that polls it late gets expired_token rather than an unknown
-// auth_req_id's invalid_grant. A relying party's session is kept until
-// it's consumed or expires. Pairwise subjects are never swept: a user's
-// identifier for a sector must stay the same for as long as relying
-// parties may hold it.
+// remove it before the server records them, and a revocation until the
+// latest expiry it was recorded with. A refresh token's grant keys are
+// kept until the token expires, revoked or not, and a revoked refresh
+// token's tombstone an hour (see Revoked refresh tokens). An opaque
+// access token is kept until it expires, and a CIBA request until
+// BackchannelExpiredRetention (an hour) after it does, so a client that
+// polls it late gets expired_token rather than an unknown auth_req_id's
+// invalid_grant. A relying party's session is kept until it's consumed
+// or expires. Pairwise subjects are never swept: a user's identifier
+// for a sector must stay the same for as long as relying parties may
+// hold it.
 //
 // Sweep deletes in batches, each a short transaction of its own, so a
 // large backlog doesn't hold up the stores' writes; on PostgreSQL,
@@ -514,6 +664,14 @@
 //     one write for a DPoP proof's replay digest; 3 with Batching;
 //   - a CIBA poll of a pending request: 4 statements, 1 write
 //     transaction.
+//
+// From v0.10 a refresh token is stored with its grant keys (see Grant
+// revocation), an INSERT for each: with a revocation store the server
+// can read, a code exchange's refresh token has one, and two with an
+// application's grant ID. So a login issuing one runs one or two more
+// statements on SQLite and, on PostgreSQL, three or four more, the
+// token's single statement becoming a transaction of its own; it's
+// still one write transaction.
 //
 // Two methods beyond the storage interfaces take a little more off,
 // with a fapigo that looks for them (storage.RevocationBatchChecker and

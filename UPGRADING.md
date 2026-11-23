@@ -1,9 +1,11 @@
 # Upgrading
 
-This page covers every breaking change from v0.30.0 onward, and,
-from v0.81.0, each fix that can refuse something a deployment relies
-on: who each one affects and what to change. Releases with neither
-aren't listed. [CHANGELOG.md](CHANGELOG.md) has the full history.
+This page covers every breaking change from v0.30.0 onward; from
+v0.79.0, each tightened storage contract that a store of your own
+must now meet; and, from v0.81.0, each fix that can refuse something
+a deployment relies on: who each one affects and what to change.
+Releases with none of these aren't listed. [CHANGELOG.md](CHANGELOG.md)
+has the full history.
 
 `New` fails at startup when a new requirement isn't met, and the error
 names the missing field, so a skipped step can't slip through to
@@ -201,6 +203,48 @@ critical. Until it does, have `Lists` also return a CRL from the same
 CA without them (a complete CRL, say), or check revocation with a
 `ClientCertificateRevocation` of your own that processes the
 extension.
+
+### A refresh token revoked before it's stored must stay revoked (storage)
+
+**Affects:** a `storage.GrantStore` of your own whose
+`RevokeRefreshToken` returns an error for a hash no refresh token is
+stored under, or keeps nothing of revoking one, so that a token stored
+under the hash afterwards can be redeemed. memstore's grant store
+already behaves as required, and so do sqlstore's once every instance
+runs sqlstore v0.10. sqlstore v0.9's `RevokeRefreshToken` only deletes
+a stored token: to move to v0.10, see
+[Upgrading from v0.9](sqlstore/README.md#upgrading-from-v09) in
+sqlstore's README.
+
+**Why:** the server revokes refresh tokens already revoked, or gone,
+in the normal course (since v0.79.0, `RevokeToken` once it has revoked
+the token's grant, and `RevokeListedGrant` and `RevokeSubjectGrants`
+again once they've deleted the grant's registry entry), so an error
+makes `RevokeToken` answer `server_error`, and the other two fail on
+every call. Those two can also revoke a token before its issuance has
+stored it; the server checks again once the token is stored, but
+that's a second layer, and the store must keep the revocation too.
+
+**What fails:** nothing at startup, and the server doesn't change.
+`storage.TestGrantStoreContract` has three new subtests:
+`RevokeRefreshTokenIsIdempotent` fails a store whose
+`RevokeRefreshToken` returns an error for a hash with no token, or one
+revoked before, and `RevokeRefreshTokenBeforeCreateKeepsItUnredeemable`
+and `ConcurrentRevokeAndCreateRefreshTokenKeepItUnredeemable` fail one
+that redeems a token, with grant keys or without, stored after, or
+while, its hash was revoked. They don't check how long a revocation
+lasts.
+
+**What to change:** if you implement `storage.GrantStore` yourself,
+`RevokeRefreshToken` must return nil for a hash no token is stored
+under (not stored yet, already revoked, or removed once it expired), as
+for one revoked before. Once it has, the first token stored under the
+hash must never be redeemable if its `CreateRefreshToken` hadn't
+returned when `RevokeRefreshToken` was called and returns within an
+hour of it: `CreateRefreshToken` can fail, as sqlstore's does on the
+tombstone its revocation leaves, or store the token so that
+`RedeemRefreshToken` refuses it, as memstore's does. Run
+`storage.TestGrantStoreContract` against your store.
 
 ## v0.79.0
 

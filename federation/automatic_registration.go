@@ -106,8 +106,8 @@ type AutomaticRegistrationConfig struct {
 	// At most 4096 failures are remembered at once.
 	FailureCacheAge time.Duration
 
-	// AllowsClientCredentialsGrant permits every automatically-registered
-	// client to use the RFC 6749 §4.4 client_credentials grant —
+	// AllowsClientCredentialsGrant permits automatically-registered
+	// clients to use the RFC 6749 §4.4 client_credentials grant —
 	// uniformly, exactly like AllowedScopes, and for the identical
 	// reason: never inferred from the RP's own self-published metadata.
 	// Deciding whether a client may mint a token representing itself,
@@ -115,23 +115,24 @@ type AutomaticRegistrationConfig struct {
 	// capability grant, not a mechanism detail an RP can safely
 	// self-assert. False (the zero value/default) means no
 	// automatically-registered client may use client_credentials,
-	// regardless of what it publishes. True grants it to every client
-	// except one the federation withholds it from: the federation can
-	// withhold a grant, never add one. A client doesn't get it when its
-	// resolved metadata has a grant_types parameter without
-	// client_credentials, or when its Trust Chain's metadata policy on
-	// grant_types (a superior's subset_of, or a value) leaves
-	// client_credentials out — even if the RP leaves grant_types out,
-	// which the policy's operators then leave absent. An RP leaving
-	// grant_types out under no such policy gets it: OpenID Connect
-	// Dynamic Client Registration 1.0 §2's default for an omitted
-	// grant_types, authorization_code alone, isn't applied yet. Also
-	// still requires server.Config.ClientCredentialsGrant to be enabled
-	// server-wide, exactly as storage.RegisteredClientConfig's own field
-	// of the same name does for a statically registered client.
+	// regardless of what it publishes. True grants it to each client
+	// whose resolved metadata (its own, after every superior's metadata
+	// policy) lists client_credentials in grant_types, unless its Trust
+	// Chain's metadata policy on grant_types (a superior's subset_of, or
+	// a value) leaves client_credentials out: the RP's metadata and the
+	// federation can withhold the grant, never add it. A client whose
+	// resolved metadata leaves grant_types out doesn't get it, whatever
+	// the policy: OpenID Connect Dynamic Client Registration 1.0 §2 and
+	// RFC 7591 §2 have a client omitting grant_types use
+	// authorization_code alone, so it is registered for the
+	// authorization code flow only (see AutomaticClientRepository for
+	// its refresh tokens). Also still requires
+	// server.Config.ClientCredentialsGrant to be enabled server-wide,
+	// exactly as storage.RegisteredClientConfig's own field of the same
+	// name does for a statically registered client.
 	AllowsClientCredentialsGrant bool
 
-	// AllowsCIBA permits every automatically-registered client to use
+	// AllowsCIBA permits automatically-registered clients to use
 	// OpenID Connect Client-Initiated Backchannel Authentication —
 	// uniformly, for the identical reason AllowsClientCredentialsGrant
 	// is a config-level switch rather than inferred from RP metadata:
@@ -148,13 +149,16 @@ type AutomaticRegistrationConfig struct {
 	// RequestObjectSigningAlg already is, once the capability itself has
 	// been granted here. When false, that metadata is ignored entirely
 	// and CIBA stays disabled for every automatically-registered client.
-	// When true, a client the federation withholds
-	// urn:openid:params:grant-type:ciba from — through its resolved
-	// grant_types, or the metadata policy on grant_types even when the RP
-	// leaves grant_types out, exactly as for AllowsClientCredentialsGrant
-	// — doesn't get CIBA either, whatever CIBA metadata it publishes. An
-	// RP getting CIBA that names no backchannel_token_delivery_mode is
-	// registered for poll.
+	// When true, a client gets CIBA only if its resolved grant_types
+	// lists urn:openid:params:grant-type:ciba and the metadata policy on
+	// grant_types doesn't leave it out, exactly as for
+	// AllowsClientCredentialsGrant — so never one leaving grant_types
+	// out, whatever CIBA metadata it publishes: CIBA Core 1.0 §4 has a
+	// poll or ping client list the CIBA grant. A client getting CIBA must
+	// also name its backchannel_token_delivery_mode, which §4 makes
+	// REQUIRED: one that doesn't fails to register, as one naming ping
+	// without a backchannel_client_notification_endpoint does, rather
+	// than being registered for a delivery mode it didn't choose.
 	AllowsCIBA bool
 
 	// AllowedClientAuthMethods restricts which client authentication
@@ -383,7 +387,18 @@ func newRememberedFailure(err error) error {
 // config-level switch (AutomaticRegistrationConfig.AllowsClientCredentialsGrant/
 // AllowsCIBA) — off by default, since whether an automatically-resolved
 // RP may use either is a capability grant an operator makes, never
-// something an RP's own self-published metadata can grant itself. Every
+// something an RP's own self-published metadata can grant itself. An
+// RP gets either only when its resolved grant_types lists it: one
+// leaving grant_types out is registered for the authorization code flow
+// alone, the default OpenID Connect Dynamic Client Registration 1.0 §2
+// and RFC 7591 §2 give an omitted grant_types. Its refresh tokens are
+// gated as any client's are, by scope rather than by grant_types: the
+// server issues one at the code exchange exactly when the granted scope
+// includes offline_access (OpenID Connect Core §11), which takes
+// AllowedScopes, narrowed by the RP's resolved scope, to include it.
+// That default describes the grants a client uses, and RFC 6749 §1.5
+// leaves issuing a refresh token to the server, so neither has the
+// server refuse one to such an RP. Every
 // storage.ClientAuthMethod this package's own storage type supports is
 // readable from an RP's own token_endpoint_auth_method and/or
 // token_endpoint_auth_methods_supported metadata — every declared
@@ -1008,7 +1023,10 @@ type relyingPartyMetadata struct {
 	// grants, only narrow it (see narrowedScopes, grantTypePermitted and
 	// narrowedAuthorizationDetailsTypes); nil means left out, while an
 	// empty array, which a superior's subset_of or value can leave,
-	// lists nothing.
+	// lists nothing. A scope or authorization_details_types left out
+	// narrows nothing, but a grant_types left out means
+	// authorization_code alone, so it lists no grant grantTypePermitted
+	// is asked about.
 	Scope                     *string  `json:"scope"`
 	GrantTypes                []string `json:"grant_types"`
 	AuthorizationDetailsTypes []string `json:"authorization_details_types"`
@@ -1044,16 +1062,19 @@ func narrowedScopes(allowed []string, resolved *string) ([]string, error) {
 	return scopes, nil
 }
 
-// grantTypePermitted reports whether the RP may be registered for grant:
-// its resolved grant_types metadata lists grant or is left out (nil),
-// and permitted, what the Trust Chain's metadata policy lets grant_types
-// hold (choiceLimits.grantTypes), allows grant either way. A superior's
-// subset_of then withholds grant from an RP that leaves grant_types out,
-// which the policy's operators leave absent, as it does from one that
-// publishes it. Like narrowedScopes, it only ever narrows an operator's
-// grant.
+// grantTypePermitted reports whether the RP may be registered for grant,
+// one beyond the authorization code flow: its resolved grant_types
+// metadata lists grant, and permitted, what the Trust Chain's metadata
+// policy lets grant_types hold (choiceLimits.grantTypes), allows it. An
+// RP leaving grant_types out (nil) gets no such grant: OpenID Connect
+// Dynamic Client Registration 1.0 §2 and RFC 7591 §2 have a client
+// omitting grant_types use authorization_code alone. The policy's own
+// operators have already held a grant_types that is present to what
+// permitted allows; checking it again keeps a grant the policy withholds
+// out however the parameter came to list it. Like narrowedScopes, it
+// only ever narrows an operator's grant.
 func grantTypePermitted(grantTypes []string, permitted *permittedValues, grant string) bool {
-	return (grantTypes == nil || slices.Contains(grantTypes, grant)) && permitted.allows(grant)
+	return slices.Contains(grantTypes, grant) && permitted.allows(grant)
 }
 
 // narrowedAuthorizationDetailsTypes returns the operator's allowed Rich
@@ -1093,9 +1114,9 @@ func narrowedAuthorizationDetailsTypes(allowed, resolved []string, permitted *pe
 // parameters registration takes values of from somewhere the policy
 // doesn't act on (see choiceLimits): the choices taken from
 // token_endpoint_auth_methods_supported and
-// token_endpoint_auth_signing_alg_values_supported, and the grants and
-// Rich Authorization Request types an RP leaving grant_types or
-// authorization_details_types out would otherwise get.
+// token_endpoint_auth_signing_alg_values_supported, and the Rich
+// Authorization Request types an RP leaving authorization_details_types
+// out would otherwise get. It bounds the grants grant_types lists too.
 //
 // a.cfg supplies the operator-level capability grants (AllowedScopes,
 // AuthorizationDetailsTypes, AllowedResources,
@@ -1221,10 +1242,11 @@ func requestObjectAlgorithm(m relyingPartyMetadata) (fapi.SignatureAlgorithm, er
 // code flow, from AutomaticRegistrationConfig and never beyond it:
 // AllowedScopes narrowed by the scope of m, the RP's resolved metadata;
 // AuthorizationDetailsTypes by m's authorization_details_types and
-// limits.authorizationDetailsTypes; and AllowsClientCredentialsGrant and
-// AllowsCIBA (with the CIBA metadata that goes with it) by m's
-// grant_types and limits.grantTypes. Each limit also bounds an RP that
-// leaves its parameter out (see choiceLimits).
+// limits.authorizationDetailsTypes, which also bounds an RP leaving
+// authorization_details_types out (see choiceLimits); and
+// AllowsClientCredentialsGrant and AllowsCIBA (with the CIBA metadata
+// that goes with it) by m's grant_types, which must list each (see
+// grantTypePermitted), and limits.grantTypes.
 func (a *AutomaticClientRepository) applyGrants(cfg *storage.RegisteredClientConfig, m relyingPartyMetadata, limits choiceLimits) error {
 	scopes, err := narrowedScopes(a.cfg.AllowedScopes, m.Scope)
 	if err != nil {
@@ -1560,10 +1582,14 @@ func supportedAssertionAlgorithms(list []string, permitted *permittedValues) ([]
 //     plural sibling token_endpoint_auth_signing_alg_values_supported
 //     instead, would register a value the policy forbids, and likewise
 //     for token_endpoint_auth_method;
-//   - an RP leaving out grant_types or authorization_details_types under
-//     a subset_of on it would keep it absent, which registration reads
-//     as everything the operator allows, so the policy would withhold
-//     nothing.
+//   - an RP leaving out authorization_details_types under a subset_of on
+//     it would keep it absent, which registration reads as every type
+//     the operator allows, so the policy would withhold nothing.
+//
+// An RP leaving out grant_types is registered for no grant beyond the
+// authorization code flow, whatever the policy (see grantTypePermitted),
+// so grantTypes bounds only the grants a grant_types that is present
+// lists, which the policy's operators have already bounded too.
 //
 // Each nil field means no policy restricts that parameter.
 type choiceLimits struct {
@@ -1661,9 +1687,13 @@ func (a *AutomaticClientRepository) allowsClientAuthMethod(method storage.Client
 // when this repository allows CIBA, m actually advertises it, and the
 // CIBA grant is permitted by m's grant_types and permittedGrants, what
 // the metadata policy lets grant_types hold (see grantTypePermitted) —
-// a no-op otherwise. An RP naming no backchannel_token_delivery_mode is
-// registered for poll. Split out of registeredClientConfigFromMetadata
-// for the same reason applyClientAuthMethodFields is.
+// a no-op otherwise. An RP getting CIBA must name its
+// backchannel_token_delivery_mode, REQUIRED by CIBA Core 1.0 §4: one
+// that doesn't is refused, like one naming ping without the
+// notification endpoint ping needs (which storage.NewRegisteredClient
+// refuses), rather than registered for a mode it never chose. Split out
+// of registeredClientConfigFromMetadata for the same reason
+// applyClientAuthMethodFields is.
 func (a *AutomaticClientRepository) applyBackchannelAuthenticationFields(cfg *storage.RegisteredClientConfig, m relyingPartyMetadata, permittedGrants *permittedValues) error {
 	if !a.cfg.AllowsCIBA || m.BackchannelAuthenticationRequestSigningAlg == "" || !grantTypePermitted(m.GrantTypes, permittedGrants, cibaGrantType) {
 		return nil
@@ -1674,11 +1704,10 @@ func (a *AutomaticClientRepository) applyBackchannelAuthenticationFields(cfg *st
 	}
 	cfg.BackchannelAuthenticationRequestAlgorithm = alg
 
-	deliveryMode := m.BackchannelTokenDeliveryMode
-	if deliveryMode == "" {
-		deliveryMode = "poll"
+	if m.BackchannelTokenDeliveryMode == "" {
+		return errors.New("backchannel_token_delivery_mode is required to register for CIBA")
 	}
-	mode, err := storage.ParseBackchannelTokenDeliveryMode(deliveryMode)
+	mode, err := storage.ParseBackchannelTokenDeliveryMode(m.BackchannelTokenDeliveryMode)
 	if err != nil {
 		return fmt.Errorf("backchannel_token_delivery_mode: %w", err)
 	}

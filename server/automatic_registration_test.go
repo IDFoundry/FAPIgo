@@ -67,7 +67,9 @@ func fedJWKS(t *testing.T, kid string, key *ecdsa.PrivateKey) json.RawMessage {
 // setupAutomaticRegistrationFixture builds a Trust Anchor and an RP
 // whose openid_relying_party metadata registers redirectURI (or, when
 // it's "", one on the RP's own Entity Identifier host, as a pairwise RP
-// needs), plus any extra members.
+// needs), plus any extra members. The RP lists every grant the server
+// can register it for, and names poll delivery for CIBA, so the
+// operator's switches alone decide which it gets.
 func setupAutomaticRegistrationFixture(t *testing.T, redirectURI string, extra ...map[string]any) *automaticRegistrationFixture {
 	t.Helper()
 	now := time.Now()
@@ -112,9 +114,11 @@ func setupAutomaticRegistrationFixture(t *testing.T, redirectURI string, extra .
 	})
 	rpMetadata := map[string]any{
 		"redirect_uris":                                  []string{redirectURI},
+		"grant_types":                                    []string{"authorization_code", "client_credentials", server.CIBAGrantType},
 		"token_endpoint_auth_method":                     "private_key_jwt",
 		"token_endpoint_auth_signing_alg":                "ES256",
 		"request_object_signing_alg":                     "ES256",
+		"backchannel_token_delivery_mode":                "poll",
 		"backchannel_authentication_request_signing_alg": "ES256",
 		"jwks":        json.RawMessage(fedJWKS(t, "rp-oidc", rpOIDCKey)),
 		"client_name": testFederatedClientName,

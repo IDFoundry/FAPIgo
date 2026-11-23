@@ -34,7 +34,10 @@ func relyingPartyMetadataNames() []string {
 //     always refused, never read (superiors' metadata policy only ever
 //     sees the exact name);
 //   - what the operator grants — scopes, client_credentials, CIBA, the
-//     allowed authentication methods — never comes from the metadata;
+//     allowed authentication methods — never comes from the metadata,
+//     which can only narrow it;
+//   - client_credentials and CIBA go only to an RP whose grant_types
+//     lists them, CIBA only with a backchannel_token_delivery_mode;
 //   - an accepted configuration may still be refused by
 //     storage.NewRegisteredClient, which is fail-closed, but must not
 //     panic it.
@@ -46,6 +49,7 @@ func FuzzRegisteredClientConfigFromMetadata(f *testing.F) {
 	f.Add(`{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_methods_supported":["tls_client_auth","private_key_jwt"],"tls_client_auth_subject_dn":"CN=rp","jwks":`+testRPJWKS+`}`, uint8(0b1100))
 	f.Add(`{"redirect_uris":["https://rp.example.org/cb"],"Token_Endpoint_Auth_Method":"tls_client_auth","tls_client_auth_subject_dn":"CN=rp","jwks":`+testRPJWKS+`}`, uint8(0))
 	f.Add(`{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"private_key_jwt","jwks":`+testRPJWKS+`,"backchannel_token_delivery_mode":"ping","backchannel_client_notification_endpoint":"https://rp.example.org/n"}`, uint8(0b0101))
+	f.Add(`{"redirect_uris":["https://rp.example.org/cb"],"grant_types":["client_credentials","urn:openid:params:grant-type:ciba"],"token_endpoint_auth_method":"private_key_jwt","jwks":`+testRPJWKS+`,"backchannel_authentication_request_signing_alg":"ES256","backchannel_token_delivery_mode":"poll"}`, uint8(0b0111))
 	names := relyingPartyMetadataNames()
 	const id = fapi.ClientID("https://rp.example.org")
 
@@ -72,6 +76,7 @@ func FuzzRegisteredClientConfigFromMetadata(f *testing.F) {
 			t.Fatalf("accepted config %+v (jwks %d bytes) lacks its id, redirect URIs, jwks or federation marker", got, len(jwks))
 		}
 		checkOperatorGrants(t, cfg, got)
+		checkListedGrants(t, members, got)
 		_, _ = storage.NewRegisteredClient(got) // may refuse; must not panic
 	})
 }
@@ -107,10 +112,11 @@ func checkNoCaseVariantMember(t *testing.T, members map[string]json.RawMessage, 
 
 // checkOperatorGrants fails t if what the operator grants in cfg — scopes,
 // client_credentials, CIBA, the allowed methods — came from anywhere but
-// cfg in got.
+// cfg in got. The metadata may withhold client_credentials (see
+// checkListedGrants), never add it.
 func checkOperatorGrants(t *testing.T, cfg AutomaticRegistrationConfig, got storage.RegisteredClientConfig) {
 	t.Helper()
-	if !slices.Equal(got.AllowedScopes, cfg.AllowedScopes) || got.AllowsClientCredentialsGrant != cfg.AllowsClientCredentialsGrant {
+	if !slices.Equal(got.AllowedScopes, cfg.AllowedScopes) || got.AllowsClientCredentialsGrant && !cfg.AllowsClientCredentialsGrant {
 		t.Fatalf("scopes %v / client_credentials %v came from somewhere other than the operator's config", got.AllowedScopes, got.AllowsClientCredentialsGrant)
 	}
 	if !cfg.AllowsCIBA && (got.BackchannelTokenDeliveryMode != 0 || got.BackchannelAuthenticationRequestAlgorithm != 0) {
@@ -123,6 +129,25 @@ func checkOperatorGrants(t *testing.T, cfg AutomaticRegistrationConfig, got stor
 		if m != 0 && !slices.Contains(cfg.AllowedClientAuthMethods, m) {
 			t.Fatalf("registered method %v outside AllowedClientAuthMethods", m)
 		}
+	}
+}
+
+// checkListedGrants fails t if got has client_credentials or CIBA that
+// the metadata's grant_types (in members) doesn't list — an RP leaving
+// grant_types out gets the authorization code flow alone — or CIBA
+// without the backchannel_token_delivery_mode CIBA Core 1.0 §4 requires.
+func checkListedGrants(t *testing.T, members map[string]json.RawMessage, got storage.RegisteredClientConfig) {
+	t.Helper()
+	var grantTypes []string
+	_ = json.Unmarshal(members["grant_types"], &grantTypes) // left out or malformed lists nothing
+	if got.AllowsClientCredentialsGrant && !slices.Contains(grantTypes, clientCredentialsGrantType) {
+		t.Fatalf("client_credentials registered, though grant_types %s doesn't list it", members["grant_types"])
+	}
+	if got.BackchannelAuthenticationRequestAlgorithm == 0 {
+		return
+	}
+	if _, named := members["backchannel_token_delivery_mode"]; !named || !slices.Contains(grantTypes, cibaGrantType) {
+		t.Fatalf("CIBA registered, though grant_types %s doesn't list it or no delivery mode is named", members["grant_types"])
 	}
 }
 

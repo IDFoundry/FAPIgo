@@ -15,6 +15,101 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.81.0
+
+### Automatic registration: an omitted `grant_types` means the authorization code flow alone, and CIBA needs a delivery mode (federation, server)
+
+**Affects:** a server with `AutomaticRegistration.TrustAnchors` set and
+`AutomaticRegistration.AllowsClientCredentialsGrant` or
+`AutomaticRegistration.AllowsCIBA` enabled, or code passing those
+switches to `federation.NewAutomaticClientRepository`; and the
+federation Relying Parties that use `client_credentials` or CIBA there,
+or that publish `backchannel_authentication_request_signing_alg` while
+leaving `grant_types` out and name an endpoint URL as their client
+assertions' `aud`. With neither switch on, nothing changes:
+automatically registered clients already get the authorization code
+flow alone.
+
+**Why:** automatic registration read a Relying Party's resolved
+metadata without `grant_types` as permitting every grant the operator
+enabled, and registered an RP for CIBA with `poll` when it named no
+`backchannel_token_delivery_mode`. RFC 7591 §2 and OpenID Connect
+Dynamic Client Registration 1.0 §2 say a client omitting `grant_types`
+uses `authorization_code` alone, and CIBA Core 1.0 §4 has a client
+registering for CIBA list the CIBA grant type and name its delivery
+mode, which it makes REQUIRED. So any federation member could get
+`client_credentials` tokens, or send backchannel authentication
+requests for any user its hints named, without saying it would use
+either grant, unless a superior's policy on `grant_types` withheld
+them. No storage interface changes.
+
+**What fails:** nothing at startup. For an automatically registered RP
+whose resolved metadata leaves `grant_types` out:
+
+- A `client_credentials` request and a backchannel authentication
+  request get `unauthorized_client`. At the token endpoint, so does a
+  CIBA request it began before the upgrade, and a refresh token from a
+  CIBA grant recorded by v0.61.0 or later (older grant records don't
+  name their grant type, so aren't checked), since the server checks a
+  CIBA grant against the client's current registration. These are the
+  answers to a client assertion whose `aud` is the issuer identifier.
+- Only a client registered for CIBA may name an endpoint URL rather
+  than the issuer identifier as its client assertion's `aud` (CIBA Core
+  1.0 §7.1). So an RP the old default registered for CIBA, because it
+  named `backchannel_authentication_request_signing_alg`, whose
+  assertions name the backchannel authentication, token or revocation
+  endpoint URL, gets `invalid_client` (HTTP 401, `client assertion aud
+  must be the authorization server's issuer identifier`) there instead:
+  for its backchannel authentication and CIBA token requests, for
+  refresh (refresh tokens from its authorization code flow included),
+  and for revocation.
+- Otherwise its authorization code flow, and the refresh tokens that
+  flow issues (which follow `offline_access`, not `grant_types`), are
+  unchanged: with assertions naming the issuer, they work as before.
+
+With `AllowsCIBA` on, an RP whose resolved `grant_types` lists
+`urn:openid:params:grant-type:ciba` and that names
+`backchannel_authentication_request_signing_alg` but no
+`backchannel_token_delivery_mode` isn't registered at all: every request
+from it gets `invalid_client`, and `OnResolutionFailure` reports
+`backchannel_token_delivery_mode is required to register for CIBA`.
+
+**What to change:** have each Relying Party that uses these grants list
+them in its `openid_relying_party` metadata, and name its delivery mode
+for CIBA:
+
+```json
+{
+  "grant_types": ["authorization_code", "refresh_token", "client_credentials", "urn:openid:params:grant-type:ciba"],
+  "backchannel_authentication_request_signing_alg": "ES256",
+  "backchannel_token_delivery_mode": "poll"
+}
+```
+
+A `ping` RP also publishes its `backchannel_client_notification_endpoint`.
+With `federation.OpenIDRelyingPartyMetadata`, set `GrantTypes`, and add
+the CIBA parameters to the metadata JSON. A Relying Party that doesn't
+list the CIBA grant, such as one that stops using CIBA, names the issuer
+identifier as its client assertions' `aud` at every endpoint (FAPI 2.0
+Security Profile §5.3.2.1).
+
+A superior's metadata policy can still withhold a listed grant
+(`subset_of` or `value` on `grant_types`), or give the Relying Parties
+under it a value they leave out (`default`), such as `grant_types` or
+`backchannel_token_delivery_mode`; your switches still bound the
+grants. With `AllowsCIBA` on, a policy that puts the CIBA grant into
+the `grant_types` of a Relying Party naming the signing algorithm but
+no delivery mode (a `default` or an `add`) now makes its registration
+fail.
+
+A Relying Party can use the authorization code flow alone until it
+republishes its Entity Configuration and the server resolves it again,
+within `AutomaticRegistration.MaxCacheAge`. One refused for a missing
+delivery mode can't use any flow meanwhile. Once it publishes one, its
+first request after the server's memory of the failure lapses
+registers it; the server remembers a failure for
+`AutomaticRegistration.FailureCacheAge` (10 seconds by default).
+
 ## v0.79.0
 
 ### CIBA requests: core parameter size bounds, and at most 32 `acr_values` (server)

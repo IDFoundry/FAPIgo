@@ -66,17 +66,29 @@ never its own metadata's: `AllowedScopes`, `AuthorizationDetailsTypes`,
 `AllowedClientAuthMethods`. The federation can narrow those grants but
 never widen them: when the Relying Party's resolved metadata (after every
 superior's metadata policy) has `scope`, it gets only the `AllowedScopes`
-that also lists; when it has `authorization_details_types`, only the
-`AuthorizationDetailsTypes` that lists; and when it has `grant_types`
-without `client_credentials` or `urn:openid:params:grant-type:ciba`, it
-doesn't get that grant. A superior's `subset_of` or `value` on
-`grant_types` or `authorization_details_types` withholds the grants or
-types it leaves out even from a Relying Party that leaves the parameter
-out of its metadata, which the policy's operators leave absent. A Relying
-Party leaving `grant_types` out under no such policy gets every grant you
-enable: Dynamic Client Registration's default for an omitted
-`grant_types`, `authorization_code` alone, isn't applied yet. To hold a
-branch of the federation to the authorization code flow, have its
+that also lists; and when it has `authorization_details_types`, only the
+`AuthorizationDetailsTypes` that lists. A superior's `subset_of` or
+`value` on `authorization_details_types` withholds the types it leaves
+out even from a Relying Party that leaves the parameter out of its
+metadata, which the policy's operators leave absent.
+
+`client_credentials` and CIBA go only to a Relying Party whose resolved
+`grant_types` lists them (`client_credentials`,
+`urn:openid:params:grant-type:ciba`), so a superior's `subset_of` or
+`value` on `grant_types` withholds what it leaves out. A Relying Party
+leaving `grant_types` out gets neither, whatever you enable: Dynamic
+Client Registration's default for an omitted `grant_types` is
+`authorization_code` alone. Refresh tokens don't depend on
+`grant_types`: like any client, such a Relying Party gets one when its
+granted scope includes `offline_access`, which needs `AllowedScopes`,
+and the Relying Party's resolved `scope` if it has one, to include it. A
+Relying Party registering for CIBA must also name its
+`backchannel_token_delivery_mode` (CIBA Core §4): `poll`, or `ping` with
+a `backchannel_client_notification_endpoint`. With `AllowsCIBA` on, one
+whose resolved `grant_types` lists the CIBA grant and that names its
+`backchannel_authentication_request_signing_alg` but no delivery mode
+fails to register. To hold a branch of the federation to the
+authorization code flow whatever its Relying Parties list, have its
 superior publish a `grant_types` policy, such as a `subset_of` of
 `authorization_code` and `refresh_token`.
 
@@ -113,10 +125,15 @@ c, err := client.NewFromDiscovery(discovered, client.Config{
 Publish your own Entity Configuration with `Client.EntityConfiguration`
 (set `Config.Federation`), with an `openid_relying_party` object
 describing your redirect URIs, keys and authentication method
-(`federation.OpenIDRelyingPartyMetadata` is a typed form of it). To find
-a provider through the federation rather than plain discovery,
-`client.DiscoverViaFederation` resolves the provider's Trust Chain with a
-`federation.Resolver` and returns the same `DiscoveredMetadata`.
+(`federation.OpenIDRelyingPartyMetadata` is a typed form of it). A
+`grant_types` left out there means the authorization code flow alone
+(Dynamic Client Registration §2), so list any other grant you use, such
+as `client_credentials` or `urn:openid:params:grant-type:ciba`; for
+CIBA, also name `backchannel_authentication_request_signing_alg` and
+`backchannel_token_delivery_mode`. To find a provider through the
+federation rather than plain discovery, `client.DiscoverViaFederation`
+resolves the provider's Trust Chain with a `federation.Resolver` and
+returns the same `DiscoveredMetadata`.
 
 ## Trust Anchors and Intermediates
 

@@ -50,6 +50,15 @@ import "encoding/json"
 // is usable, automatic registration fails — the RP only ever sees
 // invalid_client, and the OP's operator sees the reason through
 // AutomaticRegistrationConfig.OnResolutionFailure.
+//
+// Such an OP registers an RP for the client_credentials grant or CIBA
+// only if GrantTypes lists it (and the OP's operator allows it): left
+// out, GrantTypes means authorization_code alone (OpenID Connect Dynamic
+// Client Registration 1.0 §2). For CIBA the RP also publishes
+// backchannel_authentication_request_signing_alg, its opt-in, and the
+// backchannel_token_delivery_mode CIBA Core 1.0 §4 requires (neither
+// modelled here): where the operator allows CIBA, an RP listing the
+// grant and the algorithm without a delivery mode fails to register.
 type OpenIDRelyingPartyMetadata struct {
 	// ClientRegistrationTypes is RECOMMENDED (OpenID Federation 1.0
 	// §5.2) — "automatic" and/or "explicit", or a federation-specific

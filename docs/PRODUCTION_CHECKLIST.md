@@ -63,6 +63,11 @@ are things no constructor can check.
   with revocation checking, or `ClientCertificateChainVerifiedUpstream{}`
   only when your TLS termination verifies every chain.
   [Step 4](../GETTING_STARTED.md#4-wire-dependencies-and-construct-the-server)
+- [ ] **Client assertion audiences:** leave
+  `Config.CIBAEndpointURLAudiences` off unless CIBA clients you can't
+  change name an endpoint URL as `aud`: an endpoint URL is what
+  audience injection exploits.
+  [CIBA](guides/ciba.md#authorization-server-three-calls-around-your-users-decision)
 - [ ] *(yours)* **Authenticate before redirecting.** Before a user has
   authenticated, end with `DenyLocally`, never `Deny` or
   `AuthenticationFailed`.

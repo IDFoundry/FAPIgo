@@ -68,6 +68,20 @@ func (a Assertion) ClaimedIssuer() string { return a.claims.Issuer }
 // as a client-lookup key only.
 func (a Assertion) ClaimedSubject() string { return a.claims.Subject }
 
+// ExplicitlyTyped reports whether the assertion's header has the "typ"
+// RFC 10070 §4 gives a client assertion, client-authentication+jwt,
+// compared as RFC 7515 §4.1.9 compares media types. That specification
+// introduced the type for a client to signal that it follows its
+// audience rule, the issuer identifier as the sole aud, so an assertion
+// made under the older rules doesn't carry it: no typ, a generic one
+// such as "JWT" or "JOSE", and a value this package doesn't know all
+// count as untyped. Parse has already refused another kind's explicit
+// type. Untrusted until Verify succeeds, like KeyID: use it only to
+// narrow the audiences Verify accepts, never to widen them.
+func (a Assertion) ExplicitlyTyped() bool {
+	return jose.TypeIs(a.compact.Header.Type, clientAuthenticationJWTType)
+}
+
 // VerifyPolicy is the set of checks Verify enforces against an Assertion.
 type VerifyPolicy struct {
 	// ExpectedClientID is the client the caller is trying to
@@ -114,6 +128,11 @@ type VerifyPolicy struct {
 type VerifiedAssertion struct {
 	ClientID  string
 	ExpiresAt time.Time
+	// Audience is the assertion's aud, the one of
+	// VerifyPolicy.ExpectedAudiences it named, so a caller that accepted
+	// several can tell which; empty for a client authenticated without
+	// an assertion.
+	Audience string
 	// InstanceKey, for a client authenticated by Client Attestation, is
 	// the base64url RFC 7638 thumbprint of its Client Instance Key;
 	// empty for every other method.
@@ -165,7 +184,7 @@ func (a Assertion) Verify(ctx context.Context, pub crypto.PublicKey, policy Veri
 		}
 	}
 
-	return VerifiedAssertion{ClientID: c.Subject, ExpiresAt: exp}, nil
+	return VerifiedAssertion{ClientID: c.Subject, ExpiresAt: exp, Audience: c.Audience}, nil
 }
 
 // checkTimes bounds the assertion's exp, iat and nbf against policy.

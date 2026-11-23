@@ -253,6 +253,13 @@ func newBackchannelOAuthOnlyServer(t *testing.T) error {
 // PAR/token-flow precedent (mtls_test.go).
 func newHarnessWithBackchannelMTLS(t *testing.T) harness {
 	t.Helper()
+	return newHarnessWithBackchannelMTLSConfig(t, nil)
+}
+
+// newHarnessWithBackchannelMTLSConfig is newHarnessWithBackchannelMTLS
+// with mutate applied to the server config before server.New.
+func newHarnessWithBackchannelMTLSConfig(t *testing.T, mutate func(*server.Config)) harness {
+	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
 	serverKey := generateKey(t)
@@ -336,6 +343,9 @@ func newHarnessWithBackchannelMTLS(t *testing.T) harness {
 		Backchannel:            memstore.NewBackchannelAuthenticationStore(),
 		BackchannelNotifier:    server.NoBackchannelNotifications{},
 	}
+	if mutate != nil {
+		mutate(&cfg)
+	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -351,10 +361,12 @@ const testMTLSBackchannelAuthenticationEndpoint = "https://mtls.as.example/backc
 // TestBeginBackchannelAuthenticationAcceptsMTLSAliasAsClientAssertionAudience:
 // for a CIBA client registered SenderConstrainMTLS, the backchannel
 // endpoint's mTLS alias identifies the endpoint it is calling just as
-// the plain URL does, so CIBA Core §7.1's endpoint-URL audience extends
-// to it (see acceptableClientAssertionAudiences).
+// the plain URL does, so under Config.CIBAEndpointURLAudiences CIBA Core
+// §7.1's endpoint-URL audience extends to it (see
+// acceptableClientAssertionAudiences, and
+// TestCIBAEndpointURLAudiencesAtBackchannelEndpoint for the default).
 func TestBeginBackchannelAuthenticationAcceptsMTLSAliasAsClientAssertionAudience(t *testing.T) {
-	h := newHarnessWithBackchannelMTLS(t)
+	h := newHarnessWithBackchannelMTLSConfig(t, withCIBAEndpointURLAudiences)
 	requestObj := h.backchannelRequestObject(t, standardBackchannelParams(t))
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
 		Signer: h.key, Algorithm: fapi.ES256,
@@ -656,17 +668,19 @@ func TestBeginBackchannelAuthenticationSuccess(t *testing.T) {
 }
 
 // TestBeginBackchannelAuthenticationAcceptsBackchannelAuthenticationEndpointURLAsClientAssertionAudience
-// covers CIBA Core 1.0 §7.1's URL-audience widening as scoped to the
-// backchannel authentication endpoint specifically — confirmed live
-// against the OIDF conformance suite's own CIBA client, which signs
-// "aud" as whichever endpoint URL it is actually calling. See
+// covers CIBA Core 1.0 §7.1's URL-audience widening, under
+// Config.CIBAEndpointURLAudiences, as scoped to the backchannel
+// authentication endpoint specifically — confirmed live against the
+// OIDF conformance suite's own CIBA client, which signs "aud" as
+// whichever endpoint URL it is actually calling. See
 // acceptableClientAssertionAudiences's own doc comment for why this
 // scoping is per endpoint, not a blanket accept-any-of-our-own-endpoints
 // policy (that blanket approach broke
 // fapi2-security-profile-final-par-test-{par,token}-endpoint-url-as-audience-fails
-// at the PAR endpoint).
+// at the PAR endpoint), and
+// TestCIBAEndpointURLAudiencesAtBackchannelEndpoint for the default.
 func TestBeginBackchannelAuthenticationAcceptsBackchannelAuthenticationEndpointURLAsClientAssertionAudience(t *testing.T) {
-	h, _ := newHarnessWithBackchannel(t)
+	h := newHarnessWithBackchannelConfig(t, memstore.NewBackchannelAuthenticationStore(), withCIBAEndpointURLAudiences)
 	requestObj := h.backchannelRequestObject(t, standardBackchannelParams(t))
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
 		Signer: h.key, Algorithm: fapi.ES256,
@@ -690,7 +704,8 @@ func TestBeginBackchannelAuthenticationAcceptsBackchannelAuthenticationEndpointU
 
 // TestBeginBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAssertionAudience
 // covers CIBA Core 1.0 §7.1's own explicit widening of the backchannel
-// authentication endpoint's accepted audiences: "the OP MUST accept its
+// authentication endpoint's accepted audiences, which
+// Config.CIBAEndpointURLAudiences turns on: "the OP MUST accept its
 // Issuer Identifier, Token Endpoint URL, or Backchannel Authentication
 // Endpoint URL as values that identify it as an intended audience" —
 // confirmed live via the OIDF conformance suite's own
@@ -698,7 +713,7 @@ func TestBeginBackchannelAuthenticationAcceptsBackchannelAuthenticationEndpointU
 // as the token endpoint's URL on a request sent to the backchannel
 // authentication endpoint and require it to succeed.
 func TestBeginBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAssertionAudience(t *testing.T) {
-	h, _ := newHarnessWithBackchannel(t)
+	h := newHarnessWithBackchannelConfig(t, memstore.NewBackchannelAuthenticationStore(), withCIBAEndpointURLAudiences)
 	requestObj := h.backchannelRequestObject(t, standardBackchannelParams(t))
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
 		Signer: h.key, Algorithm: fapi.ES256,
@@ -724,9 +739,10 @@ func TestBeginBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAssertionA
 // proves the audience scoping actually excludes an unrelated endpoint,
 // not just that BackchannelAuthentication's own widened set (its own
 // URL plus Token's, per CIBA §7.1) still works — PAR is never named by
-// either RFC 7523 or CIBA Core 1.0 §7.1's own carve-out.
+// either RFC 7523 or CIBA Core 1.0 §7.1's own carve-out, so it's refused
+// even under Config.CIBAEndpointURLAudiences.
 func TestBeginBackchannelAuthenticationRejectsPAREndpointURLAsClientAssertionAudience(t *testing.T) {
-	h, _ := newHarnessWithBackchannel(t)
+	h := newHarnessWithBackchannelConfig(t, memstore.NewBackchannelAuthenticationStore(), withCIBAEndpointURLAudiences)
 	requestObj := h.backchannelRequestObject(t, standardBackchannelParams(t))
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
 		Signer: h.key, Algorithm: fapi.ES256,
@@ -1762,14 +1778,15 @@ func TestExchangeBackchannelAuthenticationBeforeDecisionIsPending(t *testing.T) 
 }
 
 // TestExchangeBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAssertionAudience
-// confirms a CIBA-registered client keeps CIBA Core 1.0 §7.1's widened
-// audiences at the token endpoint, even though FAPI 2.0 Final makes
-// every other client issuer-only there: the OIDF FAPI-CIBA-ID1 suite
-// signs every token-endpoint assertion (polling and refresh alike) with
-// the token endpoint URL. Reaching authorization_pending proves client
+// confirms that under Config.CIBAEndpointURLAudiences a CIBA-registered
+// client keeps CIBA Core 1.0 §7.1's widened audiences in the CIBA token
+// request, even though RFC 10070 and FAPI 2.0 Final make it
+// issuer-only otherwise: the OIDF FAPI-CIBA-ID1 suite signs every
+// token-endpoint assertion (polling and refresh alike) with the token
+// endpoint URL. Reaching authorization_pending proves client
 // authentication succeeded.
 func TestExchangeBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAssertionAudience(t *testing.T) {
-	h, _ := newHarnessWithBackchannel(t)
+	h := newHarnessWithBackchannelConfig(t, memstore.NewBackchannelAuthenticationStore(), withCIBAEndpointURLAudiences)
 	required := beginBackchannel(t, h, standardBackchannelParams(t))
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
 		Signer: h.key, Algorithm: fapi.ES256,
@@ -1795,10 +1812,12 @@ func TestExchangeBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAsserti
 }
 
 // TestExchangeBackchannelAuthenticationDescribesClientAssertionAudienceMismatch:
-// a CIBA client's aud mismatch names the endpoint URL as well as the
-// issuer, since both are accepted there (CIBA Core 1.0 §7.1).
+// under Config.CIBAEndpointURLAudiences, a CIBA client's aud mismatch
+// names the endpoint URL as well as the issuer, since both are accepted
+// there (CIBA Core 1.0 §7.1). Without it, the description names the
+// issuer alone (TestCIBAEndpointURLAudiencesAtCIBATokenRequest).
 func TestExchangeBackchannelAuthenticationDescribesClientAssertionAudienceMismatch(t *testing.T) {
-	h, _ := newHarnessWithBackchannel(t)
+	h := newHarnessWithBackchannelConfig(t, memstore.NewBackchannelAuthenticationStore(), withCIBAEndpointURLAudiences)
 	required := beginBackchannel(t, h, standardBackchannelParams(t))
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
 		Signer: h.key, Algorithm: fapi.ES256,
@@ -1828,13 +1847,14 @@ func TestExchangeBackchannelAuthenticationDescribesClientAssertionAudienceMismat
 }
 
 // TestExchangeAuthorizationCodeKeepsCIBAClientIssuerOnly: CIBA's widened
-// audiences are for the CIBA grant (and refresh). The authorization code
-// grant is FAPI 2.0's, so a CIBA-registered client's assertion there
-// must name the issuer (FAPI 2.0 Security Profile §5.3.2.1). Client
+// audiences (Config.CIBAEndpointURLAudiences) are for the CIBA grant
+// and its refresh. The authorization code grant is FAPI 2.0's, so a
+// CIBA-registered client's assertion there must name the issuer (FAPI
+// 2.0 Security Profile §5.3.2.1), with the widening on too. Client
 // authentication runs before the code is looked up, so invalid_grant
 // for the made-up code proves it succeeded.
 func TestExchangeAuthorizationCodeKeepsCIBAClientIssuerOnly(t *testing.T) {
-	h, _ := newHarnessWithBackchannel(t)
+	h := newHarnessWithBackchannelConfig(t, memstore.NewBackchannelAuthenticationStore(), withCIBAEndpointURLAudiences)
 	for aud, want := range map[string]server.ErrorCode{
 		testTokenEndpoint: server.ErrorInvalidClient,
 		testIssuer:        server.ErrorInvalidGrant,

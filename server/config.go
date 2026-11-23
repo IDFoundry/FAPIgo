@@ -550,6 +550,38 @@ type Config struct {
 	// is set.
 	RequireBindingMessage bool
 
+	// CIBAEndpointURLAudiences lets a client registered for CIBA name an
+	// endpoint URL, not only this server's issuer identifier, as a
+	// client assertion's aud where CIBA uses client authentication: the
+	// token or backchannel authentication endpoint URL at the
+	// backchannel authentication endpoint, as CIBA Core 1.0 §7.1 has the
+	// server accept, and the token endpoint URL in the CIBA token
+	// request and when refreshing a grant recorded as a CIBA grant (one
+	// from before v0.61.0 recorded no grant type, so refreshing it needs
+	// the issuer identifier). Whether a client is registered for CIBA is
+	// read from its registration when it makes the request. Some CIBA
+	// clients sign with these URLs, among them the OpenID Foundation's
+	// FAPI-CIBA conformance suite. For a client registered
+	// SenderConstrainMTLS, each URL's MTLSEndpoints alias is accepted
+	// too.
+	//
+	// False (the default) accepts only the issuer identifier, at every
+	// endpoint and for every client, as RFC 10070 §4 requires: the
+	// server "MUST reject any JWT that does not contain its issuer
+	// identifier as its sole audience value". An endpoint URL in aud is
+	// what audience injection exploits: a client that takes the URL
+	// from a malicious server's metadata signs an assertion that server
+	// can present here.
+	//
+	// Even when set, only the issuer identifier is accepted at PAR, the
+	// authorization code exchange, the client_credentials grant and
+	// revocation, and to refresh any grant but a CIBA one; and, at every
+	// endpoint, from an assertion typed client-authentication+jwt
+	// (compared as a media type), with which a client says it follows
+	// RFC 10070. It has no effect unless Endpoints.BackchannelAuthentication
+	// is set.
+	CIBAEndpointURLAudiences bool
+
 	// AdditionalGrantTypes are grant types the embedder serves itself at
 	// Endpoints.Token, routing requests by grant_type — such as
 	// OpenID4VCI's urn:ietf:params:oauth:grant-type:pre-authorized_code.

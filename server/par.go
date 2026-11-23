@@ -342,14 +342,15 @@ func (s *Server) validateAuthorizationRequest(ctx context.Context, params map[st
 // sent.
 //
 // endpoints/mtlsEndpoints list every endpoint URL (and its RFC 8705 §5
-// mTLS alias, if any) a client_assertion's "aud" may name, in addition
-// to the issuer identifier itself, for the specific physical endpoint
-// this call is authenticating a request for; see
-// acceptableClientAssertionAudiences's own doc comment for why this
-// must be scoped per endpoint rather than accepted for any of them
-// interchangeably. Pass nil for both when the calling endpoint accepts
-// no endpoint-URL audience at all (PAR — see
-// PushAuthorizationRequest's own call site).
+// mTLS alias, if any) a CIBA client's client_assertion may name as its
+// "aud" under Config.CIBAEndpointURLAudiences, in addition to the issuer
+// identifier itself, for the specific physical endpoint this call is
+// authenticating a request for; see acceptableClientAssertionAudiences's
+// own doc comment for when they apply, and why they're scoped per
+// endpoint rather than accepted for any of them interchangeably. Pass
+// nil for both when the calling endpoint accepts no endpoint-URL
+// audience at all (PAR, the authorization code and client_credentials
+// grants, and revocation).
 //
 // RFC 6749 §2.3: a client "MUST NOT use more than one authentication
 // method in each request", so a request carrying both attestation
@@ -473,7 +474,7 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 			unresolvedClientKeysError(ctx, err, newError(ErrorInvalidClient, 401, "no matching client key", err))
 	}
 
-	audiences := s.acceptableClientAssertionAudiences(client, endpoints, mtlsEndpoints)
+	audiences := s.acceptableClientAssertionAudiences(client, assertion, endpoints, mtlsEndpoints)
 	policy := clientassertion.VerifyPolicy{
 		ExpectedClientID:  client.ID().String(),
 		ExpectedAudiences: audiences,
@@ -494,72 +495,89 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 	return client, verified, nil
 }
 
+// issuerAudienceDescription is the error_description of the
+// invalid_client for a client assertion whose aud isn't the issuer
+// identifier, where nothing else is accepted.
+const issuerAudienceDescription = "client assertion aud must be the authorization server's issuer identifier"
+
 // clientAssertionFailureDescription returns the invalid_client
 // error_description for a client assertion that failed verification.
 // An aud mismatch gets its own: client libraries commonly default aud
-// to the token endpoint URL, as RFC 7523 §3 allowed, which FAPI 2.0
-// Security Profile Final §5.3.2.1 no longer accepts, and the generic
-// description gives such a client no hint why it was refused. Naming
-// the accepted audience reveals only the issuer identifier (and, for a
-// CIBA client, this server's own endpoint URLs), all of which discovery
-// already publishes; and Verify checks aud only after the signature, so
-// only a holder of the client's key ever sees it. Every other failure
-// stays generic.
+// to the token endpoint URL, as RFC 7523 §3 allowed, which RFC 10070 §4
+// and FAPI 2.0 Security Profile Final §5.3.2.1 no longer accept, and the
+// generic description gives such a client no hint why it was refused.
+// Naming the accepted audience reveals only the issuer identifier (and,
+// under Config.CIBAEndpointURLAudiences, this server's own endpoint
+// URLs), all of which discovery already publishes; and Verify checks aud
+// only after the signature, so only a holder of the client's key ever
+// sees it. Every other failure stays generic.
 func clientAssertionFailureDescription(err error, audiences []string) string {
 	if !errors.Is(err, clientassertion.ErrAudienceMismatch) {
 		return "client assertion verification failed"
 	}
 	if len(audiences) == 1 {
-		return "client assertion aud must be the authorization server's issuer identifier"
+		return issuerAudienceDescription
 	}
 	return "client assertion aud must be the authorization server's issuer identifier or this endpoint's URL"
 }
 
 // acceptableClientAssertionAudiences returns the "aud" values this
-// server accepts on a client assertion presented to one specific
-// endpoint. Always the issuer identifier — and, for a client not
-// registered for CIBA, only the issuer identifier: FAPI 2.0 Security
-// Profile Final §5.3.2.1 requires the authorization server to "only
-// accept its issuer identifier value ... as a string in the aud claim
-// received in client authentication assertions", at every endpoint —
-// narrowing RFC 7523 §3's older "the token endpoint URL ... MAY be used"
-// allowance. Confirmed live via the OIDF suite's
+// server accepts on assertion, client's assertion presented to one
+// specific endpoint. By default that is only the issuer identifier, for
+// every client at every endpoint: RFC 10070 §4 has the authorization
+// server "reject any JWT that does not contain its issuer identifier as
+// its sole audience value", and FAPI 2.0 Security Profile Final
+// §5.3.2.1 has it "only accept its issuer identifier value ... as a
+// string in the aud claim received in client authentication
+// assertions", both narrowing RFC 7523 §3's older "the token endpoint
+// URL ... MAY be used" allowance. Confirmed live via the OIDF suite's
 // fapi2-security-profile-final-ensure-invalid-client-assertions-fail
 // module, which (for the client_credentials variant, where the token
 // endpoint is the first authenticated endpoint) requires a token
 // endpoint URL "aud" to be rejected.
 //
-// A client registered for CIBA (BackchannelAuthenticationRequestAlgorithm
-// set) instead follows FAPI-CIBA's rules at every endpoint that passes
-// endpoints: CIBA Core 1.0 §7.1 requires that "the OP MUST accept its
-// Issuer Identifier, Token Endpoint URL, or Backchannel Authentication
-// Endpoint URL as values that identify it as an intended audience", and
-// the OIDF FAPI-CIBA-ID1 suite signs every token-endpoint assertion —
-// including refresh — with the token endpoint URL. Those endpoints are
-// the backchannel authentication endpoint, and the token endpoint for
-// the CIBA and refresh grants (and revocation); the authorization code
-// and client credentials grants are FAPI 2.0's, and pass nil, so a CIBA
-// client's assertion there must name the issuer like any other.
+// An endpoint URL is what audience injection exploits. A client that
+// uses one key with several authorization servers, and takes the aud
+// for each from that server's metadata, signs for a malicious server an
+// assertion naming whatever URL its metadata lists, one of this
+// server's, and the malicious server presents the assertion here. That
+// the URL names this server is no defence; only the issuer identifier,
+// which the client checks against the metadata it fetched (RFC 8414
+// §3.3), can't be planted that way.
 //
-// The refresh grant and revocation can't tell a CIBA grant from an
-// authorization code one before the client is authenticated, so a CIBA
-// client may name the token or revocation endpoint URL there whichever
-// flow issued the grant. That is deliberate: the URL names only this
-// server, so an assertion carrying it can't be replayed at another, and
-// telling the flows apart would mean recording the flow in every grant
-// for no security gain. For such a client,
-// the result also includes the URLs actually named in endpoints (those
-// appropriate for the endpoint authenticating this request) and, when
-// it is registered SenderConstrainMTLS, their RFC 8705 §5 mTLS aliases
-// (mtlsEndpoints, matched by position to endpoints).
+// Under Config.CIBAEndpointURLAudiences, a client registered for CIBA
+// (BackchannelAuthenticationRequestAlgorithm set) may also name the URLs
+// endpoints lists, and, when it is registered SenderConstrainMTLS, their
+// RFC 8705 §5 mTLS aliases (mtlsEndpoints, matched by position to
+// endpoints): CIBA Core 1.0 §7.1 says "the OP MUST accept its Issuer
+// Identifier, Token Endpoint URL, or Backchannel Authentication Endpoint
+// URL as values that identify it as an intended audience". The OIDF
+// FAPI-CIBA-ID1 suite names the backchannel authentication endpoint URL
+// at that endpoint (the issuer, or the token endpoint URL, in
+// fapi-ciba-id1 and fapi-ciba-id1-refresh-token), and the token
+// endpoint URL, or its mTLS alias, in its token requests, refresh
+// included. Only CIBA's endpoints pass endpoints: the backchannel
+// authentication endpoint, and the token endpoint for the CIBA grant
+// and the refresh grant. A refresh can't tell a CIBA grant from another
+// before the client is authenticated, so RefreshAccessToken checks the
+// aud again once the refresh token is redeemed
+// (checkRefreshAssertionAudience) and refuses an endpoint URL for any
+// grant but a CIBA one. The URLs are accepted only while this server
+// serves CIBA (Endpoints.BackchannelAuthentication set), and never from
+// an assertion typed client-authentication+jwt
+// (clientassertion.Assertion.ExplicitlyTyped): a client sends that typ
+// to say it follows RFC 10070, which has it name the issuer alone, and
+// CIBA Core 1.0's clients, the suite among them, send none.
 //
 // PAR never accepts an endpoint-URL audience, for any client —
 // confirmed live via
 // fapi2-security-profile-final-par-test-{par,token}-endpoint-url-as-audience-fails
-// — so PushAuthorizationRequest passes nil for both parameters.
-func (s *Server) acceptableClientAssertionAudiences(client storage.RegisteredClient, endpoints, mtlsEndpoints []fapi.URL) []string {
+// — and neither do the authorization code and client_credentials
+// grants, which are FAPI 2.0's, or revocation, which CIBA Core doesn't
+// name: each passes nil for both parameters.
+func (s *Server) acceptableClientAssertionAudiences(client storage.RegisteredClient, assertion clientassertion.Assertion, endpoints, mtlsEndpoints []fapi.URL) []string {
 	auds := []string{s.cfg.Issuer.String()}
-	if _, ciba := client.BackchannelAuthenticationRequestAlgorithm(); !ciba {
+	if !s.acceptsCIBAEndpointURLAudiences(client, assertion) {
 		return auds
 	}
 	for _, u := range endpoints {
@@ -576,6 +594,20 @@ func (s *Server) acceptableClientAssertionAudiences(client storage.RegisteredCli
 		}
 	}
 	return auds
+}
+
+// acceptsCIBAEndpointURLAudiences reports whether assertion, client's,
+// may name an endpoint URL its endpoint lists instead of the issuer
+// identifier: only under Config.CIBAEndpointURLAudiences, while this
+// server serves CIBA, for a client registered for CIBA, and from an
+// assertion not typed client-authentication+jwt (see
+// acceptableClientAssertionAudiences).
+func (s *Server) acceptsCIBAEndpointURLAudiences(client storage.RegisteredClient, assertion clientassertion.Assertion) bool {
+	if !s.cfg.CIBAEndpointURLAudiences || s.cfg.Endpoints.BackchannelAuthentication.IsZero() {
+		return false
+	}
+	_, ciba := client.BackchannelAuthenticationRequestAlgorithm()
+	return ciba && !assertion.ExplicitlyTyped()
 }
 
 // resolveAuthorizationParameters returns the pushed authorization

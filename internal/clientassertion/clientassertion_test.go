@@ -111,6 +111,26 @@ func TestCreateVerifyRoundTrip(t *testing.T) {
 	}
 }
 
+// TestVerifyReportsTheAudienceNamed: a caller accepting several
+// audiences learns which one the assertion named.
+func TestVerifyReportsTheAudienceNamed(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	parsed, err := Parse(createTestAssertion(t, key, now, time.Minute))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	policy := basePolicy(now)
+	policy.ExpectedAudiences = []string{"https://as.example", "https://as.example/token"}
+	verified, err := parsed.Verify(context.Background(), &key.PublicKey, policy)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if verified.Audience != "https://as.example/token" {
+		t.Fatalf("Audience = %q, want the token endpoint URL the assertion named", verified.Audience)
+	}
+}
+
 func TestVerifyWithKeyID(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()

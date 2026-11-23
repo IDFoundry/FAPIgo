@@ -105,6 +105,21 @@ if its registration says so:
   grant and its signing algorithm without a delivery mode isn't
   registered.
 
+A CIBA client's client assertions name the server's issuer identifier
+as `aud`, as every client's must (RFC 10070 §4); FAPIgo's `client`
+always does. CIBA Core 1.0 §7.1 also has the server accept the token
+endpoint URL or the backchannel authentication endpoint URL at the
+backchannel authentication endpoint, and some CIBA clients sign with
+an endpoint URL, the OpenID Foundation's FAPI-CIBA conformance suite
+among them. For those, set `Config.CIBAEndpointURLAudiences`:
+CIBA clients may then name either URL at the backchannel
+authentication endpoint, and the token endpoint URL in the CIBA token
+request and to refresh a CIBA grant (each with its mTLS alias, for a
+client registered `SenderConstrainMTLS`), but nowhere else, and not in
+an assertion typed `client-authentication+jwt`. An endpoint URL in
+`aud` is what audience injection exploits, so leave it off unless your
+clients need it.
+
 ```go
 func backchannelAuthentication(w http.ResponseWriter, r *http.Request) {
 	req, err := server.BeginBackchannelAuthenticationRequestFromHTTP(r)

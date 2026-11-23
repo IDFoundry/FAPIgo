@@ -248,6 +248,17 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		// so this stays a worked-example opt-in like -ciba/-userinfo-signing
 		// above.
 		ClientCredentialsGrant: clientCredentialsGrant,
+		// With -ciba, a CIBA client's assertion may name an endpoint URL
+		// where CIBA uses client authentication, as CIBA Core 1.0 §7.1
+		// allows, since the OIDF FAPI-CIBA suite's assertions do, with no
+		// typ: the backchannel authentication endpoint URL at that
+		// endpoint (the issuer for the first client, and the token
+		// endpoint URL for the second, in fapi-ciba-id1 and
+		// fapi-ciba-id1-refresh-token), and the token endpoint's mTLS
+		// alias, or its URL where none is published, in every token
+		// request, refresh included. Every other assertion must still
+		// name the issuer alone (RFC 10070 §4).
+		CIBAEndpointURLAudiences: ciba,
 	}
 	// autoRegLimits/autoRegCfg carry the values that would normally go
 	// straight into srvCfg.AutomaticRegistration (letting server.New

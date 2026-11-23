@@ -2067,5 +2067,152 @@
     ],
     "run": "^TestSweepRemovesTombstonesAfterAnHour$",
     "why": "a tombstone lasts an hour before Sweep removes it"
+  },
+  {
+    "id": "srv-assertion-aud-issuer-only-default",
+    "file": "server/par.go",
+    "old": "if !s.cfg.CIBAEndpointURLAudiences || s.cfg.Endpoints.BackchannelAuthentication.IsZero() {",
+    "new": "if s.cfg.Endpoints.BackchannelAuthentication.IsZero() {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestCIBAEndpointURLAudiencesAtBackchannelEndpoint|TestCIBAEndpointURLAudiencesAtCIBATokenRequest|TestCIBAEndpointURLAudiencesAtRefresh)$",
+    "why": "a CIBA client's assertion names the issuer alone unless Config.CIBAEndpointURLAudiences is set"
+  },
+  {
+    "id": "srv-assertion-aud-needs-ciba-endpoint",
+    "file": "server/par.go",
+    "old": "if !s.cfg.CIBAEndpointURLAudiences || s.cfg.Endpoints.BackchannelAuthentication.IsZero() {",
+    "new": "if !s.cfg.CIBAEndpointURLAudiences {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCIBAEndpointURLAudiencesNeedACIBAEndpoint$",
+    "why": "Config.CIBAEndpointURLAudiences has no effect on a server serving no backchannel authentication endpoint"
+  },
+  {
+    "id": "srv-assertion-aud-opt-in",
+    "file": "server/par.go",
+    "old": "return ciba && !assertion.ExplicitlyTyped()",
+    "new": "return ciba && !assertion.ExplicitlyTyped() && false",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestCIBAEndpointURLAudiencesAtBackchannelEndpoint|TestCIBAEndpointURLAudiencesAtRefresh)$",
+    "why": "Config.CIBAEndpointURLAudiences lets a CIBA client name the token or backchannel endpoint URL where CIBA uses client authentication"
+  },
+  {
+    "id": "srv-assertion-aud-ciba-clients-only",
+    "file": "server/par.go",
+    "old": "return ciba && !assertion.ExplicitlyTyped()",
+    "new": "return (ciba || true) && !assertion.ExplicitlyTyped()",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCIBAEndpointURLAudiencesNotForOtherClients$",
+    "why": "only a client registered for CIBA may name an endpoint URL, even under Config.CIBAEndpointURLAudiences"
+  },
+  {
+    "id": "srv-assertion-aud-typed-issuer-only",
+    "file": "server/par.go",
+    "old": "return ciba && !assertion.ExplicitlyTyped()",
+    "new": "return ciba",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestCIBAEndpointURLAudiencesAtBackchannelEndpoint|TestCIBAEndpointURLAudiencesAtCIBATokenRequest|TestCIBAEndpointURLAudiencesAtRefresh)$",
+    "why": "an explicitly typed client assertion, whose client follows RFC 10070, names the issuer alone even under Config.CIBAEndpointURLAudiences"
+  },
+  {
+    "id": "srv-assertion-aud-mtls-alias-mtls-clients-only",
+    "file": "server/par.go",
+    "old": "if client.SenderConstrain() != storage.SenderConstrainMTLS {\n\t\treturn auds\n\t}",
+    "new": "if false {\n\t\treturn auds\n\t}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCIBAEndpointURLAudiencesMTLSAliasesOnlyForMTLSClients$",
+    "why": "under Config.CIBAEndpointURLAudiences an endpoint's mTLS alias is accepted only from a client registered SenderConstrainMTLS"
+  },
+  {
+    "id": "srv-assertion-explicit-typ-media-type",
+    "file": "internal/clientassertion/verify.go",
+    "old": "return jose.TypeIs(a.compact.Header.Type, clientAuthenticationJWTType)",
+    "new": "return a.compact.Header.Type == clientAuthenticationJWTType",
+    "module": "root",
+    "packages": [
+      "./internal/clientassertion",
+      "./server"
+    ],
+    "run": "^(TestExplicitlyTyped|TestCIBAEndpointURLAudiencesAtBackchannelEndpoint)$",
+    "why": "the typ client-authentication+jwt is compared as a media type, so its case and application/ forms make an assertion explicitly typed too"
+  },
+  {
+    "id": "srv-assertion-explicit-typ-rfc10070-only",
+    "file": "internal/clientassertion/verify.go",
+    "old": "return jose.TypeIs(a.compact.Header.Type, clientAuthenticationJWTType)",
+    "new": "return jose.RequireGenericType(a.compact.Header.Type) != nil",
+    "module": "root",
+    "packages": [
+      "./internal/clientassertion",
+      "./server"
+    ],
+    "run": "^(TestExplicitlyTyped|TestCIBAEndpointURLAudiencesAtBackchannelEndpoint)$",
+    "why": "only client-authentication+jwt makes an assertion explicitly typed: a generic or unknown typ keeps the CIBA endpoint URLs under Config.CIBAEndpointURLAudiences"
+  },
+  {
+    "id": "srv-refresh-assertion-aud-checked",
+    "file": "server/refresh.go",
+    "old": "if audErr := s.checkRefreshAssertionAudience(grant, authn.Audience); audErr != nil {",
+    "new": "if audErr := s.checkRefreshAssertionAudience(grant, s.cfg.Issuer.String()); audErr != nil {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestCIBAEndpointURLAudiencesAtRefresh|TestCIBAEndpointURLAudiencesAtRefreshMTLS)$",
+    "why": "a refresh naming an endpoint URL is refused once the redeemed grant shows it isn't a CIBA grant"
+  },
+  {
+    "id": "srv-refresh-assertion-aud-ciba-grant-only",
+    "file": "server/refresh.go",
+    "old": "|| grant.GrantType == CIBAGrantType {",
+    "new": "|| grant.GrantType != \"authorization_code\" {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestCIBAEndpointURLAudiencesAtRefresh|TestCheckRefreshAssertionAudience)$",
+    "why": "an endpoint-URL aud refreshes only a grant recorded as CIBA, not an embedder's or one whose type was never recorded"
+  },
+  {
+    "id": "srv-refresh-assertion-aud-carried",
+    "file": "internal/clientassertion/verify.go",
+    "old": "return VerifiedAssertion{ClientID: c.Subject, ExpiresAt: exp, Audience: c.Audience}, nil",
+    "new": "return VerifiedAssertion{ClientID: c.Subject, ExpiresAt: exp}, nil",
+    "module": "root",
+    "packages": [
+      "./internal/clientassertion",
+      "./server"
+    ],
+    "run": "^(TestVerifyReportsTheAudienceNamed|TestCIBAEndpointURLAudiencesAtRefresh)$",
+    "why": "Verify reports the aud it matched, which a refresh checks once its grant is known"
+  },
+  {
+    "id": "srv-revocation-assertion-aud-issuer-only",
+    "file": "server/token_revocation.go",
+    "old": "}, nil, nil)",
+    "new": "}, []fapi.URL{s.cfg.Endpoints.Revocation}, []fapi.URL{s.cfg.MTLSEndpoints.Revocation})",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRevokeTokenAcceptsTheIssuerAudienceAlone$",
+    "why": "revocation accepts only the issuer as a client assertion's aud, even under Config.CIBAEndpointURLAudiences"
   }
 ]

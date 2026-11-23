@@ -200,10 +200,11 @@ federation.WriteHistoricalKeys(w, token)
 
 Publish the endpoint's URL as `federation_historical_keys_endpoint` in
 your `federation_entity` metadata. A key still in your Entity
-Configuration's `jwks` is refused, and so is a revocation reason other
-than §8.7.3's `unspecified`, `compromised` and `superseded` unless you
-list it in `HistoricalKeysIssueConfig.AdditionalRevocationReasons`. You
-keep the record of which keys you retired. To read a peer's, call
+Configuration's `jwks`, as FAPIgo can read it, is refused, and so is a
+revocation reason other than §8.7.3's `unspecified`, `compromised` and
+`superseded` unless you list it in
+`HistoricalKeysIssueConfig.AdditionalRevocationReasons`. You keep the
+record of which keys you retired. To read a peer's, call
 `Resolver.FetchHistoricalKeys`: the response is checked against the
 peer's current key from its resolved Trust Chain.
 

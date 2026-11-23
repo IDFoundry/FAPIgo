@@ -20,9 +20,11 @@ type ClientKeyMaterial struct {
 	// are served by ResolveVerificationKeys and its encryption keys
 	// ("use":"enc", or an "alg" that is a key management algorithm) by
 	// ResolveEncryptionKeys. An entry this module can't use — an
-	// unsupported algorithm or key type, malformed key material, or an
-	// RSA key over 4096 bits — is skipped, as it is in a JWK Set the
-	// server fetches; a JWKS with no usable entry at all is refused.
+	// unsupported algorithm or key type, malformed key material (an EC
+	// coordinate that isn't its curve's full size among it: see JWK
+	// encoding in the package doc), or an RSA key over 4096 bits — is
+	// skipped, as it is in a JWK Set the server fetches; a JWKS with no
+	// usable entry at all is refused.
 	JWKS []byte
 
 	// VerificationKeys are signature verification keys given directly.

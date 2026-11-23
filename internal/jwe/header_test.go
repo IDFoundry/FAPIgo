@@ -114,17 +114,22 @@ func TestParseHeaderRejectsInvalidEncryption(t *testing.T) {
 	}
 }
 
+// TestParseHeaderRejectsMalformedEPK wants each malformed epk refused by
+// the check its row names. The off-curve pair is 32 octets of 0x01 per
+// coordinate: full length, so the length check passes it on to the
+// curve check, which keeps an invalid-curve point out of ECDH-ES.
 func TestParseHeaderRejectsMalformedEPK(t *testing.T) {
-	cases := map[string]string{
-		"wrong kty":          `{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"RSA","crv":"P-256","x":"AA","y":"AA"}}`,
-		"wrong curve":        `{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-384","x":"AA","y":"AA"}}`,
-		"point not on curve": `{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-256","x":"AQ","y":"AQ"}}`,
-		"missing x":          `{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-256","x":"","y":"AQ"}}`,
+	const offCurve = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
+	cases := map[string]struct{ header, want string }{
+		"wrong kty":          {`{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"RSA","crv":"P-256","x":"AA","y":"AA"}}`, "epk key type"},
+		"wrong curve":        {`{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-384","x":"AA","y":"AA"}}`, "epk curve"},
+		"point not on curve": {`{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-256","x":"` + offCurve + `","y":"` + offCurve + `"}}`, "invalid epk point"},
+		"missing x":          {`{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-256","x":"","y":"AQ"}}`, "decode epk x"},
 	}
-	for name, raw := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := parseHeader([]byte(raw)); err == nil {
-				t.Fatalf("parseHeader(%s) = nil error, want error", name)
+			if _, err := parseHeader([]byte(tc.header)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("parseHeader(%s) = %v, want an error containing %q", name, err, tc.want)
 			}
 		})
 	}

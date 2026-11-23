@@ -33,4 +33,10 @@ var (
 	// ErrUnsupportedRSAExponent indicates an RSA JWK whose public
 	// exponent is not 65537 — see decodeExponent.
 	ErrUnsupportedRSAExponent = errors.New("jose: unsupported rsa public exponent")
+
+	// ErrCoordinateLength indicates an EC JWK whose "x" or "y" doesn't
+	// decode to exactly the size of a coordinate on its curve (32
+	// octets for P-256), as RFC 7518 §6.2.1.2 and §6.2.1.3 require — see
+	// decodeFullCoordinate.
+	ErrCoordinateLength = errors.New("jose: ec coordinate is not the curve's full size")
 )

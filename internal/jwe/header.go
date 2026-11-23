@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
+	"slices"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/critical"
@@ -204,17 +204,7 @@ func parseEPK(raw *rawEPK) (*ecdh.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode epk y: %w", err)
 	}
-	// x/y are attacker-controlled at this point (this function parses an
-	// untrusted header); big.Int.FillBytes below panics if the value
-	// doesn't fit in p256CoordinateSize bytes, so that must be rejected
-	// as a plain error first, not left to crash on a malformed epk.
-	if x.BitLen() > 8*p256CoordinateSize || y.BitLen() > 8*p256CoordinateSize {
-		return nil, fmt.Errorf("epk coordinate exceeds P-256 field size")
-	}
-	uncompressed := make([]byte, 1+2*p256CoordinateSize)
-	uncompressed[0] = 0x04
-	x.FillBytes(uncompressed[1 : 1+p256CoordinateSize])
-	y.FillBytes(uncompressed[1+p256CoordinateSize:])
+	uncompressed := slices.Concat([]byte{0x04}, x, y) // SEC 1 §2.3.3
 	pub, err := ecdh.P256().NewPublicKey(uncompressed)
 	if err != nil {
 		return nil, fmt.Errorf("invalid epk point: %w", err)
@@ -222,7 +212,12 @@ func parseEPK(raw *rawEPK) (*ecdh.PublicKey, error) {
 	return pub, nil
 }
 
-func decodeCoordinate(s string) (*big.Int, error) {
+// decodeCoordinate decodes an epk's "x" or "y", which RFC 7518 §6.2.1.2
+// and §6.2.1.3 require to be exactly p256CoordinateSize octets, leading
+// zero octets included: a coordinate of any other length is refused,
+// even one encoding a point on the curve, rather than padded or
+// trimmed into one, as internal/jose refuses it in a JWK.
+func decodeCoordinate(s string) ([]byte, error) {
 	if s == "" {
 		return nil, fmt.Errorf("empty value")
 	}
@@ -230,5 +225,8 @@ func decodeCoordinate(s string) (*big.Int, error) {
 	if err != nil {
 		return nil, err
 	}
-	return new(big.Int).SetBytes(b), nil
+	if len(b) != p256CoordinateSize {
+		return nil, fmt.Errorf("%d octets, not the %d of a P-256 coordinate", len(b), p256CoordinateSize)
+	}
+	return b, nil
 }

@@ -27,7 +27,9 @@ const jwksAlternateContentType = "application/jwk-set+json"
 // keys by fetching its published JWKS document live over fapihttp — the
 // hardened building block ARCHITECTURE.md design rule 6 describes for
 // exactly this case — and caching the result for CacheTTL so a
-// verification-heavy workload doesn't refetch on every call.
+// verification-heavy workload doesn't refetch on every call. An entry
+// it can't use is skipped, among them an EC key whose coordinate isn't
+// its curve's full size (see JWK encoding in the package doc).
 //
 // Per design rule 5, a live JWKS fetch in the request-handling path is a
 // last resort; prefer an administratively pre-resolved or cached

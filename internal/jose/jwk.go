@@ -97,7 +97,11 @@ func (k JWK) algString() string {
 
 // Thumbprint computes the RFC 7638 JWK thumbprint: the SHA-256 digest of
 // the key's required members, serialized with no whitespace and in
-// lexicographic member-name order.
+// lexicographic member-name order. It encodes the key itself, never the
+// member strings a parsed JWK arrived with: EC coordinates at their
+// curve's full size, RSA "n" and "e" minimally, as MarshalJSON does. A
+// key parsed from a non-minimal "n" or "e" so has the same thumbprint
+// as one parsed from its minimal encoding (see the package doc).
 func (k JWK) Thumbprint() (Thumbprint, error) {
 	var canonical string
 	switch pub := k.pub.(type) {
@@ -216,7 +220,10 @@ func ecdhP256Coordinates(pub *ecdh.PublicKey) (x, y []byte, err error) {
 // The key is treated as one a caller supplied (see
 // maxCallerRSAModulusBits): an RSA modulus over 4096 bits is refused
 // with ErrRSAKeyTooLarge, and, like every RSA JWK this package parses,
-// an exponent other than 65537 with ErrUnsupportedRSAExponent.
+// an exponent other than 65537 with ErrUnsupportedRSAExponent. Its
+// members are held to the encodings the package doc describes: an EC
+// "x" or "y" that isn't 32 octets is refused with ErrCoordinateLength,
+// while an RSA "n" or "e" may carry leading zero octets.
 func ParseJWK(data []byte, alg fapi.SignatureAlgorithm) (JWK, error) {
 	return parseJWK(data, alg, maxCallerRSAModulusBits)
 }
@@ -267,15 +274,15 @@ func parseECPublicKey(raw rawJWK) (crypto.PublicKey, error) {
 	if raw.Crv != "P-256" {
 		return nil, fmt.Errorf("jose: unsupported EC curve %q", raw.Crv)
 	}
-	x, err := decodeCoordinate(raw.X)
+	curve := elliptic.P256()
+	x, err := decodeFullCoordinate(raw.X, coordinateSize(curve))
 	if err != nil {
 		return nil, fmt.Errorf("jose: decode jwk x: %w", err)
 	}
-	y, err := decodeCoordinate(raw.Y)
+	y, err := decodeFullCoordinate(raw.Y, coordinateSize(curve))
 	if err != nil {
 		return nil, fmt.Errorf("jose: decode jwk y: %w", err)
 	}
-	curve := elliptic.P256()
 	if x.Sign() == 0 && y.Sign() == 0 {
 		return nil, fmt.Errorf("jose: jwk ec point is the point at infinity")
 	}
@@ -286,7 +293,7 @@ func parseECPublicKey(raw rawJWK) (crypto.PublicKey, error) {
 }
 
 func parseRSAPublicKey(raw rawJWK) (crypto.PublicKey, error) {
-	n, err := decodeCoordinate(raw.N)
+	n, err := decodeUInt(raw.N)
 	if err != nil {
 		return nil, fmt.Errorf("jose: decode jwk n: %w", err)
 	}
@@ -439,15 +446,42 @@ func coordinateSize(curve elliptic.Curve) int {
 	return (curve.Params().BitSize + 7) / 8
 }
 
-func decodeCoordinate(s string) (*big.Int, error) {
-	if s == "" {
-		return nil, fmt.Errorf("empty value")
-	}
-	b, err := strictb64.URL(s)
+// decodeUInt decodes an RSA JWK's "n" or "e", a Base64urlUInt (RFC 7518
+// §2, §6.3.1). RFC 7518 asks a producer for the integer's minimal
+// encoding, but some write a modulus as 257 octets, a zero octet first,
+// so leading zero octets are accepted: only the integer they encode is
+// kept, and MarshalJSON and Thumbprint write it minimally again.
+func decodeUInt(s string) (*big.Int, error) {
+	b, err := decodeOctets(s)
 	if err != nil {
 		return nil, err
 	}
 	return new(big.Int).SetBytes(b), nil
+}
+
+// decodeFullCoordinate decodes an EC JWK's "x" or "y", which RFC 7518
+// §6.2.1.2 and §6.2.1.3 require to be the full size of a coordinate on
+// the key's curve, leading zero octets included: size octets, or
+// ErrCoordinateLength for any other length, even one encoding the same
+// integer.
+func decodeFullCoordinate(s string, size int) (*big.Int, error) {
+	b, err := decodeOctets(s)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) != size {
+		return nil, fmt.Errorf("%w: %d octets, want %d", ErrCoordinateLength, len(b), size)
+	}
+	return new(big.Int).SetBytes(b), nil
+}
+
+// decodeOctets decodes a JWK member's non-empty base64url value, which
+// must be canonical (internal/strictb64).
+func decodeOctets(s string) ([]byte, error) {
+	if s == "" {
+		return nil, fmt.Errorf("empty value")
+	}
+	return strictb64.URL(s)
 }
 
 // decodeExponent decodes an RSA JWK's "e", accepting only 65537
@@ -462,7 +496,7 @@ func decodeCoordinate(s string) (*big.Int, error) {
 // lax verifiers. Refusing anything else therefore costs no real key
 // and closes both.
 func decodeExponent(s string) (int, error) {
-	n, err := decodeCoordinate(s)
+	n, err := decodeUInt(s)
 	if err != nil {
 		return 0, err
 	}

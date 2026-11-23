@@ -23,6 +23,17 @@ const ecdhHeaderPrefix = `{"alg":"ECDH-ES+A256KW","enc":"A256GCM",`
 // Decrypt opens it unless it refuses the header.
 func sealWithHeader(t *testing.T, recipient *ecdh.PublicKey, header func(x, y string) string) string {
 	t.Helper()
+	enc := base64.RawURLEncoding.EncodeToString
+	return sealFromEphemeralKey(t, recipient, generateECDHKey(t), func(x, y []byte) string {
+		return header(enc(x), enc(y))
+	})
+}
+
+// sealFromEphemeralKey is sealWithHeader for the ephemeral key eph,
+// whose coordinates, at full length, header gets as octets to encode as
+// it chooses.
+func sealFromEphemeralKey(t *testing.T, recipient *ecdh.PublicKey, eph *ecdh.PrivateKey, header func(x, y []byte) string) string {
+	t.Helper()
 	cek, iv := make([]byte, 32), make([]byte, 12)
 	if _, err := rand.Read(cek); err != nil {
 		t.Fatal(err)
@@ -30,12 +41,20 @@ func sealWithHeader(t *testing.T, recipient *ecdh.PublicKey, header func(x, y st
 	if _, err := rand.Read(iv); err != nil {
 		t.Fatal(err)
 	}
-	encryptedKey, epk, err := wrapCEKECDHESA256KW(Header{Algorithm: fapi.ECDHESA256KW}, recipient, cek, rand.Reader)
+	z, err := eph.ECDH(recipient)
+	if err != nil {
+		t.Fatalf("ecdh: %v", err)
+	}
+	kek, err := deriveKEK(fapi.ECDHESA256KW, z, nil, nil)
+	if err != nil {
+		t.Fatalf("derive kek: %v", err)
+	}
+	encryptedKey, err := aesKeyWrap(kek, cek)
 	if err != nil {
 		t.Fatalf("wrap cek: %v", err)
 	}
-	coordinates := marshalEPK(epk)
-	protected := base64.RawURLEncoding.EncodeToString([]byte(header(coordinates.X, coordinates.Y)))
+	point := eph.PublicKey().Bytes() // 0x04 || x || y
+	protected := base64.RawURLEncoding.EncodeToString([]byte(header(point[1:1+p256CoordinateSize], point[1+p256CoordinateSize:])))
 	ciphertext, tag, err := seal(cek, iv, []byte("plaintext"), []byte(protected))
 	if err != nil {
 		t.Fatalf("seal: %v", err)

@@ -246,6 +246,57 @@ tombstone its revocation leaves, or store the token so that
 `RedeemRefreshToken` refuses it, as memstore's does. Run
 `storage.TestGrantStoreContract` against your store.
 
+### A JOSE header, attestation or metadata document may not repeat a member name (all packages)
+
+**Affects:** a deployment whose peer repeats a member name, in any
+object at any depth, of a JWS or JWE header, a client attestation's
+claims or authorization server metadata, or writes two names that
+differ only in case there or in an Entity Statement's claims (which
+already refused an exact repeat). No two registered names differ only
+in case, so the second rule reaches only private names, such as a
+vendor's `"x_ext"` beside `"X_EXT"`. In metadata, a
+repeat of any member counts: a client whose authorization server lists
+`scopes_supported` twice, which v0.80.0 read last-wins, can no longer
+discover it. RFC 7515 §4, RFC 7516 §4 and RFC 7519 §4 forbid a repeated
+header parameter or claim name, and RFC 7517 §4 a repeated JWK member.
+Metadata, and objects nested inside a private member, are plain JSON:
+RFC 8259 §4 says their names SHOULD be unique, and notes that some
+recipients refuse a repeat.
+
+**Why:** encoding/json keeps the last copy of a repeated member, and
+merges the copies of an object: a JWE header with two `epk` members was
+decrypted with one key built from both, and the case check saw only
+the last copy, so a case variant (`"X"` for `"x"`) in an earlier one was
+read as the member. Another implementation keeps one copy, or refuses
+the header, so two readers could take different keys or claims from one
+signed or encrypted message.
+
+**What fails:** such a header, at any depth (its `jwk` or `epk`
+included), such attestation claims or metadata, and an Entity Statement
+with two names that differ only in case (an exact repeat in its claims
+was already refused). So does a header, attestation claims set or
+metadata document that nests objects and arrays more than 64 deep, a
+bound only Entity Statements had before. The server answers a request
+object with `invalid_request_object`, a client assertion, client
+attestation or attestation PoP with `invalid_client`, a DPoP proof with
+`invalid_dpop_proof` and a signed CIBA request with `invalid_request`;
+a resource server answers a JWT access token with `invalid_token`, and
+a DPoP proof with `invalid_dpop_proof`. The client refuses an ID token,
+JARM response or UserInfo response, signed or encrypted, with
+`invalid_response`.
+
+`client.Discover` fails for such a discovery document, so there is no
+metadata to build a client from. Its error starts
+`client: discover: metadata: malformed document:`, then names the
+member (`strictjson: duplicate member name "scopes_supported"`), or
+both members when they differ only in case. A client configured with
+its endpoints by hand never reads the document.
+`client.DiscoverViaFederation` refuses such an Entity Statement while
+it resolves the Trust Chain, as it does any malformed statement.
+
+**What to change:** nothing in your code. A peer producing such JSON
+must write each member once, spelled one way.
+
 ## v0.79.0
 
 ### CIBA requests: core parameter size bounds, and at most 32 `acr_values` (server)

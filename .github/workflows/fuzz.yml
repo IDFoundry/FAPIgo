@@ -185,6 +185,8 @@ jobs:
             name: FuzzUnmarshalMatchesCaseSensitiveReading
           - pkg: ./internal/strictjson
             name: FuzzCheckFieldCaseThenDecode
+          - pkg: ./internal/strictjson
+            name: FuzzCheckDuplicateMembersThenDecode
           - pkg: ./extension
             name: FuzzExtensionValueReadersAgree
           - pkg: ./internal/sealedcookie

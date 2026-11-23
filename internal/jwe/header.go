@@ -105,24 +105,9 @@ func marshalHeader(h Header) ([]byte, error) {
 }
 
 func parseHeader(data []byte) (Header, error) {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	var raw rawHeader
-	// RFC 8725 §3.7: refuse a header encoding/json would decode with
-	// U+FFFD in place of invalid UTF-8 or a lone surrogate escape.
-	if !strictjson.DecodesLosslessly(data) {
-		return Header{}, errors.New("jwe: parse header: not valid UTF-8, or an unpaired surrogate escape")
-	}
-	if err := strictjson.CheckFieldCase(data, &raw); err != nil {
+	raw, err := decodeRawHeader(data)
+	if err != nil {
 		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
-	}
-	if err := dec.Decode(&raw); err != nil {
-		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
-	}
-	if err := critical.Check(raw.Crit, understoodExtensionParams); err != nil {
-		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
-	}
-	if raw.Zip != nil {
-		return Header{}, errors.New("jwe: parse header: compressed content (\"zip\") is not supported")
 	}
 	alg, err := fapi.ParseKeyManagementAlgorithm(raw.Alg)
 	if err != nil {
@@ -147,6 +132,38 @@ func parseHeader(data []byte) (Header, error) {
 		return Header{}, fmt.Errorf("jwe: parse header apv: %w", err)
 	}
 	return h, nil
+}
+
+// decodeRawHeader decodes data, a JWE protected header, refusing one
+// that isn't valid UTF-8 or holds a lone surrogate escape (RFC 8725
+// §3.7: encoding/json would read either as U+FFFD), repeats a member
+// name at any depth (two that differ only in case count as one),
+// carries a member that only case-folds to one it models, or names a
+// compression algorithm, and checking its "crit". RFC 7516 §4 requires
+// Header Parameter names to be unique, as RFC 7515 §4 does:
+// encoding/json would merge two copies of "epk" into one key, where
+// another implementation keeps one of them.
+func decodeRawHeader(data []byte) (rawHeader, error) {
+	var raw rawHeader
+	if !strictjson.DecodesLosslessly(data) {
+		return rawHeader{}, errors.New("not valid UTF-8, or an unpaired surrogate escape")
+	}
+	if err := strictjson.CheckDuplicateMembers(data); err != nil {
+		return rawHeader{}, err
+	}
+	if err := strictjson.CheckFieldCase(data, &raw); err != nil {
+		return rawHeader{}, err
+	}
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&raw); err != nil {
+		return rawHeader{}, err
+	}
+	if err := critical.Check(raw.Crit, understoodExtensionParams); err != nil {
+		return rawHeader{}, err
+	}
+	if raw.Zip != nil {
+		return rawHeader{}, errors.New(`compressed content ("zip") is not supported`)
+	}
+	return raw, nil
 }
 
 // decodePartyInfo decodes an "apu"/"apv" member as strict base64url (RFC

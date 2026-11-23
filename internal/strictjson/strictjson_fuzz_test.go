@@ -77,6 +77,37 @@ func FuzzCheckFieldCaseThenDecode(f *testing.F) {
 	})
 }
 
+// FuzzCheckDuplicateMembersThenDecode is FuzzCheckFieldCaseThenDecode
+// for the callers that also run CheckDuplicateMembers first (a JOSE
+// header, an attestation's claims, a metadata document): whatever the
+// three accept is one JSON value with no member a reader could take
+// from another copy, so the decoder, which merges the copies of a
+// struct-typed member, reads it as a case-sensitive reader does.
+func FuzzCheckDuplicateMembersThenDecode(f *testing.F) {
+	for _, s := range []string{
+		`{"alg":"ES256","kid":"a"}`, `{"cnf":{"jkt":"a"},"cnf":{}}`, `{"cnf":{"JKT":"x"},"cnf":{"jkt":"y"}}`,
+		`{"alg":"a","alg":"b"}`, `{"kid":"a","KID":"b"}`, `{"cnf":{"jkt":"a","jkt":"b"}}`, `{"alg":"ES256"} {}`,
+	} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, doc string) {
+		var h fuzzHeader
+		if CheckDuplicateMembers([]byte(doc)) != nil || CheckFieldCase([]byte(doc), &h) != nil {
+			return
+		}
+		if json.NewDecoder(strings.NewReader(doc)).Decode(&h) != nil {
+			return
+		}
+		want, ok := readHeaderCaseSensitively(doc)
+		if !ok {
+			t.Fatalf("the checks and Decode accepted %q, which isn't one JSON object", doc)
+		}
+		if !reflect.DeepEqual(h, want) {
+			t.Fatalf("Decode(%q) = %+v, case-sensitive reading = %+v", doc, h, want)
+		}
+	})
+}
+
 // readHeaderCaseSensitively reads doc into a fuzzHeader by exact member
 // names, one member at a time, as a case-sensitive reader would.
 func readHeaderCaseSensitively(doc string) (fuzzHeader, bool) {

@@ -1,8 +1,12 @@
 package clientattestation
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 func TestParseAttestationClaims_RejectsMalformedJSON(t *testing.T) {
@@ -90,5 +94,47 @@ func TestParseClaimsRejectCaseVariantMemberNames(t *testing.T) {
 	}
 	if _, err := parsePoPClaims([]byte(`{"ISS":"c","aud":"https://as.example.com","jti":"j","iat":1}`)); err == nil || !strings.Contains(err.Error(), "case-sensitive") {
 		t.Errorf("parsePoPClaims: err = %v, want case-sensitivity rejection", err)
+	}
+}
+
+// TestParseAttestationClaimsRefusesDuplicateMembers covers RFC 7519 §4:
+// claim names are unique. encoding/json merged two copies of cnf,
+// keeping the first's jwk where VerifiedAttestation.Claims, like another
+// implementation, kept the last copy, and checked the case of the last
+// copy alone; now any repeated name, at any depth, is malformed.
+func TestParseAttestationClaimsRefusesDuplicateMembers(t *testing.T) {
+	for name, payload := range map[string]string{
+		"cnf then empty cnf":             `{"sub":"c","exp":1,"cnf":{"jwk":{"kty":"EC"}},"cnf":{}}`,
+		"case variant in a non-last cnf": `{"sub":"c","exp":1,"cnf":{"JWK":{"kty":"EC"}},"cnf":{}}`,
+		"jwk twice inside cnf":           `{"sub":"c","exp":1,"cnf":{"jwk":{"kty":"EC"},"jwk":{"kty":"RSA"}}}`,
+		"sub twice":                      `{"sub":"c","sub":"d","exp":1,"cnf":{"jwk":{}}}`,
+	} {
+		_, err := parseAttestationClaims([]byte(payload))
+		if !errors.Is(err, ErrMalformedClaims) || !strings.Contains(err.Error(), "duplicate member") {
+			t.Errorf("%s: parseAttestationClaims = %v, want ErrMalformedClaims for a duplicate member", name, err)
+		}
+	}
+}
+
+// TestParseRefusesDuplicateConfirmation is the same through Parse: a
+// signed attestation repeating cnf is malformed before any key is
+// looked up for it, while the same attestation with one cnf parses.
+func TestParseRefusesDuplicateConfirmation(t *testing.T) {
+	key := generateKey(t)
+	cnf := `{"jwk":` + string(confirmationJWK(t, &key.PublicKey)) + `}`
+	for name, tc := range map[string]struct {
+		claims string
+		want   error // nil: Parse succeeds
+	}{
+		"once":  {`{"sub":"c","exp":1,"cnf":` + cnf + `}`, nil},
+		"twice": {`{"sub":"c","exp":1,"cnf":` + cnf + `,"cnf":{}}`, ErrMalformedClaims},
+	} {
+		compact, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: TypHeader}, []byte(tc.claims))
+		if err != nil {
+			t.Fatalf("Sign: %v", err)
+		}
+		if _, err := Parse(compact); !errors.Is(err, tc.want) {
+			t.Errorf("%s: Parse = %v, want %v", name, err, tc.want)
+		}
 	}
 }

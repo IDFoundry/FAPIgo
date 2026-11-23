@@ -31,12 +31,13 @@ db, err := sqlstore.New(sqlDB, sqlstore.Postgres, sqlstore.Options{})
 if err := db.Migrate(ctx); err != nil { … } // or CheckSchema, if a deployment step migrates
 
 deps := server.Dependencies{
-	Clients:      db.Clients(),
-	Transactions: db.Transactions(),
-	Grants:       db.BatchingGrants(), // batching: see "Performance and scaling"
-	Replay:       db.Replay(),
-	Nonces:       db.Nonces(),
-	Revocation:   db.BatchingRevocation(),
+	Clients:             db.Clients(),
+	Transactions:        db.Transactions(),
+	PushedRequestLookup: db.PushedRequestLookup(), // see below
+	Grants:              db.BatchingGrants(),      // batching: see "Performance and scaling"
+	Replay:              db.Replay(),
+	Nonces:              db.Nonces(),
+	Revocation:          db.BatchingRevocation(),
 	// …
 }
 
@@ -54,6 +55,18 @@ clientDeps := client.Dependencies{
 	// …
 }
 ```
+
+Set `PushedRequestLookup`. Nobody authenticates at the authorization
+endpoint, and without the lookup the server writes an interaction slot
+to the replay table for any `request_uri` of its form presented there,
+with any `client_id`, before it knows whether the `request_uri`
+exists: anyone who can reach the endpoint can add a row, kept a little
+longer than a pushed request lives, for each `request_uri` they make
+up. On SQLite each is a durable commit on the one writer, which the
+replay checks of real requests then queue behind. With the lookup, a
+`request_uri` that is unknown, expired, already used or presented with
+another `client_id` is refused after one read, and nothing is written.
+It needs FAPIgo v0.80.0, which this module requires.
 
 SQLite (for example [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite),
 pure Go, no cgo) needs WAL mode and a busy timeout:
@@ -256,9 +269,11 @@ v0.4 refuses configurations v0.3 accepted:
 | PostgreSQL | yes | yes | yes | no (READ COMMITTED, row locks per key) | with a `Sealer`* |
 | SQLite | yes | yes | no: one host's file | yes | with a `Sealer`* |
 
-\* Transactions, Grants, AccessTokens, Backchannel and Sessions only,
-and not while `ReadUnsealed` is set; Clients, Replay, Nonces,
-Revocation and PairwiseSubjects never declare it.
+\* Transactions, Grants, AccessTokens, Backchannel, Sessions,
+GrantRegistry, BackchannelInbox, InteractionLookup and
+PushedRequestLookup only, and not while `ReadUnsealed` is set;
+Clients, Replay, Nonces, Revocation and PairwiseSubjects never declare
+it.
 
 So `server.New` accepts the PostgreSQL stores under
 `AssuranceProduction` with either `Deployment`, and the SQLite stores

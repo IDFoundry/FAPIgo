@@ -19,12 +19,13 @@
 // field:
 //
 //	deps := server.Dependencies{
-//		Clients:      db.Clients(),
-//		Transactions: db.Transactions(),
-//		Grants:       db.BatchingGrants(),
-//		Replay:       db.Replay(),
-//		Nonces:       db.Nonces(),
-//		Revocation:   db.BatchingRevocation(),
+//		Clients:             db.Clients(),
+//		Transactions:        db.Transactions(),
+//		PushedRequestLookup: db.PushedRequestLookup(),
+//		Grants:              db.BatchingGrants(),
+//		Replay:              db.Replay(),
+//		Nonces:              db.Nonces(),
+//		Revocation:          db.BatchingRevocation(),
 //		// ...
 //	}
 //
@@ -42,6 +43,21 @@
 //	deps.GrantRegistry = db.GrantRegistry()                                // Server.ListGrants, RevokeListedGrant
 //	deps.BackchannelInbox = db.BackchannelInbox()                          // Server.ListBackchannelInteractions
 //	deps.PairwiseSubjects, err = pairwise.NewMapping(db.PairwiseSubjects()) // pairwise subs (Config.Subjects), random and mapped
+//
+// PushedRequestLookup is optional, but set it. Nobody authenticates at
+// the authorization endpoint, and without the lookup the server claims
+// an interaction slot in Replay for any request_uri of its form
+// presented there, with any client_id, before Transactions says whether
+// it exists: anyone who can reach the endpoint can have it write a
+// replay row, kept for Limits.PushedRequestLifetime plus twice
+// Limits.MaxClockSkew, for each request_uri they make up, and on SQLite
+// each is a durable commit on the one writer, which the replay checks
+// of pushed requests, token requests and DPoP proofs then queue behind.
+// With it, a request_uri that is unknown, expired, already used or
+// presented with another client_id is refused after one read, with
+// nothing written. It declares the TransactionStore's capabilities, so
+// server.New accepts it wherever it accepts Transactions. It needs
+// FAPIgo v0.80.0, which this module requires.
 //
 // A relying party (package client) takes its session store from a DB
 // the same way, for client.Dependencies.Sessions:
@@ -467,7 +483,9 @@
 // SQLite, a file on the device, there.
 //
 // With Options.Sealer set, the stores whose records it seals —
-// Transactions, Grants, AccessTokens, Backchannel and Sessions — also
+// Transactions, Grants, AccessTokens, Backchannel, Sessions,
+// GrantRegistry and BackchannelInbox — and InteractionLookup and
+// PushedRequestLookup, which read the TransactionStore's, also
 // declare EncryptedAtRest (but not while ReadUnsealed lets unsealed
 // records be read); Clients, Replay, Nonces, Revocation and PairwiseSubjects,
 // whose rows are their lookup keys, never do. Nothing in FAPIgo
@@ -517,11 +535,14 @@
 // A read that misses a row just written — a pushed request, an
 // interaction, a DPoP nonce, an opaque access token or a CIBA request
 // the replica hasn't received yet — fails closed, as an unknown key or
-// an outage, and costs only availability. Every write, and every read a
-// consume makes inside its write, already runs on the database the
-// writes go to. PgBouncer in transaction mode (see Performance and
-// scaling) sends each transaction to the one database it pools, so it's
-// fine. A SQLite file has no replicas.
+// an outage, and costs only availability. PushedRequestLookup finds a
+// pushed request the replica hasn't seen consumed yet, so the server
+// writes an interaction slot for it, as it would without the lookup,
+// before BeginAuthorization, on the primary, refuses it. Every write,
+// and every read a consume makes inside its write, already runs on the
+// database the writes go to. PgBouncer in transaction mode (see
+// Performance and scaling) sends each transaction to the one database
+// it pools, so it's fine. A SQLite file has no replicas.
 //
 // # Clients
 //
@@ -672,6 +693,11 @@
 // statements on SQLite and, on PostgreSQL, three or four more, the
 // token's single statement becoming a transaction of its own; it's
 // still one write transaction.
+//
+// PushedRequestLookup (see Setup), which those figures predate, adds
+// one statement to each authorization request, and so to a login: a
+// SELECT of the pushed request's row by its primary key, before any
+// write, and no write transaction.
 //
 // Two methods beyond the storage interfaces take a little more off,
 // with a fapigo that looks for them (storage.RevocationBatchChecker and

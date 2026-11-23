@@ -54,16 +54,17 @@ type Dependencies struct {
 	PushedRequestLookup storage.PushedRequestLookup
 
 	// Grants persists issued authorization codes and refresh tokens. One
-	// that is also a storage.GrantRefreshTokenRevoker (memstore's is)
-	// lets RevokeGrant, and the reuse of an authorization code, revoke
-	// the grant's refresh tokens in the store as well (see RevokeGrant).
-	// A store of your own must refuse a refresh token stored up to an
-	// hour after its hash was revoked, and accept the revocation of a
-	// hash it holds no token under, as storage.GrantStore's
-	// RevokeRefreshToken requires: RevokeListedGrant and
-	// RevokeSubjectGrants can revoke a refresh token before its issuance
-	// has stored it, and the server revokes tokens already revoked, or
-	// already gone, in the normal course.
+	// that is also a storage.GrantRefreshTokenRevoker (memstore's is, as
+	// are sqlstore's DB.Grants and DB.BatchingGrants from sqlstore
+	// v0.10) lets RevokeGrant, and the reuse of an authorization code,
+	// revoke the grant's refresh tokens in the store as well (see
+	// RevokeGrant). A store of your own must refuse a refresh token
+	// stored up to an hour after its hash was revoked, and accept the
+	// revocation of a hash it holds no token under, as
+	// storage.GrantStore's RevokeRefreshToken requires: RevokeListedGrant
+	// and RevokeSubjectGrants can revoke a refresh token before its
+	// issuance has stored it, and the server revokes tokens already
+	// revoked, or already gone, in the normal course.
 	Grants storage.GrantStore
 
 	// GrantRegistry, if set, records each grant the server issues a

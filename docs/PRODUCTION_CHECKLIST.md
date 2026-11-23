@@ -51,6 +51,10 @@ are things no constructor can check.
   `RevokeListedGrant`, or through a `Dependencies.Grants` that implements
   `storage.GrantRefreshTokenRevoker`, so their refresh tokens are
   revoked too, not only refused while the grant's record lasts.
+  sqlstore's `Grants()` and `BatchingGrants()` implement it from v0.10,
+  but can't revoke the refresh tokens stored before its migration 0005,
+  or by a v0.9 instance during the deploy that applies it, this way:
+  they aren't indexed by their grants.
   [Step 5](../GETTING_STARTED.md#5-the-one-piece-thats-genuinely-yours-the-login-flow)
 - [ ] **A DPoP nonce choice:** a nonce store every instance shares
   (`Dependencies.Nonces`, with `Limits.DPoPNonceLifetime` of at most 15

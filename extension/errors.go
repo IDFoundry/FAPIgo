@@ -28,6 +28,24 @@ var (
 	// processes the token (see Definition.ReturnInTokenClaims).
 	ErrReservedTokenClaim = errors.New("extension: ReturnInTokenClaims under a reserved token claim name")
 
+	// ErrMalformedValue matches, with errors.Is, a Definition's refusal of
+	// a value that isn't a valid T: JSON that doesn't decode into T
+	// without unknown members, a member repeated in it (also
+	// ErrDuplicateMember), or, at Set, a T that doesn't encode. A
+	// Sensitive Definition's refusal withholds the detail.
+	ErrMalformedValue = errors.New("extension: malformed value")
+
+	// ErrValueRejected matches, with errors.Is, a Definition's refusal of
+	// a value its Validate refused; errors.Is also finds a sentinel
+	// Validate's error wraps, whatever the Definition's Sensitivity.
+	ErrValueRejected = errors.New("extension: value rejected by its Validate")
+
+	// ErrSensitiveTokenClaim indicates a Sensitive Definition registered
+	// with ReturnInTokenClaims: a token's claims can be read without a
+	// key by whoever holds the token, and by any log that records one,
+	// so a value that must stay out of logs can't go into them.
+	ErrSensitiveTokenClaim = errors.New("extension: a Sensitive value can't be returned in token claims")
+
 	// ErrDuplicateMember indicates a RAR detail object or an extension
 	// parameter's value, or an object nested at any depth in one, had the
 	// same JSON member name more than once, compared case-insensitively

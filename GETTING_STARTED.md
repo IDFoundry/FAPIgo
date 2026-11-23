@@ -1027,6 +1027,48 @@ client's redirect URI (RFC 9700 §4.12). And never render a
 store's own error, and is meant for logs. `WriteText` (or `WriteJSON`
 at a JSON endpoint) writes only its `Code` and `PublicDescription`.
 
+**What stays out of your logs.** The results the library hands you
+(token sets, callback results, interactions, redirects, the pushed
+request's result, CIBA sessions and the pings the client receives)
+print and log their codes, tokens, handles and credentials as
+`[REDACTED]` in any position, but for the exceptions below: under any
+fmt verb, through log/slog, and inside structs of your own, in
+unexported fields too. The requests you build from HTTP, and the ping
+the server hands your `BackchannelNotifier`, do so only when you print
+or log the request itself. A handle's `String()`, which `%v` and `%s`
+call, is its wire value, for your cookie or form, and so is a
+`server.RequestURI`'s: log/slog logs one given as an attribute as
+`[REDACTED]`, but its text handler prints a struct of yours with `%+v`,
+so one in an exported field of it logs its wire value. A Sensitive
+extension parameter's value appears in no error text, and
+`extension.Values` prints parameter names only.
+What still prints a value:
+
+- a request's own fields (a form's values,
+  `VerifyRequest.Authorization`, `AuthorizationCallback.RawQuery`,
+  `BeginAuthorizationRequest.RequestURI`, the ping's `AuthReqID`), which
+  print from an unexported field of your struct, under `%p` and `%w`,
+  through `encoding/json`, and through log/slog's JSON handler when the
+  request sits inside another value;
+- the CIBA hint tokens (`login_hint_token`, `id_token_hint`) wherever an
+  interaction holds them, which print through fmt's reflection fallback
+  (from an unexported field of your struct, under `%p` and `%w`, or
+  behind a pointer under a verb fmt rejects for it, such as `%s`) and
+  through `encoding/json`;
+- log/slog's JSON handler on a value inside a slice, map or struct,
+  which it encodes with `encoding/json`: the slice
+  `ListBackchannelInteractions` returns, or an interaction inside a
+  struct of yours, logs every hint token and extension value;
+- what's named for the wire or for storage: `Reveal()`,
+  `Destination()`, `AuthorizationSession.URL()` (which carries the
+  request_uri), `AuthReqID()` and `NotificationToken()`, and the storage
+  encodings (`MarshalText`, `json.Marshal` of an interaction or of
+  `extension.Values`);
+- `IDTokenClaims.Nonce`, the validated claim of a completed flow.
+
+Log the values themselves, not those
+([ARCHITECTURE.md](ARCHITECTURE.md), rule 18, lists them all).
+
 **Carry the interaction to the form's submission.** The consent form's
 submission needs two things from `/authorize`: the handle, bound to this
 browser, and `a.Interaction`. `server/interactioncookie` carries both in

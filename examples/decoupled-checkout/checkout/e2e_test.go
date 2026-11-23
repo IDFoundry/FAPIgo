@@ -211,7 +211,10 @@ func TestPhoneRefusesCrossSitePost(t *testing.T) {
 func TestPocketwiseRefusesForgedPing(t *testing.T) {
 	d := start(t)
 	_, link := d.post("pocketwise.localhost", "/link", url.Values{"customer": {"sam"}, "scenario": {"accounts"}})
-	authReqID := orderID(link)
+	authReqID := d.world.AuthReqIDOf(orderID(link))
+	if authReqID == "" || strings.Contains(link, authReqID) {
+		t.Fatalf("link %s: want an auth_req_id behind it, and not in its URL", link)
+	}
 	for name, token := range map[string]string{"wrong token": "Bearer guessed", "no token": ""} {
 		req, err := http.NewRequest(http.MethodPost, d.world.URL("pocketwise.localhost", "/ciba-notify"), strings.NewReader(`{"auth_req_id":"`+authReqID+`"}`))
 		if err != nil {

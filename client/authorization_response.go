@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jarm"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/keys"
@@ -47,16 +48,20 @@ type AuthorizationCallback struct {
 // unvalidated code. It is bound to the Client that validated it:
 // ExchangeCode on a Client for another issuer or client ID, or with the
 // zero value, fails without sending anything.
+//
+// It prints and logs without its code, PKCE verifier and nonce, which
+// show as [REDACTED] under every fmt verb, in log/slog, and wherever a
+// struct holding it in a field of its own is printed.
 type ValidatedAuthorizationResponse struct {
 	// issuer and clientID are the validating Client's Config.Issuer and
 	// Config.ClientID: the code, PKCE verifier and redirect URI go only
 	// to that issuer's token endpoint.
 	issuer       string
 	clientID     string
-	code         string
+	code         fapi.Secret
 	redirectURI  string
-	pkceVerifier string
-	nonce        string
+	pkceVerifier fapi.Secret
+	nonce        fapi.Secret
 	// maxAge is the max_age the authorization request carried, when
 	// hasMaxAge: ExchangeCode checks the ID token's auth_time against it.
 	maxAge    time.Duration
@@ -176,10 +181,10 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 	return CallbackSuccess{Response: ValidatedAuthorizationResponse{
 		issuer:       c.cfg.Issuer.String(),
 		clientID:     c.cfg.ClientID.String(),
-		code:         code,
+		code:         fapi.NewSecret(code),
 		redirectURI:  consumed.RedirectURI,
-		pkceVerifier: consumed.PKCEVerifier,
-		nonce:        consumed.Nonce,
+		pkceVerifier: fapi.NewSecret(consumed.PKCEVerifier),
+		nonce:        fapi.NewSecret(consumed.Nonce),
 		maxAge:       maxAge,
 		hasMaxAge:    hasMaxAge,
 		openID:       consumed.OpenID,
@@ -273,13 +278,13 @@ func (c *Client) checkCallbackBinding(cb AuthorizationCallback, state string) *E
 	if state == "" {
 		return newError(ErrorInvalidRequest, "callback is missing state", nil)
 	}
-	if cb.Session.value == "" {
+	if cb.Session.value == (fapi.Secret{}) {
 		if c.cfg.CallbackBinding == CallbackBindingDeviceLocalStore {
 			return nil
 		}
 		return newError(ErrorInvalidRequest, "callback is not bound to a session: pass the SessionHandle kept with this user agent as AuthorizationCallback.Session (client/sessioncookie keeps it for a browser)", nil)
 	}
-	if subtle.ConstantTimeCompare([]byte(state), []byte(stateForHandle(cb.Session.value))) != 1 {
+	if subtle.ConstantTimeCompare([]byte(state), []byte(stateForHandle(cb.Session.value.Reveal()))) != 1 {
 		return newError(ErrorInvalidRequest, "callback state does not match this user agent's session", nil)
 	}
 	return nil

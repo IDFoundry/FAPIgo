@@ -20,13 +20,17 @@ type pocketwise struct {
 	w    *World
 	bank *bankClient
 
-	mu    sync.Mutex
-	links map[string]*link // by auth_req_id
+	mu          sync.Mutex
+	links       map[string]*link // by ID, for the link's page
+	byAuthReqID map[string]*link // by auth_req_id, for the bank's ping
 }
 
 // link is one attempt to link a customer's accounts.
 type link struct {
-	ID       string // auth_req_id
+	// ID names the link in its page's URL. It is random, not the
+	// auth_req_id, which redeems the request's tokens: a URL ends up in
+	// the browser's history and in logs.
+	ID       string
 	Scenario string
 	session  client.BackchannelAuthenticationSession
 
@@ -51,11 +55,15 @@ const (
 
 const notifyPath = "/ciba-notify"
 
+// statusWaiting is a link's Status until its request is approved, denied
+// or expires.
+const statusWaiting = "waiting"
+
 func (w *World) newPocketwise(keys clientKeys) *pocketwise {
 	p := &pocketwise{
 		w:     w,
 		bank:  &bankClient{w: w, host: pocketwiseHost, clientID: pocketwiseClientID, keys: keys, mode: storage.BackchannelTokenDeliveryModePing},
-		links: map[string]*link{},
+		links: map[string]*link{}, byAuthReqID: map[string]*link{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", p.home)
@@ -120,9 +128,10 @@ func (p *pocketwise) start(w http.ResponseWriter, r *http.Request) {
 			Link: &link{Scenario: scenario, Status: "failed", Problem: describeError(err)}})
 		return
 	}
-	l := &link{ID: session.AuthReqID(), Scenario: scenario, session: session, Status: "waiting"}
+	l := &link{ID: randomCode(26), Scenario: scenario, session: session, Status: statusWaiting}
 	p.mu.Lock()
 	p.links[l.ID] = l
+	p.byAuthReqID[session.AuthReqID()] = l
 	p.mu.Unlock()
 	http.Redirect(w, r, "/link?id="+l.ID, http.StatusSeeOther)
 }
@@ -139,11 +148,11 @@ func (p *pocketwise) show(w http.ResponseWriter, r *http.Request) {
 		p.w.renderError(w, pocketwiseHost, http.StatusNotFound, "Unknown link", "Start linking again.")
 		return
 	}
-	if view.Status == "waiting" && time.Now().After(view.session.ExpiresAt()) {
+	if view.Status == statusWaiting && time.Now().After(view.session.ExpiresAt()) {
 		view.Status = "expired"
 	}
 	page := pocketwiseLinkPage{Page: p.w.page("Pocketwise", pocketwiseHost), Link: &view}
-	page.Refresh = view.Status == "waiting"
+	page.Refresh = view.Status == statusWaiting
 	p.w.render(w, "pocketwise-link", page)
 }
 
@@ -159,7 +168,7 @@ func (p *pocketwise) notify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.mu.Lock()
-	l, ok := p.links[notification.AuthReqID()]
+	l, ok := p.byAuthReqID[notification.AuthReqID()]
 	p.mu.Unlock()
 	if !ok || !notification.Authenticates(l.session) {
 		http.Error(w, "unknown request or wrong token", http.StatusUnauthorized)
@@ -178,13 +187,13 @@ func (p *pocketwise) collect(ctx context.Context, l *link) {
 	p.mu.Lock()
 	l.Pinged = time.Now()
 	p.mu.Unlock()
-	status, problem, granted, readings := p.fetch(ctx, l.session)
+	status, problem, granted, readings := p.fetch(ctx, l.ID, l.session)
 	p.mu.Lock()
 	l.Status, l.Problem, l.Granted, l.Readings = status, problem, granted, readings
 	p.mu.Unlock()
 }
 
-func (p *pocketwise) fetch(ctx context.Context, session client.BackchannelAuthenticationSession) (status, problem, granted string, readings []reading) {
+func (p *pocketwise) fetch(ctx context.Context, linkID string, session client.BackchannelAuthenticationSession) (status, problem, granted string, readings []reading) {
 	bank, err := p.bank.get(ctx)
 	if err != nil {
 		return "failed", err.Error(), "", nil
@@ -199,8 +208,8 @@ func (p *pocketwise) fetch(ctx context.Context, session client.BackchannelAuthen
 	case client.BackchannelAuthenticationExpired:
 		return "expired", "", "", nil
 	case client.BackchannelAuthenticationPending:
-		log.Printf("pocketwise: pinged for %s, but it's still pending", session.AuthReqID())
-		return "waiting", "", "", nil
+		log.Printf("pocketwise: pinged for link %s, but it's still pending", linkID)
+		return statusWaiting, "", "", nil
 	case client.BackchannelAuthenticationApproved:
 		c := customers[0]
 		for _, acct := range requested(c).Accounts {

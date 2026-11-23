@@ -1019,3 +1019,30 @@ func TestRefreshTokensNarrowedScopeWithoutResponseScope(t *testing.T) {
 		t.Errorf("Scope = %q, want the narrowed accounts", got.Scope)
 	}
 }
+
+// TestBeginBackchannelAuthenticationFailsWithoutEntropyForItsToken
+// checks a ping-mode request whose notification token can't be generated
+// fails, sending nothing, rather than carrying an empty or guessable one.
+func TestBeginBackchannelAuthenticationFailsWithoutEntropyForItsToken(t *testing.T) {
+	cfg := validConfig(t)
+	bcURL, err := fapi.ParseEndpointURL("https://as.example/backchannel-authenticate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Endpoints.BackchannelAuthentication = bcURL
+	cfg.Algorithms.BackchannelAuthenticationRequest = fapi.ES256
+	cfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+	cfg.BackchannelTokenDeliveryMode = storage.BackchannelTokenDeliveryModePing
+	deps := validDependencies(t)
+	deps.Keys = newFakeKeyManager(t, keys.ClientAuthentication, keys.DPoPProofSigning, keys.BackchannelAuthenticationRequestSigning)
+	deps.Random = failingReader{}
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	_, err = c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{Scope: []string{"openid"}, LoginHint: "user@example.com"})
+	var cerr *client.Error
+	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInternal {
+		t.Errorf("BeginBackchannelAuthentication = %v, want ErrorInternal", err)
+	}
+}

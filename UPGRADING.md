@@ -18,6 +18,28 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.82.0
+
+### A Sensitive extension parameter can't be returned in token claims (extension)
+
+**Affects:** an `extension.Definition` with `Sensitivity:
+extension.Sensitive` and `ReturnInTokenClaims: true`, and code that
+calls `extension.AsParameters` with one.
+
+**Why:** the authorization server copied the value into the access
+token's and ID token's claims, where every holder of the token, and
+every log that records one, can read it without a key: the opposite of
+what `Sensitive` promises.
+
+**What fails:** `extension.NewRegistry` returns an error wrapping
+`extension.ErrSensitiveTokenClaim` that names the parameter, so
+building the registry for `Config.Extensions` fails at startup, before
+`server.New`. `extension.AsParameters` leaves a Sensitive definition's
+value out.
+
+**What to change:** drop `ReturnInTokenClaims`, or declare the
+parameter `extension.NotSensitive` if tokens may carry it.
+
 ## v0.81.0
 
 ### Automatic registration: an omitted `grant_types` means the authorization code flow alone, and CIBA needs a delivery mode (federation, server)

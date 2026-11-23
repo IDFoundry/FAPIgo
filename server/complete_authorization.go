@@ -18,8 +18,10 @@ import (
 // CompleteAuthorization. Do not expose the raw authorization code or
 // JARM value independently — only the complete, engine-assembled
 // redirect Destination — so an embedding application cannot replace
-// state, edit a JARM response, change the redirect URI, or leak a code
-// into logs by handling it directly.
+// state, edit a JARM response or change the redirect URI by handling
+// it directly. Printing or logging an AuthorizationRedirect shows the
+// destination's scheme, host, path and parameter names, never a code;
+// Destination itself is the full URL to redirect to, so don't log it.
 //
 // Its variants are AuthorizationRedirect and AuthorizationLocalError;
 // switch on the concrete type.
@@ -34,7 +36,11 @@ type AuthorizationResult interface {
 // validated when the request was pushed and is still registered for the
 // client when the interaction completes.
 type AuthorizationRedirect struct {
-	destination fapi.URL
+	// destination is the redirect target's string form, which
+	// Destination parses again. A fapi.URL holds its query in a string
+	// field, which fmt's reflection fallback would print, with the code;
+	// a Secret holds none.
+	destination fapi.Secret
 }
 
 // Discriminator for AuthorizationResult — deliberately empty.
@@ -48,7 +54,17 @@ func (AuthorizationRedirect) authorizationResult() {}
 // Profile §5.3.2.2). Never use 307 Temporary Redirect, which makes the
 // browser re-send the form, credentials included, to the client's
 // redirect URI (RFC 9700 §4.12).
-func (r AuthorizationRedirect) Destination() fapi.URL { return r.destination }
+func (r AuthorizationRedirect) Destination() fapi.URL {
+	// buildAuthorizationResponse made the destination with
+	// ParseRedirectURL, which accepts only a string String gives back, so
+	// parsing that string again gives the same URL; the zero
+	// AuthorizationRedirect has none.
+	destination, err := fapi.ParseRedirectURL(r.destination.Reveal(), fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme())
+	if err != nil {
+		return fapi.URL{}
+	}
+	return destination
+}
 
 // AuthorizationLocalError means the caller must render a local error
 // rather than redirect anywhere — the interaction handle could not be
@@ -230,7 +246,7 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 	}
 
 	s.audit(ctx, AuditEventCompleteAuthorization, clientID, AuditOutcomeSuccess, "")
-	return AuthorizationRedirect{destination: destination}, nil
+	return AuthorizationRedirect{destination: fapi.NewSecret(destination.String())}, nil
 }
 
 // loginRequiredProblem describes why auth, the authentication of the
@@ -331,7 +347,7 @@ func (s *Server) completeErrorRedirect(ctx context.Context, clientID fapi.Client
 		return s.completeLocalFail(ctx, clientID, buildErr), nil
 	}
 	s.audit(ctx, AuditEventCompleteAuthorization, clientID, outcome, errorCode)
-	return AuthorizationRedirect{destination: destination}, nil
+	return AuthorizationRedirect{destination: fapi.NewSecret(destination.String())}, nil
 }
 
 // buildAuthorizationResponse assembles the final redirect target: a

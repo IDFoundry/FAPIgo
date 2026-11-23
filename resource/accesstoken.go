@@ -29,7 +29,9 @@ const accessTokenInvalidDescription = "access token is invalid"
 // ResolveAccessTokenRequest is the input to
 // AccessTokenResolver.ResolveAccessToken.
 type ResolveAccessTokenRequest struct {
-	// Raw is the presented access token, exactly as received.
+	// Raw is the presented access token, exactly as received. A
+	// ResolveAccessTokenRequest prints and logs it as [REDACTED], but
+	// encoding/json doesn't, so never log the field.
 	Raw string
 
 	// Now is available for a format-specific issuance-time sanity

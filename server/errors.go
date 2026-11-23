@@ -252,7 +252,9 @@ func (e *Error) HTTPStatus() int { return e.httpStatus }
 // internal cause — a store's or key source's own error, say — and is
 // meant for logs only: never render it to a browser or a client, in a
 // response body or anywhere else. WriteJSON and WriteText write only
-// Code and PublicDescription.
+// Code and PublicDescription. It never quotes a Sensitive extension
+// parameter's value: a refusal of one names the parameter and its type
+// only (see extension.Sensitive).
 func (e *Error) Error() string {
 	return httperror.Message("server", string(e.code), e.description, e.cause)
 }

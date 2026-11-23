@@ -76,7 +76,7 @@ func FuzzHandleAuthorizationResponsePlain(f *testing.F) {
 		c := plainCallbackClient(t, iss, requireIss, deviceLocal)
 		cb := AuthorizationCallback{RawQuery: rawQuery}
 		if passHandle {
-			cb.Session = SessionHandle{value: callbackFuzzHandle}
+			cb.Session = SessionHandle{value: fapi.NewSecret(callbackFuzzHandle)}
 		}
 		res, err := c.HandleAuthorizationResponse(context.Background(), cb)
 		if err != nil {
@@ -106,8 +106,8 @@ func checkAcceptedPlainCallback(t *testing.T, rawQuery, issuer string, requireIs
 	if requireIss && q.Get("iss") == "" {
 		t.Fatalf("accepted a missing iss under RequireAuthorizationResponseIss: %q", rawQuery)
 	}
-	if s, ok := res.(CallbackSuccess); ok && (s.Response.code == "" || !utf8.ValidString(s.Response.code) || s.Response.code != q.Get("code")) {
-		t.Fatalf("accepted code %q, query carries %q", s.Response.code, q.Get("code"))
+	if s, ok := res.(CallbackSuccess); ok && (s.Response.code.Reveal() == "" || !utf8.ValidString(s.Response.code.Reveal()) || s.Response.code.Reveal() != q.Get("code")) {
+		t.Fatalf("accepted code %q, query carries %q", s.Response.code.Reveal(), q.Get("code"))
 	}
 }
 
@@ -128,7 +128,7 @@ func TestAuthorizationCodeFlowNeedsASessionStore(t *testing.T) {
 		}
 	}()
 	_, callbackErr := c.HandleAuthorizationResponse(context.Background(), AuthorizationCallback{
-		RawQuery: "code=abc&state=" + callbackFuzzState, Session: SessionHandle{value: callbackFuzzHandle},
+		RawQuery: "code=abc&state=" + callbackFuzzState, Session: SessionHandle{value: fapi.NewSecret(callbackFuzzHandle)},
 	})
 	_, beginErr := c.BeginAuthorization(context.Background(), BeginAuthorizationRequest{Scope: []string{"openid"}})
 	for name, err := range map[string]error{"HandleAuthorizationResponse": callbackErr, "BeginAuthorization": beginErr} {
@@ -151,7 +151,7 @@ func TestHandleAuthorizationResponseRefusesInvalidUTF8(t *testing.T) {
 	}
 	const valid = "code=abc&iss=https%3A%2F%2Fas.example&state="
 	if _, err := plainCallbackClient(t, iss, true, false).HandleAuthorizationResponse(context.Background(), AuthorizationCallback{
-		RawQuery: valid + callbackFuzzState, Session: SessionHandle{value: callbackFuzzHandle},
+		RawQuery: valid + callbackFuzzState, Session: SessionHandle{value: fapi.NewSecret(callbackFuzzHandle)},
 	}); err != nil {
 		t.Fatalf("HandleAuthorizationResponse(valid UTF-8) = %v, want it accepted", err)
 	}
@@ -163,7 +163,7 @@ func TestHandleAuthorizationResponseRefusesInvalidUTF8(t *testing.T) {
 	} {
 		c := plainCallbackClient(t, iss, true, false)
 		res, err := c.HandleAuthorizationResponse(context.Background(), AuthorizationCallback{
-			RawQuery: query, Session: SessionHandle{value: callbackFuzzHandle},
+			RawQuery: query, Session: SessionHandle{value: fapi.NewSecret(callbackFuzzHandle)},
 		})
 		var cerr *Error
 		if !errors.As(err, &cerr) || cerr.Code() != ErrorInvalidRequest || cerr.PublicDescription() != "callback query contains a parameter that isn't valid UTF-8" {

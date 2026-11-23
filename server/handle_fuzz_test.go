@@ -65,7 +65,7 @@ func checkHandleDigests(t *testing.T, a, b, clientID string) {
 		if interactionHandleKey(a) == interactionHandleKey(b) {
 			t.Fatalf("interaction handles %q and %q share a store key", a, b)
 		}
-		if backchannelHandleHash(BackchannelAuthenticationHandle{a}) == backchannelHandleHash(BackchannelAuthenticationHandle{b}) {
+		if backchannelHandleHash(BackchannelAuthenticationHandle{fapi.NewSecret(a)}) == backchannelHandleHash(BackchannelAuthenticationHandle{fapi.NewSecret(b)}) {
 			t.Fatalf("backchannel handles %q and %q share a store key", a, b)
 		}
 	}

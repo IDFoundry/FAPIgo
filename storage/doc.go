@@ -33,6 +33,15 @@
 // complete client assertion or DPoP proof, and must keep each until at
 // least that expiry: one forgotten sooner can be replayed.
 //
+// The records the other stores keep carry bearer material and Sensitive
+// values as they are: a client's session record holds its PKCE verifier
+// and nonce, a pushed request's record its parameters (every extension
+// value, Sensitive ones included), a CIBA record its auth_req_id and the
+// client's notification token, and an inbox entry the handle that
+// completes its request. These types have no redacting rendering: a
+// store must not log a record, nor an error quoting one, and should keep
+// them as confidential as the credentials they are.
+//
 // A server's stores (TransactionStore, GrantStore,
 // BackchannelAuthenticationStore and the others) may be shared by every
 // instance of one authorization server, but never by servers with

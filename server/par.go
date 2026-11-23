@@ -105,7 +105,12 @@ var coreAuthorizationParameters = map[string]struct{}{
 }
 
 // FormParameter is one name/value pair from a form-encoded request body,
-// in the order it appeared on the wire.
+// in the order it appeared on the wire. It prints and logs its value
+// only for a parameter that carries no credential (grant_type, scope,
+// redirect_uri and the like), and [REDACTED] for every other one: a
+// code, a token, a client assertion, a request object, an extension
+// parameter's value. Value itself is the raw value: never log the
+// field.
 type FormParameter struct {
 	Name  string
 	Value string
@@ -116,7 +121,16 @@ type FormParameter struct {
 // accept. It is lossless specifically so this package — not an HTTP
 // adapter — detects duplicate or malformed parameters, rather than
 // trusting a pre-parsed url.Values that may already have collapsed
-// them.
+// them. It prints and logs each parameter as FormParameter does.
+//
+// The request types holding one (PushAuthorizationRequest,
+// AuthorizationCodeExchangeRequest and the rest) print and log it so
+// too, with their DPoP proofs and client attestations as [REDACTED]
+// and a TLS client certificate as its subject. Their fields hold every
+// value raw, as they must, and fmt's reflection fallback (one of them
+// in an unexported field, or under a verb fmt rejects for it) and the
+// encoders print them as they print any exported field: log the
+// request itself, never its fields or their JSON.
 type FormRequest struct {
 	Parameters []FormParameter
 }
@@ -171,7 +185,8 @@ type PushAuthorizationRequest struct {
 }
 
 // PushAuthorizationResult is returned by a successful
-// PushAuthorizationRequest.
+// PushAuthorizationRequest. It prints and logs its RequestURI as
+// [REDACTED]; WriteJSON writes the request_uri itself, for the client.
 type PushAuthorizationResult struct {
 	RequestURI RequestURI
 	ExpiresIn  time.Duration
@@ -296,17 +311,25 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to persist pushed authorization request", err))
 	}
 
+	return s.pushedResult(ctx, client.ID(), requestURI, now)
+}
+
+// pushedResult is PushAuthorizationRequest's result for a request it
+// stored under requestURI: with the DPoP nonce this server hands out,
+// once nonces are configured, and audited as a success.
+func (s *Server) pushedResult(ctx context.Context, clientID fapi.ClientID, requestURI string, now time.Time) (PushAuthorizationResult, error) {
 	var nextNonce string
 	if s.deps.Nonces != nil {
-		nextNonce, err = s.issueDPoPNonce(ctx, now)
+		nonce, err := s.issueDPoPNonce(ctx, now)
 		if err != nil {
-			return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
+			return s.parFail(ctx, clientID, newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
 		}
+		nextNonce = nonce
 	}
 
-	s.audit(ctx, AuditEventPushAuthorizationRequest, client.ID(), AuditOutcomeSuccess, "")
+	s.audit(ctx, AuditEventPushAuthorizationRequest, clientID, AuditOutcomeSuccess, "")
 	return PushAuthorizationResult{
-		RequestURI:    RequestURI{value: requestURI},
+		RequestURI:    RequestURI{value: fapi.NewSecret(requestURI)},
 		ExpiresIn:     s.cfg.Limits.PushedRequestLifetime,
 		NextDPoPNonce: nextNonce,
 	}, nil

@@ -40,35 +40,47 @@ func TestBackchannelSessionSealRoundTrip(t *testing.T) {
 	expires := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	s := sessionSealer(t, "https://as.example.com", sessionSealKey(1))
 	for name, session := range map[string]BackchannelAuthenticationSession{
-		"ping":   {issuer: "https://as.example.com", clientID: "client-1", authReqID: "req-1", interval: 5 * time.Second, expiresAt: expires, notificationToken: "notify-token"},
-		"poll":   {issuer: "https://as.example.com", clientID: "client-1", authReqID: "req-2", interval: 2 * time.Second, expiresAt: expires},
-		"openid": {issuer: "https://as.example.com", clientID: "client-1", authReqID: "req-3", interval: time.Second, expiresAt: expires, openID: true},
+		"ping":   {issuer: "https://as.example.com", clientID: "client-1", authReqID: fapi.NewSecret("req-1"), interval: 5 * time.Second, expiresAt: expires, notificationToken: fapi.NewSecret("notify-token")},
+		"poll":   {issuer: "https://as.example.com", clientID: "client-1", authReqID: fapi.NewSecret("req-2"), interval: 2 * time.Second, expiresAt: expires},
+		"openid": {issuer: "https://as.example.com", clientID: "client-1", authReqID: fapi.NewSecret("req-3"), interval: time.Second, expiresAt: expires, openID: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			sealed, err := s.Seal(session, "user-1")
 			if err != nil {
 				t.Fatalf("Seal: %v", err)
 			}
-			if bytes.Contains(sealed, []byte(session.authReqID)) || (session.notificationToken != "" && bytes.Contains(sealed, []byte(session.notificationToken))) {
-				t.Errorf("sealed session %q isn't opaque", sealed)
-			}
+			checkSealedOpaque(t, sealed, session)
 			got, reseal, err := s.Open(sealed, "user-1")
 			if err != nil || reseal {
 				t.Fatalf("Open = reseal %v, %v", reseal, err)
 			}
-			if got.authReqID != session.authReqID || got.interval != session.interval || !got.expiresAt.Equal(session.expiresAt) ||
-				got.notificationToken != session.notificationToken || got.openID != session.openID {
+			if !sameSealedFields(got, session) {
 				t.Errorf("opened %+v, want %+v", got, session)
 			}
 		})
 	}
 }
 
+// checkSealedOpaque fails t if sealed shows session's auth_req_id or
+// notification token.
+func checkSealedOpaque(t *testing.T, sealed []byte, session BackchannelAuthenticationSession) {
+	t.Helper()
+	if bytes.Contains(sealed, []byte(session.AuthReqID())) || (session.NotificationToken() != "" && bytes.Contains(sealed, []byte(session.NotificationToken()))) {
+		t.Errorf("sealed session %q isn't opaque", sealed)
+	}
+}
+
+// sameSealedFields reports whether got has want's sealed fields.
+func sameSealedFields(got, want BackchannelAuthenticationSession) bool {
+	return got.authReqID == want.authReqID && got.interval == want.interval && got.expiresAt.Equal(want.expiresAt) &&
+		got.notificationToken == want.notificationToken && got.openID == want.openID
+}
+
 // TestOpenedSessionAuthenticatesPing covers the reason to restore a
 // session: another instance authenticating the ping for it.
 func TestOpenedSessionAuthenticatesPing(t *testing.T) {
 	s := sessionSealer(t, "https://as.example.com", sessionSealKey(1))
-	begun := BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: "req-1", interval: time.Second, expiresAt: time.Now().Add(time.Minute), notificationToken: "notify-token"}
+	begun := BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: fapi.NewSecret("req-1"), interval: time.Second, expiresAt: time.Now().Add(time.Minute), notificationToken: fapi.NewSecret("notify-token")}
 	sealed, err := s.Seal(begun, "user-1")
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +102,7 @@ func TestOpenedSessionAuthenticatesPing(t *testing.T) {
 // key opens while that key is listed, and Open asks for it to be sealed
 // again; once the key is gone, it doesn't open.
 func TestBackchannelSessionSealerRotatesKeys(t *testing.T) {
-	session := BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: "req-1", interval: time.Second, expiresAt: time.Now().Add(time.Minute)}
+	session := BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: fapi.NewSecret("req-1"), interval: time.Second, expiresAt: time.Now().Add(time.Minute)}
 	sealed, err := sessionSealer(t, "https://as.example.com", sessionSealKey(1)).Seal(session, "user-1")
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +117,7 @@ func TestBackchannelSessionSealerRotatesKeys(t *testing.T) {
 
 func TestBackchannelSessionSealerRefuses(t *testing.T) {
 	s := sessionSealer(t, "https://as.example.com", sessionSealKey(1))
-	good, err := s.Seal(BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: "req-1", interval: time.Second, expiresAt: time.Now().Add(time.Minute), openID: true}, "user-1")
+	good, err := s.Seal(BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: fapi.NewSecret("req-1"), interval: time.Second, expiresAt: time.Now().Add(time.Minute), openID: true}, "user-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +128,7 @@ func TestBackchannelSessionSealerRefuses(t *testing.T) {
 		return s.keys.seal(backchannelSessionSealVersion, raw, s.additionalData("user-1"))
 	}
 	other := func(issuer string, key []byte) []byte {
-		b, err := sessionSealer(t, issuer, key).Seal(BackchannelAuthenticationSession{issuer: issuer, clientID: "client-1", authReqID: "req-1", interval: time.Second, expiresAt: time.Now()}, "user-1")
+		b, err := sessionSealer(t, issuer, key).Seal(BackchannelAuthenticationSession{issuer: issuer, clientID: "client-1", authReqID: fapi.NewSecret("req-1"), interval: time.Second, expiresAt: time.Now()}, "user-1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -158,7 +170,7 @@ func TestSealEmptyBackchannelSession(t *testing.T) {
 // which time.Time can't encode — an authorization server's expires_in
 // could produce one.
 func TestSealBackchannelSessionFarFuture(t *testing.T) {
-	s := BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: "req-1", interval: time.Second, expiresAt: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}
+	s := BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: fapi.NewSecret("req-1"), interval: time.Second, expiresAt: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}
 	if _, err := sessionSealer(t, "https://as.example.com", sessionSealKey(1)).Seal(s, "user-1"); err == nil {
 		t.Error("Seal(year 10000) = nil error, want error")
 	}
@@ -183,12 +195,12 @@ func TestNewBackchannelSessionSealerRefuses(t *testing.T) {
 // doesn't open under this user's; and an owner is required to seal.
 func TestBackchannelSessionSealerBindsOwner(t *testing.T) {
 	s := sessionSealer(t, "https://as.example.com", sessionSealKey(1))
-	session := BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: "req-1", interval: time.Second, expiresAt: time.Now().Add(time.Minute)}
+	session := BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: fapi.NewSecret("req-1"), interval: time.Second, expiresAt: time.Now().Add(time.Minute)}
 	sealed, err := s.Seal(session, "user-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _, err := s.Open(sealed, "user-1"); err != nil || got.authReqID != "req-1" {
+	if got, _, err := s.Open(sealed, "user-1"); err != nil || got.AuthReqID() != "req-1" {
 		t.Fatalf("Open(same owner) = %+v, %v; want the session", got, err)
 	}
 	for _, owner := range []string{"user-2", "", "user-1 "} {
@@ -208,7 +220,7 @@ func TestBackchannelSessionSealerBindsOwner(t *testing.T) {
 func TestBackchannelSessionSealerResources(t *testing.T) {
 	s := sessionSealer(t, "https://as.example.com", sessionSealKey(1))
 	expires := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	session := BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: "req-1", interval: time.Second, expiresAt: expires,
+	session := BackchannelAuthenticationSession{issuer: "https://as.example.com", clientID: "client-1", authReqID: fapi.NewSecret("req-1"), interval: time.Second, expiresAt: expires,
 		resource: []string{"https://issuer-a.example", "https://issuer-b.example"}}
 	sealed, err := s.Seal(session, "user-1")
 	if err != nil {
@@ -228,5 +240,28 @@ func TestBackchannelSessionSealerResources(t *testing.T) {
 	session.resource = []string{"https://issuer-a.example/" + strings.Repeat("a", maxSealedBackchannelSession)}
 	if _, err := s.Seal(session, "user-1"); err == nil {
 		t.Error("Seal sealed a session too large to open")
+	}
+}
+
+// backchannelSealedByV080 is a session v0.80.0 sealed with
+// sessionSealKey(1), for owner user-1, before a session held its
+// auth_req_id and notification token in a fapi.Secret.
+const backchannelSealedByV080 = "Aq4hbC6CTMCLg1Ed/35GQwXHarc1XoVLOsTQVovZa+TkuRZmv2rCl5dwFTB1QP5I" +
+	"61QNc+7XW/HUboeTD2exVvHLCaM0tHgQl1dbjggHz3fpYAAlz7YDgmS705k4wWw5" +
+	"cyQAxwCWzLvlEvLw9TPFOLMkiCUMXS4mSffCTegXiA=="
+
+// TestBackchannelSessionSealedByAnEarlierVersionOpens checks a session
+// sealed before the change still opens, to the same values.
+func TestBackchannelSessionSealedByAnEarlierVersionOpens(t *testing.T) {
+	sealed, err := base64.StdEncoding.DecodeString(backchannelSealedByV080)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := sessionSealer(t, "https://as.example.com", sessionSealKey(1)).Open(sealed, "user-1")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if got.AuthReqID() != "req-v080" || got.NotificationToken() != "notify-v080" || got.interval != 5*time.Second || !got.openID {
+		t.Errorf("opened %+v, want the session v0.80.0 sealed", got)
 	}
 }

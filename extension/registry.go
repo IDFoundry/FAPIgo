@@ -18,8 +18,9 @@ type Registry struct {
 // NewRegistry validates and indexes defs. It fails if any Definition
 // has an empty wire name, if two Definitions share a wire name, if any
 // Definition's declared Cardinality does not match its Go type, if any
-// Definition leaves Sensitivity unset, or if any Definition sets
-// ReturnInTokenClaims under a reserved token claim name
+// Definition leaves Sensitivity unset, if any Sensitive Definition sets
+// ReturnInTokenClaims (ErrSensitiveTokenClaim), or if any Definition
+// sets ReturnInTokenClaims under a reserved token claim name
 // (ErrReservedTokenClaim).
 func NewRegistry(defs ...Registered) (*Registry, error) {
 	byName := make(map[string]Registered, len(defs))
@@ -28,7 +29,7 @@ func NewRegistry(defs ...Registered) (*Registry, error) {
 			return nil, err
 		}
 		if _, exists := byName[d.name()]; exists {
-			return nil, fmt.Errorf("%w: %q", ErrDuplicateDefinition, d.name())
+			return nil, definitionError(ErrDuplicateDefinition, d)
 		}
 		byName[d.name()] = d
 	}
@@ -41,15 +42,24 @@ func checkDefinition(d Registered) error {
 		return fmt.Errorf("extension: definition has an empty name")
 	}
 	if !d.cardinalityOK() {
-		return fmt.Errorf("%w: %q", ErrCardinalityMismatch, d.name())
+		return definitionError(ErrCardinalityMismatch, d)
 	}
 	if !d.sensitivityOK() {
 		return fmt.Errorf("extension: definition %q: sensitivity is required (NotSensitive or Sensitive)", d.name())
 	}
+	if d.returnInTokenClaims() && d.sensitive() {
+		return definitionError(ErrSensitiveTokenClaim, d)
+	}
 	if d.returnInTokenClaims() && claimnames.ReservedInTokens(claimnames.Client, d.name()) {
-		return fmt.Errorf("%w: %q", ErrReservedTokenClaim, d.name())
+		return definitionError(ErrReservedTokenClaim, d)
 	}
 	return nil
+}
+
+// definitionError is NewRegistry's refusal of d, wrapping sentinel and
+// naming d.
+func definitionError(sentinel error, d Registered) error {
+	return fmt.Errorf("%w: %q", sentinel, d.name())
 }
 
 // Parse validates params against the registry: every name not present
@@ -92,6 +102,20 @@ func (r *Registry) Parse(params map[string]json.RawMessage, core map[string]stru
 		}
 	}
 	return values, nil
+}
+
+// Sensitive reports whether the Definition r holds for name is
+// Sensitive, and whether r holds one for name at all: for code that
+// logs extension values it read back with Get, which must leave a
+// Sensitive one out. A name r holds no Definition for is reported as
+// neither; Parse drops such a parameter, so no Values it returns holds
+// one.
+func (r *Registry) Sensitive(name string) (sensitive, registered bool) {
+	d, ok := r.byName[name]
+	if !ok {
+		return false, false
+	}
+	return d.sensitive(), true
 }
 
 // TokenClaimNames returns the wire names of every Definition registered

@@ -41,7 +41,7 @@ func TestTokenEndpointRequestBoundsItsOwnParameters(t *testing.T) {
 	for range maxFormParameters {
 		params = append(params, FormParameter{Name: resourceParameter, Value: "https://rs.example"})
 	}
-	req := TokenEndpointRequest{parts: httpRequestParts{HTTP: FormRequest{Parameters: params}}}
+	req := TokenEndpointRequest{parts: holdParts(httpRequestParts{HTTP: FormRequest{Parameters: params}})}
 	if _, err := req.Parameters(); err == nil {
 		t.Fatalf("Parameters accepted %d parameters", len(params))
 	}
@@ -82,5 +82,17 @@ func TestCheckDPoPNonceFailsWhenItCantIssue(t *testing.T) {
 	s := &Server{deps: Dependencies{Nonces: failingNonceStore{}, Random: rand.Reader}}
 	if err := s.checkDPoPNonce(context.Background(), "", time.Now()); err == nil || err.Code() != ErrorServerError {
 		t.Errorf("checkDPoPNonce = %v, want server_error", err)
+	}
+}
+
+// TestPushedResultFailsWhenItCantIssue: at the PAR endpoint too, a nonce
+// store that can't issue fails the request with server_error, and no
+// request_uri goes out without the nonce the client needs next.
+func TestPushedResultFailsWhenItCantIssue(t *testing.T) {
+	s := &Server{deps: Dependencies{Nonces: failingNonceStore{}, Random: rand.Reader}}
+	result, err := s.pushedResult(context.Background(), "client-1", "urn:ietf:params:oauth:request_uri:pushed", time.Now())
+	var serverErr *Error
+	if !errors.As(err, &serverErr) || serverErr.Code() != ErrorServerError || result.RequestURI != (RequestURI{}) {
+		t.Errorf("pushedResult = %v, %v; want server_error and no request_uri", result, err)
 	}
 }

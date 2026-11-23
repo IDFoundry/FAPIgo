@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // backchannelSessionSealVersion prefixes every sealed
@@ -103,15 +105,15 @@ func (s *BackchannelSessionSealer) Seal(session BackchannelAuthenticationSession
 	if owner == "" {
 		return nil, newError(ErrorInvalidRequest, "a backchannel authentication session is sealed for an owner", nil)
 	}
-	if session.authReqID == "" {
+	if session.authReqID == (fapi.Secret{}) {
 		return nil, newError(ErrorInvalidRequest, "a backchannel authentication session without an auth_req_id can't be sealed", nil)
 	}
 	if !s.client.ownsBackchannelSession(session) {
 		return nil, newError(ErrorInvalidRequest, "the backchannel authentication session was begun by a client for a different issuer or client ID", nil)
 	}
 	plaintext, err := json.Marshal(sealedBackchannelSession{
-		AuthReqID: session.authReqID, IntervalMillis: session.interval.Milliseconds(),
-		ExpiresAt: session.expiresAt.UTC(), NotificationToken: session.notificationToken,
+		AuthReqID: session.authReqID.Reveal(), IntervalMillis: session.interval.Milliseconds(),
+		ExpiresAt: session.expiresAt.UTC(), NotificationToken: session.notificationToken.Reveal(),
 		OpenID: session.openID, EssentialACR: session.essentialACR, Resource: session.resource,
 		Scope: session.scope,
 	})
@@ -148,8 +150,8 @@ func (s *BackchannelSessionSealer) Open(sealed []byte, owner string) (session Ba
 	// issuer and client ID.
 	return BackchannelAuthenticationSession{
 		issuer: s.client.cfg.Issuer.String(), clientID: s.client.cfg.ClientID.String(),
-		authReqID: e.AuthReqID, interval: time.Duration(e.IntervalMillis) * time.Millisecond,
-		expiresAt: e.ExpiresAt, notificationToken: e.NotificationToken,
+		authReqID: fapi.NewSecret(e.AuthReqID), interval: time.Duration(e.IntervalMillis) * time.Millisecond,
+		expiresAt: e.ExpiresAt, notificationToken: fapi.NewSecret(e.NotificationToken),
 		openID: e.OpenID, essentialACR: e.EssentialACR, resource: e.Resource,
 		scope: e.Scope,
 	}, keyIndex > 0, nil

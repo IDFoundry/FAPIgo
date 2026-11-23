@@ -71,13 +71,23 @@ func stateForHandle(handle string) string {
 //
 // A native app whose session store is its own on-device storage has that
 // binding already: see CallbackBindingDeviceLocalStore.
+//
+// String is the handle's wire value, so fmt.Sprint, %s and %v, and the
+// templates print it, for building a cookie or a form field: never log
+// a SessionHandle on its own with fmt. log/slog logs one given as an
+// attribute as [REDACTED] (LogValue), and every rendering of a type of
+// this package that holds one shows [REDACTED]; but log/slog's text
+// handler prints a struct with %+v, so a SessionHandle in an exported
+// field of a struct of yours logs its wire value. fmt's reflection
+// fallback (a SessionHandle in an unexported field, or under a verb
+// other than v, s, q, x and X) prints an address.
 type SessionHandle struct {
-	value string
+	value fapi.Secret
 }
 
 // String returns the handle's opaque wire value, for keeping it with the
 // user agent (see SessionHandle); ParseSessionHandle reverses it.
-func (h SessionHandle) String() string { return h.value }
+func (h SessionHandle) String() string { return h.value.Reveal() }
 
 // ParseSessionHandle recovers a SessionHandle from its String form — the
 // value the caller kept with the user agent — for
@@ -91,20 +101,38 @@ func ParseSessionHandle(s string) (SessionHandle, error) {
 	if err != nil || len(raw) != randomTokenSize {
 		return SessionHandle{}, newError(ErrorInvalidRequest, "session handle is malformed", nil)
 	}
-	return SessionHandle{value: s}, nil
+	return SessionHandle{value: fapi.NewSecret(s)}, nil
 }
 
 // AuthorizationSession is returned by BeginAuthorization: the browser URL
 // to redirect the user agent to, and the opaque handle that binds the
-// session to that user agent.
+// session to that user agent. It prints and logs its URL's scheme, host,
+// path and parameter names only, and its handle as [REDACTED]: the URL
+// carries the request_uri, which anyone holding it can begin the
+// authorization with until it is used (see the server package's
+// BeginAuthorization).
 type AuthorizationSession struct {
-	url       fapi.URL
+	// url is the authorization URL's string form, held in a fapi.Secret:
+	// fmt's reflection fallback, which prints a fapi.URL's query, prints
+	// only the Secret's address.
+	url       fapi.Secret
 	handle    SessionHandle
 	expiresAt time.Time
 }
 
-// URL is the authorization URL to redirect the user agent to.
-func (s AuthorizationSession) URL() fapi.URL { return s.url }
+// URL is the authorization URL to redirect the user agent to. It carries
+// the request_uri, which begins the authorization for whoever holds it
+// until it is used: redirect with it, but don't log it.
+func (s AuthorizationSession) URL() fapi.URL {
+	// BeginAuthorization keeps the String of an endpoint URL, with its
+	// own parameters added, which parses back to the same URL; the zero
+	// AuthorizationSession has none.
+	u, err := fapi.ParseEndpointURL(s.url.Reveal(), fapi.AllowLoopbackHTTP())
+	if err != nil {
+		return fapi.URL{}
+	}
+	return u
+}
 
 // Handle is this session's opaque handle: the secret that binds it to the
 // user agent that began it, to keep with that user agent (see

@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -263,5 +264,38 @@ func TestTokenSetSealerBindsTheIssuer(t *testing.T) {
 		if _, err := s.Seal(tokens, "user-1"); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
 			t.Errorf("Seal(%s) = %v, want invalid_request", name, err)
 		}
+	}
+}
+
+// tokenSetSealedByV080 is fullTokenSet as v0.80.0 sealed it, with
+// sealKey(1) for owner user-1.
+const tokenSetSealedByV080 = "Aa4hbC6h11JfWtgBze+wY6mzgb1oly1Q6Gs7jLBkrn87EX9VvSFJhS/w+ZjkTxxu" +
+	"hpqnrlVRmstzrNCTlJz6cSE50/tHcKtiZsanoaz8NSs1KAlIKQQPC8EJ5T7MQRM1" +
+	"orSZqhR84Pa65kf32ZLLGB9bGYMsAVvjvPV/IEZh41uYgkJtM4oZLsmrkwrs6UHX" +
+	"n9QkVMkjDqJeHrlaS0ybB8Tb+0m+k/HQ0c9ITxdT9hQEJu6koMVfXDt/UUsqcGHv" +
+	"3YnMwzw82assD2BdC6++5eqz2lUuhtRRz4JWDLiZcNBB9aH3PzEhMKDdig2NQOKi" +
+	"DTEAosYvTDvsacmPg1dWJKa3tjjrd1mblTeV74SW2lRU+whFFdy4Qad1+ycotFMF" +
+	"oGF27zHoH7kvKt1ERoplYNWWECJ3Ws8fQPW8B5fpybCILXBdYAwLYzjpzk0WM/fy" +
+	"VYlTuFMp6eN9wIDKBLcxHbEs2zIy7th2tEBTlklUlm/W86UVNpmjQ439KEMqiqcN" +
+	"69RQAPMjTm8knJqyJBNxkkNRGjfBNPZ3XTed/8i3P7UhLClC8k7cenGXcLeweWYJ" +
+	"SaHQUfBS8DRSgbZvUnLX0VchqDMIE8w2l9UQZzJ1BjAY+5Fhiex9QFh+AYD1gvPJ" +
+	"jc4AdLFpx1gSPyjSOF0Pobm3tggKS7EUQZkEopp1fi7Nr0yLaNVD3mEPj6y5OJdQ" +
+	"C8kiszWS1XtR45obdcBNs+BKvGmClx2RMIN1ozRDWQBcYKYyvfFHx+iiEy0ssM3O" +
+	"IgQOpnd7wlRr8aSB77w8XbWhj6kX2HohWu/pAjBBOjPPP+bNordV9unYXwqyr/J/" +
+	"am+Jix+CMt3ekKKyup5oBE82aAtLXKG5WPdS"
+
+// TestTokenSetSealedByAnEarlierVersionOpens checks a set sealed before
+// fapi.Secret held its value by handle still opens, to the same values.
+func TestTokenSetSealedByAnEarlierVersionOpens(t *testing.T) {
+	sealed, err := base64.StdEncoding.DecodeString(tokenSetSealedByV080)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened, _, err := sealer(t, testClientID, sealKey(1)).Open(sealed, "user-1")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if got, want := revealed(opened), revealed(fullTokenSet()); !reflect.DeepEqual(got, want) {
+		t.Errorf("opened = %v\nwant %v", got, want)
 	}
 }

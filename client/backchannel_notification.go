@@ -8,6 +8,8 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // maxBackchannelNotificationBytes bounds a ping callback's body, which
@@ -17,15 +19,17 @@ const maxBackchannelNotificationBytes = 4096
 // BackchannelNotification is a CIBA ping callback (§10.2): the
 // authorization server telling a client registered for ping delivery
 // that it has a decision for one auth_req_id. It is not yet
-// authenticated — check it with Authenticates before acting on it.
+// authenticated — check it with Authenticates before acting on it. It
+// prints and logs without its auth_req_id and bearer token, which show
+// as [REDACTED] under every fmt verb and in log/slog.
 type BackchannelNotification struct {
-	authReqID string
-	token     string
+	authReqID fapi.Secret
+	token     fapi.Secret
 }
 
 // AuthReqID is the auth_req_id the notification is about: the key for
 // looking up the BackchannelAuthenticationSession it belongs to.
-func (n BackchannelNotification) AuthReqID() string { return n.authReqID }
+func (n BackchannelNotification) AuthReqID() string { return n.authReqID.Reveal() }
 
 // Authenticates reports whether n was sent for session: it names
 // session's auth_req_id, and carries, as its bearer token, the
@@ -40,10 +44,11 @@ func (n BackchannelNotification) AuthReqID() string { return n.authReqID }
 // kept waiting. It is always false for a session begun under poll
 // delivery, which has no notification token.
 func (n BackchannelNotification) Authenticates(session BackchannelAuthenticationSession) bool {
-	if n.token == "" || session.notificationToken == "" || n.authReqID != session.authReqID {
+	token, want := n.token.Reveal(), session.notificationToken.Reveal()
+	if token == "" || want == "" || n.authReqID.Reveal() != session.authReqID.Reveal() {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(n.token), []byte(session.notificationToken)) == 1
+	return subtle.ConstantTimeCompare([]byte(token), []byte(want)) == 1
 }
 
 // ParseBackchannelNotification reads a CIBA ping callback (§10.2) from
@@ -80,7 +85,7 @@ func ParseBackchannelNotification(r *http.Request) (BackchannelNotification, err
 	if raw, ok := members["auth_req_id"]; !ok || json.Unmarshal(raw, &authReqID) != nil || authReqID == "" {
 		return BackchannelNotification{}, newError(ErrorInvalidRequest, "the backchannel notification has no auth_req_id", errors.New("auth_req_id missing, empty or not a string"))
 	}
-	return BackchannelNotification{authReqID: authReqID, token: bearerToken(r.Header)}, nil
+	return BackchannelNotification{authReqID: fapi.NewSecret(authReqID), token: fapi.NewSecret(bearerToken(r.Header))}, nil
 }
 
 // bearerToken returns the request's bearer token, or "" (which never

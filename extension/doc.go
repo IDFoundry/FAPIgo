@@ -18,6 +18,11 @@
 // additionally bounds the number of detail objects, bytes per object,
 // total bytes, JSON depth, and duplicate/unknown JSON members.
 //
+// Values prints and logs its parameter names and never a value (fmt,
+// log/slog), and an error refusing a Sensitive value never quotes it.
+// Values' JSON encoding, Snapshot and AsParameters carry every value:
+// they are for storage and tokens, not logs.
+//
 // An authorization request parameter without a registered Definition is
 // ignored, not rejected — RFC 6749 §3.1, RFC 9126 §2.1 and OIDC Core
 // §3.1.2.2 all require an authorization server to tolerate one rather

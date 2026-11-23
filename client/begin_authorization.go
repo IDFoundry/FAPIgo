@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/jose"
@@ -350,7 +351,7 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		"request_uri": {result.RequestURI},
 	})
 
-	return AuthorizationSession{url: browserURL, handle: SessionHandle{value: handle}, expiresAt: now.Add(c.cfg.Limits.SessionLifetime)}, nil
+	return AuthorizationSession{url: fapi.NewSecret(browserURL.String()), handle: SessionHandle{value: fapi.NewSecret(handle)}, expiresAt: now.Add(c.cfg.Limits.SessionLifetime)}, nil
 }
 
 // checkAuthorizationCodeFlow is BeginAuthorization's and

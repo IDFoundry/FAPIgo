@@ -55,9 +55,13 @@ type encodedInteractionRequest struct {
 //
 // The encoding is opaque and versioned. It can carry personal data (the
 // login hint, authorization details, and RequiredSubject, which for a
-// pairwise client can be the user's internal subject), so store it as
-// you would the rest of a session, never where the client or the user
-// agent can read it. It carries no integrity protection and needs none for
+// pairwise client can be the user's internal subject) and every
+// extension value, Sensitive ones included, so store it as you would the
+// rest of a session, never where the client or the user agent can read
+// it, and never log it: log/slog logs an InteractionRequest through
+// LogValue, without the values, but a logger that encodes values with
+// encoding/json or encoding.TextMarshaler reaches this encoding. It
+// carries no integrity protection and needs none for
 // the grant's sake: CompleteAuthorization checks the granted scope,
 // authorization details, resources and identity claims against the
 // request the server stored itself, so a modified copy can make a

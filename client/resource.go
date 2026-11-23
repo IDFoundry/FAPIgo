@@ -43,9 +43,12 @@ const errProtectedResourceRequestFailed = "protected resource request failed"
 // Client.ClientCredentialsResource produce one, always scoped to a
 // token this client obtained, so a caller can't assemble one detached
 // from an actual access token.
+//
+// It prints and logs without its access token, which shows as
+// [REDACTED] under every fmt verb and in log/slog.
 type ResourceClient struct {
 	client *Client
-	token  string
+	token  fapi.Secret
 	// err, when set, is returned by every Do: ProtectedResource was
 	// given a token set another issuer issued.
 	err *Error
@@ -73,7 +76,7 @@ func (c *Client) ProtectedResource(tokens TokenSet) *ResourceClient {
 			return &ResourceClient{client: c, err: issuerErr}
 		}
 	}
-	return &ResourceClient{client: c, token: tokens.AccessToken.Reveal()}
+	return &ResourceClient{client: c, token: tokens.AccessToken}
 }
 
 // ClientCredentialsResource is ProtectedResource for an access token
@@ -86,7 +89,7 @@ func (c *Client) ClientCredentialsResource(result ClientCredentialsTokenResult) 
 	if result.Issuer != "" && result.Issuer != c.cfg.Issuer.String() {
 		return &ResourceClient{client: c, err: newError(ErrorInvalidRequest, "the token was issued by a different issuer than this client's", nil)}
 	}
-	return &ResourceClient{client: c, token: result.AccessToken.Reveal()}
+	return &ResourceClient{client: c, token: result.AccessToken}
 }
 
 // UseDPoPNonce has the next Do to resource's origin present nonce in its
@@ -242,7 +245,7 @@ func (rc *ResourceClient) sendBearer(ctx context.Context, req *http.Request) (*h
 	// caller's request (and race when one request is a template shared
 	// across goroutines).
 	req = req.Clone(ctx)
-	req.Header.Set("Authorization", "Bearer "+rc.token)
+	req.Header.Set("Authorization", "Bearer "+rc.token.Reveal())
 	return rc.do(req)
 }
 
@@ -253,14 +256,14 @@ func (rc *ResourceClient) sendBearer(ctx context.Context, req *http.Request) (*h
 func (rc *ResourceClient) send(ctx context.Context, signer crypto.Signer, req *http.Request, nonce string) (*http.Response, error) {
 	proof, err := dpop.CreateProof(dpop.ProofRequest{
 		Signer: signer, Algorithm: rc.client.cfg.Algorithms.DPoP,
-		Method: req.Method, URL: req.URL, AccessToken: rc.token,
+		Method: req.Method, URL: req.URL, AccessToken: rc.token.Reveal(),
 		Nonce: nonce, Now: rc.client.deps.Clock.Now(), Random: rc.client.deps.Random,
 	})
 	if err != nil {
 		return nil, err
 	}
 	req = req.Clone(ctx) // never the caller's request; see sendBearer
-	req.Header.Set("Authorization", "DPoP "+rc.token)
+	req.Header.Set("Authorization", "DPoP "+rc.token.Reveal())
 	req.Header.Set("DPoP", proof)
 	return rc.do(req)
 }

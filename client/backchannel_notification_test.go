@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // pingRequest builds a ping callback the way server.NewBackchannelNotificationRequest
@@ -33,14 +35,14 @@ func TestParseBackchannelNotification(t *testing.T) {
 	if n.AuthReqID() != "req-1" {
 		t.Errorf("AuthReqID() = %q, want req-1", n.AuthReqID())
 	}
-	session := BackchannelAuthenticationSession{authReqID: "req-1", notificationToken: "notify-token"}
+	session := BackchannelAuthenticationSession{authReqID: fapi.NewSecret("req-1"), notificationToken: fapi.NewSecret("notify-token")}
 	if !n.Authenticates(session) {
 		t.Error("Authenticates(its own session) = false, want true")
 	}
 	for name, other := range map[string]BackchannelAuthenticationSession{
-		"another auth_req_id": {authReqID: "req-2", notificationToken: "notify-token"},
-		"another token":       {authReqID: "req-1", notificationToken: "other-token"},
-		"a poll session":      {authReqID: "req-1"},
+		"another auth_req_id": {authReqID: fapi.NewSecret("req-2"), notificationToken: fapi.NewSecret("notify-token")},
+		"another token":       {authReqID: fapi.NewSecret("req-1"), notificationToken: fapi.NewSecret("other-token")},
+		"a poll session":      {authReqID: fapi.NewSecret("req-1")},
 	} {
 		if n.Authenticates(other) {
 			t.Errorf("Authenticates(%s) = true, want false", name)
@@ -50,7 +52,7 @@ func TestParseBackchannelNotification(t *testing.T) {
 
 func TestParseBackchannelNotificationBearerSchemeIsCaseInsensitive(t *testing.T) {
 	n, err := ParseBackchannelNotification(pingRequest(`{"auth_req_id":"req-1"}`, map[string]string{"Authorization": "bearer notify-token"}))
-	if err != nil || !n.Authenticates(BackchannelAuthenticationSession{authReqID: "req-1", notificationToken: "notify-token"}) {
+	if err != nil || !n.Authenticates(BackchannelAuthenticationSession{authReqID: fapi.NewSecret("req-1"), notificationToken: fapi.NewSecret("notify-token")}) {
 		t.Errorf("lower-case bearer scheme: %v", err)
 	}
 }
@@ -84,7 +86,7 @@ func TestParseBackchannelNotificationRejectsMalformed(t *testing.T) {
 func TestParseBackchannelNotificationWithoutOneBearerTokenFailsAuthentication(t *testing.T) {
 	twoHeaders := pingRequest(`{"auth_req_id":"req-1"}`, nil)
 	twoHeaders.Header.Add("Authorization", "Bearer notify-token")
-	session := BackchannelAuthenticationSession{authReqID: "req-1", notificationToken: "notify-token"}
+	session := BackchannelAuthenticationSession{authReqID: fapi.NewSecret("req-1"), notificationToken: fapi.NewSecret("notify-token")}
 	for name, r := range map[string]*http.Request{
 		"no token":        pingRequest(`{"auth_req_id":"req-1"}`, map[string]string{"Authorization": ""}),
 		"empty token":     pingRequest(`{"auth_req_id":"req-1"}`, map[string]string{"Authorization": "Bearer "}),
@@ -112,5 +114,16 @@ func TestParseBackchannelNotificationBodyReadError(t *testing.T) {
 	r.Body = io.NopCloser(failingReader{})
 	if _, err := ParseBackchannelNotification(r); err == nil {
 		t.Error("unreadable body = nil error, want error")
+	}
+}
+
+// TestAuthenticatesNeedsATokenOnBothSides pins that a notification with
+// no bearer token never authenticates for a session with no
+// notification token, a poll session: two empty tokens compare equal in
+// constant time.
+func TestAuthenticatesNeedsATokenOnBothSides(t *testing.T) {
+	poll := BackchannelAuthenticationSession{authReqID: fapi.NewSecret("req-1")}
+	if (BackchannelNotification{authReqID: fapi.NewSecret("req-1")}).Authenticates(poll) {
+		t.Error("a notification without a token authenticates for a session without one")
 	}
 }

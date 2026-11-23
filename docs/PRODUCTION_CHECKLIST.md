@@ -88,7 +88,14 @@ are things no constructor can check.
 - [ ] *(yours)* **Wrap `/authorize` and every login, consent and error
   page in `server.AuthorizationPageHeaders`** (anti-framing,
   `Referrer-Policy: no-referrer`, `no-store`). Load no third-party
-  scripts or images there, and don't log full `/authorize` URLs.
+  scripts or images there, and don't log full `/authorize` URLs. The
+  library's results log redacted, and so do its requests when you log
+  the request itself; don't log what bypasses that: `Destination()`,
+  `AuthorizationSession.URL()`, a handle's or a `RequestURI`'s
+  `String()` (which slog's text handler calls for one in an exported
+  field of your struct), `Reveal()`, a request's fields, a storage
+  encoding, or a slice or struct holding results through slog's JSON
+  handler.
   Redirect with 303 after a form POST, and render errors with
   `WriteText`/`WriteJSON`, never `Error()`.
   [Step 5](../GETTING_STARTED.md#5-the-one-piece-thats-genuinely-yours-the-login-flow)

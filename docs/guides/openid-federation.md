@@ -106,7 +106,13 @@ its own (see `MaxCacheAge`). A failed one is remembered for `FailureCacheAge`
 (10 seconds by default), so requests repeating a client_id that doesn't
 resolve don't each repeat the outbound fetches. `OnResolutionFailure` tells
 your operator why a client was refused, once per resolution attempted; the
-client itself only sees `invalid_client`.
+client itself only sees `invalid_client`. The hook runs on a goroutine of
+the library's own, shared by the requests for that client_id made while it
+resolves, and can run after the request that triggered the resolution has
+returned. It must not block, panic, or resolve the same client_id. A panic
+in it is recovered rather than ending the process: the requests waiting on
+that resolution get `server_error`, and the failure is remembered as if the
+hook had returned.
 
 ## Relying party: be resolvable, and find providers
 

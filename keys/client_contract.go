@@ -65,8 +65,10 @@ type contractFixture struct {
 //   - a client ID that isn't registered is an error, never a fallback
 //     set, with or without a kid;
 //   - only keys for the requested algorithm are returned;
-//   - every key returned belongs to the requesting client (and has the
-//     requested kid, when one is requested);
+//   - every key returned belongs to the requesting client (and, when a
+//     kid is requested, has that kid: every key the contract registers
+//     has one, so none answers to a kid by its thumbprint, as
+//     VerificationKey.KeyID lets a key without one);
 //   - a client's own key resolves by its kid, and without one.
 //
 // It checks behaviour through ResolveVerificationKeys only, so it

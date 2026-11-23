@@ -171,15 +171,7 @@ func keyIDFor(kid string, pub crypto.PublicKey, algorithm fapi.SignatureAlgorith
 	if kid != "" {
 		return kid, nil
 	}
-	jwk, err := jose.NewJWK(pub, algorithm)
-	if err != nil {
-		return "", err
-	}
-	thumbprint, err := jwk.Thumbprint()
-	if err != nil {
-		return "", err
-	}
-	return thumbprint.String(), nil
+	return jose.ThumbprintKeyID(pub, algorithm)
 }
 
 // claimKeyID records kid as naming pub, refusing a kid already naming a

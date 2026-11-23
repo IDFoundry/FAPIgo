@@ -1,8 +1,9 @@
 # Upgrading
 
-This page covers every breaking change from v0.30.0 onward: who each one
-affects and what to change. Releases with no breaking changes aren't
-listed. [CHANGELOG.md](CHANGELOG.md) has the full history.
+This page covers every breaking change from v0.30.0 onward, and,
+from v0.81.0, each fix that can refuse something a deployment relies
+on: who each one affects and what to change. Releases with neither
+aren't listed. [CHANGELOG.md](CHANGELOG.md) has the full history.
 
 `New` fails at startup when a new requirement isn't met, and the error
 names the missing field, so a skipped step can't slip through to
@@ -169,6 +170,37 @@ the CIBA token request and to refresh a CIBA grant, each with its mTLS
 alias for a client registered `SenderConstrainMTLS`. A client that
 names an endpoint URL at revocation, or to refresh an authorization
 code grant, must name the issuer instead: no setting restores those.
+
+### A CRL with a critical extension FAPIgo doesn't process is skipped (server)
+
+**Affects:** a server checking client or attester certificates with
+`ClientCertificateCRLs`, whose CA marks critical an extension on its
+CRLs, or on their entries, that FAPIgo doesn't process: an extension
+of the CA's own, or an issuer alternative name, freshest CRL or
+authority information access extension marked critical. A CA marking
+RFC 5280's extensions critical only as RFC 5280 directs is unaffected:
+an issuer alternative name should be non-critical, and a freshest CRL
+or authority information access extension must be.
+
+**Why:** RFC 5280 (§5.2, §5.3) forbids using a CRL that carries a
+critical extension the reader can't process. `ClientCertificateCRLs`
+used one anyway, so a revoked certificate that such a CRL didn't list
+was accepted.
+
+**What fails:** nothing at startup. A CRL is skipped, as a stale one
+is, when a critical extension other than an authority key identifier
+or a CRL number marks it, or a critical extension other than a reason
+code or an invalidity date marks one of its entries. A certificate
+whose CA has no other usable CRL can't be decided, so the request is
+refused with `server_error`, as with a missing CRL. And a certificate
+that only such a CRL names is no longer refused as revoked when
+another current, usable CRL from its CA doesn't name it.
+
+**What to change:** have your CA stop marking such extensions
+critical. Until it does, have `Lists` also return a CRL from the same
+CA without them (a complete CRL, say), or check revocation with a
+`ClientCertificateRevocation` of your own that processes the
+extension.
 
 ## v0.79.0
 

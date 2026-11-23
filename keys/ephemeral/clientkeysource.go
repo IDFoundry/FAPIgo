@@ -71,10 +71,14 @@ func (s *ClientKeySource) refreshBackoff() time.Duration {
 }
 
 // clientKeys is one client's keys from its JWK Set: those that verify
-// its signatures and those to encrypt to it.
+// its signatures and those to encrypt to it. verificationKeyIDs[i] is
+// the kid verification[i] answers to: its KeyID or, for a key given
+// without one, its RFC 7638 thumbprint, as keys.VerificationKey.KeyID
+// sets out.
 type clientKeys struct {
-	verification []keys.VerificationKey
-	encryption   []keys.ClientEncryptionKey
+	verification       []keys.VerificationKey
+	verificationKeyIDs []string
+	encryption         []keys.ClientEncryptionKey
 }
 
 // clientKeyEntry is one registered client's key source: either a fixed,
@@ -184,24 +188,27 @@ func newClientKeyEntry(spec ClientKeySpec, haveFetcher bool) (*clientKeyEntry, e
 	return &clientKeyEntry{jwksURL: u}, nil
 }
 
-// ResolveVerificationKeys implements keys.ClientKeySource.
+// ResolveVerificationKeys implements keys.ClientKeySource: the client's
+// JWK Set entries for req.Algorithm and, if req.KeyID is set, that kid —
+// an entry with that "kid", or one with none whose RFC 7638 thumbprint
+// it is, the kid keys.NewKeyManagerFromSigners derives for such a key.
 func (s *ClientKeySource) ResolveVerificationKeys(ctx context.Context, req keys.ClientKeyRequest) (keys.VerificationKeySet, error) {
 	entry, ok := s.clients[req.ClientID]
 	if !ok {
 		return keys.VerificationKeySet{}, fmt.Errorf("ephemeral: unknown client %q", req.ClientID)
 	}
 
-	current, err := s.current(ctx, entry, req.KeyID, func(k clientKeys) []string { return verificationKeyIDs(k.verification) })
+	current, err := s.current(ctx, entry, req.KeyID, func(k clientKeys) []string { return k.verificationKeyIDs })
 	if err != nil {
 		return keys.VerificationKeySet{}, err
 	}
 
 	var matched []keys.VerificationKey
-	for _, k := range current.verification {
+	for i, k := range current.verification {
 		if k.Algorithm != req.Algorithm {
 			continue
 		}
-		if req.KeyID != "" && k.KeyID != req.KeyID {
+		if req.KeyID != "" && current.verificationKeyIDs[i] != req.KeyID {
 			continue
 		}
 		matched = append(matched, k)
@@ -335,7 +342,7 @@ func (s *ClientKeySource) fetch(ctx context.Context, entry *clientKeyEntry) (cli
 	return parsed, nil
 }
 
-func verificationKeyIDs(ks []keys.VerificationKey) []string {
+func encryptionKeyIDs(ks []keys.ClientEncryptionKey) []string {
 	out := make([]string, len(ks))
 	for i, k := range ks {
 		out[i] = k.KeyID
@@ -343,12 +350,16 @@ func verificationKeyIDs(ks []keys.VerificationKey) []string {
 	return out
 }
 
-func encryptionKeyIDs(ks []keys.ClientEncryptionKey) []string {
-	out := make([]string, len(ks))
-	for i, k := range ks {
-		out[i] = k.KeyID
+// answeredKeyID is the kid k answers to: its own, or, when it has
+// none, its RFC 7638 thumbprint. ParseJWKSet has checked k fits its
+// algorithm, so the thumbprint can be computed; were it not,
+// ThumbprintKeyID's "" would have k answer to no kid.
+func answeredKeyID(k jose.ParsedJWK) string {
+	if k.KeyID != "" {
+		return k.KeyID
 	}
-	return out
+	thumbprint, _ := jose.ThumbprintKeyID(k.PublicKey, k.Algorithm)
+	return thumbprint
 }
 
 // parseClientKeys parses a JWK Set's verification keys (via the shared
@@ -366,6 +377,7 @@ func parseClientKeys(body []byte) (clientKeys, error) {
 	var out clientKeys
 	for _, k := range verification {
 		out.verification = append(out.verification, keys.VerificationKey{KeyID: k.KeyID, Algorithm: k.Algorithm, PublicKey: k.PublicKey})
+		out.verificationKeyIDs = append(out.verificationKeyIDs, answeredKeyID(k))
 	}
 	for _, k := range encryption {
 		out.encryption = append(out.encryption, keys.ClientEncryptionKey{KeyID: k.KeyID, Algorithm: k.Algorithm, PublicKey: k.PublicKey})

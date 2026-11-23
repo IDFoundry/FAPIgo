@@ -50,10 +50,16 @@ type ClientKeyRequest struct {
 type VerificationKey struct {
 	// KeyID is the key's "kid". A request naming no kid matches any
 	// key of its algorithm; one naming a kid matches a key whose KeyID
-	// is that kid. A key given without one (to NewStaticClientKeys, or
-	// in a client's JWK Set) matches a request naming its RFC 7638 JWK
+	// is that kid. A client's key with no KeyID (given to
+	// NewStaticClientKeys without one, or with no "kid" in the client's
+	// JWK Set) also matches a request naming its RFC 7638 JWK
 	// thumbprint, the kid NewKeyManagerFromSigners and SignerSpec derive
-	// for a key given without one, and no other kid.
+	// for a key given without one, and no other kid. Every
+	// ClientKeySource this module provides matches that way, and the
+	// server applies the same rule to the keys any ClientKeySource
+	// returns, so one of your own should return a key with no KeyID for
+	// a request naming its thumbprint. An attester's key
+	// (AttesterKeySource) matches a kid only by its KeyID.
 	KeyID     string
 	Algorithm fapi.SignatureAlgorithm
 	PublicKey crypto.PublicKey

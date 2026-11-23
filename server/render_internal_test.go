@@ -6,6 +6,7 @@ import (
 	"fmt"
 	htmltemplate "html/template"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -265,6 +266,56 @@ func TestRedirectSummaryOfANonURL(t *testing.T) {
 	for raw, want := range map[string]string{"": "", renderCode: "[REDACTED]", "%zz" + renderCode: "[REDACTED]"} {
 		if got := redirectSummary(raw); got != want {
 			t.Errorf("redirectSummary(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+// TestShadowsKeepTheirTypesFields checks each rendering's shadow has the
+// fields of the type it prints for, in order.
+func TestShadowsKeepTheirTypesFields(t *testing.T) {
+	for real, shadow := range map[reflect.Type]reflect.Type{
+		reflect.TypeFor[InteractionRequired]():                      reflect.TypeFor[interactionRequiredShadow](),
+		reflect.TypeFor[BackchannelInteractionRequired]():           reflect.TypeFor[backchannelInteractionRequiredShadow](),
+		reflect.TypeFor[PendingBackchannelInteraction]():            reflect.TypeFor[pendingBackchannelInteractionShadow](),
+		reflect.TypeFor[PushAuthorizationResult]():                  reflect.TypeFor[pushAuthorizationResultShadow](),
+		reflect.TypeFor[AuthorizationRedirect]():                    reflect.TypeFor[authorizationRedirectShadow](),
+		reflect.TypeFor[RedirectResponse]():                         reflect.TypeFor[redirectResponseShadow](),
+		reflect.TypeFor[BackchannelAuthenticationHints]():           reflect.TypeFor[backchannelAuthenticationHintsShadow](),
+		reflect.TypeFor[FormParameter]():                            reflect.TypeFor[formParameterShadow](),
+		reflect.TypeFor[FormRequest]():                              reflect.TypeFor[formRequestShadow](),
+		reflect.TypeFor[httpRequestParts]():                         reflect.TypeFor[httpRequestPartsShadow](),
+		reflect.TypeFor[PushAuthorizationRequest]():                 reflect.TypeFor[httpRequestPartsShadow](),
+		reflect.TypeFor[AuthorizationCodeExchangeRequest]():         reflect.TypeFor[httpRequestPartsShadow](),
+		reflect.TypeFor[RefreshTokenRequest]():                      reflect.TypeFor[httpRequestPartsShadow](),
+		reflect.TypeFor[ClientCredentialsTokenRequest]():            reflect.TypeFor[httpRequestPartsShadow](),
+		reflect.TypeFor[BackchannelTokenExchangeRequest]():          reflect.TypeFor[httpRequestPartsShadow](),
+		reflect.TypeFor[BeginBackchannelAuthenticationRequest]():    reflect.TypeFor[httpRequestPartsShadow](),
+		reflect.TypeFor[TokenEndpointRequest]():                     reflect.TypeFor[tokenEndpointRequestShadow](),
+		reflect.TypeFor[TokenRevocationRequest]():                   reflect.TypeFor[tokenRevocationRequestShadow](),
+		reflect.TypeFor[AttestedClientAuthenticationRequest]():      reflect.TypeFor[attestedClientAuthenticationRequestShadow](),
+		reflect.TypeFor[BeginAuthorizationRequest]():                reflect.TypeFor[beginAuthorizationRequestShadow](),
+		reflect.TypeFor[CompleteAuthorizationRequest]():             reflect.TypeFor[completeAuthorizationRequestShadow](),
+		reflect.TypeFor[CompleteBackchannelAuthenticationRequest](): reflect.TypeFor[completeAuthorizationRequestShadow](),
+		reflect.TypeFor[BackchannelNotification]():                  reflect.TypeFor[backchannelNotificationShadow](),
+	} {
+		rendertest.CheckShadow(t, real, shadow)
+	}
+}
+
+// TestStringIsTheVRendering pins each result's String to its %v
+// rendering, for a logger that prints a fmt.Stringer rather than
+// formatting it.
+func TestStringIsTheVRendering(t *testing.T) {
+	for _, v := range []fmt.Stringer{
+		InteractionRequired{Handle: InteractionHandle{value: fapi.NewSecret(renderInteractionHandle)}},
+		BackchannelInteractionRequired{AuthReqID: AuthReqID{value: fapi.NewSecret(renderAuthReqID)}},
+		PendingBackchannelInteraction{ID: "id", Handle: BackchannelAuthenticationHandle{value: fapi.NewSecret(renderCIBAHandle)}},
+		PushAuthorizationResult{RequestURI: RequestURI{value: fapi.NewSecret(renderPushedRequestURI)}},
+		AuthorizationRedirect{destination: fapi.NewSecret("https://rp.example/cb?code=" + renderCode)},
+		RedirectResponse{}, BackchannelAuthenticationHints{LoginHintToken: renderHintToken},
+	} {
+		if got, want := v.String(), fmt.Sprintf("%v", v); got != want {
+			t.Errorf("%T.String() = %s, want its %%v rendering %s", v, got, want)
 		}
 	}
 }

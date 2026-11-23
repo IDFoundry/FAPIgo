@@ -142,9 +142,42 @@ func BeginBackchannelAuthenticationRequestFromHTTP(r *http.Request) (BeginBackch
 // TokenEndpointRequest is a token endpoint request read from HTTP, not
 // yet tied to a grant: the body can only be read once, and which request
 // type it becomes depends on its grant_type. Switch on GrantType, then
-// take the matching typed request.
+// take the matching typed request. It prints and logs as the typed
+// requests do (see FormRequest), without its code, tokens or
+// credentials, and has no exported field: fmt's reflection fallback (a
+// TokenEndpointRequest in an unexported field, or under %p, %w or a verb
+// fmt rejects) prints only an address.
 type TokenEndpointRequest struct {
-	parts httpRequestParts
+	parts heldParts
+}
+
+// heldParts holds a request's parts behind a pointer to a pointer, so
+// that fmt's reflection fallback prints an address, never a value. One
+// pointer isn't enough: under a verb fmt rejects for a pointer it
+// reaches by reflection (s, q, f and most others), it prints that
+// pointer again as if it were the operand itself, showing what a pointer
+// to a struct points to, but not what a pointer to a pointer does.
+type heldParts struct {
+	// The zero-size array of funcs keeps TokenEndpointRequest
+	// non-comparable, as the slices in the parts it held made it.
+	_ [0]func()
+
+	p **httpRequestParts
+}
+
+// holdParts is a heldParts holding parts.
+func holdParts(parts httpRequestParts) heldParts {
+	p := &parts
+	return heldParts{p: &p}
+}
+
+// get is the parts h holds: the zero parts for the zero heldParts, which
+// the zero TokenEndpointRequest holds.
+func (h heldParts) get() httpRequestParts {
+	if h.p == nil {
+		return httpRequestParts{}
+	}
+	return **h.p
 }
 
 // TokenEndpointRequestFromHTTP reads a token endpoint request the way
@@ -153,13 +186,13 @@ type TokenEndpointRequest struct {
 // (SetPeerCertificate here).
 func TokenEndpointRequestFromHTTP(r *http.Request) (TokenEndpointRequest, error) {
 	parts, err := readHTTPRequestParts(r)
-	return TokenEndpointRequest{parts: parts}, err
+	return TokenEndpointRequest{parts: holdParts(parts)}, err
 }
 
 // GrantType is the request's grant_type parameter: "authorization_code",
 // "refresh_token", "client_credentials" or CIBAGrantType for the grants
 // this package implements.
-func (t TokenEndpointRequest) GrantType() string { return t.parts.HTTP.Get("grant_type") }
+func (t TokenEndpointRequest) GrantType() string { return t.parts.get().HTTP.Get("grant_type") }
 
 // SetPeerCertificate sets the TLS client certificate, for a server
 // behind a proxy that terminates TLS and forwards the certificate itself.
@@ -167,28 +200,32 @@ func (t TokenEndpointRequest) GrantType() string { return t.parts.HTTP.Get("gran
 // client can send directly (fapihttp.ForwardedClientCertificate) — see
 // PushAuthorizationRequestFromHTTP.
 func (t *TokenEndpointRequest) SetPeerCertificate(cert *x509.Certificate) {
-	t.parts.PeerCertificate = cert
+	parts := t.parts.get()
+	parts.PeerCertificate = cert
+	// A holder of its own, so a copy of t made before keeps the
+	// certificate it had, as it did when t held its parts by value.
+	t.parts = holdParts(parts)
 }
 
 // AuthorizationCodeExchange is the request for ExchangeAuthorizationCode.
 func (t TokenEndpointRequest) AuthorizationCodeExchange() AuthorizationCodeExchangeRequest {
-	return AuthorizationCodeExchangeRequest(t.parts)
+	return AuthorizationCodeExchangeRequest(t.parts.get())
 }
 
 // RefreshToken is the request for RefreshAccessToken.
 func (t TokenEndpointRequest) RefreshToken() RefreshTokenRequest {
-	return RefreshTokenRequest(t.parts)
+	return RefreshTokenRequest(t.parts.get())
 }
 
 // ClientCredentials is the request for RequestClientCredentialsToken.
 func (t TokenEndpointRequest) ClientCredentials() ClientCredentialsTokenRequest {
-	return ClientCredentialsTokenRequest(t.parts)
+	return ClientCredentialsTokenRequest(t.parts.get())
 }
 
 // BackchannelTokenExchange is the request for
 // ExchangeBackchannelAuthentication.
 func (t TokenEndpointRequest) BackchannelTokenExchange() BackchannelTokenExchangeRequest {
-	return BackchannelTokenExchangeRequest(t.parts)
+	return BackchannelTokenExchangeRequest(t.parts.get())
 }
 
 // BeginAuthorizationRequestFromHTTP reads the authorization endpoint's

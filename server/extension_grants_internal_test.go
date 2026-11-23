@@ -41,7 +41,7 @@ func TestTokenEndpointRequestBoundsItsOwnParameters(t *testing.T) {
 	for range maxFormParameters {
 		params = append(params, FormParameter{Name: resourceParameter, Value: "https://rs.example"})
 	}
-	req := TokenEndpointRequest{parts: httpRequestParts{HTTP: FormRequest{Parameters: params}}}
+	req := TokenEndpointRequest{parts: holdParts(httpRequestParts{HTTP: FormRequest{Parameters: params}})}
 	if _, err := req.Parameters(); err == nil {
 		t.Fatalf("Parameters accepted %d parameters", len(params))
 	}

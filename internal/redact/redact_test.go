@@ -79,4 +79,10 @@ func TestQueryQuotesNamesThatCouldForgeALogLine(t *testing.T) {
 	if got := Query(""); got != "" {
 		t.Errorf("Query(\"\") = %q", got)
 	}
+	if got := Text("openid accounts"); got != "openid accounts" {
+		t.Errorf("Text quoted printable text: %s", got)
+	}
+	if got := Text("openid\nlevel=INFO"); got != `"openid\nlevel=INFO"` {
+		t.Errorf("Text(a newline) = %s, want it quoted", got)
+	}
 }

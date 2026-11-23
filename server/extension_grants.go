@@ -19,7 +19,7 @@ import (
 // all, so it can't be read as one value when the client sent several.
 // Read it with Resources.
 func (t TokenEndpointRequest) Parameters() (map[string]string, error) {
-	rest, _ := splitResourceParameters(t.parts.HTTP.Parameters)
+	rest, _ := splitResourceParameters(t.parts.get().HTTP.Parameters)
 	params, err := formParametersToMap(rest)
 	if err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err)
@@ -38,7 +38,7 @@ func (t TokenEndpointRequest) Parameters() (map[string]string, error) {
 // there are none, or when the request has more parameters than
 // Parameters accepts.
 func (t TokenEndpointRequest) Resources() []string {
-	_, resources := splitResourceParameters(t.parts.HTTP.Parameters)
+	_, resources := splitResourceParameters(t.parts.get().HTTP.Parameters)
 	return resources
 }
 
@@ -55,9 +55,10 @@ func (t TokenEndpointRequest) Resources() []string {
 // invalid_request as well: RFC 6749 §2.3 allows one client
 // authentication method per request.
 func (t TokenEndpointRequest) AttestedClientAuthentication() AttestedClientAuthenticationRequest {
+	parts := t.parts.get()
 	req := AttestedClientAuthenticationRequest{
-		ClientAttestations:    t.parts.ClientAttestations,
-		ClientAttestationPoPs: t.parts.ClientAttestationPoPs,
+		ClientAttestations:    parts.ClientAttestations,
+		ClientAttestationPoPs: parts.ClientAttestationPoPs,
 	}
 	params, err := t.Parameters()
 	if err != nil {
@@ -136,11 +137,12 @@ func (s *Server) VerifyTokenRequestBinding(ctx context.Context, client storage.R
 }
 
 func (s *Server) verifyExtensionGrantBinding(ctx context.Context, client storage.RegisteredClient, req TokenEndpointRequest) (TokenBinding, *Error) {
-	proof, err := resolveDPoPProof(req.parts.DPoPProofs)
+	parts := req.parts.get()
+	proof, err := resolveDPoPProof(parts.DPoPProofs)
 	if err != nil {
 		return TokenBinding{}, err
 	}
-	thumbprint, err := s.verifyTokenRequestBinding(ctx, client, proof, req.parts.PeerCertificate)
+	thumbprint, err := s.verifyTokenRequestBinding(ctx, client, proof, parts.PeerCertificate)
 	if err != nil {
 		return TokenBinding{}, err
 	}
@@ -201,7 +203,7 @@ func (s *Server) VerifyTokenRequestDPoP(ctx context.Context, req TokenEndpointRe
 }
 
 func (s *Server) verifyClientlessDPoP(ctx context.Context, req TokenEndpointRequest) (DPoPProofBinding, *Error) {
-	proof, err := resolveDPoPProof(req.parts.DPoPProofs)
+	proof, err := resolveDPoPProof(req.parts.get().DPoPProofs)
 	if err != nil {
 		return DPoPProofBinding{}, err
 	}

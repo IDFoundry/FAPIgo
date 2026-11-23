@@ -105,7 +105,12 @@ var coreAuthorizationParameters = map[string]struct{}{
 }
 
 // FormParameter is one name/value pair from a form-encoded request body,
-// in the order it appeared on the wire.
+// in the order it appeared on the wire. It prints and logs its value
+// only for a parameter that carries no credential (grant_type, scope,
+// redirect_uri and the like), and [REDACTED] for every other one: a
+// code, a token, a client assertion, a request object, an extension
+// parameter's value. Value itself is the raw value: never log the
+// field.
 type FormParameter struct {
 	Name  string
 	Value string
@@ -116,7 +121,16 @@ type FormParameter struct {
 // accept. It is lossless specifically so this package — not an HTTP
 // adapter — detects duplicate or malformed parameters, rather than
 // trusting a pre-parsed url.Values that may already have collapsed
-// them.
+// them. It prints and logs each parameter as FormParameter does.
+//
+// The request types holding one (PushAuthorizationRequest,
+// AuthorizationCodeExchangeRequest and the rest) print and log it so
+// too, with their DPoP proofs and client attestations as [REDACTED]
+// and a TLS client certificate as its subject. Their fields hold every
+// value raw, as they must, and fmt's reflection fallback (one of them
+// in an unexported field, or under a verb fmt rejects for it) and the
+// encoders print them as they print any exported field: log the
+// request itself, never its fields or their JSON.
 type FormRequest struct {
 	Parameters []FormParameter
 }

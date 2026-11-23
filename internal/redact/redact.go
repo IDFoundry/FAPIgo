@@ -94,7 +94,7 @@ func Query(raw string) string {
 	parts := strings.Split(raw, "&")
 	for i, part := range parts {
 		name, _, hasValue := strings.Cut(part, "=")
-		parts[i] = quoteName(name)
+		parts[i] = Name(name)
 		if hasValue {
 			parts[i] += "=" + Redacted
 		}
@@ -102,15 +102,28 @@ func Query(raw string) string {
 	return strings.Join(parts, "&")
 }
 
-// quoteName is name as written, or %q-quoted unless it is made of
-// characters a URL query carries unescaped.
-func quoteName(name string) string {
+// Name is name, a parameter name, as written, or %q-quoted unless it is
+// made of the characters a URL query carries unescaped, so a name the
+// client chose can't forge a log line.
+func Name(name string) string {
 	for i := range len(name) {
 		if !isPlainNameByte(name[i]) {
 			return fmt.Sprintf("%q", name)
 		}
 	}
 	return name
+}
+
+// Text is v, a value a rendering may show, as written, or %q-quoted if
+// it holds a byte outside printable ASCII, such as a newline, which
+// could forge a log line.
+func Text(v string) string {
+	for i := range len(v) {
+		if v[i] < ' ' || v[i] > '~' {
+			return fmt.Sprintf("%q", v)
+		}
+	}
+	return v
 }
 
 func isPlainNameByte(c byte) bool {

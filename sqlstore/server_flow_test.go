@@ -80,14 +80,29 @@ func form(pairs ...string) server.FormRequest {
 // returning the authorization code.
 func (c flowClient) code(ctx context.Context, srv *server.Server, now time.Time, grantID string) string {
 	c.t.Helper()
+	action, err := srv.BeginAuthorization(ctx, server.BeginAuthorizationRequest{RequestURI: c.push(ctx, srv), ClientID: flowClientID})
+	must(c.t, err)
+	return c.approve(ctx, srv, now, action, grantID)
+}
+
+// push runs a pushed authorization request for "accounts" and
+// "offline_access" on srv, returning its request_uri.
+func (c flowClient) push(ctx context.Context, srv *server.Server) string {
+	c.t.Helper()
 	pushed, err := srv.PushAuthorizationRequest(ctx, server.PushAuthorizationRequest{
 		HTTP: form("client_id", string(flowClientID), "response_type", "code", "redirect_uri", flowRedirect,
 			"scope", "accounts offline_access", "code_challenge", flowChallenge, "code_challenge_method", "S256"),
 		PeerCertificate: c.cert,
 	})
 	must(c.t, err)
-	action, err := srv.BeginAuthorization(ctx, server.BeginAuthorizationRequest{RequestURI: pushed.RequestURI.String(), ClientID: flowClientID})
-	must(c.t, err)
+	return pushed.RequestURI.String()
+}
+
+// approve completes the interaction BeginAuthorization began (action)
+// with the user's approval, with grantID, returning the authorization
+// code.
+func (c flowClient) approve(ctx context.Context, srv *server.Server, now time.Time, action server.AuthorizationAction, grantID string) string {
+	c.t.Helper()
 	required, ok := action.(server.InteractionRequired)
 	if !ok {
 		c.t.Fatalf("BeginAuthorization = %T, want server.InteractionRequired", action)

@@ -52,10 +52,20 @@ func (s *TransactionStore) CreatePAR(ctx context.Context, record storage.NewPARR
 	return nil
 }
 
+// beginnableRequest is the condition on par_requests matching the
+// pushed request an interaction can be begun for: the row of its
+// reference (the first argument), unconsumed, and not expired at the
+// server's time (the second, as nanos). BeginAuthorization's UPDATE and
+// the PushedRequestLookup's SELECT both select by it, each first
+// answering a reference no text column can hold as unknown, so the
+// lookup selects exactly the rows BeginAuthorization's UPDATE selects.
+const beginnableRequest = "reference = ? AND consumed = 0 AND expires_at > ?"
+
 // BeginAuthorization implements storage.TransactionStore. In one
 // transaction, an UPDATE finds the reference unconsumed and unexpired at
-// txn.Now — locking its row — and keeps it until the new handle
-// expires, then the handle is inserted with a copy of the request.
+// txn.Now (beginnableRequest) — locking its row — and keeps it until the
+// new handle expires, then the handle is inserted with a copy of the
+// request.
 func (s *TransactionStore) BeginAuthorization(ctx context.Context, txn storage.BeginAuthorizationTransaction) (storage.PushedAuthorizationRequest, error) {
 	if !validTextKey(txn.Reference) {
 		return storage.PushedAuthorizationRequest{}, errRequestURIUnusable
@@ -69,7 +79,7 @@ func (s *TransactionStore) BeginAuthorization(ctx context.Context, txn storage.B
 		var clientID string
 		var request []byte
 		var expires int64
-		err := q.QueryRowContext(ctx, s.d.q("UPDATE {par_requests} SET sweep_after = "+laterSweep+" WHERE reference = ? AND consumed = 0 AND expires_at > ? RETURNING client_id, request, expires_at"),
+		err := q.QueryRowContext(ctx, s.d.q("UPDATE {par_requests} SET sweep_after = "+laterSweep+" WHERE "+beginnableRequest+" RETURNING client_id, request, expires_at"),
 			handleExpires, handleExpires, txn.Reference, nanos(txn.Now)).Scan(&clientID, &request, &expires)
 		if err != nil {
 			return err
@@ -196,3 +206,67 @@ func (l interactionLookup) LookupAuthorization(ctx context.Context, txn storage.
 
 // Capabilities implements storage.StoreAssurance: the TransactionStore's.
 func (l interactionLookup) Capabilities() storage.Capabilities { return l.d.sealedCapabilities() }
+
+// PushedRequestLookup returns the storage.PushedRequestLookup reading
+// d's pushed requests: server.Dependencies.PushedRequestLookup, for a
+// server whose Dependencies.Transactions is d.Transactions(). Set it:
+// nobody has authenticated at the authorization endpoint, and without
+// the lookup the server claims an interaction slot in
+// Dependencies.Replay for any request_uri of its form presented there,
+// with any client_id, before the TransactionStore says whether it
+// exists, so anyone who can reach the endpoint can have it write a
+// replay record for each request_uri they make up. With it, a
+// request_uri that is unknown, expired, already used or presented with
+// another client_id is refused after one read, and nothing is written.
+// It's a storage.StoreAssurance with the TransactionStore's
+// Capabilities, which server.New checks under AssuranceProduction.
+//
+// It's a method of DB, rather than of TransactionStore, for the reason
+// InteractionLookup is: a wrapper of a deployment's own that embeds
+// *TransactionStore and changes how references are keyed doesn't
+// inherit a lookup that reads past that.
+func (d *DB) PushedRequestLookup() storage.PushedRequestLookup { return pushedRequestLookup{d} }
+
+// pushedRequestLookup is the lookup DB.PushedRequestLookup returns,
+// reading d's par_requests table.
+type pushedRequestLookup struct{ d *DB }
+
+// The lookup's Capabilities are what server.New's AssuranceProduction
+// gate checks, and the interface PushedRequestLookup returns doesn't
+// include them.
+var _ storage.StoreAssurance = pushedRequestLookup{}
+
+// errLookupRequestURIUnusable is LookupPushedRequest's answer for a
+// reference that is unknown, consumed by a completed interaction, swept
+// or expired.
+var errLookupRequestURIUnusable = fmt.Errorf("sqlstore: look up pushed request: %w: request_uri (unknown, already consumed or expired)", ErrNotFound)
+
+// LookupPushedRequest implements storage.PushedRequestLookup: one read,
+// outside any transaction, of the reference's row, selected as
+// BeginAuthorization's UPDATE selects it (beginnableRequest), so it
+// writes nothing and, on SQLite, doesn't queue behind the writes. It
+// reads the row's client_id and expires_at alone, which aren't sealed,
+// so it opens nothing: a Sealer binds them to the sealed request, which
+// BeginAuthorization opens, and the lookup is only advisory. A row whose
+// request doesn't open (sealed under another key, say) is found here,
+// and BeginAuthorization, which the server still calls, answers it as
+// an outage, as it would without the lookup.
+func (l pushedRequestLookup) LookupPushedRequest(ctx context.Context, txn storage.LookupPushedRequestTransaction) (storage.PendingPushedRequest, error) {
+	if !validTextKey(txn.Reference) {
+		return storage.PendingPushedRequest{}, errLookupRequestURIUnusable
+	}
+	var clientID string
+	var expires int64
+	err := l.d.queryRow(ctx, "SELECT client_id, expires_at FROM {par_requests} WHERE "+beginnableRequest,
+		txn.Reference, nanos(txn.Now)).Scan(&clientID, &expires)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return storage.PendingPushedRequest{}, errLookupRequestURIUnusable
+	case err != nil:
+		return storage.PendingPushedRequest{}, unavailable("look up pushed request", err)
+	}
+	return storage.PendingPushedRequest{ClientID: fapi.ClientID(clientID), ExpiresAt: timeOf(expires)}, nil
+}
+
+// Capabilities implements storage.StoreAssurance: the TransactionStore's.
+func (l pushedRequestLookup) Capabilities() storage.Capabilities { return l.d.sealedCapabilities() }

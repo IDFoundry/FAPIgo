@@ -322,6 +322,10 @@ func TestDatabaseFailureIsStoreUnavailable(t *testing.T) {
 				_, err := d.InteractionLookup().LookupAuthorization(ctx, storage.LookupAuthorizationTransaction{Handle: "h", Now: time.Now()})
 				return err
 			},
+			"LookupPushedRequest": func() error {
+				_, err := d.PushedRequestLookup().LookupPushedRequest(ctx, storage.LookupPushedRequestTransaction{Reference: "r", Now: time.Now()})
+				return err
+			},
 			"RecordGrant": func() error {
 				return d.GrantRegistry().RecordGrant(ctx, storage.NewGrantEntry{Key: "k", SubjectKey: "s", ClientID: "c", ExpiresAt: later})
 			},

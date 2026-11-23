@@ -79,6 +79,17 @@ func TestInteractionLookupContract(t *testing.T) {
 	})
 }
 
+// TestPushedRequestLookupContract runs the lookup's storage contract on
+// each database, with the TransactionStore of the DB it reads.
+func TestPushedRequestLookupContract(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		storage.TestPushedRequestLookupContract(t, func() (storage.TransactionStore, storage.PushedRequestLookup) {
+			db := freshDB(t, dialect)
+			return db.Transactions(), db.PushedRequestLookup()
+		})
+	})
+}
+
 func TestGrantRegistryContract(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
 		storage.TestGrantRegistryContract(t, func() storage.GrantRegistry { return freshDB(t, dialect).GrantRegistry() })
@@ -140,6 +151,12 @@ func TestSealedStoreContracts(t *testing.T) {
 			storage.TestInteractionLookupContract(t, func() (storage.TransactionStore, storage.InteractionLookup) {
 				db := sealed()
 				return db.Transactions(), db.InteractionLookup()
+			})
+		})
+		t.Run("PushedRequestLookup", func(t *testing.T) {
+			storage.TestPushedRequestLookupContract(t, func() (storage.TransactionStore, storage.PushedRequestLookup) {
+				db := sealed()
+				return db.Transactions(), db.PushedRequestLookup()
 			})
 		})
 		t.Run("Grants", func(t *testing.T) {
@@ -225,10 +242,11 @@ func checkCapabilities(t *testing.T, d *sqlstore.DB, plain, sealed storage.Capab
 	}
 	for name, s := range map[string]storage.StoreAssurance{
 		"Transactions": d.Transactions(), "Grants": d.Grants(), "AccessTokens": d.AccessTokens(), "Backchannel": d.Backchannel(),
-		"Sessions":          d.Sessions(),
-		"InteractionLookup": d.InteractionLookup().(storage.StoreAssurance),
-		"GrantRegistry":     d.GrantRegistry().(storage.StoreAssurance),
-		"BackchannelInbox":  d.BackchannelInbox().(storage.StoreAssurance),
+		"Sessions":            d.Sessions(),
+		"InteractionLookup":   d.InteractionLookup().(storage.StoreAssurance),
+		"PushedRequestLookup": d.PushedRequestLookup().(storage.StoreAssurance),
+		"GrantRegistry":       d.GrantRegistry().(storage.StoreAssurance),
+		"BackchannelInbox":    d.BackchannelInbox().(storage.StoreAssurance),
 	} {
 		if got := s.Capabilities(); got != sealed {
 			t.Errorf("%s().Capabilities() = %+v, want %+v", name, got, sealed)

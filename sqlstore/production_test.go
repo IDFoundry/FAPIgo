@@ -184,6 +184,43 @@ func checkMemstoreRefused(t *testing.T, d *sqlstore.DB, deployment server.Deploy
 	}
 }
 
+// AssuranceProduction's gate checks the pushed request lookup as it
+// checks the TransactionStore the lookup reads: it accepts this
+// package's, plain or sealed, with DeploymentSingleInstance on either
+// database and with DeploymentHorizontallyScaled on PostgreSQL, and
+// refuses SQLite's with DeploymentHorizontallyScaled, which names the
+// lookup: a file on one host isn't CrossInstanceConsistent.
+func TestProductionServerAcceptsPushedRequestLookup(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
+		p := newPlace(t, dialect)
+		for _, d := range []*sqlstore.DB{p.migrated(), p.migratedWith(sqlstore.Options{Sealer: testSealer(t)})} {
+			for _, deployment := range []server.Deployment{server.DeploymentSingleInstance, server.DeploymentHorizontallyScaled} {
+				checkProductionPushedRequestLookup(t, d, deployment)
+			}
+		}
+	})
+}
+
+// checkProductionPushedRequestLookup checks server.New under
+// AssuranceProduction and deployment, with d's stores and d's pushed
+// request lookup: accepted, but for SQLite's horizontally scaled, which
+// is refused for the lookup's want of CrossInstanceConsistent.
+func checkProductionPushedRequestLookup(t *testing.T, d *sqlstore.DB, deployment server.Deployment) {
+	t.Helper()
+	cfg, deps := productionServer(t, d, deployment)
+	deps.PushedRequestLookup = d.PushedRequestLookup()
+	_, err := server.New(cfg, deps)
+	if d.Dialect() == sqlstore.SQLite && deployment == server.DeploymentHorizontallyScaled {
+		if err == nil || !strings.Contains(err.Error(), "pushed_request_lookup must declare CrossInstanceConsistent") {
+			t.Fatalf("server.New(production, horizontally scaled, SQLite's lookup) = %v, want the lookup refused as not CrossInstanceConsistent", err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("server.New(production, %v, %s's lookup): %v", deployment, d.Dialect(), err)
+	}
+}
+
 // productionClient builds a client.New configuration and dependencies
 // under AssuranceProduction, with d's SessionStore as its sessions
 // store and the library's own production-ready keys, issuer key source

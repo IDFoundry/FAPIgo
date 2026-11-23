@@ -2214,5 +2214,126 @@
     ],
     "run": "^TestRevokeTokenAcceptsTheIssuerAudienceAlone$",
     "why": "revocation accepts only the issuer as a client assertion's aud, even under Config.CIBAEndpointURLAudiences"
+  },
+  {
+    "id": "sqlstore-begin-authorization-refuses-completed",
+    "file": "sqlstore/transaction.go",
+    "old": "const beginnableRequest = \"reference = ? AND consumed = 0 AND expires_at > ?\"",
+    "new": "const beginnableRequest = \"reference = ? AND expires_at > ?\"",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestTransactionStoreContract|TestPushedRequestLookupAgreesWithBeginAuthorization)$",
+    "why": "BeginAuthorization, and the lookup sharing its condition, refuse a pushed request whose interaction completed"
+  },
+  {
+    "id": "sqlstore-begin-authorization-refuses-at-expiry",
+    "file": "sqlstore/transaction.go",
+    "old": "const beginnableRequest = \"reference = ? AND consumed = 0 AND expires_at > ?\"",
+    "new": "const beginnableRequest = \"reference = ? AND consumed = 0 AND expires_at >= ?\"",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestPushedRequestLookupContract|TestPushedRequestLookupAgreesWithBeginAuthorization)$",
+    "why": "BeginAuthorization, and the lookup sharing its condition, refuse a pushed request at its expiry"
+  },
+  {
+    "id": "sqlstore-pushed-request-lookup-shares-condition",
+    "file": "sqlstore/transaction.go",
+    "old": "\"SELECT client_id, expires_at FROM {par_requests} WHERE \"+beginnableRequest,",
+    "new": "\"SELECT client_id, expires_at FROM {par_requests} WHERE reference = ? AND expires_at > ?\",",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestPushedRequestLookupContract|TestPushedRequestLookupAgreesWithBeginAuthorization|TestAuthorizationWithPushedRequestLookupWritesNothingUnusable)$",
+    "why": "the lookup selects by BeginAuthorization's condition, so a request_uri whose interaction completed is refused with nothing written"
+  },
+  {
+    "id": "sqlstore-pushed-request-lookup-only-reads",
+    "file": "sqlstore/transaction.go",
+    "old": "l.d.queryRow(ctx, \"SELECT client_id, expires_at FROM {par_requests} WHERE \"+beginnableRequest,",
+    "new": "l.d.queryRow(ctx, \"UPDATE {par_requests} SET sweep_after = sweep_after WHERE \"+beginnableRequest+\" RETURNING client_id, expires_at\",",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestPushedRequestLookupOnlyReads$",
+    "why": "the lookup is one read and writes nothing, so a made-up request_uri takes no write from the database"
+  },
+  {
+    "id": "sqlstore-pushed-request-lookup-unusable-not-outage",
+    "file": "sqlstore/transaction.go",
+    "old": "case errors.Is(err, sql.ErrNoRows):\n\t\treturn storage.PendingPushedRequest{}, errLookupRequestURIUnusable",
+    "new": "case errors.Is(err, sql.ErrNoRows):\n\t\treturn storage.PendingPushedRequest{}, unavailable(\"look up pushed request\", err)",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestPushedRequestLookupContract|TestPushedRequestLookupAgreesWithBeginAuthorization|TestAuthorizationWithPushedRequestLookupWritesNothingUnusable)$",
+    "why": "an unknown, used or expired request_uri is ErrNotFound, not an outage the server would answer with 500"
+  },
+  {
+    "id": "sqlstore-pushed-request-lookup-outage",
+    "file": "sqlstore/transaction.go",
+    "old": "return storage.PendingPushedRequest{}, unavailable(\"look up pushed request\", err)",
+    "new": "return storage.PendingPushedRequest{}, errLookupRequestURIUnusable",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestPushedRequestLookupOutage|TestDatabaseFailureIsStoreUnavailable)$",
+    "why": "a database that can't answer the lookup is an outage, not a request_uri that is invalid, expired or used"
+  },
+  {
+    "id": "sqlstore-pushed-request-lookup-request-context",
+    "file": "sqlstore/transaction.go",
+    "old": "err := l.d.queryRow(ctx, \"SELECT client_id, expires_at FROM {par_requests} WHERE \"+beginnableRequest,",
+    "new": "err := l.d.queryRow(context.Background(), \"SELECT client_id, expires_at FROM {par_requests} WHERE \"+beginnableRequest,",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestPushedRequestLookupOutage$",
+    "why": "the lookup runs on the request's context, so a request cancelled or past its deadline doesn't run it and gets an outage, not an unknown request_uri"
+  },
+  {
+    "id": "sqlstore-pg-pushed-request-lookup-unstorable-reference",
+    "file": "sqlstore/transaction.go",
+    "old": "if !validTextKey(txn.Reference) {\n\t\treturn storage.PendingPushedRequest{}, errLookupRequestURIUnusable",
+    "new": "if false {\n\t\treturn storage.PendingPushedRequest{}, errLookupRequestURIUnusable",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestPushedRequestLookupAgreesWithBeginAuthorization$",
+    "postgres": true,
+    "why": "a reference PostgreSQL's text can't hold is an unknown request_uri, answered without asking the database"
+  },
+  {
+    "id": "sqlstore-pushed-request-lookup-capabilities-sealed",
+    "file": "sqlstore/transaction.go",
+    "old": "func (l pushedRequestLookup) Capabilities() storage.Capabilities { return l.d.sealedCapabilities() }",
+    "new": "func (l pushedRequestLookup) Capabilities() storage.Capabilities { return l.d.capabilities() }",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestCapabilities$",
+    "why": "the lookup declares the TransactionStore's Capabilities, EncryptedAtRest with a Sealer included"
+  },
+  {
+    "id": "sqlstore-pushed-request-lookup-not-cross-instance-on-sqlite",
+    "file": "sqlstore/transaction.go",
+    "old": "func (l pushedRequestLookup) Capabilities() storage.Capabilities { return l.d.sealedCapabilities() }",
+    "new": "func (l pushedRequestLookup) Capabilities() storage.Capabilities { c := l.d.sealedCapabilities(); c.CrossInstanceConsistent = true; return c }",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestProductionServerAcceptsPushedRequestLookup$",
+    "why": "SQLite's lookup doesn't declare CrossInstanceConsistent, so server.New refuses it horizontally scaled"
   }
 ]

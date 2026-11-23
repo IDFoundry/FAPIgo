@@ -219,6 +219,32 @@
     "why": "an EC JWK's y is held to its curve's full size"
   },
   {
+    "id": "jose-es256-key-not-empty",
+    "file": "internal/jose/jwk.go",
+    "old": "if key == nil || key.X == nil || key.Y == nil {",
+    "new": "if false {",
+    "module": "root",
+    "packages": [
+      "./internal/jose",
+      "./server"
+    ],
+    "run": "^(TestThumbprintKeyIDRefusesKeysItCannotEncode|TestKeyCandidatesMatchKeyIDs)$",
+    "why": "an empty ECDSA key is refused, not dereferenced, so a custom client key without coordinates answers to no kid"
+  },
+  {
+    "id": "jose-es256-point-on-curve",
+    "file": "internal/jose/jwk.go",
+    "old": "if _, err := key.ECDH(); err != nil {",
+    "new": "if err := error(nil); err != nil {",
+    "module": "root",
+    "packages": [
+      "./internal/jose",
+      "./server"
+    ],
+    "run": "^(TestThumbprintKeyIDRefusesKeysItCannotEncode|TestKeyCandidatesMatchKeyIDs)$",
+    "why": "an ECDSA key off P-256, or with a coordinate wider than it, is refused rather than panicking in Thumbprint's FillBytes"
+  },
+  {
     "id": "jwe-epk-coordinate-length",
     "file": "internal/jwe/header.go",
     "old": "if len(b) != p256CoordinateSize {",

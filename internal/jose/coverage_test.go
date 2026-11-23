@@ -132,7 +132,7 @@ func TestParseJWKRejectsUnsupportedKeyType(t *testing.T) {
 func TestParseJWKRejectsMalformedECCoordinates(t *testing.T) {
 	cases := map[string]string{
 		"bad x":   `{"kty":"EC","crv":"P-256","x":"not-base64!!","y":"AAAA"}`,
-		"bad y":   `{"kty":"EC","crv":"P-256","x":"AAAA","y":"not-base64!!"}`,
+		"bad y":   `{"kty":"EC","crv":"P-256","x":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE","y":"not-base64!!"}`,
 		"empty x": `{"kty":"EC","crv":"P-256","x":"","y":"AAAA"}`,
 	}
 	for name, raw := range cases {

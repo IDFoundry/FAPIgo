@@ -285,3 +285,24 @@ func TestParseAndValidateRejectsCaseVariantMemberNames(t *testing.T) {
 		t.Fatalf("err = %v, want ErrMalformed case-sensitivity rejection", err)
 	}
 }
+
+// TestParseAndValidateRefusesDuplicateMembers: encoding/json merged two
+// copies of mtls_endpoint_aliases, so a client read the first copy's
+// aliases where one keeping the last read none. A member name repeated
+// at any depth, or two differing only in case, now refuses the
+// document.
+func TestParseAndValidateRefusesDuplicateMembers(t *testing.T) {
+	const issuer = "https://as.example.com"
+	open := strings.TrimSuffix(string(validDocumentJSON(t, issuer)), "}")
+	for name, extra := range map[string]string{
+		"mtls_endpoint_aliases twice":           `"mtls_endpoint_aliases":{"token_endpoint":"https://mtls.as.example.com/token"},"mtls_endpoint_aliases":{}`,
+		"repeated inside mtls_endpoint_aliases": `"mtls_endpoint_aliases":{"token_endpoint":"https://a.example/token","token_endpoint":"https://b.example/token"}`,
+		"issuer twice":                          `"issuer":"https://as.example.com"`,
+		"extensions differing only in case":     `"vendor_extension":1,"VENDOR_EXTENSION":2`,
+	} {
+		_, err := metadata.ParseAndValidate([]byte(open+","+extra+"}"), issuer)
+		if !errors.Is(err, metadata.ErrMalformed) || !strings.Contains(err.Error(), "duplicate member") {
+			t.Errorf("%s: ParseAndValidate = %v, want ErrMalformed for a duplicate member", name, err)
+		}
+	}
+}

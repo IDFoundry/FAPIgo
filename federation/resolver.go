@@ -37,7 +37,12 @@ type TrustAnchor struct {
 	// 4096 bits: the Trust Anchor's own Entity Configuration, fetched
 	// during resolution, is held to the same limit, and resolution can
 	// be started by an unauthenticated request (automatic registration),
-	// so a larger key here is skipped rather than relied on.
+	// so a larger key here is skipped rather than relied on. So is an EC
+	// entry whose "x" or "y" isn't its curve's full size, 32 octets for
+	// P-256, leading zero octets included (RFC 7518 §6.2.1.2, §6.2.1.3),
+	// while an RSA entry's "n" and "e" may carry leading zero octets. A
+	// JWKS left with no usable entry validates no statement, so every
+	// resolution through this Trust Anchor fails.
 	JWKS json.RawMessage
 }
 

@@ -32,7 +32,8 @@ type ClientKeySpec struct {
 	ClientID fapi.ClientID
 
 	// JWKS is an inline, already-known JWK Set. Takes priority over
-	// JWKSURI when both are set.
+	// JWKSURI when both are set. Its entries, like a fetched set's, are
+	// held to the encodings package keys' doc describes (JWK encoding).
 	JWKS []byte
 
 	// JWKSURI is fetched live (and cached) when JWKS is empty.

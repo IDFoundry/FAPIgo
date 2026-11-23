@@ -31,8 +31,11 @@ type Statement struct {
 // may not carry, aud or trust_anchor (Explicit Registration only), an
 // empty authority_hints, trust_anchor_hints or metadata_policy_crit,
 // metadata that isn't an object of objects or uses null, a
-// source_endpoint that isn't an https URL, a duplicate JSON member
-// name, and a trust_chain or peer_trust_chain header (§4.3, §4.4).
+// source_endpoint that isn't an https URL, an object anywhere in its
+// claims that repeats a member name, and a trust_chain or
+// peer_trust_chain header (§4.3, §4.4). Though §3.2 doesn't require
+// it, Parse also refuses an object holding two member names that
+// differ only in case, which encoding/json would read as one member.
 func Parse(token string) (Statement, error) {
 	compact, err := jose.ParseCompact(token)
 	if err != nil {

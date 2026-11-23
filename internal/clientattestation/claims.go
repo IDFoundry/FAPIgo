@@ -41,13 +41,25 @@ type confirmationClaims struct {
 
 func parseAttestationClaims(payload []byte) (attestationClaims, error) {
 	var c attestationClaims
-	if err := strictjson.Unmarshal(payload, &c); err != nil {
+	if err := unmarshalUniqueMembers(payload, &c); err != nil {
 		return attestationClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	if c.Subject == "" || c.ExpiresAt == 0 || len(c.Confirmation.JWK) == 0 {
 		return attestationClaims{}, ErrMalformedClaims
 	}
 	return c, nil
+}
+
+// unmarshalUniqueMembers is strictjson.Unmarshal for a claims set that
+// repeats no member name at any depth (RFC 7519 §4 requires unique
+// claim names): encoding/json would merge two copies of cnf into one,
+// and check the case of only the last, where VerifiedAttestation.Claims,
+// like another implementation, keeps only the last copy.
+func unmarshalUniqueMembers(payload []byte, v any) error {
+	if err := strictjson.CheckDuplicateMembers(payload); err != nil {
+		return err
+	}
+	return strictjson.Unmarshal(payload, v)
 }
 
 // popClaims is the Client Attestation PoP JWT's claims set (draft-12

@@ -124,7 +124,9 @@ type MTLSEndpointAliases struct {
 // stops a redirected, cached or otherwise substituted discovery response
 // from being silently accepted for the wrong authorization server (RFC
 // 8414 §3.3, OpenID Connect Discovery 1.0 §4.3) — the document's own
-// issuer claim equals expectedIssuer exactly.
+// issuer claim equals expectedIssuer exactly. A document that repeats a
+// member name in any object (two names that differ only in case count
+// as one), or names a parameter in another case, is ErrMalformed.
 func ParseAndValidate(body []byte, expectedIssuer string) (Document, error) {
 	if len(body) > maxDocumentBytes {
 		return Document{}, ErrTooLarge
@@ -133,12 +135,8 @@ func ParseAndValidate(body []byte, expectedIssuer string) (Document, error) {
 		return Document{}, fmt.Errorf("metadata: expected issuer is empty")
 	}
 
-	dec := json.NewDecoder(bytes.NewReader(body))
 	var doc Document
-	if err := strictjson.CheckFieldCase(body, &doc); err != nil {
-		return Document{}, fmt.Errorf("%w: %v", ErrMalformed, err)
-	}
-	if err := dec.Decode(&doc); err != nil {
+	if err := decodeDocument(body, &doc); err != nil {
 		return Document{}, fmt.Errorf("%w: %v", ErrMalformed, err)
 	}
 
@@ -156,4 +154,19 @@ func ParseAndValidate(body []byte, expectedIssuer string) (Document, error) {
 	}
 
 	return doc, nil
+}
+
+// decodeDocument decodes body into doc, refusing a document that
+// repeats a member name at any depth, or carries a member that only
+// case-folds to a parameter Document models: encoding/json would merge
+// two copies of mtls_endpoint_aliases into one, and check the case of
+// only the last, where another client keeps only one of them.
+func decodeDocument(body []byte, doc *Document) error {
+	if err := strictjson.CheckDuplicateMembers(body); err != nil {
+		return err
+	}
+	if err := strictjson.CheckFieldCase(body, doc); err != nil {
+		return err
+	}
+	return json.NewDecoder(bytes.NewReader(body)).Decode(doc)
 }

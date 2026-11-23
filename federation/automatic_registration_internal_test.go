@@ -86,8 +86,8 @@ func jwksWithCertificate(t *testing.T, key *ecdsa.PrivateKey, cert *x509.Certifi
 	t.Helper()
 	jwk := map[string]any{
 		"kty": "EC", "crv": "P-256", "kid": "rp-cert",
-		"x":   base64URLEncode(key.X.Bytes()),
-		"y":   base64URLEncode(key.Y.Bytes()),
+		"x":   base64URLEncode(key.X.FillBytes(make([]byte, 32))),
+		"y":   base64URLEncode(key.Y.FillBytes(make([]byte, 32))),
 		"x5c": []string{base64.StdEncoding.EncodeToString(cert.Raw)},
 	}
 	body, err := json.Marshal(map[string]any{"keys": []map[string]any{jwk}})

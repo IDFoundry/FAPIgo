@@ -200,10 +200,11 @@ federation.WriteHistoricalKeys(w, token)
 
 Publish the endpoint's URL as `federation_historical_keys_endpoint` in
 your `federation_entity` metadata. A key still in your Entity
-Configuration's `jwks` is refused, and so is a revocation reason other
-than §8.7.3's `unspecified`, `compromised` and `superseded` unless you
-list it in `HistoricalKeysIssueConfig.AdditionalRevocationReasons`. You
-keep the record of which keys you retired. To read a peer's, call
+Configuration's `jwks`, as FAPIgo can read it, is refused, and so is a
+revocation reason other than §8.7.3's `unspecified`, `compromised` and
+`superseded` unless you list it in
+`HistoricalKeysIssueConfig.AdditionalRevocationReasons`. You keep the
+record of which keys you retired. To read a peer's, call
 `Resolver.FetchHistoricalKeys`: the response is checked against the
 peer's current key from its resolved Trust Chain.
 
@@ -228,7 +229,9 @@ each hop, and applies:
   `fapihttp.Config.AllowedPrivateHosts` is reachable by anyone this way.
 - **Strict JSON**: entity metadata and keys are decoded case-sensitively,
   so a member that differs only in case (`REDIRECT_URIS`) can't slip past
-  a policy written for the real one.
+  a policy written for the real one, and a statement whose header or
+  claims repeat a member name anywhere, or hold two names that differ
+  only in case, is refused.
 - **Trust Marks**, when you ask: `Resolver.VerifyTrustMark` takes the
   subject's own `ResolvedEntity`, resolves the mark's issuer through the
   same Trust Anchor the subject was trusted through, and checks the

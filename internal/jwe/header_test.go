@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
+	"strings"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -113,17 +114,22 @@ func TestParseHeaderRejectsInvalidEncryption(t *testing.T) {
 	}
 }
 
+// TestParseHeaderRejectsMalformedEPK wants each malformed epk refused by
+// the check its row names. The off-curve pair is 32 octets of 0x01 per
+// coordinate: full length, so the length check passes it on to the
+// curve check, which keeps an invalid-curve point out of ECDH-ES.
 func TestParseHeaderRejectsMalformedEPK(t *testing.T) {
-	cases := map[string]string{
-		"wrong kty":          `{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"RSA","crv":"P-256","x":"AA","y":"AA"}}`,
-		"wrong curve":        `{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-384","x":"AA","y":"AA"}}`,
-		"point not on curve": `{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-256","x":"AQ","y":"AQ"}}`,
-		"missing x":          `{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-256","x":"","y":"AQ"}}`,
+	const offCurve = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
+	cases := map[string]struct{ header, want string }{
+		"wrong kty":          {`{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"RSA","crv":"P-256","x":"AA","y":"AA"}}`, "epk key type"},
+		"wrong curve":        {`{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-384","x":"AA","y":"AA"}}`, "epk curve"},
+		"point not on curve": {`{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-256","x":"` + offCurve + `","y":"` + offCurve + `"}}`, "invalid epk point"},
+		"missing x":          {`{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-256","x":"","y":"AQ"}}`, "decode epk x"},
 	}
-	for name, raw := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := parseHeader([]byte(raw)); err == nil {
-				t.Fatalf("parseHeader(%s) = nil error, want error", name)
+			if _, err := parseHeader([]byte(tc.header)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("parseHeader(%s) = %v, want an error containing %q", name, err, tc.want)
 			}
 		})
 	}
@@ -141,6 +147,35 @@ func TestParseHeaderRejectsOversizedEPKCoordinate(t *testing.T) {
 	raw := `{"alg":"ECDH-ES+A256KW","enc":"A256GCM","epk":{"kty":"EC","crv":"P-256","x":"` + hugeB64 + `","y":"AQ"}}`
 	if _, err := parseHeader([]byte(raw)); err == nil {
 		t.Fatalf("parseHeader(oversized epk x) = nil error, want error")
+	}
+}
+
+// A header that is well-formed JSON with no repeated member, but gives
+// a member the wrong type, or isn't an object at all, is refused as it
+// is decoded.
+func TestParseHeaderRefusesMistypedMembers(t *testing.T) {
+	for _, header := range []string{
+		`{"alg":"RSA-OAEP-256","enc":true}`,
+		`{"alg":"RSA-OAEP-256","enc":"A256GCM","epk":"EC"}`,
+		`{"alg":"RSA-OAEP-256","enc":"A256GCM","apu":1}`,
+		`[]`,
+	} {
+		if _, err := parseHeader([]byte(header)); err == nil {
+			t.Errorf("parseHeader(%s) = nil error, want an error", header)
+		}
+	}
+}
+
+// RFC 8725 §3.7: a header encoding/json would read with U+FFFD in place
+// of invalid UTF-8, or of a lone surrogate escape, is refused.
+func TestParseHeaderRefusesLossyText(t *testing.T) {
+	for name, header := range map[string]string{
+		"raw 0xff in kid":     "{\"alg\":\"RSA-OAEP-256\",\"enc\":\"A256GCM\",\"kid\":\"k\xff\"}",
+		"lone high surrogate": "{\"alg\":\"RSA-OAEP-256\",\"enc\":\"A256GCM\",\"kid\":\"\x5cud800\"}",
+	} {
+		if _, err := parseHeader([]byte(header)); err == nil || !strings.Contains(err.Error(), "UTF-8") {
+			t.Errorf("%s: parseHeader = %v, want the UTF-8 refusal", name, err)
+		}
 	}
 }
 

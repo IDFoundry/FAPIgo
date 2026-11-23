@@ -1,14 +1,13 @@
 package federation
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"strings"
+
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // explicitRegistrationClaims are the claims OpenID Federation 1.0 §3.2
@@ -139,73 +138,21 @@ func isHTTPSURL(s string) bool {
 	return err == nil && u.Scheme == "https" && u.Host != "" && !strings.ContainsAny(s, "# \t\r\n")
 }
 
-// maxJSONDepth bounds how deeply refuseDuplicateMembers descends; the
-// payload's size is already bounded by jose.DefaultMaxCompactBytes.
-const maxJSONDepth = 64
-
 // refuseDuplicateMembers refuses a payload in which any JSON object, at
-// any depth, has the same member name twice. encoding/json keeps the
-// last one silently, while another implementation may keep the first,
-// so two validators could derive different claims — a different
-// metadata policy, say — from one signed statement. §6.1.2 forbids
-// "Duplicate JSON object member names ... at any of the three levels of
-// the metadata_policy Claim data structure"; RFC 7519 §4 lets a JWT
-// parser reject duplicate claim names, which this applies at every
-// level.
+// any depth, has the same member name twice, or two names
+// strictjson.FoldKey maps together, or which nests deeper than
+// strictjson.MaxNestingDepth (its size is already bounded by
+// jose.DefaultMaxCompactBytes). encoding/json keeps the last copy
+// silently, and reads names that differ only in case as one, while
+// another implementation may keep the first, or read two, so two
+// validators could derive different claims — a different metadata
+// policy, say — from one signed statement. §6.1.2 forbids "Duplicate
+// JSON object member names ... at any of the three levels of the
+// metadata_policy Claim data structure"; RFC 7519 §4 lets a JWT parser
+// reject duplicate claim names, which this applies at every level.
 func refuseDuplicateMembers(payload []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(payload))
-	dec.UseNumber()
-	if err := checkJSONValue(dec, 0); err != nil {
+	if err := strictjson.CheckDuplicateMembers(payload); err != nil {
 		return fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	return nil
-}
-
-func checkJSONValue(dec *json.Decoder, depth int) error {
-	tok, err := dec.Token()
-	if err != nil {
-		return err
-	}
-	delim, ok := tok.(json.Delim)
-	if !ok {
-		return nil
-	}
-	if depth >= maxJSONDepth {
-		return errors.New("JSON nested too deeply")
-	}
-	switch delim {
-	case '{':
-		return checkJSONObject(dec, depth)
-	case '[':
-		for dec.More() {
-			if err := checkJSONValue(dec, depth+1); err != nil {
-				return err
-			}
-		}
-	}
-	_, err = dec.Token() // the closing delimiter
-	return err
-}
-
-func checkJSONObject(dec *json.Decoder, depth int) error {
-	seen := map[string]bool{}
-	for dec.More() {
-		tok, err := dec.Token()
-		if err != nil {
-			return err
-		}
-		name, _ := tok.(string)
-		if seen[name] {
-			return fmt.Errorf("duplicate member name %q", name)
-		}
-		seen[name] = true
-		if err := checkJSONValue(dec, depth+1); err != nil {
-			return err
-		}
-	}
-	_, err := dec.Token()
-	if err == io.EOF {
-		return io.ErrUnexpectedEOF
-	}
-	return err
 }

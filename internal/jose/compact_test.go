@@ -250,6 +250,17 @@ func TestParseCompactRejectsMalformed(t *testing.T) {
 	}
 }
 
+// A header that is well-formed JSON with no repeated member, but gives
+// a member the wrong type, or isn't an object at all, is refused as it
+// is decoded.
+func TestParseHeaderRefusesMistypedMembers(t *testing.T) {
+	for _, header := range []string{`{"alg":1}`, `{"alg":"ES256","kid":{}}`, `{"alg":"ES256","typ":["JWT"]}`, `[]`, `"ES256"`} {
+		if _, err := parseHeader([]byte(header)); err == nil {
+			t.Errorf("parseHeader(%s) = nil error, want an error", header)
+		}
+	}
+}
+
 func TestParseCompactRejectsOversized(t *testing.T) {
 	huge := strings.Repeat("a", DefaultMaxCompactBytes+1)
 	if _, err := ParseCompact(huge); err == nil {

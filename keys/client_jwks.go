@@ -54,8 +54,10 @@ type ClientJWKSLookup func(ctx context.Context, id fapi.ClientID) (jwksURI fapi.
 // one, and a client whose registered jwks_uri (or jwks) changes is
 // never served the old registration's keys. A client ClientJWKSLookup
 // doesn't know is an error. A client's keys are held to the limits of
-// a key a caller supplies (an RSA key over 4096 bits is skipped), and a
-// JWK Set with no usable key is an error.
+// a key a caller supplies (an RSA key over 4096 bits is skipped) and to
+// RFC 7518's EC coordinate sizes (an EC key whose coordinate isn't its
+// curve's full size is skipped: see JWK encoding in the package doc),
+// and a JWK Set with no usable key is an error.
 //
 // Per ARCHITECTURE.md design rule 5, prefer StaticClientKeys, with no
 // fetch in the request path, where a deployment can register its

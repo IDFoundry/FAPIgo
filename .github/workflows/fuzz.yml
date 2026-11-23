@@ -74,6 +74,8 @@ jobs:
           - pkg: ./internal/jose
             name: FuzzParseJWK
           - pkg: ./internal/jose
+            name: FuzzThumbprintSurvivesReencoding
+          - pkg: ./internal/jose
             name: FuzzParseJWKSet
           - pkg: ./internal/jose
             name: FuzzSignVerifyTamper
@@ -185,6 +187,8 @@ jobs:
             name: FuzzUnmarshalMatchesCaseSensitiveReading
           - pkg: ./internal/strictjson
             name: FuzzCheckFieldCaseThenDecode
+          - pkg: ./internal/strictjson
+            name: FuzzCheckDuplicateMembersThenDecode
           - pkg: ./extension
             name: FuzzExtensionValueReadersAgree
           - pkg: ./internal/sealedcookie

@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
+	"slices"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/critical"
@@ -105,24 +105,9 @@ func marshalHeader(h Header) ([]byte, error) {
 }
 
 func parseHeader(data []byte) (Header, error) {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	var raw rawHeader
-	// RFC 8725 §3.7: refuse a header encoding/json would decode with
-	// U+FFFD in place of invalid UTF-8 or a lone surrogate escape.
-	if !strictjson.DecodesLosslessly(data) {
-		return Header{}, errors.New("jwe: parse header: not valid UTF-8, or an unpaired surrogate escape")
-	}
-	if err := strictjson.CheckFieldCase(data, &raw); err != nil {
+	raw, err := decodeRawHeader(data)
+	if err != nil {
 		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
-	}
-	if err := dec.Decode(&raw); err != nil {
-		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
-	}
-	if err := critical.Check(raw.Crit, understoodExtensionParams); err != nil {
-		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
-	}
-	if raw.Zip != nil {
-		return Header{}, errors.New("jwe: parse header: compressed content (\"zip\") is not supported")
 	}
 	alg, err := fapi.ParseKeyManagementAlgorithm(raw.Alg)
 	if err != nil {
@@ -147,6 +132,38 @@ func parseHeader(data []byte) (Header, error) {
 		return Header{}, fmt.Errorf("jwe: parse header apv: %w", err)
 	}
 	return h, nil
+}
+
+// decodeRawHeader decodes data, a JWE protected header, refusing one
+// that isn't valid UTF-8 or holds a lone surrogate escape (RFC 8725
+// §3.7: encoding/json would read either as U+FFFD), repeats a member
+// name at any depth (two that differ only in case count as one),
+// carries a member that only case-folds to one it models, or names a
+// compression algorithm, and checking its "crit". RFC 7516 §4 requires
+// Header Parameter names to be unique, as RFC 7515 §4 does:
+// encoding/json would merge two copies of "epk" into one key, where
+// another implementation keeps one of them.
+func decodeRawHeader(data []byte) (rawHeader, error) {
+	var raw rawHeader
+	if !strictjson.DecodesLosslessly(data) {
+		return rawHeader{}, errors.New("not valid UTF-8, or an unpaired surrogate escape")
+	}
+	if err := strictjson.CheckDuplicateMembers(data); err != nil {
+		return rawHeader{}, err
+	}
+	if err := strictjson.CheckFieldCase(data, &raw); err != nil {
+		return rawHeader{}, err
+	}
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&raw); err != nil {
+		return rawHeader{}, err
+	}
+	if err := critical.Check(raw.Crit, understoodExtensionParams); err != nil {
+		return rawHeader{}, err
+	}
+	if raw.Zip != nil {
+		return rawHeader{}, errors.New(`compressed content ("zip") is not supported`)
+	}
+	return raw, nil
 }
 
 // decodePartyInfo decodes an "apu"/"apv" member as strict base64url (RFC
@@ -187,17 +204,7 @@ func parseEPK(raw *rawEPK) (*ecdh.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode epk y: %w", err)
 	}
-	// x/y are attacker-controlled at this point (this function parses an
-	// untrusted header); big.Int.FillBytes below panics if the value
-	// doesn't fit in p256CoordinateSize bytes, so that must be rejected
-	// as a plain error first, not left to crash on a malformed epk.
-	if x.BitLen() > 8*p256CoordinateSize || y.BitLen() > 8*p256CoordinateSize {
-		return nil, fmt.Errorf("epk coordinate exceeds P-256 field size")
-	}
-	uncompressed := make([]byte, 1+2*p256CoordinateSize)
-	uncompressed[0] = 0x04
-	x.FillBytes(uncompressed[1 : 1+p256CoordinateSize])
-	y.FillBytes(uncompressed[1+p256CoordinateSize:])
+	uncompressed := slices.Concat([]byte{0x04}, x, y) // SEC 1 §2.3.3
 	pub, err := ecdh.P256().NewPublicKey(uncompressed)
 	if err != nil {
 		return nil, fmt.Errorf("invalid epk point: %w", err)
@@ -205,7 +212,12 @@ func parseEPK(raw *rawEPK) (*ecdh.PublicKey, error) {
 	return pub, nil
 }
 
-func decodeCoordinate(s string) (*big.Int, error) {
+// decodeCoordinate decodes an epk's "x" or "y", which RFC 7518 §6.2.1.2
+// and §6.2.1.3 require to be exactly p256CoordinateSize octets, leading
+// zero octets included: a coordinate of any other length is refused,
+// even one encoding a point on the curve, rather than padded or
+// trimmed into one, as internal/jose refuses it in a JWK.
+func decodeCoordinate(s string) ([]byte, error) {
 	if s == "" {
 		return nil, fmt.Errorf("empty value")
 	}
@@ -213,5 +225,8 @@ func decodeCoordinate(s string) (*big.Int, error) {
 	if err != nil {
 		return nil, err
 	}
-	return new(big.Int).SetBytes(b), nil
+	if len(b) != p256CoordinateSize {
+		return nil, fmt.Errorf("%d octets, not the %d of a P-256 coordinate", len(b), p256CoordinateSize)
+	}
+	return b, nil
 }

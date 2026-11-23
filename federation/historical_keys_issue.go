@@ -100,7 +100,11 @@ type HistoricalKeysIssueDependencies struct {
 	// here, since a key still in the Entity Configuration isn't
 	// historical yet (§8.7.4: historical keys are those "no longer
 	// published in the Entity's Entity Configuration"). Signer's own key
-	// is refused whether or not JWKS is set.
+	// is refused whether or not JWKS is set. An entry this module can't
+	// use (an unsupported algorithm or key type, malformed key material,
+	// or an EC key whose "x" or "y" isn't its curve's full size, as for
+	// TrustAnchor.JWKS) is skipped, so a retired key that only such an
+	// entry names isn't refused.
 	JWKS json.RawMessage
 
 	Clock Clock

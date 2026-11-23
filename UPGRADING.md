@@ -246,6 +246,129 @@ tombstone its revocation leaves, or store the token so that
 `RedeemRefreshToken` refuses it, as memstore's does. Run
 `storage.TestGrantStoreContract` against your store.
 
+### A JOSE header, attestation or metadata document may not repeat a member name (all packages)
+
+**Affects:** a deployment whose peer repeats a member name, in any
+object at any depth, of a JWS or JWE header, a client attestation's
+claims or authorization server metadata, or writes two names that
+differ only in case there or in an Entity Statement's claims (which
+already refused an exact repeat). No two registered names differ only
+in case, so the second rule reaches only private names, such as a
+vendor's `"x_ext"` beside `"X_EXT"`. In metadata, a
+repeat of any member counts: a client whose authorization server lists
+`scopes_supported` twice, which v0.80.0 read last-wins, can no longer
+discover it. RFC 7515 §4, RFC 7516 §4 and RFC 7519 §4 forbid a repeated
+header parameter or claim name, and RFC 7517 §4 a repeated JWK member.
+Metadata, and objects nested inside a private member, are plain JSON:
+RFC 8259 §4 says their names SHOULD be unique, and notes that some
+recipients refuse a repeat.
+
+**Why:** encoding/json keeps the last copy of a repeated member, and
+merges the copies of an object: a JWE header with two `epk` members was
+decrypted with one key built from both, and the case check saw only
+the last copy, so a case variant (`"X"` for `"x"`) in an earlier one was
+read as the member. Another implementation keeps one copy, or refuses
+the header, so two readers could take different keys or claims from one
+signed or encrypted message.
+
+**What fails:** such a header, at any depth (its `jwk` or `epk`
+included), such attestation claims or metadata, and an Entity Statement
+with two names that differ only in case (an exact repeat in its claims
+was already refused). So does a header, attestation claims set or
+metadata document that nests objects and arrays more than 64 deep, a
+bound only Entity Statements had before. The server answers a request
+object with `invalid_request_object`, a client assertion, client
+attestation or attestation PoP with `invalid_client`, a DPoP proof with
+`invalid_dpop_proof` and a signed CIBA request with `invalid_request`;
+a resource server answers a JWT access token with `invalid_token`, and
+a DPoP proof with `invalid_dpop_proof`. The client refuses an ID token,
+JARM response or UserInfo response, signed or encrypted, with
+`invalid_response`.
+
+`client.Discover` fails for such a discovery document, so there is no
+metadata to build a client from. Its error starts
+`client: discover: metadata: malformed document:`, then names the
+member (`strictjson: duplicate member name "scopes_supported"`), or
+both members when they differ only in case. A client configured with
+its endpoints by hand never reads the document.
+`client.DiscoverViaFederation` refuses such an Entity Statement while
+it resolves the Trust Chain, as it does any malformed statement.
+
+**What to change:** nothing in your code. A peer producing such JSON
+must write each member once, spelled one way.
+
+### An EC JWK's coordinates must be their curve's full size (all packages)
+
+**Affects:** a peer that writes an EC key's `x` or `y`, in a JWK or a
+JWE `epk`, in other than 32 octets for P-256: without its leading zero
+octets, as a coordinate below 2^248 (about one key in 128) comes out of
+a producer that drops them, or with extra ones. RFC 7518 §6.2.1.2 and
+§6.2.1.3 require the full size, leading zeros included.
+
+**Why:** the parser read the integer such a coordinate encoded,
+whatever its length, so it accepted keys other implementations refuse,
+and many spellings of one key. An EC key now has one spelling. An RSA
+key's `n` and `e` may still carry leading zero octets, which some
+producers write (a 257-octet modulus): they are read as the integers
+they encode. Either way, every thumbprint and key ID the module derives
+is computed from the parsed key, never from the strings received.
+
+**What fails:** a DPoP proof whose `jwk` has such a coordinate is
+refused with `invalid_dpop_proof`, by the server and by a resource
+server, and a client attestation whose `cnf.jwk` has one with
+`invalid_client`. Any other JWS whose protected header carries such a
+`jwk` is refused as malformed, with the error its path gives (only
+DPoP requires a header `jwk`). The client refuses an encrypted ID token
+or UserInfo response whose `epk` has one with `invalid_response`.
+
+A JWK Set entry with such a coordinate, from `jwks` or `jwks_uri` and
+whether a client's, an authorization server's or a federation
+entity's, is skipped like any other unusable entry, so a JWS that only
+that key could verify fails as signed with an unknown key, and an ID
+token or UserInfo response the server could encrypt only to a client's
+skipped key fails with `server_error`. In a federation Relying Party's
+`jwks`, a TLS client certificate that only such an entry vouched for
+(its `x5c` for `self_signed_tls_client_auth`, or the key a
+`tls_client_auth` certificate must carry) is refused with
+`invalid_client`. What happens to a set left with no usable key
+depends on where it comes from:
+
+- `keys.NewStaticClientKeys` fails, naming the client
+  (`client "c": jwks: jwks contains no usable keys`), so a server built
+  on it doesn't start until a key in that client's `jwks` is usable
+  again: pad the short keys, since removing them leaves a set with no
+  usable key, which is refused the same way.
+- `keys.ClientJWKSSource` refuses the set with the same
+  `jwks contains no usable keys` error when it resolves the client's
+  inline `jwks` or fetches its `jwks_uri`, and
+  `keys.JWKSIssuerKeySource` refuses a fetched set as containing no
+  usable keys: everything that needs the set fails.
+- `keys/ephemeral`'s `ClientKeySource` keeps the set without the entry,
+  so the client's signed requests fail as signed with an unknown key.
+- A federation `TrustAnchor` whose `JWKS`, or an entity whose `jwks`,
+  is left with no usable key validates no statement, so every
+  resolution through it fails.
+- `federation.NewAutomaticClientRepository` keeps a Relying Party's
+  `openid_relying_party` `jwks` without the entry. One left with no
+  usable key that authenticates with `tls_client_auth` or
+  `self_signed_tls_client_auth` isn't registered: every request from
+  it gets `invalid_client`, and `OnResolutionFailure` reports why. One
+  using `private_key_jwt` is registered, and its client assertions
+  fail as signed with an unknown key.
+
+**What to change:** nothing in your code. A peer writing short
+coordinates must pad each one to 32 octets with leading zero octets. A
+client registered with such a key in its `jwks` must register it again,
+padded. In a `keys.NewStaticClientKeys` configuration, pad it before
+upgrading (removing it helps only if another key in that client's
+`jwks` is usable and nothing needs this one): if no other key in that
+client's `jwks` is usable, the server won't start; otherwise the
+server starts and skips it silently, and whatever only that key
+verified, such as the client's assertions or request objects if it
+signs with it, fails as signed with an unknown key, and a response
+the server could encrypt only to it fails with `server_error`. Pad a
+Trust Anchor's configured key the same way.
+
 ## v0.79.0
 
 ### CIBA requests: core parameter size bounds, and at most 32 `acr_values` (server)

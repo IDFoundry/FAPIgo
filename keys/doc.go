@@ -93,6 +93,23 @@
 // bounded-redirect and stale-key/duplicate-kid protections as any other
 // outbound fetch (see fapihttp).
 //
+// JWK encoding: every JWK Set this package parses (ClientKeyMaterial's
+// JWKS, ClientJWKSSource's inline and fetched sets, JWKSIssuerKeySource,
+// keys/ephemeral's ClientKeySource), like every JWK the module reads
+// from the wire (a DPoP proof's, an attestation's cnf), holds an EC
+// key's "x" and "y" to the full size of a coordinate on its curve, 32
+// octets for P-256, as RFC 7518 §6.2.1.2 and §6.2.1.3 require: an entry
+// whose coordinate is written without its leading zero octets, or with
+// extra ones, is unusable and skipped, like any other malformed entry.
+// An RSA key's "n" and "e" may carry leading zero octets, which RFC 7518
+// §2 asks a producer to drop but some keep, and are read as the integers
+// they encode. Any kid or JWK thumbprint this module derives for a key —
+// NewKeyManagerFromSigners' default kid, the thumbprint a kid-less
+// client key answers to, a DPoP proof's jkt — is the RFC 7638
+// thumbprint of the parsed key, written canonically (EC coordinates at
+// full size, RSA values minimally), never of the member strings
+// received, so a key written two ways has one thumbprint.
+//
 // Publishing this party's own keys as a JWK Set (RFC 7517 §5) is
 // publicjwks.go's PublicJWKS: resolve every SigningKeyUse (honoring
 // RotatingKeyManager) and EncryptionKeyUse it's given, deduplicated by

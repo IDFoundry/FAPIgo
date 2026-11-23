@@ -1,10 +1,10 @@
-// Package strictjson closes the one way encoding/json decodes JOSE
-// content differently from the specifications: it matches an object
-// member to a struct field case-insensitively, so {"ALG": ...} fills a
-// field tagged "alg", and when both "alg" and "ALG" appear the later one
-// silently wins. JOSE and JWT member names are case-sensitive (RFC 7515
-// §4, RFC 7519 §4), so a member that only case-folds to a field name is
-// not that member — accepting it creates a parser differential with any
+// Package strictjson closes the ways encoding/json decodes JOSE content
+// differently from the specifications. It matches an object member to a
+// struct field case-insensitively, so {"ALG": ...} fills a field tagged
+// "alg", and when both "alg" and "ALG" appear the later one silently
+// wins. JOSE and JWT member names are case-sensitive (RFC 7515 §4, RFC
+// 7519 §4), so a member that only case-folds to a field name is not
+// that member — accepting it creates a parser differential with any
 // strictly conforming implementation reading the same token.
 //
 // Unmarshal rejects such members, at every depth of the target type,
@@ -16,6 +16,17 @@
 // json.Decoder stops after one value, so without that a caller decoding
 // with one would read {"ALG":"none"} {} case-insensitively once the
 // check had skipped what json.Unmarshal can't parse.
+//
+// A member repeated in one object is the other difference: encoding/json
+// keeps the last copy, or merges the copies of one that decodes into a
+// struct or a map, and the case check sees only the last copy. The JWS
+// and JWE header parsers, a client attestation's claims, the metadata
+// parser and Entity Statements run CheckDuplicateMembers first, which
+// refuses a repeated name, or two names FoldKey maps together, at any
+// depth. The other claims sets decoded with this package (DPoP proofs,
+// client assertions, attestation PoPs) fill only scalar fields, so they
+// keep encoding/json's last copy of a repeated claim, which RFC 7519 §4
+// allows.
 package strictjson
 
 import (

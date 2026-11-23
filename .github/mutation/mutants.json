@@ -2867,5 +2867,295 @@
     ],
     "run": "^TestGrantStoreContract$",
     "why": "storing a refresh token with grant keys keeps an earlier revocation of its hash"
+  },
+  {
+    "id": "secret-new-empty-is-zero",
+    "file": "secret.go",
+    "old": "\tif value == \"\" {\n\t\treturn Secret{}\n\t}\n\treturn Secret{h: unique.Make(value)}",
+    "new": "\treturn Secret{h: unique.Make(value)}",
+    "module": "root",
+    "packages": [
+      "."
+    ],
+    "run": "^TestSecretComparesByValue$",
+    "why": "NewSecret(\"\") is the zero Secret, as it was when the value sat in a string field"
+  },
+  {
+    "id": "secret-reveal-zero-guard",
+    "file": "secret.go",
+    "old": "\tif s.h == (unique.Handle[string]{}) {",
+    "new": "\tif false {",
+    "module": "root",
+    "packages": [
+      "."
+    ],
+    "run": "^TestSecretComparesByValue$",
+    "why": "the zero Secret reveals \"\" instead of dereferencing the zero handle"
+  },
+  {
+    "id": "secret-format-bad-verb",
+    "file": "secret.go",
+    "old": "\t\t_, _ = fmt.Fprintf(f, \"%%!%c(fapi.Secret=%s)\", verb, redactedSecret)",
+    "new": "\t\t_, _ = fmt.Fprintf(f, \"%%!%c(fapi.Secret=%s)\", verb, s.Reveal())",
+    "module": "root",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestSecretPrintsNoValue|TestSecretFormatOtherVerbs)$",
+    "why": "a verb fmt rejects for a Secret prints the placeholder, never the value"
+  },
+  {
+    "id": "secret-format-sharp-v",
+    "file": "secret.go",
+    "old": "\tcase verb == 'v' && f.Flag('#'):\n\t\t_, _ = fmt.Fprintf(f, fmt.FormatString(f, 's'), s.GoString())\n",
+    "new": "",
+    "module": "root",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestSecretStringRedacts|TestSecretFormatMatchesString)$",
+    "why": "%#v prints GoString's text, as it did before Secret had a Format"
+  },
+  {
+    "id": "secret-log-value",
+    "file": "secret.go",
+    "old": "func (s Secret) LogValue() slog.Value {\n\treturn slog.StringValue(redactedSecret)",
+    "new": "func (s Secret) LogValue() slog.Value {\n\treturn slog.StringValue(s.Reveal())",
+    "module": "root",
+    "packages": [
+      "."
+    ],
+    "run": "^(TestSecretLogValue|TestSecretPrintsNoValue)$",
+    "why": "log/slog logs a Secret as the placeholder"
+  },
+  {
+    "id": "extension-values-shadow-names-only",
+    "file": "extension/render.go",
+    "old": "\t\tout[name] = redactedValue",
+    "new": "\t\tout[name] = string(raw[name])",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^(TestValuesPrintNoValue|TestValuesRenderNames)$",
+    "why": "fmt prints a Values' parameter names, never a value"
+  },
+  {
+    "id": "extension-sensitive-error-withholds-cause",
+    "file": "extension/definition.go",
+    "old": "\t\treturn fmt.Sprintf(\"extension: %q: malformed value: not a valid %s (%s)\", e.name, e.typeName, withheldDetail)",
+    "new": "\t\treturn fmt.Sprintf(\"extension: %q: malformed value: not a valid %s (%s): %v\", e.name, e.typeName, withheldDetail, e.cause)",
+    "module": "root",
+    "packages": [
+      "./extension",
+      "./server"
+    ],
+    "run": "^(TestSensitiveRefusalWithholdsTheValue|TestSensitiveExtensionRefusalAtPARQuotesNoValue|TestSensitiveExtensionRefusalAtCIBAQuotesNoValue|TestSensitiveExtensionReparseQuotesNoValue)$",
+    "why": "a Sensitive definition's refusal never quotes the decoder's text, which can quote the value"
+  },
+  {
+    "id": "extension-sensitive-error-unwrap",
+    "file": "extension/definition.go",
+    "old": "\tif e.sensitive {\n\t\treturn nil\n\t}\n\treturn e.cause",
+    "new": "\treturn e.cause",
+    "module": "root",
+    "packages": [
+      "./extension",
+      "./server"
+    ],
+    "run": "^(TestSensitiveRefusalWithholdsTheValue|TestSensitiveExtensionRefusalAtPARQuotesNoValue)$",
+    "why": "a Sensitive definition's refusal hands out no cause, through errors.Unwrap or errors.As"
+  },
+  {
+    "id": "extension-sensitive-error-is",
+    "file": "extension/definition.go",
+    "old": "\treturn e.sensitive && errors.Is(e.cause, target)",
+    "new": "\treturn e.sensitive && errors.Is(e.cause, nil)",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestSensitiveValidateRefusalMatchesItsSentinel$",
+    "why": "errors.Is still finds a sentinel a Sensitive refusal's cause wraps"
+  },
+  {
+    "id": "extension-refuse-sensitive-token-claims",
+    "file": "extension/registry.go",
+    "old": "\tif d.returnInTokenClaims() && d.sensitive() {",
+    "new": "\tif false && d.sensitive() {",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestNewRegistryRefusesSensitiveTokenClaims$",
+    "why": "NewRegistry refuses a Sensitive definition with ReturnInTokenClaims"
+  },
+  {
+    "id": "extension-as-parameters-skips-sensitive",
+    "file": "extension/definition.go",
+    "old": "\t\tif !d.returnInTokenClaims() || d.sensitive() {",
+    "new": "\t\tif !d.returnInTokenClaims() {",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestAsParametersLeavesOutSensitiveValues$",
+    "why": "AsParameters never copies a Sensitive value into token claims"
+  },
+  {
+    "id": "extension-registry-sensitive",
+    "file": "extension/registry.go",
+    "old": "\treturn d.sensitive(), true",
+    "new": "\treturn d.sensitive() && false, true",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestRegistrySensitive$",
+    "why": "Registry.Sensitive reports a Sensitive definition as Sensitive"
+  },
+  {
+    "id": "server-interaction-handle-log-value",
+    "file": "server/render.go",
+    "old": "func (h InteractionHandle) LogValue() slog.Value { return h.value.LogValue() }",
+    "new": "func (h InteractionHandle) LogValue() slog.Value { return slog.StringValue(h.String()) }",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestHandlesKeepTheirWireValue$",
+    "why": "log/slog logs an interaction handle as the placeholder, not its wire value"
+  },
+  {
+    "id": "server-redirect-summary",
+    "file": "server/render.go",
+    "old": "\treturn authorizationRedirectShadow{destination: redirectSummary(r.destination.Reveal())}",
+    "new": "\treturn authorizationRedirectShadow{destination: r.destination.Reveal()}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestAuthorizationRedirectPrintsNoCode$",
+    "why": "an AuthorizationRedirect prints its destination's parameter names, never the code"
+  },
+  {
+    "id": "redact-query-values",
+    "file": "internal/redact/redact.go",
+    "old": "\t\t\tparts[i] += \"=\" + Redacted",
+    "new": "\t\t\tparts[i] = part",
+    "module": "root",
+    "packages": [
+      "./internal/redact"
+    ],
+    "run": "^TestURLSummary$",
+    "why": "a URL summary prints each query parameter's name and no value"
+  },
+  {
+    "id": "redact-query-quotes-names",
+    "file": "internal/redact/redact.go",
+    "old": "\t\tif !isPlainNameByte(name[i]) {",
+    "new": "\t\tif !isPlainNameByte(name[i]) && false {",
+    "module": "root",
+    "packages": [
+      "./internal/redact"
+    ],
+    "run": "^TestQueryQuotesNamesThatCouldForgeALogLine$",
+    "why": "a parameter name with a byte a query never carries unescaped, a newline say, prints quoted, so it can't forge a log line"
+  },
+  {
+    "id": "server-form-value-allowlist",
+    "file": "server/render_requests.go",
+    "old": "\tcase formValueAllowlist[p.Name]:",
+    "new": "\tcase true:",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestFormParameterPrintsOnlyAllowedValues$",
+    "why": "a form parameter's value prints only for a parameter that carries no credential"
+  },
+  {
+    "id": "client-validated-response-shadow",
+    "file": "client/render.go",
+    "old": "\t\tissuer: r.issuer, clientID: r.clientID, code: redact.Mask(r.code), redirectURI: r.redirectURI,",
+    "new": "\t\tissuer: r.issuer, clientID: r.clientID, code: redact.Hidden(r.code.Reveal()), redirectURI: r.redirectURI,",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestValidatedAuthorizationResponsePrintsNoSecret$",
+    "why": "a ValidatedAuthorizationResponse prints its code as the placeholder"
+  },
+  {
+    "id": "client-resource-client-shadow",
+    "file": "client/render.go",
+    "old": "token: redact.Mask(rc.token), err: \"<nil>\"}",
+    "new": "token: redact.Hidden(rc.token.Reveal()), err: \"<nil>\"}",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestResourceClientPrintsNoToken$",
+    "why": "a ResourceClient prints its access token as the placeholder"
+  },
+  {
+    "id": "server-token-endpoint-request-shadow",
+    "file": "server/render_requests.go",
+    "old": "\tredact.Format(f, verb, tokenEndpointRequestShadow{parts: t.parts.get().shadow()},",
+    "new": "\tredact.Format(f, verb, t.parts.get(),",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestTokenEndpointRequestPrintsNoCredential$",
+    "why": "a TokenEndpointRequest prints its form through the shadow, without its credentials"
+  },
+  {
+    "id": "resource-verify-request-authorization",
+    "file": "resource/render.go",
+    "old": "\t\tMethod: r.Method, Authorization: authorizationSummary(r.Authorization), DPoPProofs: redact.MaskStrings(r.DPoPProofs),",
+    "new": "\t\tMethod: r.Method, Authorization: r.Authorization, DPoPProofs: redact.MaskStrings(r.DPoPProofs),",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyRequestPrintsNoToken$",
+    "why": "a VerifyRequest prints its Authorization header's scheme and the placeholder, never the access token"
+  },
+  {
+    "id": "server-hints-mask",
+    "file": "server/render.go",
+    "old": "\t\tLoginHint: h.LoginHint, LoginHintToken: redact.MaskString(h.LoginHintToken), IDTokenHint: redact.MaskString(h.IDTokenHint),",
+    "new": "\t\tLoginHint: h.LoginHint, LoginHintToken: redact.Hidden(h.LoginHintToken), IDTokenHint: redact.MaskString(h.IDTokenHint),",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelAuthenticationHintsPrintNoToken$",
+    "why": "CIBA hints print their login_hint_token as the placeholder"
+  },
+  {
+    "id": "server-interaction-request-log-value",
+    "file": "server/render.go",
+    "old": "func (r InteractionRequest) LogValue() slog.Value {",
+    "new": "func (r InteractionRequest) LogValue() slog.Value { if text, err := r.MarshalText(); err == nil { return slog.StringValue(string(text)) }",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestInteractionRequestLogsNoValue$",
+    "why": "log/slog logs an InteractionRequest through LogValue, not MarshalText, which carries every extension value"
+  },
+  {
+    "id": "client-authenticates-empty-tokens",
+    "file": "client/backchannel_notification.go",
+    "old": "\tif token == \"\" || want == \"\" || n.authReqID.Reveal() != session.authReqID.Reveal() {",
+    "new": "\tif n.authReqID.Reveal() != session.authReqID.Reveal() {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestAuthenticatesNeedsATokenOnBothSides$",
+    "why": "a ping without a bearer token never authenticates for a poll session, though two empty tokens compare equal"
   }
 ]

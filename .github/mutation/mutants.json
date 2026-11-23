@@ -3157,5 +3157,689 @@
     ],
     "run": "^TestAuthenticatesNeedsATokenOnBothSides$",
     "why": "a ping without a bearer token never authenticates for a poll session, though two empty tokens compare equal"
+  },
+  {
+    "id": "client-backchannel-session-shadow",
+    "file": "client/render.go",
+    "old": "issuer: s.issuer, clientID: s.clientID, authReqID: redact.Mask(s.authReqID),",
+    "new": "issuer: s.issuer, clientID: s.clientID, authReqID: redact.Hidden(s.authReqID.Reveal()),",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestBackchannelAuthenticationSessionPrintsNoSecret$",
+    "why": "a CIBA session prints its auth_req_id as the placeholder"
+  },
+  {
+    "id": "client-backchannel-notification-shadow",
+    "file": "client/render.go",
+    "old": "token: redact.Mask(n.token)}",
+    "new": "token: redact.Hidden(n.token.Reveal())}",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestBackchannelNotificationPrintsNoSecret$",
+    "why": "a ping prints its bearer token as the placeholder"
+  },
+  {
+    "id": "client-session-handle-log-value",
+    "file": "client/render.go",
+    "old": "func (h SessionHandle) LogValue() slog.Value { return h.value.LogValue() }",
+    "new": "func (h SessionHandle) LogValue() slog.Value { return slog.StringValue(h.String()) }",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestSessionHandleKeepsItsWireValue$",
+    "why": "log/slog logs a session handle as the placeholder, not its wire value"
+  },
+  {
+    "id": "client-authorization-session-handle",
+    "file": "client/render.go",
+    "old": "handle: redact.Mask(s.handle.value), expiresAt:",
+    "new": "handle: redact.Hidden(s.handle.value.Reveal()), expiresAt:",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestAuthorizationSessionPrintsNoHandle$",
+    "why": "an AuthorizationSession prints its handle as the placeholder"
+  },
+  {
+    "id": "client-authorization-callback-query",
+    "file": "client/render.go",
+    "old": "RawQuery: redact.Query(cb.RawQuery), Session:",
+    "new": "RawQuery: cb.RawQuery, Session:",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestAuthorizationCallbackPrintsNoValue$",
+    "why": "a callback prints its query's parameter names, never the code"
+  },
+  {
+    "id": "client-ciba-request-hint-token",
+    "file": "client/render.go",
+    "old": "LoginHintToken: redact.MaskString(r.LoginHintToken), IDTokenHint: redact.MaskString(r.IDTokenHint),",
+    "new": "LoginHintToken: redact.Hidden(r.LoginHintToken), IDTokenHint: redact.MaskString(r.IDTokenHint),",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestBeginBackchannelAuthenticationRequestPrintsNoHintToken$",
+    "why": "a CIBA request prints its login_hint_token as the placeholder"
+  },
+  {
+    "id": "client-begin-authorization-log-value",
+    "file": "client/render.go",
+    "old": "func (r BeginAuthorizationRequest) LogValue() slog.Value {",
+    "new": "func (r BeginAuthorizationRequest) logValue() slog.Value {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestBeginAuthorizationRequestLogsNoExtensionValue$",
+    "why": "log/slog logs an authorization request's extension parameters by name, not through MarshalJSON"
+  },
+  {
+    "id": "server-interaction-required-shadow",
+    "file": "server/render.go",
+    "old": "return interactionRequiredShadow{Handle: redact.Mask(a.Handle.value),",
+    "new": "return interactionRequiredShadow{Handle: redact.Hidden(a.Handle.value.Reveal()),",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestInteractionRequiredPrintsNoHandleOrValue$",
+    "why": "InteractionRequired prints its handle as the placeholder"
+  },
+  {
+    "id": "server-backchannel-required-auth-req-id",
+    "file": "server/render.go",
+    "old": "AuthReqID: redact.Mask(a.AuthReqID.value),",
+    "new": "AuthReqID: redact.Hidden(a.AuthReqID.value.Reveal()),",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInteractionRequiredPrintsNoSecret$",
+    "why": "BackchannelInteractionRequired prints its auth_req_id as the placeholder"
+  },
+  {
+    "id": "server-pending-interaction-handle",
+    "file": "server/render.go",
+    "old": "return pendingBackchannelInteractionShadow{ID: p.ID, Handle: redact.Mask(p.Handle.value),",
+    "new": "return pendingBackchannelInteractionShadow{ID: p.ID, Handle: redact.Hidden(p.Handle.value.Reveal()),",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestPendingBackchannelInteractionPrintsItsIDNotItsHandle$",
+    "why": "a pending CIBA request prints its ID, and its handle as the placeholder"
+  },
+  {
+    "id": "server-auth-req-id-log-value",
+    "file": "server/render.go",
+    "old": "func (a AuthReqID) LogValue() slog.Value { return a.value.LogValue() }",
+    "new": "func (a AuthReqID) LogValue() slog.Value { return slog.StringValue(a.String()) }",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestHandlesKeepTheirWireValue$",
+    "why": "log/slog logs an auth_req_id as the placeholder"
+  },
+  {
+    "id": "server-backchannel-handle-log-value",
+    "file": "server/render.go",
+    "old": "func (h BackchannelAuthenticationHandle) LogValue() slog.Value { return h.value.LogValue() }",
+    "new": "func (h BackchannelAuthenticationHandle) LogValue() slog.Value { return slog.StringValue(h.String()) }",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestHandlesKeepTheirWireValue$",
+    "why": "log/slog logs a CIBA handle as the placeholder"
+  },
+  {
+    "id": "server-backchannel-interaction-log-value",
+    "file": "server/render.go",
+    "old": "func (r BackchannelInteractionRequest) LogValue() slog.Value {",
+    "new": "func (r BackchannelInteractionRequest) LogValue() slog.Value { type withoutLogValue BackchannelInteractionRequest; if v := slog.AnyValue(withoutLogValue(r)); v.Kind() == slog.KindAny { return v }",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInteractionRequiredPrintsNoSecret$",
+    "why": "log/slog logs a CIBA interaction through LogValue, with its hint tokens as the placeholder"
+  },
+  {
+    "id": "server-redirect-response-summary",
+    "file": "server/render.go",
+    "old": "return redirectResponseShadow{Destination: destinationSummary(r.Destination)}",
+    "new": "return redirectResponseShadow{Destination: r.Destination.String()}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRedirectResponsePrintsNoQueryValue$",
+    "why": "a RedirectResponse prints its destination's parameter names, never their values"
+  },
+  {
+    "id": "server-redirect-summary-absolute",
+    "file": "server/render.go",
+    "old": "\tif err != nil || !u.IsAbs() {",
+    "new": "\tif err != nil {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRedirectSummaryOfANonURL$",
+    "why": "a destination that isn't an absolute URL prints as the placeholder, not as a path"
+  },
+  {
+    "id": "server-notification-token-shadow",
+    "file": "server/render_requests.go",
+    "old": "ClientNotificationToken: redact.Mask(n.ClientNotificationToken),",
+    "new": "ClientNotificationToken: redact.Hidden(n.ClientNotificationToken.Reveal()),",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelNotificationPrintsNoToken$",
+    "why": "a ping notification prints its bearer token as the placeholder"
+  },
+  {
+    "id": "server-begin-authorization-request-uri",
+    "file": "server/render_requests.go",
+    "old": "return beginAuthorizationRequestShadow{RequestURI: redact.MaskString(r.RequestURI),",
+    "new": "return beginAuthorizationRequestShadow{RequestURI: redact.Hidden(r.RequestURI),",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestOtherRequestsPrintNoCredential$",
+    "why": "an authorization endpoint request prints its request_uri, a bearer value in the front channel, as the placeholder"
+  },
+  {
+    "id": "server-complete-request-handle",
+    "file": "server/render_requests.go",
+    "old": "redact.Format(f, verb, completeAuthorizationRequestShadow{Handle: redact.Mask(r.Handle.value), Result: r.Result},\n\t\t\"server.completeAuthorizationRequestShadow\", \"server.CompleteAuthorizationRequest\")",
+    "new": "redact.Format(f, verb, completeAuthorizationRequestShadow{Handle: redact.Hidden(r.Handle.value.Reveal()), Result: r.Result},\n\t\t\"server.completeAuthorizationRequestShadow\", \"server.CompleteAuthorizationRequest\")",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCompletionRequestsPrintNoHandle$",
+    "why": "a completion request prints its handle as the placeholder"
+  },
+  {
+    "id": "server-request-parts-proofs",
+    "file": "server/render_requests.go",
+    "old": "HTTP: p.HTTP.shadow(), DPoPProofs: redact.MaskStrings(p.DPoPProofs),",
+    "new": "HTTP: p.HTTP.shadow(), DPoPProofs: func() []redact.Hidden { out := []redact.Hidden{}; for _, v := range p.DPoPProofs { out = append(out, redact.Hidden(v)) }; return out }(),",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestTypedRequestsPrintNoCredential|TestTokenEndpointRequestPrintsNoCredential)$",
+    "why": "a token or pushed request prints its DPoP proofs as the placeholder"
+  },
+  {
+    "id": "resource-resolve-raw",
+    "file": "resource/render.go",
+    "old": "return resolveAccessTokenRequestShadow{Raw: redact.MaskString(r.Raw),",
+    "new": "return resolveAccessTokenRequestShadow{Raw: redact.Hidden(r.Raw),",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestResolveAccessTokenRequestPrintsNoToken$",
+    "why": "a resolver's input prints its access token as the placeholder"
+  },
+  {
+    "id": "resource-verify-proofs",
+    "file": "resource/render.go",
+    "old": "DPoPProofs: redact.MaskStrings(r.DPoPProofs),",
+    "new": "DPoPProofs: func() []redact.Hidden { out := []redact.Hidden{}; for _, v := range r.DPoPProofs { out = append(out, redact.Hidden(v)) }; return out }(),",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyRequestPrintsNoToken$",
+    "why": "a VerifyRequest prints its DPoP proofs as the placeholder"
+  },
+  {
+    "id": "extension-values-nil-guard",
+    "file": "extension/definition.go",
+    "old": "func (values Values) rawValues() map[string]json.RawMessage {\n\tif values.p == nil {",
+    "new": "func (values Values) rawValues() map[string]json.RawMessage {\n\tif false {",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestValuesCopiesShareStorage$",
+    "why": "the zero Values, whose values sit behind no pointer yet, reads as empty"
+  },
+  {
+    "id": "rendertest-prefix-shortcut",
+    "file": "internal/rendertest/rendertest.go",
+    "old": "\tif !d.mayCarry(out, numbers) {",
+    "new": "\tif d.mayCarry(out, numbers) {",
+    "module": "root",
+    "packages": [
+      "./internal/rendertest"
+    ],
+    "run": "^(TestPrefixCheckFindsEverySecret|TestLeaksFindsAStringFieldLayout)$",
+    "why": "the rendering matrix skips only a rendering that carries none of its secrets' common prefix"
+  },
+  {
+    "id": "rendertest-base64-forms",
+    "file": "internal/rendertest/rendertest.go",
+    "old": "\t\t\tforms = append(forms, form{\"base64\", text})",
+    "new": "\t\t\tforms = append(forms, form{\"base64\", text + \"\\x00\"})",
+    "module": "root",
+    "packages": [
+      "./internal/rendertest"
+    ],
+    "run": "^(TestLeaksFindsEncodedForms|TestPrefixCheckFindsEverySecret)$",
+    "why": "the rendering matrix finds a secret base64-encoded, at any alignment"
+  },
+  {
+    "id": "extension-values-log-value",
+    "file": "extension/render.go",
+    "old": "\t\tattrs[i] = slog.String(name, redactedValue)",
+    "new": "\t\tattrs[i] = slog.String(name, string(values.rawValues()[name]))",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^(TestValuesPrintNoValue|TestValuesRenderNames)$",
+    "why": "log/slog logs a Values' parameter names, never a value"
+  },
+  {
+    "id": "extension-values-gostring",
+    "file": "extension/render.go",
+    "old": "\t\tb.WriteString(strconv.Quote(name) + \":\" + redactedValue)",
+    "new": "\t\tb.WriteString(strconv.Quote(name) + \":\" + string(values.rawValues()[name]))",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^(TestValuesPrintNoValue|TestValuesRenderNames)$",
+    "why": "%#v prints a Values' parameter names, never a value"
+  },
+  {
+    "id": "extension-rejected-text",
+    "file": "extension/definition.go",
+    "old": "\t\treturn fmt.Sprintf(\"extension: %q: value rejected by its Validate (%s)\", e.name, withheldDetail)",
+    "new": "\t\treturn fmt.Sprintf(\"extension: %q: value rejected by its Validate (%s): %v\", e.name, withheldDetail, e.cause)",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestSensitiveValidateRefusalMatchesItsSentinel$",
+    "why": "a Sensitive definition's Validate refusal never quotes Validate's text"
+  },
+  {
+    "id": "extension-refusal-sensitivity",
+    "file": "extension/definition.go",
+    "old": "\t\tcause: cause, sensitive: d.sensitive(),",
+    "new": "\t\tcause: cause, sensitive: false,",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestSensitiveRefusalWithholdsTheValue$",
+    "why": "a refusal withholds its cause for exactly the Sensitive definitions"
+  },
+  {
+    "id": "extension-not-sensitive-text",
+    "file": "extension/definition.go",
+    "old": "\t\treturn fmt.Sprintf(\"extension: %q: %s%v\", e.name, e.stage, e.cause)",
+    "new": "\t\treturn fmt.Sprintf(\"extension: %q: %v\", e.name, e.cause)",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestSensitiveSetRefusalWithholdsTheValue$",
+    "why": "a NotSensitive definition's refusal reads exactly as it always has"
+  },
+  {
+    "id": "extension-definition-sensitive",
+    "file": "extension/definition.go",
+    "old": "func (d Definition[T]) sensitive() bool { return d.Sensitivity == Sensitive }",
+    "new": "func (d Definition[T]) sensitive() bool { return false }",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^(TestNewRegistryRefusesSensitiveTokenClaims|TestAsParametersLeavesOutSensitiveValues)$",
+    "why": "a Definition reports itself Sensitive, for the token-claims rules"
+  },
+  {
+    "id": "extension-sensitive-token-claim-error",
+    "file": "extension/registry.go",
+    "old": "\t\treturn definitionError(ErrSensitiveTokenClaim, d)",
+    "new": "\t\treturn definitionError(ErrReservedTokenClaim, d)",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestNewRegistryRefusesSensitiveTokenClaims$",
+    "why": "NewRegistry's refusal of a Sensitive token claim wraps ErrSensitiveTokenClaim"
+  },
+  {
+    "id": "extension-is-malformed",
+    "file": "extension/definition.go",
+    "old": "\tcase ErrMalformedValue:\n\t\treturn e.kind == valueMalformed",
+    "new": "\tcase ErrMalformedValue:\n\t\treturn true",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestValueRefusalsMatchTheirSentinels$",
+    "why": "errors.Is matches ErrMalformedValue only to a malformed value's refusal"
+  },
+  {
+    "id": "extension-sensitive-cause-withheld",
+    "file": "extension/definition.go",
+    "old": "\t\theld := cause\n\t\tcause = &withheldCause{&held}",
+    "new": "\t\theld := cause\n\t\t_ = &withheldCause{&held}",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^(TestSensitiveRefusalWithholdsTheValue|TestSensitiveValidateRefusalMatchesItsSentinel)$",
+    "why": "a Sensitive refusal holds its cause where fmt's reflection fallback prints only an address"
+  },
+  {
+    "id": "extension-withheld-cause-text",
+    "file": "extension/definition.go",
+    "old": "func (*withheldCause) Error() string { return withheldDetail }",
+    "new": "func (c *withheldCause) Error() string { return (*c.err).Error() }",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^TestWithheldCauseGivesNoText$",
+    "why": "the holder of a Sensitive refusal's cause gives none of the cause's text"
+  },
+  {
+    "id": "extension-withheld-cause-unwrap",
+    "file": "extension/definition.go",
+    "old": "func (c *withheldCause) Unwrap() error { return *c.err }",
+    "new": "func (c *withheldCause) Unwrap() error { return nil }",
+    "module": "root",
+    "packages": [
+      "./extension"
+    ],
+    "run": "^(TestWithheldCauseGivesNoText|TestSensitiveValidateRefusalMatchesItsSentinel)$",
+    "why": "errors.Is still reaches a Sensitive refusal's cause through its holder"
+  },
+  {
+    "id": "server-interaction-required-log-value-handle",
+    "file": "server/render.go",
+    "old": "slog.Any(handleKey, a.Handle.LogValue()), slog.Any(interactionKey, a.Interaction.LogValue())",
+    "new": "slog.Any(handleKey, a.Handle), slog.Any(interactionKey, a.Interaction.LogValue())",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestInteractionRequiredPrintsNoHandleOrValue$",
+    "why": "InteractionRequired's slog group holds its handle already resolved, so a handler printing the group's values with %v shows the placeholder, not the wire value"
+  },
+  {
+    "id": "client-authorization-callback-log-value-session",
+    "file": "client/render.go",
+    "old": "slog.Any(\"Session\", cb.Session.LogValue())",
+    "new": "slog.Any(\"Session\", cb.Session)",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestAuthorizationCallbackPrintsNoValue$",
+    "why": "an AuthorizationCallback's slog group holds its session handle already resolved"
+  },
+  {
+    "id": "server-token-endpoint-request-zero-parts",
+    "file": "server/http_requests.go",
+    "old": "\tif h.p == nil {\n\t\treturn httpRequestParts{}\n\t}\n\treturn **h.p",
+    "new": "\treturn **h.p",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestTokenEndpointRequestKeepsValueSemantics$",
+    "why": "the zero TokenEndpointRequest holds no parts, rather than dereferencing a nil holder"
+  },
+  {
+    "id": "server-token-endpoint-request-set-certificate-copy",
+    "file": "server/http_requests.go",
+    "old": "\tt.parts = holdParts(parts)",
+    "new": "\t**t.parts.p = parts",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestTokenEndpointRequestKeepsValueSemantics$",
+    "why": "SetPeerCertificate gives the request a holder of its own, so a copy made before keeps its certificate"
+  },
+  {
+    "id": "server-request-uri-log-value",
+    "file": "server/render.go",
+    "old": "func (r RequestURI) LogValue() slog.Value { return r.value.LogValue() }",
+    "new": "func (r RequestURI) LogValue() slog.Value { return slog.StringValue(r.String()) }",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestHandlesKeepTheirWireValue$",
+    "why": "log/slog logs a request_uri as the placeholder; its String stays the wire value"
+  },
+  {
+    "id": "server-push-result-request-uri",
+    "file": "server/render.go",
+    "old": "return pushAuthorizationResultShadow{RequestURI: redact.Mask(r.RequestURI.value),",
+    "new": "return pushAuthorizationResultShadow{RequestURI: redact.Hidden(r.RequestURI.String()),",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestPushAuthorizationResultPrintsNoRequestURI$",
+    "why": "a PushAuthorizationResult prints its request_uri, a bearer value until its interaction completes, as the placeholder"
+  },
+  {
+    "id": "server-push-result-log-value",
+    "file": "server/render.go",
+    "old": "slog.Any(\"RequestURI\", r.RequestURI.LogValue())",
+    "new": "slog.String(\"RequestURI\", r.RequestURI.String())",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestPushAuthorizationResultPrintsNoRequestURI$",
+    "why": "a PushAuthorizationResult logs its request_uri as the placeholder"
+  },
+  {
+    "id": "client-authorization-session-url-loopback",
+    "file": "client/session.go",
+    "old": "u, err := fapi.ParseEndpointURL(s.url.Reveal(), fapi.AllowLoopbackHTTP())",
+    "new": "u, err := fapi.ParseEndpointURL(s.url.Reveal())",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestAuthorizationSessionURLParsesBack$",
+    "why": "an AuthorizationSession's URL parses back from its string for a loopback endpoint too"
+  },
+  {
+    "id": "resource-authorization-summary-scheme",
+    "file": "resource/render.go",
+    "old": "if !ok || !strings.EqualFold(scheme, \"Bearer\") && !strings.EqualFold(scheme, \"DPoP\") {",
+    "new": "if !ok {",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyRequestPrintsNoToken$",
+    "why": "an Authorization header of a scheme other than Bearer or DPoP, which may begin with the token itself, prints as the placeholder"
+  },
+  {
+    "id": "rendertest-resolving-handler",
+    "file": "internal/rendertest/rendertest.go",
+    "old": "_, _ = fmt.Fprintf(h.w, \" %s=%v\", a.Key, a.Value.Resolve())",
+    "new": "_, _ = fmt.Fprintf(h.w, \" %s\", a.Key)",
+    "module": "root",
+    "packages": [
+      "./internal/rendertest"
+    ],
+    "run": "^TestLeaksFindsAnUnresolvedGroupAttribute$",
+    "why": "the matrix's resolving handler prints each resolved value with %v, as a deployment's own handler may"
+  },
+  {
+    "id": "rendertest-resolve-string-printer",
+    "file": "internal/rendertest/rendertest.go",
+    "old": "func(v any) string { return slog.AnyValue(v).Resolve().String() }",
+    "new": "func(v any) string { return slog.AnyValue(v).String() }",
+    "module": "root",
+    "packages": [
+      "./internal/rendertest"
+    ],
+    "run": "^TestLeaksFindsAnUnresolvedGroupAttribute$",
+    "why": "the matrix renders a value slog resolved, through slog.Value's String"
+  },
+  {
+    "id": "client-authorization-session-url-summary",
+    "file": "client/render.go",
+    "old": "url: redact.URL(u.URL())",
+    "new": "url: u.String()",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestAuthorizationSessionPrintsNoHandle$",
+    "why": "an AuthorizationSession prints its URL's scheme, host, path and parameter names, never the request_uri it carries"
+  },
+  {
+    "id": "server-certificate-summary-quoted",
+    "file": "server/render_requests.go",
+    "old": "return redact.Text(cert.Subject.String())",
+    "new": "return cert.Subject.String()",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRequestsQuoteWhatTheClientChose$",
+    "why": "a request's certificate subject, the client's to choose for a self-signed certificate, prints quoted when it holds a newline, so it can't forge a log line"
+  },
+  {
+    "id": "resource-certificate-summary-quoted",
+    "file": "resource/render.go",
+    "old": "return redact.Text(cert.Subject.String())",
+    "new": "return cert.Subject.String()",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyRequestQuotesACertificateSubject$",
+    "why": "a VerifyRequest's certificate subject, the client's to choose for a self-signed certificate, prints quoted when it holds a newline, so it can't forge a log line"
+  },
+  {
+    "id": "server-begin-authorization-client-id-quoted",
+    "file": "server/render_requests.go",
+    "old": "ClientID: redact.Text(r.ClientID.String())",
+    "new": "ClientID: r.ClientID.String()",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRequestsQuoteWhatTheClientChose$",
+    "why": "BeginAuthorizationRequest prints a client_id anyone can send at /authorize quoted when it holds a newline, so it can't forge a log line"
+  },
+  {
+    "id": "server-attested-client-id-quoted",
+    "file": "server/render_requests.go",
+    "old": "ClientID: redact.Text(r.ClientID), malformed: r.malformed",
+    "new": "ClientID: r.ClientID, malformed: r.malformed",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRequestsQuoteWhatTheClientChose$",
+    "why": "AttestedClientAuthenticationRequest prints the request's client_id quoted when it holds a newline, so it can't forge a log line"
+  },
+  {
+    "id": "server-request-parts-http-resolved",
+    "file": "server/render_requests.go",
+    "old": "slog.Any(\"HTTP\", p.HTTP.LogValue()), slog.Any(\"DPoPProofs\", shadow.DPoPProofs)",
+    "new": "slog.Any(\"HTTP\", p.HTTP), slog.Any(\"DPoPProofs\", shadow.DPoPProofs)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestTokenEndpointRequestPrintsNoCredential$",
+    "why": "a request's slog group holds its form already resolved, so a handler that encodes a group's attributes without resolving them doesn't print the form's raw values"
+  },
+  {
+    "id": "server-interaction-required-interaction-resolved",
+    "file": "server/render.go",
+    "old": "slog.Any(interactionKey, a.Interaction.LogValue()), slog.Time(expiresAtKey, a.ExpiresAt)",
+    "new": "slog.Any(interactionKey, a.Interaction), slog.Time(expiresAtKey, a.ExpiresAt)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestInteractionRequiredPrintsNoHandleOrValue$",
+    "why": "InteractionRequired's slog group holds its interaction already resolved, so a handler that encodes a group's attributes without resolving them doesn't print the storage encoding, extension values included"
+  },
+  {
+    "id": "server-backchannel-interaction-hints-resolved",
+    "file": "server/render.go",
+    "old": "slog.Any(\"Hints\", r.Hints.LogValue())",
+    "new": "slog.Any(\"Hints\", r.Hints)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInteractionRequiredPrintsNoSecret$",
+    "why": "a CIBA interaction's slog group holds its hints already resolved, so a handler that encodes a group's attributes without resolving them doesn't print the hint tokens"
+  },
+  {
+    "id": "client-begin-authorization-extensions-resolved",
+    "file": "client/render.go",
+    "old": "slog.Any(\"Extensions\", r.Extensions.LogValue()), slog.Int(\"AuthorizationDetails\", len(r.AuthorizationDetails))",
+    "new": "slog.Any(\"Extensions\", r.Extensions), slog.Int(\"AuthorizationDetails\", len(r.AuthorizationDetails))",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestBeginAuthorizationRequestLogsNoExtensionValue$",
+    "why": "BeginAuthorizationRequest's slog group holds its extension values already resolved, as names, so a handler that encodes a group's attributes without resolving them doesn't print the values"
+  },
+  {
+    "id": "rendertest-unresolved-group-json",
+    "file": "internal/rendertest/rendertest.go",
+    "old": "out, err := json.Marshal(a.Value.Any())",
+    "new": "out, err := json.Marshal(a.Key)",
+    "module": "root",
+    "packages": [
+      "./internal/rendertest"
+    ],
+    "run": "^TestLeaksFindsAGroupAttributeEncodedUnresolved$",
+    "why": "the matrix encodes each attribute of a LogValue group with encoding/json unresolved, as a handler that walks a group without resolving it may"
+  },
+  {
+    "id": "rendertest-unresolved-group-json-error",
+    "file": "internal/rendertest/rendertest.go",
+    "old": "out = []byte(err.Error())",
+    "new": "out = nil",
+    "module": "root",
+    "packages": [
+      "./internal/rendertest"
+    ],
+    "run": "^TestLeaksFindsAnUnresolvedAttributesEncodingError$",
+    "why": "the matrix reports the error an unresolved group attribute's encoding gives, as log/slog's JSON handler logs one"
   }
 ]

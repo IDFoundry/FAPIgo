@@ -28,12 +28,18 @@ const (
 // (AuthReqID) must never double as the value that authorizes recording
 // a decision (this handle), the same separation InteractionHandle
 // keeps from a request_uri.
+//
+// Like InteractionHandle, its String is its wire value, which fmt
+// prints; log/slog logs one given as an attribute as [REDACTED], and
+// every rendering of a type of this package that holds one shows
+// [REDACTED], but log/slog's text handler prints a struct with %+v, so
+// one in an exported field of a struct of yours logs its wire value.
 type BackchannelAuthenticationHandle struct {
-	value string
+	value fapi.Secret
 }
 
 // String returns the handle's opaque wire value.
-func (h BackchannelAuthenticationHandle) String() string { return h.value }
+func (h BackchannelAuthenticationHandle) String() string { return h.value.Reveal() }
 
 // ParseBackchannelAuthenticationHandle reconstructs the
 // BackchannelAuthenticationHandle BeginBackchannelAuthentication
@@ -50,7 +56,7 @@ func ParseBackchannelAuthenticationHandle(value string) (BackchannelAuthenticati
 	if value == "" {
 		return BackchannelAuthenticationHandle{}, fmt.Errorf("server: backchannel authentication handle is empty")
 	}
-	return BackchannelAuthenticationHandle{value: value}, nil
+	return BackchannelAuthenticationHandle{value: fapi.NewSecret(value)}, nil
 }
 
 func generateBackchannelAuthenticationHandle(random io.Reader) (string, error) {
@@ -66,13 +72,19 @@ func generateBackchannelAuthenticationHandle(random io.Reader) (string, error) {
 
 // AuthReqID is the client-facing "auth_req_id" a successful
 // BeginBackchannelAuthentication call returns. It has no public
-// constructor — only this package can produce one.
+// constructor — only this package can produce one. It redeems the
+// request's tokens, so, like a handle, its String is its wire value,
+// which fmt prints, while log/slog logs one given as an attribute as
+// [REDACTED], and every rendering of a type of this package that holds
+// one shows [REDACTED]; log/slog's text handler prints a struct with
+// %+v, so one in an exported field of a struct of yours logs its wire
+// value, as a handle's does.
 type AuthReqID struct {
-	value string
+	value fapi.Secret
 }
 
 // String returns the auth_req_id's wire value.
-func (a AuthReqID) String() string { return a.value }
+func (a AuthReqID) String() string { return a.value.Reveal() }
 
 // generateAuthReqID returns a new auth_req_id: authReqIDSize random
 // bytes in unpadded base64url, the one form isWellFormedAuthReqID
@@ -119,7 +131,9 @@ type BackchannelAuthenticationHints struct {
 
 // BackchannelInteractionRequest is what the embedding application needs
 // to authenticate/consent the end user out-of-band for a pending CIBA
-// request — mirroring InteractionRequest for the browser flow.
+// request — mirroring InteractionRequest for the browser flow. log/slog
+// logs it as a group of its fields (LogValue), with Extensions as
+// parameter names only and the hint tokens as [REDACTED].
 type BackchannelInteractionRequest struct {
 	ClientID  fapi.ClientID
 	Scope     []string

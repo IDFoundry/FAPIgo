@@ -45,12 +45,22 @@ const interactionHandleSize = 32
 // a form field or query parameter alone. Package
 // server/interactioncookie does this, carrying the InteractionRequest
 // in the same encrypted cookie.
+//
+// String is the handle's wire value, so fmt.Sprint, %s and %v, and the
+// templates print it, for a cookie or a form: never log an
+// InteractionHandle on its own with fmt. log/slog logs one given as an
+// attribute as [REDACTED] (LogValue), and every rendering of a type of
+// this package that holds one shows [REDACTED]; but log/slog's text
+// handler prints a struct with %+v, so a handle in an exported field of
+// a struct of yours logs its wire value. fmt's reflection fallback (a
+// handle in an unexported field, or under a verb other than v, s, q, x
+// and X) prints an address.
 type InteractionHandle struct {
-	value string
+	value fapi.Secret
 }
 
 // String returns the handle's opaque wire value.
-func (h InteractionHandle) String() string { return h.value }
+func (h InteractionHandle) String() string { return h.value.Reveal() }
 
 // ParseInteractionHandle reconstructs the InteractionHandle
 // BeginAuthorization originally returned, from its own wire value
@@ -68,7 +78,7 @@ func ParseInteractionHandle(value string) (InteractionHandle, error) {
 	if value == "" {
 		return InteractionHandle{}, fmt.Errorf("server: interaction handle is empty")
 	}
-	return InteractionHandle{value: value}, nil
+	return InteractionHandle{value: fapi.NewSecret(value)}, nil
 }
 
 func generateInteractionHandle(random io.Reader) (string, error) {
@@ -104,6 +114,11 @@ type AuthenticationHints struct {
 // the interaction on another instance, store it with MarshalText and
 // restore it with ParseInteractionRequest, alongside the
 // InteractionHandle's String form.
+//
+// fmt prints its fields, and Extensions as parameter names only;
+// log/slog logs it as a group of its fields (LogValue), Extensions again
+// as names only, rather than through MarshalText, the storage encoding,
+// which carries every value.
 type InteractionRequest struct {
 	ClientID fapi.ClientID
 	Scope    []string

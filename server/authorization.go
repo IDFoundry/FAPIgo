@@ -27,7 +27,8 @@ type AuthorizationAction interface {
 // InteractionRequired means the embedding application must authenticate
 // the resource owner (and obtain consent) before authorization can
 // proceed. Handle must be passed back to CompleteAuthorization once that
-// interaction concludes.
+// interaction concludes. It prints and logs with its Handle as
+// [REDACTED].
 type InteractionRequired struct {
 	Handle      InteractionHandle
 	Interaction InteractionRequest
@@ -51,6 +52,12 @@ func (InteractionRequired) authorizationAction() {}
 // would be a breaking change to callers that type-switch on
 // AuthorizationAction. Handle it as a plain redirect to Destination (a
 // field here, unlike AuthorizationRedirect's Destination method).
+// Printed or logged itself, it shows Destination as
+// AuthorizationRedirect does, without its query's values. The field
+// itself is the full URL, an exported fapi.URL, so unlike
+// AuthorizationRedirect's, it prints whole, code included, wherever
+// fmt's reflection fallback reaches it (a RedirectResponse in an
+// unexported field, or under %p and %w) and through encoding/json.
 type RedirectResponse struct {
 	Destination fapi.URL
 }
@@ -190,7 +197,7 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	}
 
 	action := InteractionRequired{
-		Handle:      InteractionHandle{value: handle},
+		Handle:      InteractionHandle{value: fapi.NewSecret(handle)},
 		Interaction: interaction,
 		ExpiresAt:   handleExpiresAt,
 	}

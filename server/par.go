@@ -171,7 +171,8 @@ type PushAuthorizationRequest struct {
 }
 
 // PushAuthorizationResult is returned by a successful
-// PushAuthorizationRequest.
+// PushAuthorizationRequest. It prints and logs its RequestURI as
+// [REDACTED]; WriteJSON writes the request_uri itself, for the client.
 type PushAuthorizationResult struct {
 	RequestURI RequestURI
 	ExpiresIn  time.Duration
@@ -296,17 +297,25 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to persist pushed authorization request", err))
 	}
 
+	return s.pushedResult(ctx, client.ID(), requestURI, now)
+}
+
+// pushedResult is PushAuthorizationRequest's result for a request it
+// stored under requestURI: with the DPoP nonce this server hands out,
+// once nonces are configured, and audited as a success.
+func (s *Server) pushedResult(ctx context.Context, clientID fapi.ClientID, requestURI string, now time.Time) (PushAuthorizationResult, error) {
 	var nextNonce string
 	if s.deps.Nonces != nil {
-		nextNonce, err = s.issueDPoPNonce(ctx, now)
+		nonce, err := s.issueDPoPNonce(ctx, now)
 		if err != nil {
-			return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
+			return s.parFail(ctx, clientID, newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
 		}
+		nextNonce = nonce
 	}
 
-	s.audit(ctx, AuditEventPushAuthorizationRequest, client.ID(), AuditOutcomeSuccess, "")
+	s.audit(ctx, AuditEventPushAuthorizationRequest, clientID, AuditOutcomeSuccess, "")
 	return PushAuthorizationResult{
-		RequestURI:    RequestURI{value: requestURI},
+		RequestURI:    RequestURI{value: fapi.NewSecret(requestURI)},
 		ExpiresIn:     s.cfg.Limits.PushedRequestLifetime,
 		NextDPoPNonce: nextNonce,
 	}, nil

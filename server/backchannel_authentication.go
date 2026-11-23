@@ -55,7 +55,8 @@ type BackchannelAuthenticationAction interface {
 // BackchannelInteractionRequired means the embedding application must
 // authenticate (and obtain consent from) the end user out-of-band
 // before this request can be decided. Handle must be passed back to
-// CompleteBackchannelAuthentication once that concludes.
+// CompleteBackchannelAuthentication once that concludes. It prints and
+// logs with its Handle and AuthReqID as [REDACTED].
 type BackchannelInteractionRequired struct {
 	Handle    BackchannelAuthenticationHandle
 	AuthReqID AuthReqID
@@ -267,8 +268,8 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	}
 
 	action := BackchannelInteractionRequired{
-		Handle:      BackchannelAuthenticationHandle{value: handleRaw},
-		AuthReqID:   AuthReqID{value: authReqIDRaw},
+		Handle:      BackchannelAuthenticationHandle{value: fapi.NewSecret(handleRaw)},
+		AuthReqID:   AuthReqID{value: fapi.NewSecret(authReqIDRaw)},
 		ExpiresIn:   lifetime,
 		Interval:    s.cfg.Limits.BackchannelAuthenticationPollInterval,
 		Interaction: interaction,

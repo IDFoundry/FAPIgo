@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/server/interactioncookie"
 )
@@ -393,5 +394,36 @@ func TestLookupReadsACookieSealedWithTheRequest(t *testing.T) {
 	ck, tag = set(t, withLookup, now)
 	if _, _, err := plain.Read(requestWith(ck), now, tag); !errors.Is(err, interactioncookie.ErrNoInteraction) {
 		t.Errorf("Read(handle only, no Lookup) = %v, want ErrNoInteraction", err)
+	}
+}
+
+// TestRoundTripKeepsSensitiveExtensionValues checks the cookie carries a
+// Sensitive extension value through its storage encoding intact, and
+// encrypted: rendering an interaction prints no value, but storing one
+// must keep them all.
+func TestRoundTripKeepsSensitiveExtensionValues(t *testing.T) {
+	const otp = "SENSITIVE-OTP-0420"
+	def := extension.Definition[string]{
+		Sensitivity: extension.Sensitive, Name: "x_otp", Cardinality: extension.Single,
+		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
+	}
+	h, in := interaction(t)
+	if err := extension.Set(&in.Extensions, def, otp); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	c := newCookie(t, [][]byte{newKey(t)}, interactioncookie.Options{})
+	w := httptest.NewRecorder()
+	tag, err := c.Set(w, required(h, in, now), now)
+	if err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	ck := w.Result().Cookies()[0]
+	if showsInClear(ck.Value, otp) {
+		t.Error("the cookie value shows the Sensitive value")
+	}
+	_, got, err := c.Read(requestWith(ck), now.Add(time.Minute), tag)
+	if v, ok := extension.Get(got.Extensions, def); err != nil || !ok || v != otp {
+		t.Errorf("Read restored %q, %v, %v; want the value set", v, ok, err)
 	}
 }

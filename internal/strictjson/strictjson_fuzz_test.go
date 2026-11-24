@@ -28,13 +28,13 @@ func FuzzUnmarshalMatchesCaseSensitiveReading(f *testing.F) {
 	for _, s := range []string{
 		`{"alg":"ES256","kid":"a"}`, `{"ALG":"none","alg":"ES256"}`, `{"Kid":"x","alg":"ES256"}`,
 		`{"alg":"ES256","ſig":1}`, `{"cnf":{"JKT":"x"}}`, `{"cnf":{"jkt":"a","jkt":"b"}}`, `{"alg":"a","alg":"b"}`,
-		`{"alg":"ES256"}`,
+		`{"alg":"ES256"}`, `{"cnf":{"jkt":"a"},"cnf":{}}`,
 	} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, doc string) {
 		var h fuzzHeader
-		if Unmarshal([]byte(doc), &h) != nil {
+		if Unmarshal([]byte(doc), &h) != nil || repeatsAMember(doc) {
 			return
 		}
 		want, ok := readHeaderCaseSensitively(doc)
@@ -55,13 +55,13 @@ func FuzzUnmarshalMatchesCaseSensitiveReading(f *testing.F) {
 func FuzzCheckFieldCaseThenDecode(f *testing.F) {
 	for _, s := range []string{
 		`{"alg":"ES256","kid":"a"}`, `{"ALG":"none"} {}`, `{"alg":"PS256","kid":"a","ALG":"ES256","KID":"b"}"x"`,
-		`{"alg":"ES256"} 1`, `{"cnf":{"JKT":"x"}} []`, `{"alg":"ES256"}}`,
+		`{"alg":"ES256"} 1`, `{"cnf":{"JKT":"x"}} []`, `{"alg":"ES256"}}`, `{"cnf":{"jkt":"a"},"cnf":{}}`,
 	} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, doc string) {
 		var h fuzzHeader
-		if CheckFieldCase([]byte(doc), &h) != nil {
+		if CheckFieldCase([]byte(doc), &h) != nil || repeatsAMember(doc) {
 			return
 		}
 		if json.NewDecoder(strings.NewReader(doc)).Decode(&h) != nil {
@@ -106,6 +106,18 @@ func FuzzCheckDuplicateMembersThenDecode(f *testing.F) {
 			t.Fatalf("Decode(%q) = %+v, case-sensitive reading = %+v", doc, h, want)
 		}
 	})
+}
+
+// repeatsAMember reports whether doc repeats a member name anywhere.
+// encoding/json merges the copies of a repeated object member, so
+// Unmarshal and Decode then read "cnf" from more than one copy, where
+// the case-sensitive reader takes the last. That is out of these two
+// oracles' scope: the callers that run only the case check fill scalar
+// fields, which no merge can mix, and every caller whose fields include
+// an object runs CheckDuplicateMembers first, which
+// FuzzCheckDuplicateMembersThenDecode covers.
+func repeatsAMember(doc string) bool {
+	return CheckDuplicateMembers([]byte(doc)) != nil
 }
 
 // readHeaderCaseSensitively reads doc into a fuzzHeader by exact member

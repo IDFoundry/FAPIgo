@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.82.3](https://github.com/IDFoundry/FAPIgo/compare/v0.82.2...v0.82.3) (2026-11-24)
+
+
+### Bug Fixes
+
+* **client:** refuse token, CIBA and PAR responses a strict parser reads differently ([73aea47](https://github.com/IDFoundry/FAPIgo/commit/73aea47d613faabfd94554d6111d5673a9910a91))
+* reserve claim names in any case ([6bc6b8c](https://github.com/IDFoundry/FAPIgo/commit/6bc6b8c2c4ca5097c258afacc1f03b2f08967bca))
+* **server:** cap a pending CIBA request's lifetime at an hour in production ([ec91e3d](https://github.com/IDFoundry/FAPIgo/commit/ec91e3d5984ae6bba4e63d4420679b3903bd47f8))
+* **server:** refuse binding_message characters that display as nothing ([0b4d4ba](https://github.com/IDFoundry/FAPIgo/commit/0b4d4bac2fa09617126df495009156f897e385ce))
+* **server:** require a client_notification_token of at least 22 characters ([01c9d2b](https://github.com/IDFoundry/FAPIgo/commit/01c9d2bfa3f08b333bb31fe17a5c62332cea7bc7))
+* **server:** require an essential acr to meet both value and values ([fb76f32](https://github.com/IDFoundry/FAPIgo/commit/fb76f3221988e878fc3b79a621162d4c8d8b3a81))
+
 ## [0.82.2](https://github.com/IDFoundry/FAPIgo/compare/v0.82.1...v0.82.2) (2026-11-24)
 
 

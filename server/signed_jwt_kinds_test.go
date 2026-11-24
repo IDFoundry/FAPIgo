@@ -237,17 +237,27 @@ func TestRequestObjectWithSubjectRefused(t *testing.T) {
 	for name, sub := range map[string]string{"client_id": testClientID.String(), "other": "someone-else"} {
 		t.Run("PAR/"+name, func(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)
-			params := standardAuthParams(t)
-			params["sub"] = jsonRaw(t, sub)
-			requireServerErrorCode(t, pushRequestObject(t, h, h.requestObject(t, params)), server.ErrorInvalidRequestObject)
+			obj := requestObjectWithSubject(t, h, standardAuthParams(t), sub)
+			requireServerErrorCode(t, pushRequestObject(t, h, obj), server.ErrorInvalidRequestObject)
 		})
 		t.Run("CIBA/"+name, func(t *testing.T) {
 			h, _ := newHarnessWithBackchannel(t)
-			params := standardBackchannelParams(t)
-			params["sub"] = jsonRaw(t, sub)
-			requireBackchannelErrorCode(t, h, h.backchannelRequestObject(t, params), server.ErrorInvalidRequest)
+			obj := requestObjectWithSubject(t, h, standardBackchannelParams(t), sub)
+			requireBackchannelErrorCode(t, h, obj, server.ErrorInvalidRequest)
 		})
 	}
+}
+
+// requestObjectWithSubject is a request object carrying params and sub,
+// signed as requestobject.Create would sign one, which refuses a sub
+// parameter itself.
+func requestObjectWithSubject(t *testing.T, h harness, params map[string]json.RawMessage, sub string) string {
+	t.Helper()
+	extra := map[string]any{"sub": sub, "client_id": testClientID.String()}
+	for name, value := range params {
+		extra[name] = value
+	}
+	return signClientJWT(t, h, "oauth-authz-req+jwt", clientJWTClaims(h, "jti-with-sub-"+sub, extra))
 }
 
 // TestClientAssertionWithRequestClaimsRefused: a client assertion

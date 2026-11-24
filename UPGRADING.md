@@ -39,6 +39,23 @@ presents no TLS client certificate.
 `GetClientCertificate`, on the transport config you pass to
 `fapihttp.NewClient`.
 
+### A request object parameter may not be named `sub` (client)
+
+**Affects:** a client whose authorization or backchannel request
+parameters, an extension's included, carry a `sub` member in a signed
+request object.
+
+**Why:** a request object carrying `sub` has every claim a client
+assertion authenticates with (RFC 7523 §3), so it could be presented as
+one. FAPIgo's server already refuses such a request object; the client
+now refuses to build one.
+
+**What fails:** building the request fails with an error naming the
+reserved claim, instead of the server refusing it.
+
+**What to change:** rename the parameter. To name the end user, use
+`login_hint`, or a `sub` value in the `claims` parameter.
+
 ## sqlstore v0.11.1
 
 ### `ClientCacheTTL` is at most a minute (sqlstore)

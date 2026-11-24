@@ -495,7 +495,7 @@ func TestNewWiresAutomaticRegistrationRequestObjectFederationRules(t *testing.T)
 	f := setupAutomaticRegistrationFixture(t, testRedirectURI)
 	srv := newAutomaticRegistrationTestServer(t, f)
 
-	push := func(t *testing.T, params map[string]json.RawMessage) error {
+	pushObject := func(t *testing.T, requestObj string) error {
 		t.Helper()
 		// A fresh assertion each call: one is single-use, so a reused
 		// one would be refused as a replay before the request object
@@ -508,14 +508,6 @@ func TestNewWiresAutomaticRegistrationRequestObjectFederationRules(t *testing.T)
 		if err != nil {
 			t.Fatalf("CreateAssertion: %v", err)
 		}
-		requestObj, err := requestobject.Create(requestobject.CreateParams{
-			Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
-			ClientID: f.rpID, Audience: testIssuer,
-			Now: f.now, Lifetime: 30 * time.Second, Parameters: params,
-		})
-		if err != nil {
-			t.Fatalf("requestobject.Create: %v", err)
-		}
 		_, err = srv.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 			HTTP: server.FormRequest{Parameters: []server.FormParameter{
 				formParam("client_assertion", assertion),
@@ -524,6 +516,18 @@ func TestNewWiresAutomaticRegistrationRequestObjectFederationRules(t *testing.T)
 			}},
 		})
 		return err
+	}
+	push := func(t *testing.T, params map[string]json.RawMessage) error {
+		t.Helper()
+		requestObj, err := requestobject.Create(requestobject.CreateParams{
+			Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
+			ClientID: f.rpID, Audience: testIssuer,
+			Now: f.now, Lifetime: 30 * time.Second, Parameters: params,
+		})
+		if err != nil {
+			t.Fatalf("requestobject.Create: %v", err)
+		}
+		return pushObject(t, requestObj)
 	}
 
 	// OpenID Federation 1.0 §12.1.1.1: the request object carries
@@ -547,9 +551,23 @@ func TestNewWiresAutomaticRegistrationRequestObjectFederationRules(t *testing.T)
 	})
 
 	t.Run("rejects a sub claim", func(t *testing.T) {
-		params := compliant(t)
-		params["sub"] = jsonRaw(t, f.rpID)
-		if err := push(t, params); err == nil || !strings.Contains(err.Error(), "invalid_request_object") {
+		// Signed by hand: requestobject.Create refuses a sub parameter.
+		claims := map[string]any{
+			"iss": f.rpID, "aud": testIssuer, "sub": f.rpID, "jti": "with-sub",
+			"exp": f.now.Add(30 * time.Second).Unix(), "nbf": f.now.Unix(), "iat": f.now.Unix(),
+		}
+		for name, value := range compliant(t) {
+			claims[name] = value
+		}
+		payload, err := json.Marshal(claims)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		requestObj, err := jose.Sign(f.rpOIDCKey, jose.Header{Algorithm: fapi.ES256, Type: "oauth-authz-req+jwt", KeyID: "rp-oidc"}, payload)
+		if err != nil {
+			t.Fatalf("jose.Sign: %v", err)
+		}
+		if err := pushObject(t, requestObj); err == nil || !strings.Contains(err.Error(), "invalid_request_object") {
 			t.Fatalf("PushAuthorizationRequest (sub present) = %v, want invalid_request_object", err)
 		}
 	})

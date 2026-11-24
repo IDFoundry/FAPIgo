@@ -18,6 +18,26 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## sqlstore v0.11.1
+
+### `ClientCacheTTL` is at most a minute (sqlstore)
+
+**Affects:** a `sqlstore` DB opened with `Options.ClientCacheTTL` over
+one minute.
+
+**Why:** the cache serves a client as last read for up to the TTL, so
+a client removed, reconfigured or rekeyed through another instance (or
+by SQL run on the table) goes on authenticating on this one that long.
+A PostgreSQL DB's stores declare `CrossInstanceConsistent`, which
+`server.New` relies on for a horizontally scaled deployment, so the
+staleness needs a bound short enough for an emergency revocation.
+
+**What fails:** `sqlstore.New` returns an error naming
+`ClientCacheTTL`.
+
+**What to change:** set it to `sqlstore.MaxClientCacheTTL` or less.
+A few seconds keeps nearly all of the cache's saving.
+
 ## v0.82.4
 
 ### A built-in access token issuer needs its keys or store (server)

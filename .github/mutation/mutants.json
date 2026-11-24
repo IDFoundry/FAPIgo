@@ -4018,5 +4018,77 @@
     ],
     "run": "^TestLeaksFindsAnUnresolvedAttributesEncodingError$",
     "why": "the matrix reports the error an unresolved group attribute's encoding gives, as log/slog's JSON handler logs one"
+  },
+  {
+    "id": "server-interaction-needed-only-prompt-none",
+    "file": "server/complete_authorization.go",
+    "old": "err != nil || !prompt.Has(PromptNone) {",
+    "new": "err != nil && !prompt.Has(PromptNone) {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestCompleteAuthorizationInteractionNeeded|TestCompleteAuthorizationDropsReasonOutsideErrorText)$",
+    "why": "InteractionNeeded redirects to the client only for a prompt=none request; any other ends locally with server_error"
+  },
+  {
+    "id": "server-nonce-lookup-outage-server-error",
+    "file": "server/nonce.go",
+    "old": "if err != nil && storeOutage(ctx, err) {",
+    "new": "if err != nil && !storeOutage(ctx, err) {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCheckDPoPNonceAnswersALookupOutageWithServerError$",
+    "why": "a nonce Lookup the store couldn't answer is a 500 server_error, and an unknown nonce still gets the use_dpop_nonce challenge"
+  },
+  {
+    "id": "server-peer-certificate-needs-encoding",
+    "file": "server/peer_certificate.go",
+    "old": "if len(cert.Raw) == 0 {",
+    "new": "if len(cert.Raw) < 0 {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestCertificateClientAuthRefusesACertificateWithoutItsEncoding|TestCertificateBindingRefusesACertificateWithoutItsEncoding)$",
+    "why": "a PeerCertificate without its DER encoding neither authenticates a client nor binds a token to the digest of nothing"
+  },
+  {
+    "id": "resource-peer-certificate-needs-encoding",
+    "file": "resource/verify.go",
+    "old": "if len(req.PeerCertificate.Raw) == 0 {",
+    "new": "if len(req.PeerCertificate.Raw) < 0 {",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyRefusesACertificateWithoutItsEncoding$",
+    "why": "Verify fails with server_error for a PeerCertificate without its DER encoding rather than comparing the digest of nothing"
+  },
+  {
+    "id": "resource-explicit-url-normal-path",
+    "file": "resource/target.go",
+    "old": "if !canonical.HasNormalPath(target) {",
+    "new": "if false && !canonical.HasNormalPath(target) {",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyRefusesANonNormalPath$",
+    "why": "an explicit VerifyRequest.URL with a dot segment or a percent-encoded unreserved character is refused"
+  },
+  {
+    "id": "resource-request-path-normal-path",
+    "file": "resource/target.go",
+    "old": "if err == nil && !canonical.HasNormalPath(t) {",
+    "new": "if false && err == nil && !canonical.HasNormalPath(t) {",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyRefusesANonNormalPath$",
+    "why": "a request path from VerifyRequestFromHTTP with a dot segment or a percent-encoded unreserved character is refused"
   }
 ]

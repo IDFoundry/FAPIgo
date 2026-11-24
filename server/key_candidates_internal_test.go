@@ -9,6 +9,7 @@ import (
 	"crypto/rsa"
 	"errors"
 	"fmt"
+	"math/big"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -115,7 +116,8 @@ func thumbprintOf(t *testing.T, pub crypto.PublicKey, alg fapi.SignatureAlgorith
 // its RFC 7638 thumbprint, computed for the key's own algorithm (ES256,
 // PS256 or EdDSA), as well as to a request naming no kid; one with a
 // KeyID answers to that alone, and one whose thumbprint can't be
-// computed for its algorithm to no kid. An attester's keys
+// computed, for its algorithm or at all (an empty key, or a coordinate
+// wider than its curve), to no kid. An attester's keys
 // (verificationKeyCandidates) answer to their KeyID alone. Each key is
 // asked for under its own algorithm.
 func TestKeyCandidatesMatchKeyIDs(t *testing.T) {
@@ -135,6 +137,13 @@ func TestKeyCandidatesMatchKeyIDs(t *testing.T) {
 	rsaKidless := keys.VerificationKey{Algorithm: fapi.PS256, PublicKey: &rsaKey.PublicKey}
 	edKidless := keys.VerificationKey{Algorithm: fapi.EdDSA, PublicKey: edPub}
 	unfit := keys.VerificationKey{Algorithm: fapi.ES256, PublicKey: edPub}
+	// Keys a custom keys.ClientKeySource can hand over unchecked: one
+	// with a coordinate too wide for P-256 and an empty one. Neither has
+	// a thumbprint, so neither answers to a kid.
+	wide := keys.VerificationKey{Algorithm: fapi.ES256, PublicKey: &ecdsa.PublicKey{
+		Curve: elliptic.P256(), X: new(big.Int).Lsh(big.NewInt(1), 256), Y: pub.Y,
+	}}
+	empty := keys.VerificationKey{Algorithm: fapi.ES256, PublicKey: (*ecdsa.PublicKey)(nil)}
 	for _, tc := range []struct {
 		name             string
 		key              keys.VerificationKey
@@ -149,6 +158,8 @@ func TestKeyCandidatesMatchKeyIDs(t *testing.T) {
 		{"KeyID, itself", named, "named", true, true},
 		{"KeyID, its thumbprint", named, thumbprint, false, false},
 		{"no KeyID, unfit for its algorithm", unfit, edThumbprint, false, false},
+		{"no KeyID, a coordinate too wide for its curve", wide, thumbprint, false, false},
+		{"no KeyID, an empty key", empty, thumbprint, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			set := keys.VerificationKeySet{Keys: []keys.VerificationKey{tc.key}}

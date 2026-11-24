@@ -117,8 +117,11 @@ func TestAutomaticRegistrationRequiresCIBADeliveryMode(t *testing.T) {
 			f := setupAutomaticRegistrationFixtureWithPolicy(t, rpMetadataWith(t, cibaMetadata(tc.extra)), policyOrNil(t, tc.policy))
 			client, failure := resolveWith(t, f, tc.cfg)
 			if tc.refused {
-				if failure == nil || !strings.Contains(failure.Error(), "backchannel_token_delivery_mode") {
-					t.Fatalf("registration failure = %v, want the missing backchannel_token_delivery_mode refused", failure)
+				// UPGRADING.md quotes this reason as the one
+				// OnResolutionFailure reports.
+				const reason = "backchannel_token_delivery_mode is required to register for CIBA"
+				if failure == nil || !strings.Contains(failure.Error(), reason) {
+					t.Fatalf("registration failure = %v, want it to report %q", failure, reason)
 				}
 				return
 			}

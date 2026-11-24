@@ -56,6 +56,22 @@ request is refused with 400 `invalid_request`.
 **What to change:** have the client send a token of at least 128
 random bits, such as 16 random bytes base64url-encoded.
 
+### CIBA: a pending request lives at most an hour in production (server, *production only*)
+
+**Affects:** a server with `Endpoints.BackchannelAuthentication` set,
+under `AssuranceProduction`, whose
+`Limits.BackchannelAuthenticationRequestLifetime` is over 60 minutes.
+
+**Why:** the lifetime is how long an end user can be asked to approve
+a request, and how long the client can poll it. Without a ceiling, a
+request could wait for approval for days. An hour matches the 60
+minutes FAPI-CIBA §5.2.2 allows a signed request's own lifetime.
+
+**What fails:** `server.New` returns an error naming
+`limits.backchannel_authentication_request_lifetime`.
+
+**What to change:** set the lifetime to 60 minutes or less.
+
 ## v0.82.2
 
 ### `InteractionNeeded` answers only a `prompt=none` request (server)

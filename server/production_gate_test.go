@@ -371,6 +371,33 @@ func TestNewCapsCIBARequestLifetimeUnderProduction(t *testing.T) {
 	}
 }
 
+// TestNewCapsCIBAPendingLifetimeUnderProduction: a pending CIBA request
+// stays approvable and pollable at most an hour under
+// AssuranceProduction, so a longer
+// BackchannelAuthenticationRequestLifetime is refused, while
+// development leaves it to the embedder.
+func TestNewCapsCIBAPendingLifetimeUnderProduction(t *testing.T) {
+	for lifetime, wantRefused := range map[time.Duration]bool{
+		60 * time.Minute: false,
+		61 * time.Minute: true,
+		24 * time.Hour:   true,
+	} {
+		cfg, deps := cibaConfigAndDeps(t, server.AssuranceProduction, server.NoBackchannelNotifications{})
+		cfg.Limits.BackchannelAuthenticationRequestLifetime = lifetime
+		_, err := server.New(cfg, deps)
+		if (err != nil && strings.Contains(err.Error(), "limits.backchannel_authentication_request_lifetime must be at most")) != wantRefused {
+			t.Errorf("New(production, %v) = %v, want refused: %v", lifetime, err, wantRefused)
+		}
+		if !wantRefused && err != nil {
+			t.Errorf("New(production, %v): %v", lifetime, err)
+		}
+		cfg.Assurance = server.AssuranceDevelopment
+		if _, err := server.New(cfg, deps); err != nil {
+			t.Errorf("New(development, %v) = %v, want it accepted", lifetime, err)
+		}
+	}
+}
+
 // productionConfigAndDeps is validConfig/validDependencies with every
 // AssuranceProduction requirement met.
 func productionConfigAndDeps(t *testing.T) (server.Config, server.Dependencies) {

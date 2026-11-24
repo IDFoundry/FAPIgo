@@ -38,7 +38,8 @@ const (
 	// §5.3.2.1 item 13 says to accept, or over 60 seconds, a
 	// MaxRequestObjectLifetime over 60 minutes (Message Signing §5.3.1),
 	// and, with CIBA, a MaxBackchannelAuthenticationRequestLifetime over
-	// 60 minutes (FAPI-CIBA §5.2.2). It also accepts web clients'
+	// 60 minutes (FAPI-CIBA §5.2.2) or a
+	// BackchannelAuthenticationRequestLifetime over 60 minutes. It also accepts web clients'
 	// loopback http redirect URIs (§5.3.2.2 item 8), an issuer and
 	// endpoints over loopback http (§5.2.1) when they were parsed with
 	// fapi.AllowLoopbackHTTP, and any Dependencies.Random, and it skips
@@ -115,7 +116,8 @@ const (
 	// those numbers leave open: MaxDPoPProofAge at most 5 minutes (RFC
 	// 9449 §11.1's "seconds or minutes"), DPoPNonceLifetime at most 15
 	// minutes, JARMResponseLifetime at most 10 minutes (JARM §2.1),
-	// InteractionLifetime at most an hour and, with
+	// InteractionLifetime at most an hour, with CIBA
+	// BackchannelAuthenticationRequestLifetime at most an hour and, with
 	// AttestationBasedClientAuthentication, MaxClientAttestationPoPAge
 	// at most 5 minutes (a PoP JWT has no exp and is meant to be fresh
 	// per request, draft-12 §10.2).

@@ -261,7 +261,8 @@ sends requests. So also:
   and written to the store, before a cap can refuse it.
 - Keep `Limits.BackchannelAuthenticationRequestLifetime` short, minutes
   rather than an hour: a request counts against the caps, and is
-  listed, until it's decided or expires.
+  listed, until it's decided or expires. `AssuranceProduction` refuses
+  more than an hour.
 - With sqlstore, set `sqlstore.Options.ClientCacheTTL` (a few
   seconds), so a listing doesn't cost a client query for every request
   it shows.

@@ -182,7 +182,7 @@ func (r *Resolver) checkTrustMarkDelegation(trustAnchor ResolvedEntity, tm intfe
 // rather than reactively after a gate failure).
 func verifyAgainstCandidateKeys[C any](jwksRaw json.RawMessage, kid string, algorithm fapi.SignatureAlgorithm, verify func(pub crypto.PublicKey) (C, error)) (C, error) {
 	var zero C
-	candidates, err := jose.ParseJWKSet(jwksRaw)
+	candidates, skipped, err := jose.ParseJWKSetWithSkips(jwksRaw)
 	if err != nil {
 		return zero, fmt.Errorf("parse jwks: %w", err)
 	}
@@ -203,7 +203,7 @@ func verifyAgainstCandidateKeys[C any](jwksRaw json.RawMessage, kid string, algo
 		lastErr = err
 	}
 	if !tried {
-		return zero, fmt.Errorf("no candidate key found for algorithm %v kid %q among %d keys", algorithm, kid, len(candidates))
+		return zero, fmt.Errorf("no candidate key found for algorithm %v kid %q among %d keys%s", algorithm, kid, len(candidates), jose.SkippedKeyReason(skipped, kid))
 	}
 	return zero, fmt.Errorf("signature verification failed against every candidate key: %w", lastErr)
 }

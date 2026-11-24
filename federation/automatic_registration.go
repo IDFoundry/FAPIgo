@@ -1873,7 +1873,7 @@ func parseEncryptionAlgorithmPair(algValue, encValue *string, algLabel, encLabel
 // (OpenID Federation 1.0 §12.1.1.2: "an x5c Claim for a key in the
 // Entity's RP JWK Set"), the second one during a key rollover, say.
 func certificateThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
-	candidates, err := jose.ParseJWKSet(jwks)
+	candidates, skipped, err := jose.ParseJWKSetWithSkips(jwks)
 	if err != nil {
 		return nil, fmt.Errorf("parse jwks: %w", err)
 	}
@@ -1891,7 +1891,7 @@ func certificateThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
 		}
 	}
 	if len(thumbprints) == 0 {
-		return nil, fmt.Errorf("jwks has no usable x5c certificate")
+		return nil, fmt.Errorf("jwks has no usable x5c certificate%s", jose.SkippedKeysReason(skipped))
 	}
 	return thumbprints, nil
 }
@@ -1899,7 +1899,7 @@ func certificateThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
 // keyThumbprintsFromJWKS is internal/mtls.PublicKeyThumbprint of every
 // key in jwks, the keys a CA-issued certificate must carry one of.
 func keyThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
-	candidates, err := jose.ParseJWKSet(jwks)
+	candidates, skipped, err := jose.ParseJWKSetWithSkips(jwks)
 	if err != nil {
 		return nil, fmt.Errorf("parse jwks: %w", err)
 	}
@@ -1912,7 +1912,7 @@ func keyThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
 		thumbprints = append(thumbprints, t)
 	}
 	if len(thumbprints) == 0 {
-		return nil, fmt.Errorf("the RP JWK Set has no usable key for the certificate to carry (OpenID Federation 1.0 §12.1.1.2)")
+		return nil, fmt.Errorf("the RP JWK Set has no usable key for the certificate to carry (OpenID Federation 1.0 §12.1.1.2)%s", jose.SkippedKeysReason(skipped))
 	}
 	return thumbprints, nil
 }

@@ -990,7 +990,7 @@ func (r *Resolver) verifySelfSigned(stmt intfed.Statement, entityID string, now 
 // stmt's own algorithm (and kid, if the header carries one) and tries
 // Verify against each until one succeeds.
 func (r *Resolver) verifyAgainstJWKS(stmt intfed.Statement, jwksRaw json.RawMessage, expectedIssuer, expectedSubject string, algorithm fapi.SignatureAlgorithm, now time.Time) (intfed.Claims, error) {
-	candidates, err := jose.ParseJWKSet(jwksRaw)
+	candidates, skipped, err := jose.ParseJWKSetWithSkips(jwksRaw)
 	if err != nil {
 		return intfed.Claims{}, fmt.Errorf("parse jwks: %w", err)
 	}
@@ -1017,7 +1017,7 @@ func (r *Resolver) verifyAgainstJWKS(stmt intfed.Statement, jwksRaw json.RawMess
 		lastErr = err
 	}
 	if !tried {
-		return intfed.Claims{}, fmt.Errorf("no candidate key found for algorithm %v kid %q among %d keys", algorithm, kid, len(candidates))
+		return intfed.Claims{}, fmt.Errorf("no candidate key found for algorithm %v kid %q among %d keys%s", algorithm, kid, len(candidates), jose.SkippedKeyReason(skipped, kid))
 	}
 	return intfed.Claims{}, fmt.Errorf("signature verification failed against every candidate key: %w", lastErr)
 }

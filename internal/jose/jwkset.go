@@ -5,6 +5,8 @@ import (
 	"crypto"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/strictb64"
@@ -72,7 +74,88 @@ type jwkSetAlgHint struct {
 // ParseTrustedJWKSet for the JWK Set of a party the operator configured
 // as trusted.
 func ParseJWKSet(body []byte) ([]ParsedJWK, error) {
+	keys, _, err := parseJWKSet(body, maxCallerRSAModulusBits)
+	return keys, err
+}
+
+// SkippedJWK is a JWK Set entry ParseJWKSet skipped, and why: its "kid"
+// (empty when it has none or it didn't decode) and the reason, the
+// error ParseJWK gave or a description of what made it unusable. An
+// entry marked "use":"enc" isn't one: it is a key for another purpose,
+// not an unusable one.
+type SkippedJWK struct {
+	KeyID  string
+	Reason error
+}
+
+// ParseJWKSetWithSkips is ParseJWKSet that also reports the entries it
+// skipped, so a caller whose verification then finds no key can say
+// why an entry it might have used was left out.
+func ParseJWKSetWithSkips(body []byte) ([]ParsedJWK, []SkippedJWK, error) {
 	return parseJWKSet(body, maxCallerRSAModulusBits)
+}
+
+// SkippedKeyReason describes, for an error saying no key answered to
+// kid, why each of skipped's entries with that kid was left out: "" when
+// none has it. A caller appends it to its error, so an operator reading
+// "no candidate key" for a kid the set does list learns what was wrong
+// with that entry. Like SkippedKeysReason, it names at most
+// maxSkipReasons entries, since the set's publisher chooses how many
+// there are.
+func SkippedKeyReason(skipped []SkippedJWK, kid string) string {
+	var matching []SkippedJWK
+	for _, s := range skipped {
+		if s.KeyID == kid {
+			matching = append(matching, s)
+		}
+	}
+	if len(matching) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; the JWK Set's entry with kid %s was skipped: %s", quoteKeyID(kid), joinSkipReasons(matching, false))
+}
+
+// SkippedKeysReason is SkippedKeyReason for an error saying a set had no
+// usable key at all: why its skipped entries were left out, "" when
+// none was.
+func SkippedKeysReason(skipped []SkippedJWK) string {
+	if len(skipped) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; %d JWK Set entries were skipped (%s)", len(skipped), joinSkipReasons(skipped, true))
+}
+
+// maxSkipReasons is how many skipped entries a reason names, and
+// maxQuotedKeyIDBytes how much of a kid it quotes: both are chosen by
+// whoever publishes the set, and the reason goes into an error.
+const (
+	maxSkipReasons      = 3
+	maxQuotedKeyIDBytes = 64
+)
+
+func joinSkipReasons(skipped []SkippedJWK, withKeyIDs bool) string {
+	reasons := make([]string, 0, maxSkipReasons+1)
+	for i, s := range skipped {
+		if i == maxSkipReasons {
+			reasons = append(reasons, fmt.Sprintf("and %d more", len(skipped)-maxSkipReasons))
+			break
+		}
+		if withKeyIDs {
+			reasons = append(reasons, fmt.Sprintf("kid %s: %v", quoteKeyID(s.KeyID), s.Reason))
+		} else {
+			reasons = append(reasons, s.Reason.Error())
+		}
+	}
+	return strings.Join(reasons, "; ")
+}
+
+// quoteKeyID quotes kid, or another member of an entry, cut to
+// maxQuotedKeyIDBytes.
+func quoteKeyID(kid string) string {
+	if len(kid) > maxQuotedKeyIDBytes {
+		return strconv.Quote(kid[:maxQuotedKeyIDBytes]) + "…"
+	}
+	return strconv.Quote(kid)
 }
 
 // ParseTrustedJWKSet is ParseJWKSet for the JWK Set of an authorization
@@ -81,46 +164,62 @@ func ParseJWKSet(body []byte) ([]ParsedJWK, error) {
 // accepted, since which server's keys get fetched is the operator's
 // choice, not a caller's. Every other check is ParseJWKSet's.
 func ParseTrustedJWKSet(body []byte) ([]ParsedJWK, error) {
-	return parseJWKSet(body, maxRSAModulusBits)
+	keys, _, err := parseJWKSet(body, maxRSAModulusBits)
+	return keys, err
 }
 
-func parseJWKSet(body []byte, maxRSABits int) ([]ParsedJWK, error) {
+func parseJWKSet(body []byte, maxRSABits int) ([]ParsedJWK, []SkippedJWK, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	var set rawJWKSet
 	if err := strictjson.CheckFieldCase(body, &set); err != nil {
-		return nil, fmt.Errorf("malformed jwks: %w", err)
+		return nil, nil, fmt.Errorf("malformed jwks: %w", err)
 	}
 	if err := dec.Decode(&set); err != nil {
-		return nil, fmt.Errorf("malformed jwks: %w", err)
+		return nil, nil, fmt.Errorf("malformed jwks: %w", err)
 	}
 
-	var out []ParsedJWK
+	var (
+		out     []ParsedJWK
+		skipped []SkippedJWK
+	)
 	for _, raw := range set.Keys {
-		// Strictly, like ParseJWK: rawJWK doesn't model "x5c", so a
-		// case variant ("X5C") would otherwise reach Certificates.
-		var hint jwkSetAlgHint
-		if err := strictjson.Unmarshal(raw, &hint); err != nil {
-			continue
+		key, skip, ok := parseJWKSetEntry(raw, maxRSABits)
+		switch {
+		case ok:
+			out = append(out, key)
+		case skip.Reason != nil:
+			skipped = append(skipped, skip)
 		}
-		// RFC 7517 §4.2: a key for encryption isn't one to verify
-		// signatures with — see ParseEncryptionJWKSet.
-		if hint.Use == string(jwkUseEncryption) {
-			continue
-		}
-		alg, ok := algorithmForJWKSetHint(hint)
-		if !ok {
-			continue
-		}
-		jwk, err := parseJWK(raw, alg, maxRSABits)
-		if err != nil {
-			continue
-		}
-		out = append(out, ParsedJWK{
-			KeyID: hint.Kid, Algorithm: alg, PublicKey: jwk.PublicKey(),
-			Certificates: decodeX5C(hint.X5C),
-		})
 	}
-	return out, nil
+	return out, skipped, nil
+}
+
+// parseJWKSetEntry parses one JWK Set entry as a verification key. When
+// it can't be used, ok is false and skip says why, except for an entry
+// marked "use":"enc", which is skipped with no reason: it is a key for
+// another purpose (RFC 7517 §4.2; see ParseEncryptionJWKSet).
+func parseJWKSetEntry(raw json.RawMessage, maxRSABits int) (key ParsedJWK, skip SkippedJWK, ok bool) {
+	// Strictly, like ParseJWK: rawJWK doesn't model "x5c", so a case
+	// variant ("X5C") would otherwise reach Certificates.
+	var hint jwkSetAlgHint
+	if err := strictjson.Unmarshal(raw, &hint); err != nil {
+		return ParsedJWK{}, SkippedJWK{Reason: err}, false
+	}
+	if hint.Use == string(jwkUseEncryption) {
+		return ParsedJWK{}, SkippedJWK{}, false
+	}
+	alg, ok := algorithmForJWKSetHint(hint)
+	if !ok {
+		return ParsedJWK{}, SkippedJWK{KeyID: hint.Kid, Reason: fmt.Errorf("jose: unsupported key: kty %s, crv %s, alg %s", quoteKeyID(hint.Kty), quoteKeyID(hint.Crv), quoteKeyID(hint.Alg))}, false
+	}
+	jwk, err := parseJWK(raw, alg, maxRSABits)
+	if err != nil {
+		return ParsedJWK{}, SkippedJWK{KeyID: hint.Kid, Reason: err}, false
+	}
+	return ParsedJWK{
+		KeyID: hint.Kid, Algorithm: alg, PublicKey: jwk.PublicKey(),
+		Certificates: decodeX5C(hint.X5C),
+	}, SkippedJWK{}, true
 }
 
 // decodeX5C decodes each of x5c's own base64-encoded (RFC 7517 §4.7's

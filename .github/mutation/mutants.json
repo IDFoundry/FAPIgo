@@ -2643,6 +2643,30 @@
     "why": "an automatically registered RP's key published without a kid answers to its thumbprint whatever its algorithm, an RSA or Ed25519 key's as well as a P-256 one's"
   },
   {
+    "id": "fed-create-round-trip-duplicates",
+    "file": "internal/federation/create_validation.go",
+    "old": "if err := refuseDuplicateMembers(payload); err != nil {",
+    "new": "if err := error(nil); err != nil {",
+    "module": "root",
+    "packages": [
+      "./internal/federation"
+    ],
+    "run": "^TestCreateRefusesRepeatedMembers$",
+    "why": "Create refuses to sign a statement that repeats a member or holds two names differing only in case, which Parse would refuse"
+  },
+  {
+    "id": "fed-historical-revoked-null",
+    "file": "internal/federation/historicalkeys.go",
+    "old": "if len(raw) == 0 || string(raw) == \"null\" {",
+    "new": "if len(raw) == 0 {",
+    "module": "root",
+    "packages": [
+      "./internal/federation"
+    ],
+    "run": "^TestParseHistoricalKeyEntryReadsTheLastRevokedCopy$",
+    "why": "a historical key whose revoked is null is unrevoked, not skipped for lacking revoked_at"
+  },
+  {
     "id": "keys-jwks-refresh-panic-recovered",
     "file": "keys/jwkscache.go",
     "old": "defer func() { c.finishRefresh(call, recover()) }()",

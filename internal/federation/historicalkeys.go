@@ -205,15 +205,36 @@ func (r HistoricalKeysResponse) Verify(pub crypto.PublicKey, policy HistoricalKe
 // members — parsed separately from its JWK material (kty/crv/x/y/n/e/
 // kid/alg), which goes through jose.ParseJWKSet via a synthetic
 // single-entry set instead, reusing that package's own algorithm
-// detection and shape validation rather than duplicating it.
+// detection and shape validation rather than duplicating it. "revoked"
+// stays raw until decodeKeyRevocation reads it: encoding/json would
+// merge the copies of a repeated "revoked" into one struct, taking
+// revoked_at from one and reason from another, where a json.RawMessage
+// keeps the last copy, as it does for every other member here.
 type rawHistoricalKey struct {
 	IAT     *numericdate.Value `json:"iat"`
 	EXP     *numericdate.Value `json:"exp"`
 	NBF     *numericdate.Value `json:"nbf"`
-	Revoked *struct {
-		RevokedAt *numericdate.Value `json:"revoked_at"`
-		Reason    string             `json:"reason"`
-	} `json:"revoked"`
+	Revoked json.RawMessage    `json:"revoked"`
+}
+
+// rawKeyRevocation is a historical key entry's "revoked" object.
+type rawKeyRevocation struct {
+	RevokedAt *numericdate.Value `json:"revoked_at"`
+	Reason    string             `json:"reason"`
+}
+
+// decodeKeyRevocation decodes raw, a historical key entry's "revoked"
+// member, as received: nil when it's absent or null, and false when it
+// isn't an object of the expected shape.
+func decodeKeyRevocation(raw json.RawMessage) (*rawKeyRevocation, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, true
+	}
+	var revoked rawKeyRevocation
+	if err := json.Unmarshal(raw, &revoked); err != nil {
+		return nil, false
+	}
+	return &revoked, true
 }
 
 func parseHistoricalKeysClaims(payload []byte) (HistoricalKeysClaims, error) {
@@ -271,9 +292,13 @@ func parseHistoricalKeyEntry(entry json.RawMessage) (HistoricalKey, bool) {
 	if err := json.Unmarshal(entry, &extra); err != nil {
 		return HistoricalKey{}, false
 	}
+	revoked, ok := decodeKeyRevocation(extra.Revoked)
+	if !ok {
+		return HistoricalKey{}, false
+	}
 	// §8.7.2: each key's kid and exp are REQUIRED, and so is a
 	// revocation's revoked_at.
-	if extra.EXP == nil || parsed[0].KeyID == "" || (extra.Revoked != nil && extra.Revoked.RevokedAt == nil) {
+	if extra.EXP == nil || parsed[0].KeyID == "" || (revoked != nil && revoked.RevokedAt == nil) {
 		return HistoricalKey{}, false
 	}
 
@@ -287,10 +312,10 @@ func parseHistoricalKeyEntry(entry json.RawMessage) (HistoricalKey, bool) {
 	if extra.NBF != nil {
 		key.NotBefore = extra.NBF.Time()
 	}
-	if extra.Revoked != nil {
+	if revoked != nil {
 		key.Revoked = &KeyRevocation{
-			RevokedAt: extra.Revoked.RevokedAt.Time(),
-			Reason:    KeyRevocationReason(extra.Revoked.Reason),
+			RevokedAt: revoked.RevokedAt.Time(),
+			Reason:    KeyRevocationReason(revoked.Reason),
 		}
 	}
 	return key, true

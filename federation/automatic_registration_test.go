@@ -103,11 +103,18 @@ func setupAutomaticRegistrationFixtureWithPolicy(t *testing.T, metadataFn func(r
 	if metadataFn != nil {
 		metadata = map[string]json.RawMessage{"openid_relying_party": metadataFn(rpID, rpOIDCKey)}
 	}
-	rpConfig := sign(intfed.CreateParams{
+	// The RP is the peer under test, so its Entity Configuration is
+	// signed without Create's content checks: tests publish metadata a
+	// non-conformant RP would, such as member names differing only in
+	// case, which Create refuses to sign.
+	rpConfig, err := intfed.CreateUncheckedForTesting(intfed.CreateParams{
 		Signer: rpFedKey, Algorithm: fapi.ES256, KeyID: "rp-fed",
 		Issuer: rpID, Subject: rpID, Now: now, Lifetime: time.Hour, JWKS: rpFedJWKS,
 		AuthorityHints: []string{taID}, Metadata: metadata,
 	})
+	if err != nil {
+		t.Fatalf("intfed.CreateUncheckedForTesting: %v", err)
+	}
 
 	taMux.HandleFunc("/.well-known/openid-federation", serveStatement(taConfig))
 	taMux.HandleFunc("/fetch", serveFetch(map[string]string{rpID: taAboutRP}))

@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -465,5 +466,56 @@ func TestCreateHistoricalKeysResponseEmptyKeysAndOmittedReason(t *testing.T) {
 	}
 	if len(claims.Keys) != 1 || claims.Keys[0].Revoked == nil || claims.Keys[0].Revoked.Reason != "" {
 		t.Errorf("Keys = %+v, want one revoked key with no reason", claims.Keys)
+	}
+}
+
+// TestParseHistoricalKeyEntryReadsTheLastRevokedCopy: an entry that
+// repeats "revoked" is read from its last copy, as every other member
+// is, not from a merge of the copies. Merged, a revoked_at from one copy
+// and a reason from another made a revocation neither copy states.
+func TestParseHistoricalKeyEntryReadsTheLastRevokedCopy(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now().Truncate(time.Second)
+	base, err := json.Marshal(historicalKeyJWKMap(t, "k", &key.PublicKey, map[string]any{"exp": now.Unix()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := func(members string) json.RawMessage {
+		return json.RawMessage(string(base[:len(base)-1]) + "," + members + "}")
+	}
+	earlier, later := now.Add(-2*time.Hour).Unix(), now.Add(-time.Hour).Unix()
+
+	// The last copy has no revoked_at, which §8.7.2 requires, so the
+	// entry is skipped; merged, it took the first copy's.
+	if got, ok := parseHistoricalKeyEntry(entry(fmt.Sprintf(`"revoked":{"revoked_at":%d},"revoked":{"reason":"compromised"}`, earlier))); ok {
+		t.Fatalf("parseHistoricalKeyEntry = %+v, want the entry skipped: its last revoked has no revoked_at", got.Revoked)
+	}
+
+	// The last copy names no reason; merged, it took the first copy's.
+	got, ok := parseHistoricalKeyEntry(entry(fmt.Sprintf(`"revoked":{"revoked_at":%d,"reason":"compromised"},"revoked":{"revoked_at":%d}`, earlier, later)))
+	if !ok || got.Revoked == nil {
+		t.Fatalf("parseHistoricalKeyEntry = %+v, %v; want a revoked key", got, ok)
+	}
+	if got.Revoked.Reason != "" || got.Revoked.RevokedAt.Unix() != later {
+		t.Fatalf("Revoked = %+v, want the last copy's revoked_at and no reason", got.Revoked)
+	}
+
+	// A null revoked is no revocation, as before.
+	if got, ok := parseHistoricalKeyEntry(entry(`"revoked":null`)); !ok || got.Revoked != nil {
+		t.Fatalf("parseHistoricalKeyEntry(revoked null) = %+v, %v; want an unrevoked key", got.Revoked, ok)
+	}
+
+	// A revoked that isn't an object, or whose revoked_at isn't a
+	// NumericDate, skips the entry, as it did when the entry was decoded
+	// in one piece.
+	for _, members := range []string{
+		`"revoked":"compromised"`,
+		`"revoked":[]`,
+		`"revoked":{"revoked_at":"yesterday"}`,
+		`"revoked":{"revoked_at":1},"revoked":true`,
+	} {
+		if got, ok := parseHistoricalKeyEntry(entry(members)); ok {
+			t.Errorf("parseHistoricalKeyEntry(%s) = %+v, want the entry skipped", members, got.Revoked)
+		}
 	}
 }

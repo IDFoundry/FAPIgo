@@ -18,6 +18,32 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.82.3
+
+### `InteractionNeeded` answers only a `prompt=none` request (server)
+
+**Affects:** an application that completes an interaction with
+`server.InteractionNeeded` for a request whose
+`InteractionRequest.Prompt` doesn't include `server.PromptNone`: to end
+a sign-in page the user abandoned, say.
+
+**Why:** `CompleteAuthorization` redirected the browser to the client's
+redirect URI with `login_required` (or another `InteractionNeeded`
+error) although nobody had authenticated. RFC 9700 §4.11.2 forbids
+that redirect, since a client can register any page as its redirect
+URI, and allows it only for `prompt=none`'s silent authentication.
+`Deny` and `AuthenticationFailed` already documented the same rule.
+
+**What fails:** nothing at startup. For such a request,
+`CompleteAuthorization` ends the interaction and returns
+`AuthorizationLocalError` with `server_error`, instead of the redirect.
+A `prompt=none` request is answered as before.
+
+**What to change:** end a sign-in nobody completed with
+`DenyLocally`, and render the outcome yourself. Use `Deny` or
+`AuthenticationFailed` once the user has authenticated, and keep
+`InteractionNeeded` for `prompt=none` requests.
+
 ## v0.82.0
 
 ### A Sensitive extension parameter can't be returned in token claims (extension)

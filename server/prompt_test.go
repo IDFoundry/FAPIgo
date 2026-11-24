@@ -179,6 +179,46 @@ func TestCompleteAuthorizationInteractionNeeded(t *testing.T) {
 			t.Fatalf("result = %#v, want a server_error AuthorizationLocalError", result)
 		}
 	})
+
+	for name, prompt := range map[string]map[string]string{
+		"no prompt":    nil,
+		"prompt=login": {"prompt": "login"},
+	} {
+		t.Run("without prompt=none/"+name, func(t *testing.T) {
+			runInteractionNeededWithoutPromptNone(t, prompt)
+		})
+	}
+}
+
+// runInteractionNeededWithoutPromptNone completes an interaction whose
+// request didn't ask for prompt=none with InteractionNeeded, and checks
+// it ends locally with server_error: no redirect, no code, and the
+// handle used up.
+func runInteractionNeededWithoutPromptNone(t *testing.T, extra map[string]string) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	handle := interactionFor(t, h, extra).Handle
+	complete := func() server.AuthorizationResult {
+		result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+			Handle: handle, Result: server.InteractionNeeded(server.NeedLogin, "abandoned"),
+		})
+		if err != nil {
+			t.Fatalf("CompleteAuthorization: %v", err)
+		}
+		return result
+	}
+	local, ok := complete().(server.AuthorizationLocalError)
+	if !ok || local.Error.Code() != server.ErrorServerError || local.Error.HTTPStatus() != 500 {
+		t.Fatalf("result = %#v, want a 500 server_error AuthorizationLocalError", local)
+	}
+	if !strings.Contains(local.Error.Error(), "prompt=none") {
+		t.Errorf("error = %q, want it to name prompt=none", local.Error.Error())
+	}
+	if len(h.grants.all()) != 0 {
+		t.Fatal("a grant was recorded")
+	}
+	if again, ok := complete().(server.AuthorizationLocalError); !ok || again.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("second completion = %#v, want the handle used up", again)
+	}
 }
 
 // runInteractionNeededCase completes an interaction with
@@ -186,7 +226,7 @@ func TestCompleteAuthorizationInteractionNeeded(t *testing.T) {
 // reason and no authorization code.
 func runInteractionNeededCase(t *testing.T, need server.InteractionNeed, code string) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
-	handle := beginInteraction(t, h)
+	handle := interactionFor(t, h, map[string]string{"prompt": "none"}).Handle
 	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
 		Handle: handle, Result: server.InteractionNeeded(need, "no session"),
 	})

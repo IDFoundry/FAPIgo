@@ -182,6 +182,14 @@ func (interactionNeededResult) interactionResult() {
 // explanation the caller controls, sent as error_description under
 // Deny's rule.
 //
+// It answers only a request whose Prompt has PromptNone, the silent
+// authentication RFC 9700 §4.11.2 lets redirect before anyone
+// authenticates (see Deny). For any other request CompleteAuthorization
+// redirects nowhere: it ends the interaction and returns
+// AuthorizationLocalError with ErrorServerError. End such a sign-in
+// with DenyLocally, or with Deny or AuthenticationFailed once the user
+// has authenticated.
+//
 // It answers a redirect-based authorization only: a backchannel
 // authentication request carries no prompt, and
 // CompleteBackchannelAuthentication refuses it as an unrecognized

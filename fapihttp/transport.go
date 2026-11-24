@@ -278,7 +278,7 @@ func candidateIPs(ctx context.Context, host string) ([]net.IP, error) {
 // Parsed once at init from literals that cannot fail to parse.
 var extraBlockedCIDRs = func() []*net.IPNet {
 	cidrs := []string{
-		"0.0.0.0/8",       // RFC 1122 "this network" (IsUnspecified only catches the exact 0.0.0.0)
+		"0.0.0.0/8",       // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 1122 "this network" (IsUnspecified only catches the exact 0.0.0.0)
 		"100.64.0.0/10",   // NOSONAR: go:S1313 — this is the SSRF blocklist itself: hardcoding the range is what blocks it, not a fetch target. RFC 6598 CGNAT.
 		"192.0.0.0/24",    // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 6890 IETF protocol assignments.
 		"192.0.2.0/24",    // RFC 5737 TEST-NET-1 documentation
@@ -291,24 +291,24 @@ var extraBlockedCIDRs = func() []*net.IPNet {
 		// 64:ff9b::/96, an operator picks where inside it the IPv4
 		// address sits, so embeddedIPv4 can't decode it; and being
 		// local-use it never leads anywhere public, so block it whole.
-		"64:ff9b:1::/48",
+		"64:ff9b:1::/48", // NOSONAR: go:S1313 — see 100.64.0.0/10 above.
 		// RFC 3879 deprecated site-local unicast: the IPv6 counterpart
 		// of the private IPv4 ranges, still routed internally on some
 		// networks, and neither IsPrivate (fc00::/7) nor IsLinkLocal*
 		// covers it.
-		"fec0::/10",
+		"fec0::/10", // NOSONAR: go:S1313 — see 100.64.0.0/10 above.
 		// The IPv6 Special-Purpose Address Registry's other blocks that
 		// aren't globally reachable, the counterparts of the IPv4
 		// benchmarking and documentation ranges above. 2001::/23 as a
 		// whole isn't blocked: it holds globally reachable assignments
 		// (AMT, AS112, ORCHIDv2, DETs and anycast addresses).
-		"100::/64",       // RFC 6666 discard-only
-		"100:0:0:1::/64", // RFC 9780 dummy prefix
-		"2001:2::/48",    // RFC 5180 benchmarking
-		"2001:10::/28",   // RFC 4843 ORCHID, deprecated
+		"100::/64",       // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 6666 discard-only
+		"100:0:0:1::/64", // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 9780 dummy prefix
+		"2001:2::/48",    // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 5180 benchmarking
+		"2001:10::/28",   // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 4843 ORCHID, deprecated
 		"2001:db8::/32",  // RFC 3849 documentation
 		"3fff::/20",      // RFC 9637 documentation
-		"5f00::/16",      // RFC 9602 SRv6 segment identifiers
+		"5f00::/16",      // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 9602 SRv6 segment identifiers
 	}
 	out := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {

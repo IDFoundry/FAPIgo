@@ -105,7 +105,8 @@ are things no constructor can check.
   record, kept `Limits.PushedRequestLifetime` plus twice
   `Limits.MaxClockSkew`, up to eight per `request_uri`. Set
   `Dependencies.PushedRequestLookup` to the `storage.PushedRequestLookup`
-  built on your `Transactions` storage, if it has one (one of your own
+  built on your `Transactions` storage, if it has one (sqlstore's
+  `db.PushedRequestLookup()` from sqlstore v0.11.0; one of your own
   must pass `storage.TestPushedRequestLookupContract`): a `request_uri`
   that is unknown, expired, already used or presented with another
   `client_id` is then refused before anything is written. Without it,

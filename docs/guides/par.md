@@ -71,7 +71,8 @@ holds across instances.
 Counting writes a record before anyone has authenticated, so set
 `Dependencies.PushedRequestLookup` to the lookup built on your
 `Transactions` storage (`memstore.NewPushedRequestLookup` for
-memstore's): `BeginAuthorization` then refuses a `request_uri` that is
+memstore's, `db.PushedRequestLookup()` for sqlstore's from sqlstore
+v0.11.0): `BeginAuthorization` then refuses a `request_uri` that is
 unknown, expired, already used or presented with another `client_id`
 before it writes anything, where otherwise each such request leaves a
 record until it expires. Rate-limit the authorization endpoint either

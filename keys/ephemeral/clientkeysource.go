@@ -352,15 +352,11 @@ func encryptionKeyIDs(ks []keys.ClientEncryptionKey) []string {
 }
 
 // answeredKeyID is the kid k answers to: its own, or, when it has
-// none, its RFC 7638 thumbprint. ParseJWKSet has checked k fits its
-// algorithm, so the thumbprint can be computed; were it not,
-// ThumbprintKeyID's "" would have k answer to no kid.
+// none, its RFC 7638 thumbprint (jose.AnsweredKeyID). ParseJWKSet has
+// checked k fits its algorithm, so the thumbprint can be computed; were
+// it not, the "" returned would have k answer to no kid.
 func answeredKeyID(k jose.ParsedJWK) string {
-	if k.KeyID != "" {
-		return k.KeyID
-	}
-	thumbprint, _ := jose.ThumbprintKeyID(k.PublicKey, k.Algorithm)
-	return thumbprint
+	return jose.AnsweredKeyID(k.KeyID, k.PublicKey, k.Algorithm)
 }
 
 // parseClientKeys parses a JWK Set's verification keys (via the shared

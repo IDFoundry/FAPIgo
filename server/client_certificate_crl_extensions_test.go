@@ -251,7 +251,7 @@ func requireRevocationOutcome(t *testing.T, err error, want string) {
 			t.Fatalf("CheckRevocation = %v, want an error wrapping ErrCertificateRevoked", err)
 		}
 	default:
-		if err == nil || errors.Is(err, server.ErrCertificateRevoked) || !strings.Contains(err.Error(), "no current CRL") {
+		if err == nil || errors.Is(err, server.ErrCertificateRevoked) || !strings.Contains(err.Error(), "skipped as 1 unreadable") {
 			t.Fatalf("CheckRevocation = %v, want the issuer to have no usable CRL", err)
 		}
 	}

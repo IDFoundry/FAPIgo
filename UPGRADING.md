@@ -1161,6 +1161,55 @@ client's registered redirect URIs:
 cfg.RedirectURIs = []fapi.RegisteredRedirectURI{"https://rp.example/cb"} // not "https://rp.example/cb#"
 ```
 
+## sqlstore v0.4.0
+
+### A sealing key that isn't random is refused (sqlstore)
+
+**Affects:** a deployment passing `sqlstore.AESGCMSealer` a key that is
+one byte repeated (all zeros, say) or made entirely of printable text:
+a passphrase, or a hex or base64 key passed without decoding it.
+
+**Why:** such a key gave no confidentiality, and anyone who could guess
+it and write to the database could forge sealed records.
+
+**What fails:** `AESGCMSealer` returns an error for the key, so the
+stores can't be built. `RotatingSealer` also refuses two
+`AESGCMSealer`s over the same key.
+
+**What to change:** generate 32 bytes with `crypto/rand`, and decode an
+encoded key before passing it:
+
+```go
+key, err := hex.DecodeString(os.Getenv("FAPIGO_SEAL_KEY")) // `openssl rand -hex 32`
+sealer, err := sqlstore.AESGCMSealer(key)
+```
+
+Records sealed under the old key open only under it. Either let them go
+(clients authorize again, as with a lost key), or keep reading them
+with a `Sealer` of your own over the old key, as
+[sqlstore's README](sqlstore/README.md#upgrading-from-v03) shows.
+
+### A SQLite database must be in WAL mode (sqlstore)
+
+**Affects:** a deployment on SQLite whose database isn't in WAL mode.
+
+**Why:** without WAL, a read made while a write commits fails with
+`SQLITE_BUSY`, which the stores answer as an outage. Under concurrent
+requests, that was most of them.
+
+**What fails:** `Migrate` and `CheckSchema` return an error unless
+`PRAGMA journal_mode` is `wal`.
+
+**What to change:** open the file with both pragmas, `busy_timeout`
+first:
+
+```go
+sql.Open("sqlite", "file:fapigo.db?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
+```
+
+The first connection opened that way switches the file to WAL mode,
+and the mode lasts.
+
 ## v0.68.0
 
 ### `DefaultAttesterLeafPolicy` refuses more signing roles (server)

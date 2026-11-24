@@ -83,14 +83,11 @@ func hasKeyID(k keys.VerificationKey, kid string) bool { return k.KeyID == kid }
 
 // answersToKeyID reports whether k, a client's key, answers to kid: its
 // KeyID is kid, or it has none and kid is its RFC 7638 thumbprint,
-// computed as keys.NewKeyManagerFromSigners computes it. A key whose
-// thumbprint can't be computed answers to no kid.
+// computed as keys.NewKeyManagerFromSigners computes it
+// (jose.AnswersToKeyID). A key whose thumbprint can't be computed
+// answers to no kid.
 func answersToKeyID(k keys.VerificationKey, kid string) bool {
-	if k.KeyID != "" {
-		return k.KeyID == kid
-	}
-	thumbprint, err := jose.ThumbprintKeyID(k.PublicKey, k.Algorithm)
-	return err == nil && thumbprint == kid
+	return jose.AnswersToKeyID(k.KeyID, k.PublicKey, k.Algorithm, kid)
 }
 
 // verifyWithCandidates calls verify with each of candidates in turn and

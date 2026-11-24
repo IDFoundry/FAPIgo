@@ -2619,22 +2619,10 @@
     "why": "a resolution every caller abandoned still frees its place under MaxConcurrentResolutions when its goroutine ends, whether it returned or panicked, so callers cancelling their own requests can't use the places up"
   },
   {
-    "id": "fed-rp-key-thumbprint-kid",
-    "file": "federation/automatic_registration.go",
-    "old": "return err == nil && thumbprint == kid",
-    "new": "return err == nil && thumbprint == kid && false",
-    "module": "root",
-    "packages": [
-      "./federation"
-    ],
-    "run": "^TestAutomaticClientKeySourceMatchesThumbprintOfKeyWithoutKeyID$",
-    "why": "an automatically registered RP's key published without a kid answers to a request naming its RFC 7638 thumbprint"
-  },
-  {
     "id": "fed-rp-key-thumbprint-own-algorithm",
     "file": "federation/automatic_registration.go",
-    "old": "jose.ThumbprintKeyID(c.PublicKey, c.Algorithm)",
-    "new": "jose.ThumbprintKeyID(c.PublicKey, fapi.ES256)",
+    "old": "jose.AnswersToKeyID(c.KeyID, c.PublicKey, c.Algorithm, kid)",
+    "new": "jose.AnswersToKeyID(c.KeyID, c.PublicKey, fapi.ES256, kid)",
     "module": "root",
     "packages": [
       "./federation"
@@ -2751,34 +2739,38 @@
     "why": "a delta CRL, or one with an issuing distribution point, decides no certificate's status, critical or not"
   },
   {
-    "id": "srv-client-key-thumbprint-kid",
-    "file": "server/key_candidates.go",
-    "old": "return err == nil && thumbprint == kid",
-    "new": "return err == nil && thumbprint == kid && false",
+    "id": "jose-key-without-kid-answers-to-thumbprint",
+    "file": "internal/jose/keyid.go",
+    "old": "\treturn thumbprint\n}",
+    "new": "\treturn thumbprint[:0]\n}",
     "module": "root",
     "packages": [
-      "./server"
+      "./internal/jose",
+      "./server",
+      "./federation"
     ],
-    "run": "^(TestClientKeyWithoutKeyIDMatchesItsThumbprint|TestKeyCandidatesMatchKeyIDs)$",
-    "why": "a client key registered without a kid answers to a JWT naming its RFC 7638 thumbprint, the kid keys.NewKeyManagerFromSigners derives for it"
+    "run": "^(TestAnswersToKeyID|TestKeyCandidatesMatchKeyIDs|TestClientKeyWithoutKeyIDMatchesItsThumbprint|TestAutomaticClientKeySourceMatchesThumbprintOfKeyWithoutKeyID)$",
+    "why": "a client key registered without a kid answers to its RFC 7638 thumbprint, at the server and in a federation RP's key set"
   },
   {
-    "id": "srv-client-key-thumbprint-kid-its-own",
-    "file": "server/key_candidates.go",
-    "old": "return err == nil && thumbprint == kid",
-    "new": "return err == nil && thumbprint != \"\"",
+    "id": "jose-key-answers-to-its-own-kid-only",
+    "file": "internal/jose/keyid.go",
+    "old": "return kid != \"\" && AnsweredKeyID(keyID, pub, alg) == kid",
+    "new": "return kid != \"\" && AnsweredKeyID(keyID, pub, alg) != \"\"",
     "module": "root",
     "packages": [
-      "./server"
+      "./internal/jose",
+      "./server",
+      "./federation"
     ],
-    "run": "^(TestClientKeyWithoutKeyIDMatchesItsThumbprint|TestKeyCandidatesMatchKeyIDs)$",
-    "why": "a client key registered without a kid answers only to its own thumbprint, so a kid naming another key, another client's included, finds none"
+    "run": "^(TestAnswersToKeyID|TestKeyCandidatesMatchKeyIDs|TestClientKeyWithoutKeyIDMatchesItsThumbprint|TestAutomaticClientKeySourceMatchesThumbprintOfKeyWithoutKeyID)$",
+    "why": "a client key answers only to its own kid or thumbprint, not to any kid a request names"
   },
   {
     "id": "srv-client-key-thumbprint-own-algorithm",
     "file": "server/key_candidates.go",
-    "old": "jose.ThumbprintKeyID(k.PublicKey, k.Algorithm)",
-    "new": "jose.ThumbprintKeyID(k.PublicKey, fapi.ES256)",
+    "old": "jose.AnswersToKeyID(k.KeyID, k.PublicKey, k.Algorithm, kid)",
+    "new": "jose.AnswersToKeyID(k.KeyID, k.PublicKey, fapi.ES256, kid)",
     "module": "root",
     "packages": [
       "./server"
@@ -2787,16 +2779,18 @@
     "why": "a client key registered without a kid answers to its thumbprint whatever its algorithm, a PS256 or EdDSA key's as well as an ES256 one's"
   },
   {
-    "id": "srv-client-key-named-kid-exact",
-    "file": "server/key_candidates.go",
-    "old": "if k.KeyID != \"\" {\n\t\treturn k.KeyID == kid",
-    "new": "if k.KeyID != \"\" {\n\t\treturn k.KeyID == kid || true",
+    "id": "jose-named-key-answers-to-its-kid-alone",
+    "file": "internal/jose/keyid.go",
+    "old": "return kid != \"\" && AnsweredKeyID(keyID, pub, alg) == kid",
+    "new": "return kid != \"\" && (AnsweredKeyID(keyID, pub, alg) == kid || keyID != \"\")",
     "module": "root",
     "packages": [
-      "./server"
+      "./internal/jose",
+      "./server",
+      "./federation"
     ],
-    "run": "^TestKeyCandidatesMatchKeyIDs$",
-    "why": "a client key registered with a kid answers to that kid alone, never to its thumbprint"
+    "run": "^(TestAnswersToKeyID|TestKeyCandidatesMatchKeyIDs|TestClientKeyWithoutKeyIDMatchesItsThumbprint|TestAutomaticClientKeySourceMatchesThumbprintOfKeyWithoutKeyID)$",
+    "why": "a key registered with a kid answers to that kid alone, not to any other a request names"
   },
   {
     "id": "srv-attester-key-exact-kid",
@@ -2825,8 +2819,8 @@
   {
     "id": "keys-ephemeral-client-key-thumbprint-own-algorithm",
     "file": "keys/ephemeral/clientkeysource.go",
-    "old": "jose.ThumbprintKeyID(k.PublicKey, k.Algorithm)",
-    "new": "jose.ThumbprintKeyID(k.PublicKey, fapi.ES256)",
+    "old": "jose.AnsweredKeyID(k.KeyID, k.PublicKey, k.Algorithm)",
+    "new": "jose.AnsweredKeyID(k.KeyID, k.PublicKey, fapi.ES256)",
     "module": "root",
     "packages": [
       "./keys/ephemeral"

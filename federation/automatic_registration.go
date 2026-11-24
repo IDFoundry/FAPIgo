@@ -656,13 +656,10 @@ func (a *AutomaticClientRepository) resolveVerificationKeys(ctx context.Context,
 // answersToKeyID reports whether c, a key of an RP's JWK Set, answers
 // to kid: its "kid" is kid, or it has none and kid is its RFC 7638
 // thumbprint, the kid keys.NewKeyManagerFromSigners derives for such a
-// key. A key whose thumbprint can't be computed answers to no kid.
+// key (jose.AnswersToKeyID). A key whose thumbprint can't be computed
+// answers to no kid.
 func answersToKeyID(c jose.ParsedJWK, kid string) bool {
-	if c.KeyID != "" {
-		return c.KeyID == kid
-	}
-	thumbprint, err := jose.ThumbprintKeyID(c.PublicKey, c.Algorithm)
-	return err == nil && thumbprint == kid
+	return jose.AnswersToKeyID(c.KeyID, c.PublicKey, c.Algorithm, kid)
 }
 
 // resolve returns id's cached entry if still fresh, or resolves (via

@@ -85,3 +85,46 @@ func TestNewEncryptionJWKRefusesEmptyKeys(t *testing.T) {
 		t.Fatal("NewEncryptionJWK accepted a nil ECDH key")
 	}
 }
+
+// TestAnswersToKeyID: a key with a kid answers to that kid alone; one
+// without answers to its thumbprint kid; one without a kid whose
+// thumbprint can't be computed answers to no kid; and no key answers to
+// an empty kid.
+func TestAnswersToKeyID(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := &key.PublicKey
+	thumbprint, err := ThumbprintKeyID(pub, fapi.ES256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := AnsweredKeyID("named", pub, fapi.ES256); got != "named" {
+		t.Errorf("AnsweredKeyID(named) = %q, want its own kid", got)
+	}
+	if got := AnsweredKeyID("", pub, fapi.ES256); got != thumbprint {
+		t.Errorf("AnsweredKeyID(no kid) = %q, want its thumbprint %q", got, thumbprint)
+	}
+	if got := AnsweredKeyID("", pub, fapi.PS256); got != "" {
+		t.Errorf("AnsweredKeyID(no kid, unfit for its algorithm) = %q, want none", got)
+	}
+	for _, tc := range []struct {
+		name, keyID string
+		alg         fapi.SignatureAlgorithm
+		kid         string
+		want        bool
+	}{
+		{"its kid", "named", fapi.ES256, "named", true},
+		{"its thumbprint, though it has a kid", "named", fapi.ES256, thumbprint, false},
+		{"no kid, its thumbprint", "", fapi.ES256, thumbprint, true},
+		{"no kid, another kid", "", fapi.ES256, "other", false},
+		{"no kid, unfit for its algorithm", "", fapi.PS256, "", false},
+		{"no kid, unfit, any kid", "", fapi.PS256, thumbprint, false},
+		{"an empty kid", "named", fapi.ES256, "", false},
+	} {
+		if got := AnswersToKeyID(tc.keyID, pub, tc.alg, tc.kid); got != tc.want {
+			t.Errorf("%s: AnswersToKeyID = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

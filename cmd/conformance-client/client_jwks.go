@@ -14,12 +14,12 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -73,33 +73,50 @@ func loadFixedClientSigner(path string) (*ecdsa.PrivateKey, string, error) {
 			return nil, "", fmt.Errorf("client jwks file: key %q has no private component (\"d\") — "+
 				"this must be the client's PRIVATE key, not the public one handed to the suite", k.Kid)
 		}
-		x, err := decodeJWKCoordinate(k.X)
+		priv, err := parseP256PrivateJWK(k)
 		if err != nil {
-			return nil, "", fmt.Errorf("client jwks file: key %q: decode x: %w", k.Kid, err)
-		}
-		y, err := decodeJWKCoordinate(k.Y)
-		if err != nil {
-			return nil, "", fmt.Errorf("client jwks file: key %q: decode y: %w", k.Kid, err)
-		}
-		d, err := decodeJWKCoordinate(k.D)
-		if err != nil {
-			return nil, "", fmt.Errorf("client jwks file: key %q: decode d: %w", k.Kid, err)
-		}
-		priv := &ecdsa.PrivateKey{
-			PublicKey: ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y},
-			D:         d,
+			return nil, "", fmt.Errorf("client jwks file: key %q: %w", k.Kid, err)
 		}
 		return priv, k.Kid, nil
 	}
 	return nil, "", fmt.Errorf("client jwks file %s: no P-256 EC private key found", path)
 }
 
-func decodeJWKCoordinate(s string) (*big.Int, error) {
-	b, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return nil, err
+// p256Octets is the size of a P-256 coordinate and private scalar: RFC
+// 7518 §6.2.1.2, §6.2.1.3 and §6.2.2.1 require "x", "y" and "d" at that
+// full size, leading zero octets included.
+const p256Octets = 32
+
+// parseP256PrivateJWK builds the private key k holds, as strictly as
+// the library parses a public JWK: "x", "y" and "d" each exactly 32
+// octets, "d" a valid P-256 scalar, and "x" and "y" the public key "d"
+// derives. A file whose public half isn't its private key's would have
+// this driver sign with a key the suite can't verify, and fail every
+// signed request with an error that says nothing about the file.
+func parseP256PrivateJWK(k clientJWK) (*ecdsa.PrivateKey, error) {
+	var octets [3][]byte
+	for i, member := range []struct{ name, value string }{{"x", k.X}, {"y", k.Y}, {"d", k.D}} {
+		b, err := base64.RawURLEncoding.DecodeString(member.value)
+		if err != nil {
+			return nil, fmt.Errorf("decode %s: %w", member.name, err)
+		}
+		if len(b) != p256Octets {
+			return nil, fmt.Errorf("%s is %d octets, want %d (RFC 7518 §6.2)", member.name, len(b), p256Octets)
+		}
+		octets[i] = b
 	}
-	return new(big.Int).SetBytes(b), nil
+	priv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), octets[2])
+	if err != nil {
+		return nil, fmt.Errorf("d: %w", err)
+	}
+	public, err := priv.PublicKey.Bytes() // 0x04 || x || y
+	if err != nil {
+		return nil, fmt.Errorf("derive public key: %w", err)
+	}
+	if !bytes.Equal(public[1:1+p256Octets], octets[0]) || !bytes.Equal(public[1+p256Octets:], octets[1]) {
+		return nil, fmt.Errorf("x and y are not the public key of d")
+	}
+	return priv, nil
 }
 
 // fixedKeyPurposes are every SigningPurpose the suite can plausibly

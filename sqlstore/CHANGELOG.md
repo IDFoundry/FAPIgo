@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.10.0...sqlstore/v0.11.0) (2026-11-24)
+
+
+### Features
+
+* **sqlstore:** sqlstore implements storage.PushedRequestLookup ([3f6ad97](https://github.com/IDFoundry/FAPIgo/commit/3f6ad9774bbe665c5e616554b24812e4b80c383c))
+
 ## [0.10.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.9.2...sqlstore/v0.10.0) (2026-11-23)
 
 

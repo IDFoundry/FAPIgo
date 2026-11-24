@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestFromRequest(t *testing.T) {
@@ -93,16 +92,23 @@ func TestEqualNumbersExactly(t *testing.T) {
 func TestFromRequestDecodesValueOnce(t *testing.T) {
 	value := "[" + strings.Repeat("1,", 2699) + "1]"
 	request := json.RawMessage(`{"value":` + value + `,"values":[` + strings.Repeat("0,", 5399) + value + `]}`)
-	start := time.Now()
 	acceptable, constrained := FromRequest(request)
-	elapsed := time.Since(start)
 	if !constrained || len(acceptable) != 1 || !Equal(acceptable[0], json.RawMessage(value)) {
 		t.Fatalf("FromRequest = %d values, %v; want only the one equal to value", len(acceptable), constrained)
 	}
-	if elapsed > 250*time.Millisecond {
-		t.Fatalf("FromRequest took %v, want a few milliseconds", elapsed)
+	if allocs := testing.AllocsPerRun(1, func() { FromRequest(request) }); allocs > maxDecodeOnceAllocs {
+		t.Fatalf("FromRequest made %.0f allocations, want at most %d: value decoded once per entry of values?", allocs, maxDecodeOnceAllocs)
 	}
 }
+
+// maxDecodeOnceAllocs bounds the allocations FromRequest and Allows may
+// make for the two tests above and below: about 49,000 (65,000 on Go
+// 1.27) when the large value is decoded once, and about 15 million when
+// FromRequest decodes it again for each entry of "values". Counting
+// allocations, rather than timing the call, gives the same answer on a
+// loaded machine, where a time budget failed under the mutation run's
+// load.
+const maxDecodeOnceAllocs = 200_000
 
 // Allows decodes the released value once, not once per acceptable
 // value, and still matches by JSON equality.
@@ -114,12 +120,11 @@ func TestAllowsDecodesValueOnce(t *testing.T) {
 	}
 	acceptable = append(acceptable, json.RawMessage(`[`+strings.Repeat("1.0,", 2699)+`1e0]`))
 	a := Acceptable{"c": acceptable}
-	start := time.Now()
 	if !a.Allows("c", released) {
 		t.Fatal("Allows = false, want true for a value equal as JSON")
 	}
-	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
-		t.Fatalf("Allows took %v, want a few milliseconds", elapsed)
+	if allocs := testing.AllocsPerRun(1, func() { a.Allows("c", released) }); allocs > maxDecodeOnceAllocs {
+		t.Fatalf("Allows made %.0f allocations, want at most %d: value decoded once per acceptable value?", allocs, maxDecodeOnceAllocs)
 	}
 	if a.Allows("c", json.RawMessage(`[1]`)) || a.Allows("c", json.RawMessage(`{`)) {
 		t.Fatal("Allows = true for a value not among the acceptable ones")

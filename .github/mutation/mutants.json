@@ -4225,5 +4225,77 @@
     ],
     "run": "^(TestDecodeTokenResponseRefusesAmbiguousResponses|TestDecodeBackchannelAuthenticationResponseRefusesAmbiguousResponses|TestDecodeResultRefusesAmbiguousResponses|TestUnmarshalNoRepeats)$",
     "why": "UnmarshalNoRepeats refuses a member repeated in one object, exactly or as a case variant"
+  },
+  {
+    "id": "server-jwt-access-tokens-keys-required",
+    "file": "server/accesstoken.go",
+    "old": "if j.Keys == nil {",
+    "new": "if j.Keys == nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewRefusesBuiltInAccessTokensWithoutTheirDependencies$",
+    "why": "a JWTAccessTokens without Keys is refused by New"
+  },
+  {
+    "id": "server-jwt-access-tokens-keys-typed-nil",
+    "file": "server/accesstoken.go",
+    "old": "if found, ok := depcheck.FindTypedNil(j, map[string]string{\"Keys\": \"Keys\"}); ok {",
+    "new": "if found, ok := depcheck.FindTypedNil(j, map[string]string{\"Keys\": \"Keys\"}); ok && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewRefusesBuiltInAccessTokensWithoutTheirDependencies$",
+    "why": "a JWTAccessTokens with a nil key manager behind Keys is refused by New"
+  },
+  {
+    "id": "server-jwt-access-tokens-algorithm-valid",
+    "file": "server/accesstoken.go",
+    "old": "if !j.Algorithm.IsValid() {",
+    "new": "if false && !j.Algorithm.IsValid() {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewRefusesBuiltInAccessTokensWithoutTheirDependencies$",
+    "why": "a JWTAccessTokens without a valid Algorithm is refused by New"
+  },
+  {
+    "id": "server-opaque-access-tokens-store-required",
+    "file": "server/accesstoken.go",
+    "old": "if o.Store == nil {",
+    "new": "if o.Store == nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewRefusesBuiltInAccessTokensWithoutTheirDependencies$",
+    "why": "an OpaqueAccessTokens without Store is refused by New"
+  },
+  {
+    "id": "server-opaque-access-tokens-store-typed-nil",
+    "file": "server/accesstoken.go",
+    "old": "if found, ok := depcheck.FindTypedNil(o, map[string]string{\"Store\": \"Store\"}); ok {",
+    "new": "if found, ok := depcheck.FindTypedNil(o, map[string]string{\"Store\": \"Store\"}); ok && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewRefusesBuiltInAccessTokensWithoutTheirDependencies$",
+    "why": "an OpaqueAccessTokens with a nil store behind Store is refused by New"
+  },
+  {
+    "id": "server-client-assertion-lifetime-ceiling",
+    "file": "server/server.go",
+    "old": "if l.MaxClientAssertionLifetime > fapiMaxClientAssertionLifetime {",
+    "new": "if false && l.MaxClientAssertionLifetime > fapiMaxClientAssertionLifetime {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewEnforcesFAPILimitsUnderProduction$",
+    "why": "production assurance refuses a MaxClientAssertionLifetime over 5 minutes"
   }
 ]

@@ -461,6 +461,13 @@ const (
 	// It mirrors fapiMaxDPoPProofAge: five minutes is the top of RFC
 	// 9449 §11.1's "seconds or minutes".
 	fapiMaxClientAttestationPoPAge = 5 * time.Minute
+	// RFC 7523 §3 and FAPI 2.0 give a client assertion no number, but
+	// its exp is how long a captured assertion stays usable and how
+	// long its jti must be remembered to refuse a replay. Five minutes
+	// is the same bound this module's client puts on the assertions it
+	// makes under AssuranceProduction; RecommendedLimits uses 60
+	// seconds.
+	fapiMaxClientAssertionLifetime = 5 * time.Minute
 	// RFC 9449 §8 and §11.1 give a nonce no number: it limits how long
 	// a proof made for it stays usable, so it's held to a few multiples
 	// of the proof age.
@@ -524,6 +531,9 @@ func fapiLimitErrors(l Limits, cibaEnabled, attestationEnabled bool) []error {
 // used.
 func validateProductionLifetimes(l Limits, attestationEnabled bool) []error {
 	var errs []error
+	if l.MaxClientAssertionLifetime > fapiMaxClientAssertionLifetime {
+		errs = append(errs, fmt.Errorf("server: config: limits.max_client_assertion_lifetime must be at most %v under AssuranceProduction", fapiMaxClientAssertionLifetime))
+	}
 	if l.MaxDPoPProofAge > fapiMaxDPoPProofAge {
 		errs = append(errs, fmt.Errorf("server: config: limits.max_dpop_proof_age must be at most %v under AssuranceProduction (RFC 9449 §11.1)", fapiMaxDPoPProofAge))
 	}
@@ -741,6 +751,9 @@ func validateRequiredDependencies(deps Dependencies) error {
 	}
 	if deps.AccessTokens == nil {
 		return fmt.Errorf("server: dependencies: access tokens is required (pass JWTAccessTokens{...} or OpaqueAccessTokens{...})")
+	}
+	if err := checkBuiltInAccessTokens(deps.AccessTokens); err != nil {
+		return err
 	}
 	return checkEmbeddedJWTAccessTokens(deps.AccessTokens)
 }

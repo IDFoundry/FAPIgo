@@ -131,12 +131,13 @@ tests; run anything clients rely on under `AssuranceProduction`.
 `AssuranceProduction` holds the limits FAPI 2.0 fixes (authorization
 code and pushed request lifetimes, clock skew, request object and CIBA
 request lifetimes) to the profile's numbers, and bounds a few it leaves
-open (`MaxDPoPProofAge` at most 5 minutes, `DPoPNonceLifetime` 15,
-`JARMResponseLifetime` 10, `InteractionLifetime` an hour, and, with
+open (`MaxClientAssertionLifetime` and `MaxDPoPProofAge` at most 5
+minutes, `DPoPNonceLifetime` 15, `JARMResponseLifetime` 10,
+`InteractionLifetime` an hour, with CIBA
+`BackchannelAuthenticationRequestLifetime` an hour, and, with
 attestation-based client authentication, `MaxClientAttestationPoPAge`
 5), but not the ones it leaves to you: `AccessTokenLifetime`,
-`RefreshTokenLifetime`, and how long a client assertion or attestation
-may live. It also
+`RefreshTokenLifetime`, and how long a client attestation may live. It also
 requires `Dependencies.Clock` to be `server.SystemClock{}` (or a clock
 declaring `server.ClockAssurance`) reading the real time. Those are what bound a leaked
 token when nothing else does, so keep them short, and shorter still with

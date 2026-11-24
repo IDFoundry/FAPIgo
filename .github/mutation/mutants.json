@@ -4138,5 +4138,42 @@
     ],
     "run": "^TestNewCapsCIBAPendingLifetimeUnderProduction$",
     "why": "production assurance refuses a pending CIBA request lifetime over an hour"
+  },
+  {
+    "id": "claimnames-reserved-case-folded",
+    "file": "internal/claimnames/claimnames.go",
+    "old": "return slices.ContainsFunc(names, func(n string) bool { return strings.EqualFold(n, name) })",
+    "new": "return slices.Contains(names, name) || strings.EqualFold(\"\", name)",
+    "module": "root",
+    "packages": [
+      "./internal/claimnames",
+      "./server"
+    ],
+    "run": "^(TestReservedIgnoresCase|TestCompleteAuthorizationRejectsInvalidGrantedIDTokenClaims|TestNewRejectsExtensionClaimShadowingManagedClaim|TestSignUserInfoResponseRejectsReservedClaims)$",
+    "why": "a case variant of a reserved claim name, such as Sub or the long-s spelling of sub, is reserved too"
+  },
+  {
+    "id": "server-essential-acr-unmatched-value",
+    "file": "server/essential_acr.go",
+    "old": "return []string{}, nil",
+    "new": "return append([]string{value}, list...), nil",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestEssentialACRValues$",
+    "why": "an essential acr whose value isn't among its values can't be met and is refused"
+  },
+  {
+    "id": "server-essential-acr-value-and-values-intersect",
+    "file": "server/essential_acr.go",
+    "old": "return []string{value}, nil",
+    "new": "return append([]string{value}, list...), nil",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestEssentialACRValues$",
+    "why": "an essential acr with both value and values must equal value, not any of values"
   }
 ]

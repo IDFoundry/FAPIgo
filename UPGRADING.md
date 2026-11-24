@@ -18,6 +18,28 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.82.3
+
+### CIBA: a `binding_message` may not hold characters that display as nothing (server)
+
+**Affects:** a CIBA client whose `binding_message` holds a Unicode
+default-ignorable character outside the format characters already
+refused: a Hangul filler (U+115F, U+1160, U+3164, U+FFA0), the
+combining grapheme joiner (U+034F), or another listed in Unicode's
+Other_Default_Ignorable_Code_Point. With `Config.RequireBindingMessage`,
+also a client whose message shows only blank Braille cells (U+2800).
+
+**Why:** a display renders these as nothing, so the end user could be
+shown a different, or an empty, message from the one the consumption
+device shows. The Hangul fillers are classed as letters, so a required
+message made of them passed as visible.
+
+**What fails:** nothing at startup. The backchannel authentication
+request is refused with 400 `invalid_binding_message`.
+
+**What to change:** send a message of ordinary text. Korean text in
+precomposed syllables is unaffected.
+
 ## v0.82.2
 
 ### `InteractionNeeded` answers only a `prompt=none` request (server)

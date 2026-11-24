@@ -236,6 +236,7 @@ func TestClientCertificateCRLs(t *testing.T) {
 	ca := newRevocationCA(t, "crl-ca", now.Add(-time.Hour), now.Add(time.Hour))
 	// Same name as ca, different key: its CRLs mustn't count as ca's.
 	impostor := newRevocationCA(t, "crl-ca", now.Add(-time.Hour), now.Add(time.Hour))
+	other := newRevocationCA(t, "other-ca", now.Add(-time.Hour), now.Add(time.Hour))
 	cert := ca.issue(t, now.Add(-time.Minute), now.Add(time.Hour))
 	chain := []*x509.Certificate{cert, ca.cert}
 	current := func(extensions []pkix.Extension, revoked ...*x509.Certificate) *x509.RevocationList {
@@ -252,11 +253,16 @@ func TestClientCertificateCRLs(t *testing.T) {
 		{name: "not revoked", lists: []*x509.RevocationList{current(nil)}},
 		{name: "revoked", lists: []*x509.RevocationList{current(nil, cert)}, wantErr: "is revoked", wantRevoked: true},
 		{name: "revoked in one of several current lists", lists: []*x509.RevocationList{current(nil), current(nil, cert)}, wantErr: "is revoked", wantRevoked: true},
-		{name: "no list", wantErr: "no current CRL"},
-		{name: "stale", lists: []*x509.RevocationList{ca.crl(t, now.Add(-2*time.Hour), now.Add(-time.Hour), nil)}, wantErr: "no current CRL"},
-		{name: "not yet valid", lists: []*x509.RevocationList{ca.crl(t, now.Add(time.Minute), now.Add(time.Hour), nil)}, wantErr: "no current CRL"},
-		{name: "signed by a same-named impostor", lists: []*x509.RevocationList{impostor.crl(t, now.Add(-time.Minute), now.Add(time.Hour), nil)}, wantErr: "no current CRL"},
-		{name: "delta CRL only", lists: []*x509.RevocationList{current(deltaIndicator)}, wantErr: "no current CRL"},
+		{name: "no list", wantErr: `no usable CRL from "CN=crl-ca": no list names it`},
+		{name: "stale", lists: []*x509.RevocationList{ca.crl(t, now.Add(-2*time.Hour), now.Add(-time.Hour), nil)}, wantErr: "skipped as 1 not current"},
+		{name: "not yet valid", lists: []*x509.RevocationList{ca.crl(t, now.Add(time.Minute), now.Add(time.Hour), nil)}, wantErr: "skipped as 1 not current"},
+		{name: "signed by a same-named impostor", lists: []*x509.RevocationList{impostor.crl(t, now.Add(-time.Minute), now.Add(time.Hour), nil)}, wantErr: "skipped as 1 not signed by the issuer"},
+		{name: "delta CRL only", lists: []*x509.RevocationList{current(deltaIndicator)}, wantErr: "skipped as 1 unreadable"},
+		{name: "several lists, each skipped", lists: []*x509.RevocationList{
+			ca.crl(t, now.Add(-2*time.Hour), now.Add(-time.Hour), nil), current(deltaIndicator), current(deltaIndicator),
+			impostor.crl(t, now.Add(-time.Minute), now.Add(time.Hour), nil), other.crl(t, now.Add(-time.Minute), now.Add(time.Hour), nil),
+		}, wantErr: "skipped as 1 not current, 2 unreadable (incomplete, or a critical extension it can't process), 1 not signed by the issuer"},
+		{name: "only another issuer's list", lists: []*x509.RevocationList{other.crl(t, now.Add(-time.Minute), now.Add(time.Hour), nil)}, wantErr: "no list names it"},
 		{name: "nil list ignored", lists: []*x509.RevocationList{nil, current(nil)}},
 	}
 	for _, tc := range cases {

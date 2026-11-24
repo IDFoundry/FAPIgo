@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.82.2](https://github.com/IDFoundry/FAPIgo/compare/v0.82.1...v0.82.2) (2026-11-24)
+
+
+### Bug Fixes
+
+* **federation:** say why a JWK Set entry was skipped ([eb09c61](https://github.com/IDFoundry/FAPIgo/commit/eb09c6199f8d6100e4851963aa5f86d4a9c66dc0))
+* refuse a peer certificate without its DER encoding ([485d8c6](https://github.com/IDFoundry/FAPIgo/commit/485d8c67ffacc37e7eb9e22f9b13aaca5fc2bc33))
+* **resource:** refuse a request path that isn't in normal form ([a7340d4](https://github.com/IDFoundry/FAPIgo/commit/a7340d4bcd18a3741c28bf1977ec8e470b1a449f))
+* **server:** answer a DPoP nonce store outage with server_error ([d3478b2](https://github.com/IDFoundry/FAPIgo/commit/d3478b20e09a51f838c5fef230e9c3ba8485adb9))
+* **server:** redirect InteractionNeeded only for a prompt=none request ([1a2914f](https://github.com/IDFoundry/FAPIgo/commit/1a2914f32c30e0278e35961bcde4a0354c3e4b01))
+
+
+### Performance Improvements
+
+* **strictjson:** scan for duplicate members before walking tokens ([8e694c9](https://github.com/IDFoundry/FAPIgo/commit/8e694c94159e91b79fcbc07075f3985571d8ab5a))
+
 ## [0.82.1](https://github.com/IDFoundry/FAPIgo/compare/v0.82.0...v0.82.1) (2026-11-24)
 
 

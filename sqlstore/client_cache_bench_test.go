@@ -3,7 +3,6 @@ package sqlstore_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/keys"
@@ -56,7 +55,7 @@ func benchmarkClientLookup(b *testing.B, dialect sqlstore.Dialect, opts sqlstore
 func BenchmarkClientLookupTTL(b *testing.B) {
 	for _, dialect := range dialects() {
 		b.Run(dialect.String(), func(b *testing.B) {
-			benchmarkClientLookup(b, dialect, sqlstore.Options{ClientCacheTTL: time.Hour})
+			benchmarkClientLookup(b, dialect, sqlstore.Options{ClientCacheTTL: sqlstore.MaxClientCacheTTL})
 		})
 	}
 }

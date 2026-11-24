@@ -456,7 +456,10 @@
 //   - Postgres: Durable, AtomicConsume and CrossInstanceConsistent. Rows
 //     are committed to the database, the consumes above are atomic
 //     statements or row-locked transactions, and every instance sharing
-//     the database sees the same rows. Not SerializableRedemption: the
+//     the database sees the same rows, except that with
+//     Options.ClientCacheTTL set, Clients and ClientKeys serve a
+//     client as they last read it for up to that TTL, which New holds
+//     to MaxClientCacheTTL. Not SerializableRedemption: the
 //     stores write at READ COMMITTED isolation, relying on row locks for
 //     each key rather than on SERIALIZABLE isolation between keys. Each
 //     write of several statements is a transaction that asks for READ

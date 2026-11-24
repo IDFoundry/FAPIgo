@@ -169,7 +169,9 @@ func (s *StaticClientKeys) Capabilities() KeySourceCapabilities {
 
 // matchVerificationKeys is set's verification keys for alg (and kid, if
 // set), in a new slice. A key registered without a KeyID matches a kid
-// that is its RFC 7638 thumbprint, and no other.
+// that is its RFC 7638 thumbprint, and no other: jose.AnswersToKeyID's
+// rule, with each thumbprint computed once, when the key is added
+// (addVerificationKey), rather than per request.
 func matchVerificationKeys(set clientKeySet, alg fapi.SignatureAlgorithm, kid string) []VerificationKey {
 	var matched []VerificationKey
 	for i, k := range set.verification {

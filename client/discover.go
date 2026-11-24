@@ -460,8 +460,17 @@ func parseMTLSEndpointAliases(raw *metadata.MTLSEndpointAliases, opts ...fapi.UR
 // insert-before-path algorithm, is correct for this specific suffix.
 func wellKnownURL(issuer *url.URL) *url.URL {
 	out := *issuer
-	issuerPath := strings.TrimSuffix(issuer.Path, "/")
-	out.Path = issuerPath + "/.well-known/openid-configuration"
+	const suffix = "/.well-known/openid-configuration"
+	out.Path = strings.TrimSuffix(issuer.Path, "/") + suffix
+	// The escaped path is built alongside, so an issuer path holding an
+	// escaped character, such as %2F, keeps it: copied from the issuer
+	// unchanged, RawPath would no longer match Path, and EscapedPath
+	// would fall back to escaping Path, turning %2F into a separator and
+	// asking for another URL.
+	out.RawPath = ""
+	if issuer.RawPath != "" {
+		out.RawPath = strings.TrimSuffix(issuer.EscapedPath(), "/") + suffix
+	}
 	out.RawQuery = ""
 	out.Fragment = ""
 	return &out

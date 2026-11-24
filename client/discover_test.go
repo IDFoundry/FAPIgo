@@ -182,6 +182,28 @@ func TestDiscoverAppendsWellKnownPathAfterIssuerPath(t *testing.T) {
 	}
 }
 
+// TestDiscoverKeepsAnEscapedIssuerPath: an issuer whose path holds an
+// escaped character, here %2F, is fetched at that path with the
+// well-known suffix appended, not at the path its unescaped form names.
+func TestDiscoverKeepsAnEscapedIssuerPath(t *testing.T) {
+	var gotURI string
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.RequestURI
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	issuer, err := fapi.ParseIssuerURL(ts.URL+"/tenants/a%2Fb", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	_, _ = client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+
+	if want := "/tenants/a%2Fb/.well-known/openid-configuration"; gotURI != want {
+		t.Fatalf("fetched %q, want %q", gotURI, want)
+	}
+}
+
 // TestDiscoverOmitsUserinfoEndpointWhenAbsent covers the common case —
 // a server with no UserInfo Endpoint, or one that just doesn't
 // advertise it — Discover must succeed with a zero

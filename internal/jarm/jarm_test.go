@@ -356,3 +356,30 @@ func TestVerifyRejectsIDTokenCarryingCode(t *testing.T) {
 		})
 	}
 }
+
+// TestParseClaimsAudienceShapes: "aud" may be a string or an array of
+// exactly one string (RFC 7519 §4.1.3); an empty one, an array of
+// several, an empty array or any other shape is malformed.
+func TestParseClaimsAudienceShapes(t *testing.T) {
+	for aud, want := range map[string]string{
+		`"client-123"`:                "client-123",
+		`["client-123"]`:              "client-123",
+		`["client-123","client-456"]`: "",
+		`[]`:                          "",
+		`[""]`:                        "",
+		`""`:                          "",
+		`42`:                          "",
+		`{"a":"b"}`:                   "",
+	} {
+		claims, err := parseClaims([]byte(`{"iss":"https://as.example","aud":` + aud + `,"exp":9999999999}`))
+		if want == "" {
+			if !errors.Is(err, ErrMalformedClaims) {
+				t.Errorf("aud %s: parseClaims = %+v, %v; want ErrMalformedClaims", aud, claims, err)
+			}
+			continue
+		}
+		if err != nil || claims.Audience != want {
+			t.Errorf("aud %s: parseClaims = %q, %v; want %q", aud, claims.Audience, err, want)
+		}
+	}
+}

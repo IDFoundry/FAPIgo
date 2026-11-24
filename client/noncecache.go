@@ -61,7 +61,11 @@ type DPoPNonceCache interface {
 
 // InMemoryDPoPNonceCache is a DPoPNonceCache backed by a plain map, safe
 // for concurrent use. New installs one when Dependencies.DPoPNonceCache
-// is nil.
+// is nil. It holds at most maxCachedDPoPNonceScopes scopes: setting one
+// more forgets another, chosen arbitrarily, which costs that origin one
+// use_dpop_nonce retry, so a client sending to many origins (resource
+// servers named by data it receives, say) doesn't keep a nonce for each
+// for as long as it runs.
 type InMemoryDPoPNonceCache struct {
 	mu     sync.Mutex
 	nonces map[string]string
@@ -88,8 +92,20 @@ func (c *InMemoryDPoPNonceCache) Set(_ context.Context, scope, nonce string) {
 		delete(c.nonces, scope)
 		return
 	}
+	if _, cached := c.nonces[scope]; !cached && len(c.nonces) >= maxCachedDPoPNonceScopes {
+		for evicted := range c.nonces {
+			delete(c.nonces, evicted)
+			break
+		}
+	}
 	c.nonces[scope] = nonce
 }
+
+// maxCachedDPoPNonceScopes bounds how many scopes an
+// InMemoryDPoPNonceCache holds: the authorization server and each
+// resource server origin this client has had a nonce from. At most
+// maxDPoPNonceLength bytes each, it keeps the cache to about a megabyte.
+const maxCachedDPoPNonceScopes = 1024
 
 // maxDPoPNonceLength bounds a DPoP nonce this client caches or presents.
 // RFC 9449 sets no limit; package server issues 43 characters (32 random bytes,

@@ -55,8 +55,9 @@ type CreateParams struct {
 	// state, nonce, code_challenge, code_challenge_method,
 	// authorization_details, and any registered extension parameter —
 	// each already encoded as JSON. Parameters must not use the
-	// JWT-standard claim names iss, aud, exp, nbf, iat or jti; Create
-	// sets those itself.
+	// JWT-standard claim names iss, aud, exp, nbf, iat or jti, which
+	// Create sets itself, or sub, which Verify refuses in a request
+	// object.
 	Parameters map[string]json.RawMessage
 }
 
@@ -80,7 +81,10 @@ func Create(p CreateParams) (string, error) {
 	if p.Lifetime <= 0 {
 		return "", fmt.Errorf("requestobject: lifetime must be positive")
 	}
-	for _, reserved := range []string{"iss", "aud", "exp", "nbf", "iat", "jti"} {
+	// "sub" is refused as Verify refuses it: it's the claim a client
+	// assertion authenticates by (RFC 7523 §3), and a request object
+	// carrying it could be presented as one (see ErrUnexpectedSubject).
+	for _, reserved := range []string{"iss", "aud", "exp", "nbf", "iat", "jti", "sub"} {
 		if _, ok := p.Parameters[reserved]; ok {
 			return "", fmt.Errorf("requestobject: parameters must not set reserved claim %q", reserved)
 		}

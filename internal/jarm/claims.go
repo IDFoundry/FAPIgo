@@ -35,7 +35,7 @@ func parseClaims(payload []byte) (Claims, error) {
 	if err != nil {
 		return Claims{}, err
 	}
-	aud, _, err := popString(raw, "aud", true)
+	aud, err := popAudience(raw)
 	if err != nil {
 		return Claims{}, err
 	}
@@ -84,6 +84,30 @@ func popString(m map[string]json.RawMessage, key string, required bool) (value s
 		return "", false, fmt.Errorf("%w: %q must be a non-empty string", ErrMalformedClaims, key)
 	}
 	return s, true, nil
+}
+
+// popAudience extracts and deletes "aud" from m: a non-empty string, or
+// an array of exactly one, which RFC 7519 §4.1.3 allows for a single
+// audience ("In the special case when the JWT has one audience, the
+// aud value MAY be a single case-sensitive string"; an array is the
+// general form). A JARM response is meant for one client (JARM §2.1),
+// so an array naming several audiences is refused, as is any other
+// shape.
+func popAudience(m map[string]json.RawMessage) (string, error) {
+	raw, ok := m["aud"]
+	if !ok {
+		return "", fmt.Errorf("%w: missing %q", ErrMalformedClaims, "aud")
+	}
+	delete(m, "aud")
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil && s != "" {
+		return s, nil
+	}
+	var list []string
+	if err := json.Unmarshal(raw, &list); err == nil && len(list) == 1 && list[0] != "" {
+		return list[0], nil
+	}
+	return "", fmt.Errorf("%w: \"aud\" must be a non-empty string, or an array of exactly one", ErrMalformedClaims)
 }
 
 // popInt64 extracts and deletes key from m, decoding it as an RFC 7519

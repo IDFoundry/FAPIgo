@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,14 +187,18 @@ func TestVerifyWithKeyID(t *testing.T) {
 
 func TestCreateRejectsReservedClaimName(t *testing.T) {
 	key := generateKey(t)
-	params := testParameters(t)
-	params["exp"] = jsonRaw(t, 12345)
-	_, err := Create(CreateParams{
-		Signer: key, Algorithm: fapi.ES256, ClientID: "client-123",
-		Audience: "https://as.example", Now: time.Now(), Lifetime: time.Minute, Parameters: params,
-	})
-	if err == nil {
-		t.Fatalf("Create with reserved claim in Parameters = nil error, want error")
+	// sub too, which Verify refuses in every request object: one
+	// carrying it could pass for the client's assertion.
+	for _, reserved := range []string{"exp", "sub"} {
+		params := testParameters(t)
+		params[reserved] = jsonRaw(t, "client-123")
+		_, err := Create(CreateParams{
+			Signer: key, Algorithm: fapi.ES256, ClientID: "client-123",
+			Audience: "https://as.example", Now: time.Now(), Lifetime: time.Minute, Parameters: params,
+		})
+		if err == nil || !strings.Contains(err.Error(), `"`+reserved+`"`) {
+			t.Fatalf("Create with %q in Parameters = %v, want it refused", reserved, err)
+		}
 	}
 }
 
@@ -490,14 +495,21 @@ func TestVerifyAutomaticFederationRegistrationAcceptsExactAudience(t *testing.T)
 func TestVerifyRejectsSubjectClaim(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
-	token, err := Create(CreateParams{
-		Signer: key, Algorithm: fapi.ES256, ClientID: "client-123", Audience: "https://as.example",
-		Now: now, Lifetime: time.Minute,
-		Parameters: map[string]json.RawMessage{"sub": jsonRaw(t, "client-123")},
+	// Signed by hand: Create refuses a "sub" parameter.
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","typ":"oauth-authz-req+jwt"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "client-123", "aud": "https://as.example", "sub": "client-123", "client_id": "client-123",
+		"exp": now.Add(time.Minute).Unix(), "jti": "some-jti",
 	})
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf("marshal: %v", err)
 	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig, err := signRaw(key, signingInput)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	token := signingInput + "." + sig
 
 	obj, err := Parse(token)
 	if err != nil {

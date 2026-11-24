@@ -2,6 +2,7 @@ package client
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,6 +70,10 @@ const (
 	// MaxIDTokenLifetime at most 24 hours (OpenID Providers commonly
 	// issue ID tokens for an hour, some for several), and
 	// MaxJARMResponseLifetime at most 10 minutes (JARM §2.1).
+	// Dependencies.HTTP must come from fapihttp.NewClient, and a client
+	// doing mutual TLS (SenderConstrainMTLS, or certificate client
+	// authentication) must have it present a client certificate
+	// (fapihttp.TransportConfig.Certificates or GetClientCertificate).
 	AssuranceProduction
 )
 
@@ -160,4 +165,41 @@ func checkHTTPHardening(httpClient fapihttp.HTTPClient) error {
 		return fmt.Errorf("client: dependencies: http's transport allows loopback addresses (fapihttp.TransportConfig's loopback fields), which is not permitted under AssuranceProduction")
 	}
 	return nil
+}
+
+// checkMTLSCertificate refuses, under AssuranceProduction, an HTTP
+// client that visibly presents no TLS client certificate, for a client
+// doing mutual TLS: one
+// authenticating with its certificate, or whose tokens are bound to it
+// (SenderConstrainMTLS). Such a client would send its requests without
+// one, and a server that doesn't insist would answer with a Bearer
+// token bound to nothing, which this client can't tell from a
+// certificate-bound one: both have token_type Bearer (RFC 8705 §3).
+//
+// Only an *http.Client whose transport is an *http.Transport (as
+// fapihttp.NewClient builds) without a custom TLS dialer can be read:
+// it presents a certificate when its TLSClientConfig has Certificates
+// or GetClientCertificate. A nil Transport is http.DefaultTransport,
+// which presents none. Any other transport is left to its own
+// configuration.
+func checkMTLSCertificate(cfg Config, httpClient fapihttp.HTTPClient) error {
+	if cfg.SenderConstrain != storage.SenderConstrainMTLS && !authenticatesWithCertificate(cfg.ClientAuthMethod) {
+		return nil
+	}
+	c, ok := httpClient.(*http.Client)
+	if !ok {
+		return nil
+	}
+	rt := c.Transport
+	if rt == nil {
+		rt = http.DefaultTransport
+	}
+	t, ok := rt.(*http.Transport)
+	if !ok || t.DialTLSContext != nil || t.DialTLS != nil { //nolint:staticcheck // DialTLS, deprecated, still replaces the TLS handshake
+		return nil
+	}
+	if tc := t.TLSClientConfig; tc != nil && (len(tc.Certificates) > 0 || tc.GetClientCertificate != nil) {
+		return nil
+	}
+	return errors.New("client: dependencies: http presents no TLS client certificate, but this client does mutual TLS (SenderConstrainMTLS or certificate client authentication): set fapihttp.TransportConfig.Certificates or GetClientCertificate")
 }

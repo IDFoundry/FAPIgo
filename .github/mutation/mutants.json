@@ -4333,5 +4333,77 @@
     ],
     "run": "^TestNewBoundsClientCacheTTL$",
     "why": "New refuses a ClientCacheTTL over MaxClientCacheTTL, the staleness CrossInstanceConsistent allows for"
+  },
+  {
+    "id": "client-mtls-certificate-required",
+    "file": "client/assurance.go",
+    "old": "if tc := t.TLSClientConfig; tc != nil && (len(tc.Certificates) > 0 || tc.GetClientCertificate != nil) {",
+    "new": "if tc := t.TLSClientConfig; tc != nil || true {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestNewProductionRequiresAClientCertificateForMutualTLS$",
+    "why": "a production client doing mutual TLS is refused an HTTP client presenting no certificate"
+  },
+  {
+    "id": "client-mtls-certificate-only-for-mutual-tls",
+    "file": "client/assurance.go",
+    "old": "if cfg.SenderConstrain != storage.SenderConstrainMTLS && !authenticatesWithCertificate(cfg.ClientAuthMethod) {",
+    "new": "if false && cfg.SenderConstrain != storage.SenderConstrainMTLS && !authenticatesWithCertificate(cfg.ClientAuthMethod) {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestNewProductionRequiresAClientCertificateForMutualTLS$",
+    "why": "a client doing no mutual TLS needs no client certificate"
+  },
+  {
+    "id": "client-well-known-keeps-escaped-path",
+    "file": "client/discover.go",
+    "old": "if issuer.RawPath != \"\" {",
+    "new": "if issuer.RawPath != \"\" && false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestDiscoverKeepsAnEscapedIssuerPath$",
+    "why": "discovery is fetched at the issuer's escaped path, keeping %2F"
+  },
+  {
+    "id": "jarm-aud-one-element-array",
+    "file": "internal/jarm/claims.go",
+    "old": "if err := json.Unmarshal(raw, &list); err == nil && len(list) == 1 && list[0] != \"\" {",
+    "new": "if err := json.Unmarshal(raw, &list); err == nil && len(list) >= 1 && list[0] != \"\" {",
+    "module": "root",
+    "packages": [
+      "./internal/jarm"
+    ],
+    "run": "^TestParseClaimsAudienceShapes$",
+    "why": "a JARM aud array is accepted only with exactly one audience"
+  },
+  {
+    "id": "requestobject-create-reserves-sub",
+    "file": "internal/requestobject/create.go",
+    "old": "\"jti\", \"sub\"} {",
+    "new": "\"jti\"} {",
+    "module": "root",
+    "packages": [
+      "./internal/requestobject"
+    ],
+    "run": "^TestCreateRejectsReservedClaimName$",
+    "why": "Create refuses a sub parameter, which Verify refuses in every request object"
+  },
+  {
+    "id": "client-dpop-nonce-cache-bounded",
+    "file": "client/noncecache.go",
+    "old": "if _, cached := c.nonces[scope]; !cached && len(c.nonces) >= maxCachedDPoPNonceScopes {",
+    "new": "if _, cached := c.nonces[scope]; !cached && len(c.nonces) >= 10*maxCachedDPoPNonceScopes {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestInMemoryDPoPNonceCacheIsBounded$",
+    "why": "the in-memory DPoP nonce cache holds at most maxCachedDPoPNonceScopes scopes"
   }
 ]

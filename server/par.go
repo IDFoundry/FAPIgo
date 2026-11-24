@@ -722,11 +722,20 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	if _, hasRequestURI := verified.Parameters["request_uri"]; hasRequestURI {
 		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object must not contain request_uri", nil)
 	}
-	// OpenID Federation 1.0 §12.1.1.1 requires client_id in the request
-	// object of a client registered automatically, which is how it names
-	// its Entity Identifier there. requestobject.Parse already checked
-	// that one present equals iss.
-	if _, hasClientID := verified.Parameters["client_id"]; !hasClientID && client.AutomaticFederationRegistration() {
+	// The same rule for "request": a request object nested in another
+	// would otherwise be stripped as an unrecognized parameter, and the
+	// outer one accepted as though it carried no such member.
+	if _, hasRequest := verified.Parameters["request"]; hasRequest {
+		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object must not contain request", nil)
+	}
+	// RFC 9101 §5 has the request's client_id match its request object's
+	// own, and OpenID Federation 1.0 §12.1.1.1 requires one of a client
+	// registered automatically, as the way it names its Entity
+	// Identifier. A request object without one is refused from every
+	// client: the client it names is otherwise only its iss, a claim the
+	// same key signs for every kind of JWT the client issues.
+	// requestobject.Parse already checked that one present equals iss.
+	if _, hasClientID := verified.Parameters["client_id"]; !hasClientID {
 		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object must contain client_id", nil)
 	}
 	if err := checkParameterTypes(verified.Parameters, authorizationParameterTypes); err != nil {

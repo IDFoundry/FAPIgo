@@ -177,7 +177,7 @@ func signedRequest(t *testing.T, h harness, key *ecdsa.PrivateKey, kid string, p
 	obj, err := requestobject.Create(requestobject.CreateParams{
 		Signer: key, Algorithm: fapi.ES256, KeyID: kid,
 		ClientID: testClientID.String(), Audience: testIssuer,
-		Now: h.now, Lifetime: 30 * time.Second, Parameters: params,
+		Now: h.now, Lifetime: 30 * time.Second, Parameters: withClientID(t, params),
 	})
 	if err != nil {
 		t.Fatalf("requestobject.Create: %v", err)

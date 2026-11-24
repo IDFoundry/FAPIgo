@@ -182,7 +182,7 @@ func TestRecommendedLimitsAcceptMessageSigningRequestObjectWindows(t *testing.T)
 		obj, err := requestobject.Create(requestobject.CreateParams{
 			Signer: h.key, Algorithm: fapi.ES256,
 			ClientID: testClientID.String(), Audience: testIssuer,
-			Now: h.now, Lifetime: c.lifetime, Parameters: standardAuthParams(t),
+			Now: h.now, Lifetime: c.lifetime, Parameters: withClientID(t, standardAuthParams(t)),
 		})
 		if err != nil {
 			t.Fatalf("requestobject.Create: %v", err)

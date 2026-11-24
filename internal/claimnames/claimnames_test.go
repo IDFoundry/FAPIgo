@@ -61,3 +61,34 @@ func TestReservedInTokens(t *testing.T) {
 		t.Error("ReservedInTokens(Embedder, roles) = true, want false")
 	}
 }
+
+// TestReservedIgnoresCase: a reserved name is reserved under every
+// spelling Unicode simple case folding equates with it, since a
+// recipient decoding claims case-insensitively (Go's encoding/json)
+// reads "Sub" or "ſub" (long s) as "sub", and keeps the last of the
+// two. Names nothing reserves stay unreserved in any case.
+func TestReservedIgnoresCase(t *testing.T) {
+	for _, tc := range []reservedCase{
+		{IDToken, Embedder, "Sub", true},
+		{IDToken, Embedder, "SUB", true},
+		{IDToken, Embedder, "ſub", true},
+		{IDToken, Embedder, "Nonce", true},
+		{IDToken, Embedder, "ACR", true},
+		{AccessToken, Embedder, "Client_ID", true},
+		{AccessToken, Embedder, "ſcope", true},
+		{UserInfo, Embedder, "ISS", true},
+		{UserInfo, Embedder, "Events", true},
+		{AccessToken, Client, "Roles", true},
+		{IDToken, Client, "EMAIL", true},
+		{AccessToken, Embedder, "Roles", false},
+		{IDToken, Embedder, "X_Custom", false},
+		{UserInfo, Embedder, "Sub", false},
+	} {
+		if got := Reserved(tc.kind, tc.source, tc.name); got != tc.want {
+			t.Errorf("Reserved(%d, %d, %q) = %v, want %v", tc.kind, tc.source, tc.name, got, tc.want)
+		}
+	}
+	if !ContainsFold([]string{"grant_type"}, "Grant_Type") || ContainsFold([]string{"grant_type"}, "grant-type") {
+		t.Error("ContainsFold must match case variants only")
+	}
+}

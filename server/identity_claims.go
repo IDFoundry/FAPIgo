@@ -208,7 +208,7 @@ var serverTokenClaims = []string{
 // roles:["admin"] would otherwise reach the access token, and an
 // unapproved "email" an ID token, as the client's own value.
 func isManagedTokenClaim(name string) bool {
-	return claimnames.ReservedInTokens(claimnames.Client, name) || slices.Contains(serverTokenClaims, name)
+	return claimnames.ReservedInTokens(claimnames.Client, name) || claimnames.ContainsFold(serverTokenClaims, name)
 }
 
 // checkExtensionClaimNames rejects a registry that would copy a

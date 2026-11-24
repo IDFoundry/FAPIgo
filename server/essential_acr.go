@@ -37,7 +37,12 @@ func essentialACRValues(params map[string]json.RawMessage) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !essential || len(values) == 0 {
+	switch {
+	case !essential:
+		return nil, nil
+	case values != nil && len(values) == 0:
+		return nil, errors.New(`claims: the id_token "acr" entry's "value" is not among its "values", so no authentication can meet it`)
+	case len(values) == 0:
 		return nil, nil
 	}
 	return dedupeStrings(values), nil
@@ -77,28 +82,38 @@ func acrEntryEssential(entry map[string]json.RawMessage) (bool, error) {
 	return essential, nil
 }
 
-// acrEntryValues reads the "acr" entry's "value" and then "values"
-// members, in that order.
+// acrEntryValues reads the "acr" entry's "value" and "values" members:
+// the values the authentication's acr may take, nil when it names none.
+// With both, as for any other claim (see internal/claimvalues), the acr
+// must equal "value" and be among "values", so the result is "value"
+// alone, or empty, not nil, when "value" isn't among "values" and no
+// acr could match.
 func acrEntryValues(entry map[string]json.RawMessage) ([]string, error) {
-	var values []string
-	if v, ok := entry["value"]; ok {
-		var value string
+	var value string
+	v, hasValue := entry["value"]
+	if hasValue {
 		if err := json.Unmarshal(v, &value); err != nil || value == "" {
 			return nil, errors.New(`claims: the id_token "acr" entry's "value" must be a non-empty string`)
 		}
-		values = append(values, value)
 	}
-	if v, ok := entry["values"]; ok {
-		var list []string
+	var list []string
+	v, hasValues := entry["values"]
+	if hasValues {
 		if err := json.Unmarshal(v, &list); err != nil || len(list) == 0 || slices.Contains(list, "") {
 			return nil, errors.New(`claims: the id_token "acr" entry's "values" must be a non-empty array of non-empty strings`)
 		}
-		values = append(values, list...)
+		if len(list) > maxEssentialACRValues {
+			return nil, fmt.Errorf(`claims: the id_token "acr" entry must not name more than %d values`, maxEssentialACRValues)
+		}
 	}
-	if len(values) > maxEssentialACRValues {
-		return nil, fmt.Errorf(`claims: the id_token "acr" entry must not name more than %d values`, maxEssentialACRValues)
+	switch {
+	case hasValue && hasValues && !slices.Contains(list, value):
+		return []string{}, nil
+	case hasValue:
+		return []string{value}, nil
+	default:
+		return list, nil
 	}
-	return values, nil
 }
 
 // dedupeStrings returns values without repeats, in first-seen order.

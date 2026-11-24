@@ -353,6 +353,19 @@
     "why": "MarshalJSON writes an RSA key's e minimally, as AQAB, whatever spelling it was parsed from"
   },
   {
+    "id": "jose-skipped-key-reason-matches-kid",
+    "file": "internal/jose/jwkset.go",
+    "old": "if s.KeyID == kid {",
+    "new": "if true {",
+    "module": "root",
+    "packages": [
+      "./internal/jose",
+      "./federation"
+    ],
+    "run": "^(TestSkippedKeyReasonsDescribeTheSkips|TestNoCandidateKeySaysWhyTheEntryWasSkipped)$",
+    "why": "a no-candidate-key error names only the skipped entries with the kid it looked for, not every skipped entry"
+  },
+  {
     "id": "fed-registration-config-copied",
     "file": "federation/automatic_registration.go",
     "old": "cfg = cfg.clone()",

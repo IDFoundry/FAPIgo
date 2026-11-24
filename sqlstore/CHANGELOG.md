@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.11.0...sqlstore/v0.11.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **sqlstore:** refuse a ClientCacheTTL over a minute ([cbd219d](https://github.com/IDFoundry/FAPIgo/commit/cbd219d92f4991414095844dcb9232708fbca9ea))
+
 ## [0.11.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.10.0...sqlstore/v0.11.0) (2026-11-24)
 
 

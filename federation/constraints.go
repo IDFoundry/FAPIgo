@@ -55,7 +55,9 @@ func checkNamingConstraints(constraints []subordinateConstraint) error {
 // excluded list is invalid, regardless of the information appearing in
 // the permitted list" — checked first, unconditionally — and otherwise,
 // when a permitted list is present at all, entityID's host must match
-// at least one of its entries.
+// at least one of its entries. A permitted list present but empty
+// permits no name: it fails closed, rather than being read as absent,
+// which would permit every name a superior meant to restrict.
 func checkNamingConstraint(nc NamingConstraints, entityID string) error {
 	host, err := entityIDHost(entityID)
 	if err != nil {
@@ -66,7 +68,7 @@ func checkNamingConstraint(nc NamingConstraints, entityID string) error {
 			return fmt.Errorf("federation: entity %q is excluded by naming_constraints (%q)", entityID, excluded)
 		}
 	}
-	if len(nc.Permitted) == 0 {
+	if nc.Permitted == nil {
 		return nil
 	}
 	for _, permitted := range nc.Permitted {

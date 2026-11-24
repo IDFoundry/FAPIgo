@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,6 +164,19 @@ func TestResolveEnforcesNamingConstraintsPermittedMismatch(t *testing.T) {
 	r := f.newResolver(t)
 	if _, err := r.Resolve(context.Background(), f.leID); err == nil {
 		t.Fatalf("Resolve(permitted mismatch) = nil error, want error")
+	}
+}
+
+// TestResolveEnforcesAnEmptyNamingConstraintsPermitted: a superior's
+// naming_constraints with "permitted": [] permits no Subordinate, so the
+// chain is refused, after a round trip through the signed statement.
+func TestResolveEnforcesAnEmptyNamingConstraintsPermitted(t *testing.T) {
+	f := setupConstrainedFederation(t, &intfed.Constraints{
+		NamingConstraints: &intfed.NamingConstraints{Permitted: []string{}},
+	}, nil)
+	r := f.newResolver(t)
+	if _, err := r.Resolve(context.Background(), f.leID); err == nil || !strings.Contains(err.Error(), "not within any permitted naming_constraints namespace") {
+		t.Fatalf("Resolve(empty permitted) = %v, want the naming constraint refusal", err)
 	}
 }
 

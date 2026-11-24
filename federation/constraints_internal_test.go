@@ -101,6 +101,16 @@ func TestCheckNamingConstraintNoPermittedAllowsAnything(t *testing.T) {
 	}
 }
 
+// TestCheckNamingConstraintEmptyPermittedAllowsNothing: a permitted
+// list present but empty permits no name, rather than being read as
+// absent.
+func TestCheckNamingConstraintEmptyPermittedAllowsNothing(t *testing.T) {
+	nc := intfed.NamingConstraints{Permitted: []string{}}
+	if err := checkNamingConstraint(nc, "https://rp.anything.example.org"); err == nil {
+		t.Fatal("checkNamingConstraint(empty permitted) = nil error, want error")
+	}
+}
+
 func TestCheckNamingConstraintsExcludedOverridesPermitted(t *testing.T) {
 	nc := intfed.NamingConstraints{
 		Permitted: []string{".example.com"},

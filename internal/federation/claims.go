@@ -180,6 +180,9 @@ type Constraints struct {
 }
 
 // NamingConstraints is Constraints' own "naming_constraints" member.
+// A nil Permitted means the member was absent (no restriction); a
+// non-nil, empty one means it was present as an empty array, which
+// permits no name.
 type NamingConstraints struct {
 	Permitted []string
 	Excluded  []string

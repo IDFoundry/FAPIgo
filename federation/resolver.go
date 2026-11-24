@@ -507,7 +507,7 @@ func (r *Resolver) walk(ctx context.Context, st *chainWalkState, hop int, budget
 	}
 
 	var branches []branchError
-	for _, hint := range r.trustAnchorsFirst(hints) {
+	for _, hint := range r.trustAnchorsFirst(uniqueHints(hints)) {
 		if st.visited[hint] {
 			continue
 		}
@@ -631,6 +631,24 @@ func (r *Resolver) trustAnchorsFirst(hints []string) []string {
 		}
 	}
 	return ordered
+}
+
+// uniqueHints is hints with each repeat after the first dropped, in
+// their order. A repeated authority hint names the same superior again:
+// walking it again would find nothing new, since every branch reads
+// the same fetched statements, but it would verify that branch again,
+// spend another superior's worth of the search's budget, and list the
+// same failure twice.
+func uniqueHints(hints []string) []string {
+	out := make([]string, 0, len(hints))
+	seen := make(map[string]struct{}, len(hints))
+	for _, h := range hints {
+		if _, dup := seen[h]; !dup {
+			seen[h] = struct{}{}
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 // statementCache holds every Entity Configuration and Subordinate

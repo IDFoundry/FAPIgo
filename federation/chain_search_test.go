@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -402,5 +403,43 @@ func TestResolveNoPathKeepsEachBranchErrorReachable(t *testing.T) {
 	var urlErr *url.Error
 	if !errors.As(err, &urlErr) {
 		t.Fatalf("Resolve = %v, want it to unwrap to the unreachable hint's *url.Error", err)
+	}
+}
+
+// TestResolveWalksARepeatedAuthorityHintOnce: an authority hint listed
+// several times names one superior, so its branch is walked once: the
+// error lists it once, and a later hint is still reached.
+func TestResolveWalksARepeatedAuthorityHintOnce(t *testing.T) {
+	g := newFederationGraph(t, "leaf", "a", "untrusted", "ta")
+	g.link(map[string][]string{
+		"leaf": {"a", "a", "a"},
+		"a":    {"untrusted"},
+		"ta":   nil,
+	})
+	_, err := g.resolver(5, 5, "ta").Resolve(context.Background(), g.entities["leaf"].id)
+	if err == nil {
+		t.Fatal("Resolve = nil error, want no path")
+	}
+	via := "via \"" + g.entities["a"].id + "\""
+	if n := strings.Count(err.Error(), via); n != 1 {
+		t.Errorf("Resolve error lists the branch through a %d times, want once: %q", n, err.Error())
+	}
+
+	g = newFederationGraph(t, "leaf", "a", "u1", "u2", "b", "ta")
+	g.link(map[string][]string{
+		"leaf": {"a", "a", "a", "a", "b"},
+		"a":    {"u1", "u2"},
+		"b":    {"ta"},
+		"ta":   nil,
+	})
+	// A budget of 2 × 5 = 10 superiors: a and its two dead ends once
+	// (3), then b and the Trust Anchor (2). Walking each copy of a would
+	// spend 12 before reaching b.
+	result, err := g.resolver(2, 5, "ta").Resolve(context.Background(), g.entities["leaf"].id)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got := g.chain(result); !slices.Equal(got, []string{"leaf", "b", "ta"}) {
+		t.Errorf("chain = %v, want leaf, b, ta", got)
 	}
 }

@@ -4297,5 +4297,29 @@
     ],
     "run": "^TestNewEnforcesFAPILimitsUnderProduction$",
     "why": "production assurance refuses a MaxClientAssertionLifetime over 5 minutes"
+  },
+  {
+    "id": "federation-empty-permitted-permits-nothing",
+    "file": "federation/constraints.go",
+    "old": "if nc.Permitted == nil {",
+    "new": "if len(nc.Permitted) == 0 {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestCheckNamingConstraintEmptyPermittedAllowsNothing|TestResolveEnforcesAnEmptyNamingConstraintsPermitted)$",
+    "why": "a naming_constraints permitted list present but empty permits no Subordinate name"
+  },
+  {
+    "id": "federation-repeated-authority-hint-walked-once",
+    "file": "federation/resolver.go",
+    "old": "r.trustAnchorsFirst(uniqueHints(hints))",
+    "new": "r.trustAnchorsFirst(append(uniqueHints(hints)[:0:0], hints...))",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestResolveWalksARepeatedAuthorityHintOnce$",
+    "why": "a repeated authority hint is walked once, so its copies neither repeat its failure nor spend the search budget"
   }
 ]

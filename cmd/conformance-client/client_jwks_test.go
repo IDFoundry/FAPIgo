@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -8,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,11 +32,11 @@ func writeTestJWKSFile(t *testing.T, kid string, includePrivate bool) (path stri
 	}
 	jwk := map[string]string{
 		"kty": "EC", "crv": "P-256", "kid": kid,
-		"x": base64.RawURLEncoding.EncodeToString(priv.X.Bytes()),
-		"y": base64.RawURLEncoding.EncodeToString(priv.Y.Bytes()),
+		"x": base64.RawURLEncoding.EncodeToString(priv.X.FillBytes(make([]byte, 32))),
+		"y": base64.RawURLEncoding.EncodeToString(priv.Y.FillBytes(make([]byte, 32))),
 	}
 	if includePrivate {
-		jwk["d"] = base64.RawURLEncoding.EncodeToString(priv.D.Bytes())
+		jwk["d"] = base64.RawURLEncoding.EncodeToString(priv.D.FillBytes(make([]byte, 32)))
 	}
 	set := map[string]any{"keys": []map[string]string{jwk}}
 	body, err := json.Marshal(set)
@@ -157,5 +159,55 @@ func TestBuildFixedClientKeyManagerUsesFixedKeyAndEphemeralOthers(t *testing.T) 
 	}
 	if len(sig.Value) == 0 {
 		t.Fatal("Sign(DPoPProofSigning) returned an empty signature")
+	}
+}
+
+// TestLoadFixedClientSignerRefusesMalformedKeys: the private JWK is read
+// as strictly as the library reads a public one. A coordinate or scalar
+// that isn't 32 octets, a d outside P-256's range, or an x and y that
+// aren't d's public key is refused with an error naming the key.
+func TestLoadFixedClientSignerRefusesMalformedKeys(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := func(n *big.Int) string { return base64.RawURLEncoding.EncodeToString(n.FillBytes(make([]byte, 32))) }
+	octets := func(n int, b byte) string { return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{b}, n)) }
+	good := map[string]string{"kty": "EC", "crv": "P-256", "kid": "k", "x": full(priv.X), "y": full(priv.Y), "d": full(priv.D)}
+	for _, tc := range []struct {
+		name, member, value, wantErr string
+	}{
+		{"short x", "x", octets(31, 1), "x is 31 octets"},
+		{"long y", "y", octets(33, 1), "y is 33 octets"},
+		{"short d", "d", octets(31, 1), "d is 31 octets"},
+		{"d of zero", "d", octets(32, 0), "d:"},
+		{"d above the curve order", "d", octets(32, 0xff), "d:"},
+		{"another key's x", "x", full(other.X), "not the public key of d"},
+		{"another key's y", "y", full(other.Y), "not the public key of d"},
+		{"x not base64url", "x", "!!", "decode x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			jwk := map[string]string{}
+			for k, v := range good {
+				jwk[k] = v
+			}
+			jwk[tc.member] = tc.value
+			body, err := json.Marshal(map[string]any{"keys": []map[string]string{jwk}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "client.jwks")
+			if err := os.WriteFile(path, body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = loadFixedClientSigner(path)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) || !strings.Contains(err.Error(), `key "k"`) {
+				t.Fatalf("loadFixedClientSigner = %v, want an error naming key \"k\" and containing %q", err, tc.wantErr)
+			}
+		})
 	}
 }

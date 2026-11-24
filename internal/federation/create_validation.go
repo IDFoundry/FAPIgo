@@ -69,11 +69,17 @@ func checkOpenIDProviderIssuer(metadata map[string]json.RawMessage, entityID str
 // never signs a statement it, or another conformant implementation,
 // rejects: an empty authority_hints or metadata_policy_crit, metadata
 // that isn't an object of objects or uses null, a non-https
-// source_endpoint, a negative max_path_length, and so on.
+// source_endpoint, a negative max_path_length, and so on. It runs
+// Parse's duplicate-member check too: a member repeated inside a
+// json.RawMessage the caller supplied, or two names differing only in
+// case, such as {"x_ext":1,"X_EXT":2} in metadata.
 func checkRoundTrip(claims map[string]any) error {
 	payload, err := json.Marshal(claims)
 	if err != nil {
 		return fmt.Errorf("federation: marshal claims: %w", err)
+	}
+	if err := refuseDuplicateMembers(payload); err != nil {
+		return fmt.Errorf("federation: the statement would not parse: %w", err)
 	}
 	if _, err := parseClaims(payload); err != nil {
 		return fmt.Errorf("federation: the statement would not parse: %w", err)

@@ -992,3 +992,36 @@ func TestParseRefusesMisplacedClaims(t *testing.T) {
 		}
 	}
 }
+
+// TestCreateRefusesRepeatedMembers: Create runs Parse's duplicate-member
+// check before signing, so a statement whose caller-supplied JSON
+// repeats a member, or holds two names differing only in case, is
+// refused rather than signed and then refused by every Parse.
+// CreateUncheckedForTesting, which skips the round trip, still signs
+// one, and Parse refuses it.
+func TestCreateRefusesRepeatedMembers(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	for _, tc := range []struct {
+		name     string
+		metadata string
+	}{
+		{"a repeated member", `{"client_name":"a","client_name":"b"}`},
+		{"names differing only in case", `{"x_ext":1,"X_EXT":2}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := entityConfigParams(t, key, "https://rp.example.org", now)
+			params.Metadata = map[string]json.RawMessage{"openid_relying_party": json.RawMessage(tc.metadata)}
+			if _, err := Create(params); !errors.Is(err, ErrMalformedClaims) {
+				t.Fatalf("Create = %v, want ErrMalformedClaims", err)
+			}
+			token, err := CreateUncheckedForTesting(params)
+			if err != nil {
+				t.Fatalf("CreateUncheckedForTesting: %v", err)
+			}
+			if _, err := Parse(token); !errors.Is(err, ErrMalformedClaims) {
+				t.Fatalf("Parse(the unchecked statement) = %v, want ErrMalformedClaims", err)
+			}
+		})
+	}
+}

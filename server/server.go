@@ -472,6 +472,13 @@ const (
 	// a slow sign-in (a second factor, a password reset) while keeping a
 	// pushed request's interaction from staying completable for days.
 	fapiMaxInteractionLifetime = time.Hour
+	// No spec numbers it either: BackchannelAuthenticationRequestLifetime
+	// is how long a pending CIBA request can be approved and polled. An
+	// hour matches the 60 minutes FAPI-CIBA §5.2.2 allows a signed
+	// request's own lifetime, and InteractionLifetime's bound, so an
+	// end user can't be asked to approve a request days after the
+	// client made it.
+	fapiMaxBackchannelRequestPendingLifetime = time.Hour
 )
 
 // validateFAPILimits refuses Limits outside the FAPI 2.0 Security
@@ -502,6 +509,9 @@ func fapiLimitErrors(l Limits, cibaEnabled, attestationEnabled bool) []error {
 	}
 	if cibaEnabled && l.MaxBackchannelAuthenticationRequestLifetime > fapiMaxBackchannelAuthenticationRequestLifetime {
 		errs = append(errs, fmt.Errorf("server: config: limits.max_backchannel_authentication_request_lifetime must be at most %v under AssuranceProduction (FAPI-CIBA §5.2.2)", fapiMaxBackchannelAuthenticationRequestLifetime))
+	}
+	if cibaEnabled && l.BackchannelAuthenticationRequestLifetime > fapiMaxBackchannelRequestPendingLifetime {
+		errs = append(errs, fmt.Errorf("server: config: limits.backchannel_authentication_request_lifetime must be at most %v under AssuranceProduction", fapiMaxBackchannelRequestPendingLifetime))
 	}
 	return append(errs, validateProductionLifetimes(l, attestationEnabled)...)
 }

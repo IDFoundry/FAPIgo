@@ -28,6 +28,9 @@ func TestRequireBindingMessage(t *testing.T) {
 		"required, spaces":            {true, "     ", server.ErrorInvalidBindingMessage},
 		"required, ideographic space": {true, "\u3000", server.ErrorInvalidBindingMessage},
 		"required, combining only":    {true, "\u0301\u0301", server.ErrorInvalidBindingMessage},
+		"required, Braille blank":     {true, "\u2800\u2800", server.ErrorInvalidBindingMessage},
+		"required, Braille and text":  {true, "\u2800W4SCT", ""},
+		"required, Hangul syllables":  {true, "\uc8fc\ubb38 1042", ""},
 		"default, missing":            {false, absent, ""},
 		"default, empty":              {false, "", ""},
 	} {
@@ -67,6 +70,15 @@ func TestBindingMessageRefusesFormatCharacters(t *testing.T) {
 		"word joiner only":        "\u2060\u2060",
 		"byte order mark":         "\xef\xbb\xbfW4SCT",
 		"soft hyphen":             "W4\u00adSCT",
+		// Default-ignorable code points outside Cf, which a display
+		// renders as nothing although Unicode classes the Hangul
+		// fillers as letters.
+		"Hangul filler only":        "\u3164\u3164",
+		"Hangul choseong filler":    "W4\u115fSCT",
+		"Hangul jungseong filler":   "\u1160",
+		"halfwidth Hangul filler":   "W4SCT\uffa0",
+		"combining grapheme joiner": "W4\u034fSCT",
+		"Khmer inherent vowel":      "W4\u17b4SCT",
 	} {
 		for _, require := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s, required %v", name, require), func(t *testing.T) {

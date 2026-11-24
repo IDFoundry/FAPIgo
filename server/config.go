@@ -358,7 +358,8 @@ type Limits struct {
 	// Required only when Endpoints.BackchannelAuthentication is set,
 	// and then New requires a whole number of seconds, at least one:
 	// expires_in is an integer (CIBA §7.3), so any other value would be
-	// advertised truncated.
+	// advertised truncated. Under AssuranceProduction it must be at most
+	// 60 minutes.
 	BackchannelAuthenticationRequestLifetime time.Duration
 
 	// MaxBackchannelAuthenticationRequestLifetime bounds how far in the

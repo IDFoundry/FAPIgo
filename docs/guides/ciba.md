@@ -261,7 +261,8 @@ sends requests. So also:
   and written to the store, before a cap can refuse it.
 - Keep `Limits.BackchannelAuthenticationRequestLifetime` short, minutes
   rather than an hour: a request counts against the caps, and is
-  listed, until it's decided or expires.
+  listed, until it's decided or expires. `AssuranceProduction` refuses
+  more than an hour.
 - With sqlstore, set `sqlstore.Options.ClientCacheTTL` (a few
   seconds), so a listing doesn't cost a client query for every request
   it shows.
@@ -280,15 +281,18 @@ tell whether a request's details are unique to it, so by default it
 accepts a request without `binding_message`. If yours can't be told
 apart otherwise, set `Config.RequireBindingMessage`: a request without
 one is then refused with `invalid_request`, and one whose
-`binding_message` shows nothing (empty or only spaces) with
-`invalid_binding_message`, before it's stored or shown to anyone.
+`binding_message` shows nothing (empty, only spaces, or only blank
+Braille cells) with `invalid_binding_message`, before it's stored or
+shown to anyone.
 
 Whether or not it's required, a `binding_message` must be one the
 authentication device can show as sent: at most 100 characters, with
-no control or line-separator characters and no Unicode format
+no control or line-separator characters, no Unicode format
 characters (bidi controls such as U+202E, zero-width characters such
-as U+200B), which could reorder or hide part of it. Anything else is
-refused with `invalid_binding_message` (CIBA §13).
+as U+200B), which could reorder or hide part of it, and no other
+default-ignorable characters, such as the Hangul fillers (U+3164),
+which display as nothing. Anything else is refused with
+`invalid_binding_message` (CIBA §13).
 
 The request's other core parameters are bounded as a pushed request's
 are: `login_hint` and `acr_values` at 4 KiB each, `scope` at the larger

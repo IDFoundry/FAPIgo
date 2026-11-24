@@ -551,7 +551,7 @@ func validateClientNotificationToken(params map[string]json.RawMessage, client s
 			return newError(ErrorInvalidRequest, 400, "client_notification_token must be a string", err)
 		}
 		if !isClientNotificationToken(notificationToken) {
-			return newError(ErrorInvalidRequest, 400, "client_notification_token must be a bearer token of at most 1024 characters", nil)
+			return newError(ErrorInvalidRequest, 400, "client_notification_token must be a bearer token of 22 to 1024 characters", nil)
 		}
 	}
 	return nil
@@ -561,14 +561,23 @@ func validateClientNotificationToken(params map[string]json.RawMessage, client s
 // client_notification_token.
 const maxClientNotificationTokenLength = 1024
 
+// minClientNotificationTokenLength is the fewest characters that can
+// hold the 128 bits of entropy CIBA §7.1 requires of a
+// client_notification_token: 22 base64 characters carry 132 bits, and
+// a b64token character at most about 6.1. A shorter token can't meet
+// §7.1, and the ping callback is authenticated by nothing else, so a
+// guessable one would let anyone send the client pings.
+const minClientNotificationTokenLength = 22
+
 // isClientNotificationToken reports whether token is a
-// client_notification_token CIBA §7.1 allows: at most 1024 characters,
-// with the syntax of a Bearer credential (RFC 6750 §2.1, b64token:
+// client_notification_token CIBA §7.1 allows: from
+// minClientNotificationTokenLength to 1024 characters, with the syntax
+// of a Bearer credential (RFC 6750 §2.1, b64token:
 // 1*( ALPHA / DIGIT / "-" / "." / "_" / "~" / "+" / "/" ) *"="). The
 // server sends it back as an Authorization header at ping time, so a
 // token outside that syntax could inject into the notification request.
 func isClientNotificationToken(token string) bool {
-	if token == "" || len(token) > maxClientNotificationTokenLength {
+	if len(token) < minClientNotificationTokenLength || len(token) > maxClientNotificationTokenLength {
 		return false
 	}
 	body := strings.TrimRight(token, "=")
@@ -612,24 +621,36 @@ const maxBindingMessageLength = 100
 // emoji sequence joined with U+200D; ordinary punctuation, single emoji
 // with their modifiers, and non-Latin scripts are all fine and remain
 // accepted.
+//
+// The other default-ignorable code points Unicode lists
+// (Other_Default_Ignorable_Code_Point) are refused for the same
+// reason: a display renders them as nothing. They include the Hangul
+// fillers (U+115F, U+1160, U+3164, U+FFA0), which Unicode classes as
+// letters, so a message made of them would otherwise pass as visible.
+// Modern Korean text is written in precomposed syllables and doesn't
+// need them.
 func isAcceptableBindingMessage(msg string) bool {
 	if utf8.RuneCountInString(msg) > maxBindingMessageLength {
 		return false
 	}
 	for _, r := range msg {
-		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || unicode.Is(unicode.Cf, r) {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) {
 			return false
 		}
 	}
 	return true
 }
 
+// brailleBlank is U+2800 BRAILLE PATTERN BLANK, a symbol that displays
+// as an empty cell.
+const brailleBlank = '\u2800'
+
 // hasVisibleContent reports whether msg has a character that shows up
-// on a display: a letter, digit, punctuation mark or symbol. Spaces and
-// combining marks on their own don't.
+// on a display: a letter, digit, punctuation mark or symbol. Spaces,
+// combining marks and the blank Braille pattern on their own don't.
 func hasVisibleContent(msg string) bool {
 	for _, r := range msg {
-		if unicode.In(r, unicode.L, unicode.N, unicode.P, unicode.S) {
+		if r != brailleBlank && unicode.In(r, unicode.L, unicode.N, unicode.P, unicode.S) {
 			return true
 		}
 	}

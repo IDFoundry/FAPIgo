@@ -18,6 +18,60 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.82.3
+
+### CIBA: a `binding_message` may not hold characters that display as nothing (server)
+
+**Affects:** a CIBA client whose `binding_message` holds a Unicode
+default-ignorable character outside the format characters already
+refused: a Hangul filler (U+115F, U+1160, U+3164, U+FFA0), the
+combining grapheme joiner (U+034F), or another listed in Unicode's
+Other_Default_Ignorable_Code_Point. With `Config.RequireBindingMessage`,
+also a client whose message shows only blank Braille cells (U+2800).
+
+**Why:** a display renders these as nothing, so the end user could be
+shown a different, or an empty, message from the one the consumption
+device shows. The Hangul fillers are classed as letters, so a required
+message made of them passed as visible.
+
+**What fails:** nothing at startup. The backchannel authentication
+request is refused with 400 `invalid_binding_message`.
+
+**What to change:** send a message of ordinary text. Korean text in
+precomposed syllables is unaffected.
+
+### CIBA: `client_notification_token` must be at least 22 characters (server)
+
+**Affects:** a CIBA client registered for ping delivery that sends a
+`client_notification_token` shorter than 22 characters.
+
+**Why:** CIBA §7.1 requires the token to carry at least 128 bits of
+entropy, and the token is all that authenticates the ping callback to
+the client. 22 characters is the fewest that can hold 128 bits.
+FAPIgo's own client sends 43.
+
+**What fails:** nothing at startup. The backchannel authentication
+request is refused with 400 `invalid_request`.
+
+**What to change:** have the client send a token of at least 128
+random bits, such as 16 random bytes base64url-encoded.
+
+### CIBA: a pending request lives at most an hour in production (server, *production only*)
+
+**Affects:** a server with `Endpoints.BackchannelAuthentication` set,
+under `AssuranceProduction`, whose
+`Limits.BackchannelAuthenticationRequestLifetime` is over 60 minutes.
+
+**Why:** the lifetime is how long an end user can be asked to approve
+a request, and how long the client can poll it. Without a ceiling, a
+request could wait for approval for days. An hour matches the 60
+minutes FAPI-CIBA §5.2.2 allows a signed request's own lifetime.
+
+**What fails:** `server.New` returns an error naming
+`limits.backchannel_authentication_request_lifetime`.
+
+**What to change:** set the lifetime to 60 minutes or less.
+
 ## v0.82.2
 
 ### `InteractionNeeded` answers only a `prompt=none` request (server)

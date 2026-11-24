@@ -39,13 +39,13 @@ func pingInboxHarness(t *testing.T, store storage.BackchannelAuthenticationStore
 }
 
 // beginPings files n ping requests from testClientID for user-1, the
-// i-th with client_notification_token "notify-me-i".
+// i-th with client_notification_token "notify-me-0123456789abcdef-i".
 func beginPings(t *testing.T, h harness, n int) []server.BackchannelInteractionRequired {
 	t.Helper()
 	var filed []server.BackchannelInteractionRequired
 	for i := range n {
 		params := standardBackchannelParams(t)
-		params["client_notification_token"] = jsonRaw(t, fmt.Sprintf("notify-me-%d", i))
+		params["client_notification_token"] = jsonRaw(t, fmt.Sprintf("notify-me-0123456789abcdef-%d", i))
 		action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
 			HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, params))},
 		})
@@ -373,7 +373,7 @@ func TestDenyBackchannelInteractionsPingsOnlyWhatItDenied(t *testing.T) {
 	if denied != 3 || !errors.Is(err, storage.ErrStoreUnavailable) {
 		t.Fatalf("DenyBackchannelInteractions with one denial failing = %d, %v; want 3 and the store's failure", denied, err)
 	}
-	if got, want := notifier.notifiedTokens(), []string{"notify-me-1", "notify-me-2", "notify-me-3"}; !slices.Equal(got, want) {
+	if got, want := notifier.notifiedTokens(), []string{"notify-me-0123456789abcdef-1", "notify-me-0123456789abcdef-2", "notify-me-0123456789abcdef-3"}; !slices.Equal(got, want) {
 		t.Errorf("clients notified with %v, want %v: those denied", got, want)
 	}
 	if left := inboxOf(t, h, "user-1"); len(left) != 1 || left[0].Handle.String() != pending[0].Handle.String() {
@@ -397,7 +397,7 @@ func TestDenyBackchannelInteractionsPingsOnlyWhatItDenied(t *testing.T) {
 // decision's would.
 func TestDenyBackchannelInteractionsRaisesANotifierPanic(t *testing.T) {
 	notifier := &callbackNotifier{notify: func(_ context.Context, notification server.BackchannelNotification) error {
-		if notification.ClientNotificationToken.Reveal() == "notify-me-0" {
+		if notification.ClientNotificationToken.Reveal() == "notify-me-0123456789abcdef-0" {
 			panic("notifier bug")
 		}
 		return nil

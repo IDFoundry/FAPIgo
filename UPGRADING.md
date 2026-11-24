@@ -100,6 +100,24 @@ fails.
 **What to change:** rename the claim so it isn't a case variant of a
 reserved name.
 
+### An essential `acr` with both `value` and `values` must meet both (server)
+
+**Affects:** a client whose `claims` parameter asks for an essential ID
+token `acr` with both `value` and `values`.
+
+**Why:** the server took the union of the two, so an authentication at
+any of the `values` met a request whose `value` asked for one in
+particular. Every other claim requested with both must equal `value`
+and be among `values`, as `internal/claimvalues` applies them.
+
+**What fails:** nothing at startup. The essential `acr` must now equal
+`value`. A request whose `value` isn't among its `values` can't be met,
+so it is refused with `invalid_request` at the pushed authorization or
+backchannel authentication request. A voluntary `acr`, without
+`essential`, is still only a preference.
+
+**What to change:** send `value` or `values`, not both.
+
 ## v0.82.2
 
 ### `InteractionNeeded` answers only a `prompt=none` request (server)

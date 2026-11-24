@@ -332,3 +332,26 @@ func TestVerifyRefusesResolvedTokenWithoutKey(t *testing.T) {
 		t.Fatalf("Verify(resolver without Key) = %v, want 500 server_error", err)
 	}
 }
+
+// TestVerifyRefusesACertificateWithoutItsEncoding: a PeerCertificate
+// without its DER encoding (built field by field, not parsed) fails
+// with server_error, even when its fields are the bound certificate's,
+// rather than being compared by the digest of nothing.
+func TestVerifyRefusesACertificateWithoutItsEncoding(t *testing.T) {
+	f := newMTLSFixture(t)
+	built := *f.cert
+	built.Raw = nil
+
+	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method: "GET", URL: f.target,
+		Authorization:   "Bearer " + f.accessToken,
+		PeerCertificate: &built,
+	})
+	var rerr *resource.Error
+	if !errors.As(err, &rerr) || rerr.Code() != resource.ErrorServerError || rerr.HTTPStatus() != 500 {
+		t.Fatalf("Verify = %v, want a 500 server_error", err)
+	}
+	if !strings.Contains(err.Error(), "no DER encoding") {
+		t.Errorf("Error() = %q, want the missing encoding named", err.Error())
+	}
+}

@@ -44,6 +44,25 @@ A `prompt=none` request is answered as before.
 `AuthenticationFailed` once the user has authenticated, and keep
 `InteractionNeeded` for `prompt=none` requests.
 
+### A peer certificate must carry its DER encoding (server, resource)
+
+**Affects:** code that sets `PeerCertificate` (on a server request type
+or `resource.VerifyRequest`) to an `x509.Certificate` it built field by
+field, rather than one from a TLS connection, `x509.ParseCertificate`
+or `fapihttp.ForwardedClientCertificate`.
+
+**Why:** the RFC 8705 §3.1 thumbprint is a digest of the certificate's
+DER encoding (`Raw`). A certificate without one has the digest of
+nothing, which every such certificate shares, so a token could be bound
+to it, and certificate client authentication compared it.
+
+**What fails:** nothing at startup. Certificate client authentication,
+an mTLS-bound token request, and `resource.Verify` of an mTLS-bound
+token fail with 500 `server_error` when `PeerCertificate.Raw` is empty.
+
+**What to change:** pass the certificate as parsed, for example from
+`x509.ParseCertificate` on the DER bytes your proxy forwards.
+
 ## v0.82.0
 
 ### A Sensitive extension parameter can't be returned in token claims (extension)

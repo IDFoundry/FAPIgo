@@ -79,6 +79,11 @@ type VerifyRequest struct {
 	// proves the client holds its private key. A certificate taken
 	// from anything the client controls lets anyone present a stolen
 	// certificate-bound token.
+	//
+	// It must carry its DER encoding in Raw, as a certificate
+	// x509.ParseCertificate returns does: the RFC 8705 §3.1 thumbprint
+	// is taken over it, and Verify fails with server_error for a
+	// certificate without one.
 	PeerCertificate *x509.Certificate
 
 	// requestPath is the escaped path (url.URL.EscapedPath) of the
@@ -540,6 +545,12 @@ func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, tar
 	// HTTP request itself, so this isn't invalid_request.
 	if req.PeerCertificate == nil {
 		return storage.SenderConstrainMTLS, dpop.VerifiedProof{}, "", nil
+	}
+	if len(req.PeerCertificate.Raw) == 0 {
+		// A certificate built field by field rather than parsed: its
+		// thumbprint would be the digest of nothing, the same for every
+		// such certificate. The caller's mistake, not the client's.
+		return 0, dpop.VerifiedProof{}, "", newError(ErrorServerError, 500, "failed to verify request", errors.New("resource: VerifyRequest.PeerCertificate has no DER encoding: set it to a certificate x509.ParseCertificate returned"))
 	}
 	return storage.SenderConstrainMTLS, dpop.VerifiedProof{}, mtls.Thumbprint(req.PeerCertificate), nil
 }

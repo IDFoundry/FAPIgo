@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/x509"
+	"errors"
 	"net/http"
 )
 
@@ -25,9 +26,28 @@ import (
 // accepts any self-signed certificate whose subject an attacker chose
 // to match — see storage.ClientAuthMethodTLSClientAuth's own doc
 // comment.
+//
+// A PeerCertificate set some other way must carry its DER encoding in
+// Raw, as one x509.ParseCertificate returns does: the RFC 8705 §3.1
+// thumbprint is taken over it, and a request whose certificate has
+// none fails with server_error rather than being bound to, or
+// authenticated by, the digest of nothing.
 func PeerCertificateFromHTTP(r *http.Request) *x509.Certificate {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		return nil
 	}
 	return r.TLS.PeerCertificates[0]
+}
+
+// checkCertificateEncoding refuses a PeerCertificate without its DER
+// encoding (an x509.Certificate built field by field rather than
+// parsed): its thumbprint would be the digest of nothing, the same for
+// every such certificate, and certificate checks read fields Raw
+// should have been parsed into. It is the caller's mistake, not the
+// client's, so it is a server_error.
+func checkCertificateEncoding(cert *x509.Certificate) *Error {
+	if len(cert.Raw) == 0 {
+		return newError(ErrorServerError, 500, "failed to read the client certificate", errors.New("server: PeerCertificate has no DER encoding: set it to a certificate x509.ParseCertificate returned"))
+	}
+	return nil
 }

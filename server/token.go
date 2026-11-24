@@ -777,6 +777,9 @@ func (s *Server) verifyTokenRequestBinding(ctx context.Context, client storage.R
 		if peerCert == nil {
 			return "", newError(ErrorInvalidRequest, 400, "a client certificate is required", nil)
 		}
+		if err := checkCertificateEncoding(peerCert); err != nil {
+			return "", err
+		}
 		return mtls.Thumbprint(peerCert), nil
 	}
 	verified, err := s.verifyTokenRequestDPoP(ctx, dpopProof)

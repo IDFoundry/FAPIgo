@@ -239,6 +239,9 @@ func (s *Server) authenticateClientViaCertificate(ctx context.Context, clientID 
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "a client certificate is required for client authentication", nil)
 	}
+	if err := checkCertificateEncoding(peerCert); err != nil {
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{}, err
+	}
 
 	if verifyErr := s.verifyClientCertificate(ctx, client, peerCert); verifyErr != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{}, verifyErr

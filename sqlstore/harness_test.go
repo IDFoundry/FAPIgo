@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -57,7 +58,11 @@ func runTests(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, "create schema:", err)
 		return 1
 	}
-	defer func() { _, _ = admin.ExecContext(ctx, "DROP SCHEMA "+schema+" CASCADE") }()
+	defer func() {
+		if err := dropSchema(ctx, admin, schema); err != nil {
+			fmt.Fprintf(os.Stderr, "drop schema %s: %v\n", schema, err)
+		}
+	}()
 	u, err := url.Parse(base)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, postgresDSNEnv+":", err)
@@ -75,6 +80,54 @@ func runTests(m *testing.M) int {
 	postgresPool.SetMaxOpenConns(16)
 	defer func() { _ = postgresPool.Close() }()
 	return m.Run()
+}
+
+// dropTablesPerStatement bounds how many tables one DROP TABLE names.
+// Dropping a table takes a lock on it until the statement's transaction
+// ends, and a stock PostgreSQL holds max_locks_per_transaction (64) per
+// connection: the thousands of tables a run creates, dropped in one
+// statement, exceed that.
+const dropTablesPerStatement = 50
+
+// dropSchema drops schema and the tables a run created in it, a batch
+// of tables per statement, then the schema itself. A single DROP SCHEMA
+// CASCADE runs out of shared memory for its locks on a stock server and
+// leaves the schema behind.
+func dropSchema(ctx context.Context, admin *sql.DB, schema string) error {
+	for {
+		rows, err := admin.QueryContext(ctx, "SELECT tablename FROM pg_tables WHERE schemaname = $1 LIMIT $2", schema, dropTablesPerStatement)
+		if err != nil {
+			return err
+		}
+		var names []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			names = append(names, quoteIdentifier(schema)+"."+quoteIdentifier(name))
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(names) == 0 {
+			break
+		}
+		if _, err := admin.ExecContext(ctx, "DROP TABLE "+strings.Join(names, ", ")+" CASCADE"); err != nil {
+			return err
+		}
+	}
+	_, err := admin.ExecContext(ctx, "DROP SCHEMA "+quoteIdentifier(schema)+" CASCADE")
+	return err
+}
+
+// quoteIdentifier quotes name as a PostgreSQL identifier.
+func quoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 func randomHex(n int) string {

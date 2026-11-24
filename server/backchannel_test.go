@@ -1021,7 +1021,9 @@ func TestBeginBackchannelAuthenticationRefusesMalformedNotificationToken(t *test
 		token any
 		ok    bool
 	}{
-		"b64token":        {"aZ09-._~+/==", true},
+		"b64token":        {"aZ09-._~+/aZ09-._~+/a==", true},
+		"21 characters":   {strings.Repeat("a", 21), false},
+		"22 characters":   {strings.Repeat("a", 22), true},
 		"1024 characters": {strings.Repeat("a", 1024), true},
 		"1025 characters": {strings.Repeat("a", 1025), false},
 		"empty":           {"", false},
@@ -1139,7 +1141,7 @@ func TestBeginBackchannelAuthenticationRejectsNoHints(t *testing.T) {
 func TestBeginBackchannelAuthenticationIgnoresNotificationTokenForPollClient(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 	params := standardBackchannelParams(t)
-	params["client_notification_token"] = jsonRaw(t, "notify-me")
+	params["client_notification_token"] = jsonRaw(t, "notify-me-0123456789abcdef")
 	requestObj := h.backchannelRequestObject(t, params)
 
 	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
@@ -1179,7 +1181,7 @@ func TestBeginBackchannelAuthenticationRejectsMissingNotificationTokenForPingCli
 func TestBeginBackchannelAuthenticationAcceptsNotificationTokenForPingClient(t *testing.T) {
 	h, _, _ := newHarnessWithBackchannelPing(t)
 	params := standardBackchannelParams(t)
-	params["client_notification_token"] = jsonRaw(t, "notify-me")
+	params["client_notification_token"] = jsonRaw(t, "notify-me-0123456789abcdef")
 	requestObj := h.backchannelRequestObject(t, params)
 
 	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
@@ -1202,7 +1204,7 @@ func TestBeginBackchannelAuthenticationAcceptsNotificationTokenForPingClient(t *
 func TestCompleteBackchannelAuthenticationDispatchesPingNotification(t *testing.T) {
 	h, _, notifier := newHarnessWithBackchannelPing(t)
 	params := standardBackchannelParams(t)
-	params["client_notification_token"] = jsonRaw(t, "notify-me-123")
+	params["client_notification_token"] = jsonRaw(t, "notify-me-0123456789abcdef-123")
 	requestObj := h.backchannelRequestObject(t, params)
 	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
 		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
@@ -1241,8 +1243,8 @@ func TestCompleteBackchannelAuthenticationDispatchesPingNotification(t *testing.
 	if call.Endpoint.String() != testBackchannelClientNotificationEndpoint {
 		t.Fatalf("Endpoint = %v, want %q", call.Endpoint, testBackchannelClientNotificationEndpoint)
 	}
-	if call.ClientNotificationToken.Reveal() != "notify-me-123" {
-		t.Fatalf("ClientNotificationToken = %q, want %q", call.ClientNotificationToken.Reveal(), "notify-me-123")
+	if call.ClientNotificationToken.Reveal() != "notify-me-0123456789abcdef-123" {
+		t.Fatalf("ClientNotificationToken = %q, want %q", call.ClientNotificationToken.Reveal(), "notify-me-0123456789abcdef-123")
 	}
 	if call.AuthReqID != required.AuthReqID.String() {
 		t.Fatalf("AuthReqID = %q, want %q (CIBA §10.2 requires the notification body carry it)", call.AuthReqID, required.AuthReqID.String())
@@ -1256,7 +1258,7 @@ func TestCompleteBackchannelAuthenticationDispatchesPingNotification(t *testing.
 func TestCompleteBackchannelAuthenticationDispatchesPingNotificationOnDenied(t *testing.T) {
 	h, _, notifier := newHarnessWithBackchannelPing(t)
 	params := standardBackchannelParams(t)
-	params["client_notification_token"] = jsonRaw(t, "notify-me-456")
+	params["client_notification_token"] = jsonRaw(t, "notify-me-0123456789abcdef-456")
 	requestObj := h.backchannelRequestObject(t, params)
 	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
 		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
@@ -1279,8 +1281,8 @@ func TestCompleteBackchannelAuthenticationDispatchesPingNotificationOnDenied(t *
 	if notifier.callCount() != 1 {
 		t.Fatalf("Notify call count = %d, want 1", notifier.callCount())
 	}
-	if notifier.lastCall().ClientNotificationToken.Reveal() != "notify-me-456" {
-		t.Fatalf("ClientNotificationToken = %q, want %q", notifier.lastCall().ClientNotificationToken.Reveal(), "notify-me-456")
+	if notifier.lastCall().ClientNotificationToken.Reveal() != "notify-me-0123456789abcdef-456" {
+		t.Fatalf("ClientNotificationToken = %q, want %q", notifier.lastCall().ClientNotificationToken.Reveal(), "notify-me-0123456789abcdef-456")
 	}
 }
 
@@ -1292,7 +1294,7 @@ func TestCompleteBackchannelAuthenticationIgnoresNotifierError(t *testing.T) {
 	h, _, notifier := newHarnessWithBackchannelPing(t)
 	notifier.err = fmt.Errorf("simulated network failure")
 	params := standardBackchannelParams(t)
-	params["client_notification_token"] = jsonRaw(t, "notify-me-789")
+	params["client_notification_token"] = jsonRaw(t, "notify-me-0123456789abcdef-789")
 	requestObj := h.backchannelRequestObject(t, params)
 	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
 		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},

@@ -551,7 +551,7 @@ func validateClientNotificationToken(params map[string]json.RawMessage, client s
 			return newError(ErrorInvalidRequest, 400, "client_notification_token must be a string", err)
 		}
 		if !isClientNotificationToken(notificationToken) {
-			return newError(ErrorInvalidRequest, 400, "client_notification_token must be a bearer token of at most 1024 characters", nil)
+			return newError(ErrorInvalidRequest, 400, "client_notification_token must be a bearer token of 22 to 1024 characters", nil)
 		}
 	}
 	return nil
@@ -561,14 +561,23 @@ func validateClientNotificationToken(params map[string]json.RawMessage, client s
 // client_notification_token.
 const maxClientNotificationTokenLength = 1024
 
+// minClientNotificationTokenLength is the fewest characters that can
+// hold the 128 bits of entropy CIBA §7.1 requires of a
+// client_notification_token: 22 base64 characters carry 132 bits, and
+// a b64token character at most about 6.1. A shorter token can't meet
+// §7.1, and the ping callback is authenticated by nothing else, so a
+// guessable one would let anyone send the client pings.
+const minClientNotificationTokenLength = 22
+
 // isClientNotificationToken reports whether token is a
-// client_notification_token CIBA §7.1 allows: at most 1024 characters,
-// with the syntax of a Bearer credential (RFC 6750 §2.1, b64token:
+// client_notification_token CIBA §7.1 allows: from
+// minClientNotificationTokenLength to 1024 characters, with the syntax
+// of a Bearer credential (RFC 6750 §2.1, b64token:
 // 1*( ALPHA / DIGIT / "-" / "." / "_" / "~" / "+" / "/" ) *"="). The
 // server sends it back as an Authorization header at ping time, so a
 // token outside that syntax could inject into the notification request.
 func isClientNotificationToken(token string) bool {
-	if token == "" || len(token) > maxClientNotificationTokenLength {
+	if len(token) < minClientNotificationTokenLength || len(token) > maxClientNotificationTokenLength {
 		return false
 	}
 	body := strings.TrimRight(token, "=")

@@ -39,7 +39,7 @@ func TestPingClientRefusedWhenNotificationsDeclined(t *testing.T) {
 	}
 
 	params := standardBackchannelParams(t)
-	params["client_notification_token"] = jsonRaw(t, "notify-me-0123456789abcdef")
+	params["client_notification_token"] = jsonRaw(t, "notify-me-0123456789abcdef-0123456789abcdef")
 	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
 		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, params))},
 	})
@@ -94,7 +94,7 @@ func (n sendingDeclinedNotifier) Notify(ctx context.Context, notification server
 func TestEmbeddedNoBackchannelNotificationsDeclinesPing(t *testing.T) {
 	h, _, _ := newHarnessWithBackchannelPing(t)
 	params := standardBackchannelParams(t)
-	params["client_notification_token"] = jsonRaw(t, "notify-me-123")
+	params["client_notification_token"] = jsonRaw(t, "notify-me-0123456789abcdef-123")
 	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
 		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, params))},
 	})

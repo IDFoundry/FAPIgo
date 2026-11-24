@@ -40,6 +40,22 @@ request is refused with 400 `invalid_binding_message`.
 **What to change:** send a message of ordinary text. Korean text in
 precomposed syllables is unaffected.
 
+### CIBA: `client_notification_token` must be at least 22 characters (server)
+
+**Affects:** a CIBA client registered for ping delivery that sends a
+`client_notification_token` shorter than 22 characters.
+
+**Why:** CIBA §7.1 requires the token to carry at least 128 bits of
+entropy, and the token is all that authenticates the ping callback to
+the client. 22 characters is the fewest that can hold 128 bits.
+FAPIgo's own client sends 43.
+
+**What fails:** nothing at startup. The backchannel authentication
+request is refused with 400 `invalid_request`.
+
+**What to change:** have the client send a token of at least 128
+random bits, such as 16 random bytes base64url-encoded.
+
 ## v0.82.2
 
 ### `InteractionNeeded` answers only a `prompt=none` request (server)

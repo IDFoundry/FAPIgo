@@ -59,6 +59,24 @@ the assertions it makes under `AssuranceProduction`.
 assertions with a longer `exp` must shorten it, since this server
 refuses an assertion whose `exp` is further away than the limit.
 
+### An empty `naming_constraints` `permitted` list permits nothing (federation)
+
+**Affects:** a federation whose Trust Anchor or Intermediate publishes
+a Subordinate Statement with `"naming_constraints": {"permitted": []}`.
+
+**Why:** the resolver read an empty `permitted` list as absent, so it
+permitted every Entity Identifier. A superior that publishes the list
+means to restrict its Subordinates' names, and an empty one restricts
+them to none. An absent `permitted` member still imposes no
+restriction.
+
+**What fails:** nothing at startup. A Trust Chain through such a
+statement is refused, as for a name outside a non-empty `permitted`
+list.
+
+**What to change:** have the superior list the namespaces it permits,
+or leave `permitted` out to permit any name.
+
 ## v0.82.3
 
 ### CIBA: a `binding_message` may not hold characters that display as nothing (server)

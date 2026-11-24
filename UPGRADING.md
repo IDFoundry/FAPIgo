@@ -18,6 +18,27 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.82.5
+
+### A mutual-TLS client must present a certificate in production (client, *production only*)
+
+**Affects:** a client under `AssuranceProduction` that does mutual TLS
+(`Config.SenderConstrain` is `SenderConstrainMTLS`, or its
+`ClientAuthMethod` is a certificate method), whose `Dependencies.HTTP`
+presents no client certificate.
+
+**Why:** without one, the client sends its requests without a
+certificate. A server that doesn't insist answers with a Bearer token
+bound to nothing, and the client can't tell it from a certificate-bound
+one: both have `token_type` Bearer (RFC 8705 §3).
+
+**What fails:** `client.New` returns an error saying the HTTP client
+presents no TLS client certificate.
+
+**What to change:** set `fapihttp.TransportConfig.Certificates`, or
+`GetClientCertificate`, on the transport config you pass to
+`fapihttp.NewClient`.
+
 ## sqlstore v0.11.1
 
 ### `ClientCacheTTL` is at most a minute (sqlstore)

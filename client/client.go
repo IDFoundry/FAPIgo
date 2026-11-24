@@ -655,7 +655,7 @@ func validateProductionDependencies(cfg Config, deps Dependencies) error {
 	if deps.IssuerKeys != nil {
 		errs = append(errs, checkKeySourceAssurance("issuer_keys", deps.IssuerKeys))
 	}
-	errs = append(errs, checkHTTPHardening(deps.HTTP))
+	errs = append(errs, checkHTTPHardening(deps.HTTP), checkMTLSCertificate(cfg, deps.HTTP))
 	return errors.Join(errs...)
 }
 

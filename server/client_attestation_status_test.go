@@ -633,52 +633,7 @@ func (checkingEmbeddedStatusDecline) CheckConfiguration(server.AssuranceLevel) e
 func TestClientAttestationStatusChecksItsConfiguration(t *testing.T) {
 	misconfigured := errors.New("status list fetcher may reach private addresses")
 	for name, production := range map[string]bool{"development": false, "production": true} {
-		t.Run(name, func(t *testing.T) {
-			level := server.AssuranceDevelopment
-			if production {
-				level = server.AssuranceProduction
-			}
-			build := func(attestation bool, mutate func(*server.Dependencies)) error {
-				cfg := validConfig(t)
-				if attestation {
-					cfg = validAttestationConfig(t)
-				}
-				deps := validDependencies()
-				if production {
-					asProduction(&cfg)
-					cfg.Deployment = server.DeploymentSingleInstance
-					deps.Audit = &fakeAuditSink{}
-				}
-				mutate(&deps)
-				_, err := server.New(cfg, deps)
-				return err
-			}
-
-			passing := &selfCheckingStatusChecker{}
-			if err := build(true, func(d *server.Dependencies) { d.ClientAttestationStatus = passing }); err != nil {
-				t.Fatalf("New with a checker whose configuration passes: %v", err)
-			}
-			if len(passing.levels) != 1 || passing.levels[0] != level {
-				t.Fatalf("CheckConfiguration asked at %v, want once at %v", passing.levels, level)
-			}
-
-			failing := &selfCheckingStatusChecker{configErr: misconfigured}
-			err := build(true, func(d *server.Dependencies) { d.ClientAttestationStatus = failing })
-			if !errors.Is(err, misconfigured) || !strings.Contains(err.Error(), "server: dependencies: client_attestation_status: "+misconfigured.Error()) {
-				t.Fatalf("New with a misconfigured checker = %v, want its error as client_attestation_status's", err)
-			}
-			if len(failing.levels) != 1 {
-				t.Fatalf("CheckConfiguration asked %d times, want once", len(failing.levels))
-			}
-
-			unasked := &selfCheckingStatusChecker{configErr: misconfigured}
-			if err := build(false, func(d *server.Dependencies) { d.ClientAttestationStatus = unasked }); err != nil {
-				t.Fatalf("New with attestation disabled: %v", err)
-			}
-			if len(unasked.levels) != 0 {
-				t.Fatalf("CheckConfiguration asked at %v with attestation disabled, want never", unasked.levels)
-			}
-		})
+		t.Run(name, func(t *testing.T) { checkStatusConfigurationAt(t, production, misconfigured) })
 	}
 
 	t.Run("joined with production's other refusals", func(t *testing.T) {
@@ -693,6 +648,66 @@ func TestClientAttestationStatusChecksItsConfiguration(t *testing.T) {
 			t.Fatalf("New = %v, want both the checker's refusal and the missing audit sink", err)
 		}
 	})
+}
+
+// checkStatusConfigurationAt is TestClientAttestationStatusChecksItsConfiguration
+// at one assurance level: a checker whose configuration passes is asked
+// once, at that level; one whose configuration fails refuses New with
+// its error as client_attestation_status's; and neither is asked with
+// attestation-based client authentication off.
+func checkStatusConfigurationAt(t *testing.T, production bool, misconfigured error) {
+	t.Helper()
+	level := server.AssuranceDevelopment
+	if production {
+		level = server.AssuranceProduction
+	}
+
+	passing := &selfCheckingStatusChecker{}
+	if err := newWithStatusChecker(t, production, true, passing); err != nil {
+		t.Fatalf("New with a checker whose configuration passes: %v", err)
+	}
+	if len(passing.levels) != 1 || passing.levels[0] != level {
+		t.Fatalf("CheckConfiguration asked at %v, want once at %v", passing.levels, level)
+	}
+
+	failing := &selfCheckingStatusChecker{configErr: misconfigured}
+	err := newWithStatusChecker(t, production, true, failing)
+	if !errors.Is(err, misconfigured) || !strings.Contains(err.Error(), "server: dependencies: client_attestation_status: "+misconfigured.Error()) {
+		t.Fatalf("New with a misconfigured checker = %v, want its error as client_attestation_status's", err)
+	}
+	if len(failing.levels) != 1 {
+		t.Fatalf("CheckConfiguration asked %d times, want once", len(failing.levels))
+	}
+
+	unasked := &selfCheckingStatusChecker{configErr: misconfigured}
+	if err := newWithStatusChecker(t, production, false, unasked); err != nil {
+		t.Fatalf("New with attestation disabled: %v", err)
+	}
+	if len(unasked.levels) != 0 {
+		t.Fatalf("CheckConfiguration asked at %v with attestation disabled, want never", unasked.levels)
+	}
+}
+
+// newWithStatusChecker builds a server with checker as
+// Dependencies.ClientAttestationStatus, under AssuranceProduction (with
+// its other requirements met) or AssuranceDevelopment, and with
+// attestation-based client authentication on or off, returning New's
+// error.
+func newWithStatusChecker(t *testing.T, production, attestation bool, checker server.ClientAttestationStatusChecker) error {
+	t.Helper()
+	cfg := validConfig(t)
+	if attestation {
+		cfg = validAttestationConfig(t)
+	}
+	deps := validDependencies()
+	if production {
+		asProduction(&cfg)
+		cfg.Deployment = server.DeploymentSingleInstance
+		deps.Audit = &fakeAuditSink{}
+	}
+	deps.ClientAttestationStatus = checker
+	_, err := server.New(cfg, deps)
+	return err
 }
 
 // TestNoClientAttestationStatusCheckAcceptsEverything covers the

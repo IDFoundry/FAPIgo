@@ -13,6 +13,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/depcheck"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -115,6 +116,56 @@ func NewJWTAccessTokens(keys keys.KeyManager, algorithm fapi.SignatureAlgorithm)
 		return JWTAccessTokens{}, fmt.Errorf("server: JWTAccessTokens: algorithm is invalid")
 	}
 	return JWTAccessTokens{Keys: keys, Algorithm: algorithm}, nil
+}
+
+// checkBuiltInAccessTokens refuses a JWTAccessTokens or
+// OpaqueAccessTokens, by value or pointer, built without what it
+// issues with: a JWTAccessTokens without Keys, or with a nil key
+// manager behind the interface, or without a valid Algorithm; an
+// OpaqueAccessTokens without a Store, or with a nil store behind the
+// interface. Such an issuer passed New and failed at its first token
+// request, under either assurance level: the production checks read
+// its keys or store only to check their assurance, and skipped a
+// missing one.
+func checkBuiltInAccessTokens(issuer AccessTokenIssuer) error {
+	switch t := issuer.(type) {
+	case JWTAccessTokens:
+		return t.check()
+	case *JWTAccessTokens:
+		if t != nil {
+			return t.check()
+		}
+	case OpaqueAccessTokens:
+		return t.check()
+	case *OpaqueAccessTokens:
+		if t != nil {
+			return t.check()
+		}
+	}
+	return nil
+}
+
+func (j JWTAccessTokens) check() error {
+	if j.Keys == nil {
+		return errors.New("server: dependencies: access_tokens: JWTAccessTokens.Keys is required, the key manager access tokens are signed with")
+	}
+	if found, ok := depcheck.FindTypedNil(j, map[string]string{"Keys": "Keys"}); ok {
+		return fmt.Errorf("server: dependencies: access_tokens: JWTAccessTokens.%s is a nil %s", found.Name, found.Type)
+	}
+	if !j.Algorithm.IsValid() {
+		return errors.New("server: dependencies: access_tokens: JWTAccessTokens.Algorithm is invalid")
+	}
+	return nil
+}
+
+func (o OpaqueAccessTokens) check() error {
+	if o.Store == nil {
+		return errors.New("server: dependencies: access_tokens: OpaqueAccessTokens.Store is required, the store opaque access tokens are kept in")
+	}
+	if found, ok := depcheck.FindTypedNil(o, map[string]string{"Store": "Store"}); ok {
+		return fmt.Errorf("server: dependencies: access_tokens: OpaqueAccessTokens.%s is a nil %s", found.Name, found.Type)
+	}
+	return nil
 }
 
 // IssueAccessToken implements AccessTokenIssuer.

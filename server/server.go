@@ -742,6 +742,9 @@ func validateRequiredDependencies(deps Dependencies) error {
 	if deps.AccessTokens == nil {
 		return fmt.Errorf("server: dependencies: access tokens is required (pass JWTAccessTokens{...} or OpaqueAccessTokens{...})")
 	}
+	if err := checkBuiltInAccessTokens(deps.AccessTokens); err != nil {
+		return err
+	}
 	return checkEmbeddedJWTAccessTokens(deps.AccessTokens)
 }
 

@@ -18,6 +18,28 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.82.4
+
+### A built-in access token issuer needs its keys or store (server)
+
+**Affects:** a server whose `Dependencies.AccessTokens` is a
+`JWTAccessTokens` without `Keys`, with a nil key manager behind it, or
+without a valid `Algorithm`, or an `OpaqueAccessTokens` without `Store`
+or with a nil store behind it, by value or pointer.
+
+**Why:** `New` checked only that `AccessTokens` was set, so such a
+server started and then failed at its first token request. Under
+`AssuranceProduction`, the checks of the keys' or store's assurance
+skipped a missing one.
+
+**What fails:** `server.New` returns an error naming the missing
+field, such as `JWTAccessTokens.Keys is required`, under either
+assurance level.
+
+**What to change:** build the issuer with `server.NewJWTAccessTokens`
+or `server.NewOpaqueAccessTokens`, which check the same things, or set
+the missing field.
+
 ## v0.82.3
 
 ### CIBA: a `binding_message` may not hold characters that display as nothing (server)

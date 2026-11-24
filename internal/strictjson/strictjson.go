@@ -48,6 +48,19 @@ func Unmarshal(data []byte, v any) error {
 	return json.Unmarshal(data, v)
 }
 
+// UnmarshalNoRepeats is Unmarshal, after CheckDuplicateMembers: it
+// also refuses a member name repeated in one object, exactly or as a
+// case variant. It is for a document that decides what a caller does,
+// such as an authorization server's token response, where encoding/json
+// keeping the last copy would let a second access_token or expires_in
+// replace the first.
+func UnmarshalNoRepeats(data []byte, v any) error {
+	if err := CheckDuplicateMembers(data); err != nil {
+		return err
+	}
+	return Unmarshal(data, v)
+}
+
 // CheckFieldCase reports an error if data contains, at any depth, an
 // object member whose name matches a field of v's type (its json tag, or
 // its Go name when untagged) only case-insensitively, or anything but

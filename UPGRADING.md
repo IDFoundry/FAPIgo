@@ -44,6 +44,30 @@ A `prompt=none` request is answered as before.
 `AuthenticationFailed` once the user has authenticated, and keep
 `InteractionNeeded` for `prompt=none` requests.
 
+### A resource request path must be in normal form (resource)
+
+**Affects:** a resource server whose clients call it with a path
+holding a dot segment (`/accounts/../admin`, `/accounts/./1`) or a
+percent-encoded unreserved character (`/accounts/%31`, `/%7Euser`).
+Clients that build request URLs from the resource server's own don't
+send these.
+
+**Why:** a DPoP proof's `htu` is compared after both forms are
+resolved, so a proof for `/accounts/1` also matched
+`/other/../accounts/1`. A router dispatching on the path as sent,
+rather than as resolved, would then run a different handler from the
+one the proof names.
+
+**What fails:** nothing at startup. `Verify` refuses such a request
+with 400 `invalid_request` ("request path is not in normal form"),
+whether it was built by `VerifyRequestFromHTTP` or given an explicit
+`VerifyRequest.URL`. A percent-encoded reserved character, such as
+`%2F`, is still accepted.
+
+**What to change:** nothing for clients that send normal paths. A
+client that encodes unreserved characters, such as `~` as `%7E`, must
+send them unencoded.
+
 ### A peer certificate must carry its DER encoding (server, resource)
 
 **Affects:** code that sets `PeerCertificate` (on a server request type

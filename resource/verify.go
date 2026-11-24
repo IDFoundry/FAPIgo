@@ -39,7 +39,9 @@ type VerifyRequest struct {
 	// escaped path and Config.ResourceURLs. Set, it must be an absolute
 	// http(s) URL under one of Config.ResourceURLs, or Verify refuses
 	// the request — so one built from the request's Host header, which
-	// the client controls, can name no other resource server.
+	// the client controls, can name no other resource server. A path
+	// with a dot segment or a percent-encoded unreserved character is
+	// refused too, as VerifyRequestFromHTTP's is.
 	URL *url.URL
 
 	// Authorization is the request's one Authorization header. A request

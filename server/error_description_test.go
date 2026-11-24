@@ -29,7 +29,8 @@ func TestCompleteAuthorizationDropsReasonOutsideErrorText(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)
-			handle := beginInteraction(t, h)
+			// prompt=none, which InteractionNeeded answers.
+			handle := interactionFor(t, h, map[string]string{"prompt": "none"}).Handle
 			res, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{Handle: handle, Result: tc.result})
 			if err != nil {
 				t.Fatalf("CompleteAuthorization: %v", err)

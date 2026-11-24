@@ -148,14 +148,28 @@ func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthoriz
 	case authenticationFailedResult:
 		return s.completeErrorRedirect(ctx, completed.ClientID, redirectURI, state, "login_required", result.reason, AuditOutcomeFailure)
 	case interactionNeededResult:
-		code := result.need.errorCode()
-		if code == "" {
-			return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "unrecognized interaction need", nil)), nil
-		}
-		return s.completeErrorRedirect(ctx, completed.ClientID, redirectURI, state, code, result.reason, AuditOutcomeFailure)
+		return s.completeInteractionNeeded(ctx, completed.ClientID, request, redirectURI, state, result)
 	default:
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "unrecognized interaction result", nil)), nil
 	}
+}
+
+// completeInteractionNeeded answers InteractionNeeded with need's
+// error at the client's redirect URI, for a request whose prompt has
+// PromptNone. That is the silent authentication RFC 9700 §4.11.2 lets
+// redirect before anyone authenticates. Any other request is refused
+// locally with server_error: nothing the end user did justifies sending
+// the browser to the client's redirect URI, which may be any page the
+// client chose.
+func (s *Server) completeInteractionNeeded(ctx context.Context, clientID fapi.ClientID, request requestRecord, redirectURI, state string, result interactionNeededResult) (AuthorizationResult, error) {
+	code := result.need.errorCode()
+	if code == "" {
+		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "unrecognized interaction need", nil)), nil
+	}
+	if prompt, err := requestedPrompt(request.Parameters); err != nil || !prompt.Has(PromptNone) {
+		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "InteractionNeeded answers only a request with prompt=none", err)), nil
+	}
+	return s.completeErrorRedirect(ctx, clientID, redirectURI, state, code, result.reason, AuditOutcomeFailure)
 }
 
 func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, request requestRecord, redirectURI, state string, result authorizeResult) (AuthorizationResult, error) {

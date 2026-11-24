@@ -261,3 +261,74 @@ func TestNewVerifierChecksResourceURLs(t *testing.T) {
 		t.Errorf("loopback http in development: %v", err)
 	}
 }
+
+// TestVerifyRefusesANonNormalPath: with origin-only ResourceURLs, a
+// path with a dot segment or a percent-encoded unreserved character is
+// refused, from VerifyRequestFromHTTP or an explicit URL, even though
+// the proof's htu, compared canonically, names the same resource: a
+// router dispatching on the path as sent would run another handler.
+// A percent-encoded reserved character is left alone.
+func TestVerifyRefusesANonNormalPath(t *testing.T) {
+	f := newFixture(t)
+	for path, ok := range map[string]bool{
+		"/accounts/1":            true,
+		"/accounts/a%2Fb":        true,
+		"/other/../accounts/1":   false,
+		"/accounts/./1":          false,
+		"/accounts/%31":          false,
+		"/%61ccounts/1":          false,
+		"/accounts/1/..%2F..%2F": true,
+	} {
+		// A refused path's proof names the resource it resolves to.
+		htu := "https://rs.example.com/accounts/1"
+		if ok {
+			htu = "https://rs.example.com" + path
+		}
+		for form, build := range pathRequestForms(t, f, path) {
+			_, err := f.verifier.Verify(context.Background(), build(f.proofFor(t, "GET", htu)))
+			assertPathVerdict(t, form+", path "+path, err, ok)
+		}
+	}
+}
+
+// pathRequestForms are the two ways a request for path reaches Verify:
+// built by VerifyRequestFromHTTP, and with an explicit URL. Each takes
+// a fresh proof, since a proof is accepted once.
+func pathRequestForms(t *testing.T, f fixture, path string) map[string]func(proof string) resource.VerifyRequest {
+	t.Helper()
+	explicit, err := url.Parse("https://rs.example.com" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]func(proof string) resource.VerifyRequest{
+		"from HTTP": func(proof string) resource.VerifyRequest {
+			r := httptest.NewRequest(http.MethodGet, "https://rs.example.com/", nil)
+			r.URL = &url.URL{Path: path}
+			if p, err := url.PathUnescape(path); err == nil && p != path {
+				r.URL = &url.URL{Path: p, RawPath: path}
+			}
+			r.Header.Set("Authorization", "DPoP "+f.accessToken)
+			r.Header.Set("DPoP", proof)
+			return resource.VerifyRequestFromHTTP(r)
+		},
+		"explicit URL": func(proof string) resource.VerifyRequest {
+			return resource.VerifyRequest{Method: "GET", URL: explicit, Authorization: "DPoP " + f.accessToken, DPoPProofs: []string{proof}}
+		},
+	}
+}
+
+// assertPathVerdict checks err accepts the path when ok, and otherwise
+// refuses it as invalid_request naming its form.
+func assertPathVerdict(t *testing.T, what string, err error, ok bool) {
+	t.Helper()
+	if ok {
+		if err != nil {
+			t.Errorf("%s: %v, want accepted", what, err)
+		}
+		return
+	}
+	assertCode(t, what, err, resource.ErrorInvalidRequest)
+	if err != nil && !strings.Contains(err.Error(), "normal form") {
+		t.Errorf("%s: %v, want the path's form named", what, err)
+	}
+}

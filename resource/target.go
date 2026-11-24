@@ -71,6 +71,9 @@ func (v *Verifier) explicitTarget(target *url.URL) ([]*url.URL, *Error) {
 	if !target.IsAbs() || target.Host == "" || (target.Scheme != "https" && target.Scheme != "http") {
 		return nil, newError(ErrorServerError, 500, "failed to verify request", errors.New("resource: VerifyRequest.URL must be an absolute http(s) URL, or left nil with a request built by VerifyRequestFromHTTP"))
 	}
+	if !canonical.HasNormalPath(target) {
+		return nil, nonNormalPath(target.EscapedPath())
+	}
 	for _, r := range v.resourceURLs {
 		if r.covers(target) {
 			return []*url.URL{target}, nil
@@ -88,6 +91,9 @@ func (v *Verifier) pathTargets(escapedPath string) ([]*url.URL, *Error) {
 	var targets []*url.URL
 	for _, r := range v.resourceURLs {
 		t, err := url.Parse(r.origin.String() + escapedPath)
+		if err == nil && !canonical.HasNormalPath(t) {
+			return nil, nonNormalPath(escapedPath)
+		}
 		if err == nil && t.Host == r.origin.Host && t.RawQuery == "" && t.Fragment == "" && r.covers(t) {
 			targets = append(targets, t)
 		}
@@ -96,6 +102,17 @@ func (v *Verifier) pathTargets(escapedPath string) ([]*url.URL, *Error) {
 		return nil, outsideResourceURLs(escapedPath)
 	}
 	return targets, nil
+}
+
+// nonNormalPath refuses a request whose path isn't in the normal form
+// a DPoP htu is compared in: one with a dot segment ("/a/../b") or a
+// percent-encoded unreserved character ("/accounts/%31"). htu matching
+// resolves both, so the proof would match, while a router that
+// dispatches on the path as sent would run a different handler from
+// the one the proof names. A client building its URL from the resource
+// server's own does not send such a path.
+func nonNormalPath(escapedPath string) *Error {
+	return newError(ErrorInvalidRequest, 400, "request path is not in normal form", fmt.Errorf("resource: request path %q has a dot segment or a percent-encoded unreserved character", escapedPath))
 }
 
 // outsideResourceURLs refuses a request whose target isn't under any of

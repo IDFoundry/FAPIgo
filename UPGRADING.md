@@ -18,6 +18,75 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.82.3
+
+### `InteractionNeeded` answers only a `prompt=none` request (server)
+
+**Affects:** an application that completes an interaction with
+`server.InteractionNeeded` for a request whose
+`InteractionRequest.Prompt` doesn't include `server.PromptNone`: to end
+a sign-in page the user abandoned, say.
+
+**Why:** `CompleteAuthorization` redirected the browser to the client's
+redirect URI with `login_required` (or another `InteractionNeeded`
+error) although nobody had authenticated. RFC 9700 §4.11.2 forbids
+that redirect, since a client can register any page as its redirect
+URI, and allows it only for `prompt=none`'s silent authentication.
+`Deny` and `AuthenticationFailed` already documented the same rule.
+
+**What fails:** nothing at startup. For such a request,
+`CompleteAuthorization` ends the interaction and returns
+`AuthorizationLocalError` with `server_error`, instead of the redirect.
+A `prompt=none` request is answered as before.
+
+**What to change:** end a sign-in nobody completed with
+`DenyLocally`, and render the outcome yourself. Use `Deny` or
+`AuthenticationFailed` once the user has authenticated, and keep
+`InteractionNeeded` for `prompt=none` requests.
+
+### A resource request path must be in normal form (resource)
+
+**Affects:** a resource server whose clients call it with a path
+holding a dot segment (`/accounts/../admin`, `/accounts/./1`) or a
+percent-encoded unreserved character (`/accounts/%31`, `/%7Euser`).
+Clients that build request URLs from the resource server's own don't
+send these.
+
+**Why:** a DPoP proof's `htu` is compared after both forms are
+resolved, so a proof for `/accounts/1` also matched
+`/other/../accounts/1`. A router dispatching on the path as sent,
+rather than as resolved, would then run a different handler from the
+one the proof names.
+
+**What fails:** nothing at startup. `Verify` refuses such a request
+with 400 `invalid_request` ("request path is not in normal form"),
+whether it was built by `VerifyRequestFromHTTP` or given an explicit
+`VerifyRequest.URL`. A percent-encoded reserved character, such as
+`%2F`, is still accepted.
+
+**What to change:** nothing for clients that send normal paths. A
+client that encodes unreserved characters, such as `~` as `%7E`, must
+send them unencoded.
+
+### A peer certificate must carry its DER encoding (server, resource)
+
+**Affects:** code that sets `PeerCertificate` (on a server request type
+or `resource.VerifyRequest`) to an `x509.Certificate` it built field by
+field, rather than one from a TLS connection, `x509.ParseCertificate`
+or `fapihttp.ForwardedClientCertificate`.
+
+**Why:** the RFC 8705 §3.1 thumbprint is a digest of the certificate's
+DER encoding (`Raw`). A certificate without one has the digest of
+nothing, which every such certificate shares, so a token could be bound
+to it, and certificate client authentication compared it.
+
+**What fails:** nothing at startup. Certificate client authentication,
+an mTLS-bound token request, and `resource.Verify` of an mTLS-bound
+token fail with 500 `server_error` when `PeerCertificate.Raw` is empty.
+
+**What to change:** pass the certificate as parsed, for example from
+`x509.ParseCertificate` on the DER bytes your proxy forwards.
+
 ## v0.82.0
 
 ### A Sensitive extension parameter can't be returned in token claims (extension)

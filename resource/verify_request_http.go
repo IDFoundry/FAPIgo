@@ -20,7 +20,10 @@ import (
 // r's Host header, which the client controls, nor from the decoded
 // r.URL.Path, under which /accounts/a%2Fb would be /accounts/a/b. A
 // handler mounted on a path outside every ResourceURLs prefix has each
-// request refused.
+// request refused, and so is a path with a dot segment ("/a/../b") or a
+// percent-encoded unreserved character ("/accounts/%31"): htu matching
+// would resolve it, while a router dispatching on the path as sent
+// wouldn't.
 //
 // Behind a proxy that terminates TLS, r carries no client certificate:
 // set PeerCertificate afterwards from however the proxy forwards it

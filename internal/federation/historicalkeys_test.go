@@ -504,4 +504,18 @@ func TestParseHistoricalKeyEntryReadsTheLastRevokedCopy(t *testing.T) {
 	if got, ok := parseHistoricalKeyEntry(entry(`"revoked":null`)); !ok || got.Revoked != nil {
 		t.Fatalf("parseHistoricalKeyEntry(revoked null) = %+v, %v; want an unrevoked key", got.Revoked, ok)
 	}
+
+	// A revoked that isn't an object, or whose revoked_at isn't a
+	// NumericDate, skips the entry, as it did when the entry was decoded
+	// in one piece.
+	for _, members := range []string{
+		`"revoked":"compromised"`,
+		`"revoked":[]`,
+		`"revoked":{"revoked_at":"yesterday"}`,
+		`"revoked":{"revoked_at":1},"revoked":true`,
+	} {
+		if got, ok := parseHistoricalKeyEntry(entry(members)); ok {
+			t.Errorf("parseHistoricalKeyEntry(%s) = %+v, want the entry skipped", members, got.Revoked)
+		}
+	}
 }

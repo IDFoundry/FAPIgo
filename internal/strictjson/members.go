@@ -46,8 +46,19 @@ var errNestedTooDeep = fmt.Errorf("strictjson: JSON nested more than %d deep", M
 // refuse a repeat.
 //
 // It reads data once, and holds the names of each object it is inside,
-// so it takes time and memory linear in len(data).
+// so it takes time and memory linear in len(data). A byte scanner
+// (scanMembers) accepts the documents it finds nothing wrong with;
+// anything else is walked with a json.Decoder, which gives the error.
 func CheckDuplicateMembers(data []byte) error {
+	if scanMembers(data) {
+		return nil
+	}
+	return walkMembers(data)
+}
+
+// walkMembers is CheckDuplicateMembers by json.Decoder tokens: slower
+// than scanMembers, but what decides each error.
+func walkMembers(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber() // numbers are skipped, never converted, so none overflows
 	err := checkValueMembers(dec, 0)

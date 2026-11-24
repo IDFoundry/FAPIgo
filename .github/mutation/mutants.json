@@ -4321,5 +4321,17 @@
     ],
     "run": "^TestResolveWalksARepeatedAuthorityHintOnce$",
     "why": "a repeated authority hint is walked once, so its copies neither repeat its failure nor spend the search budget"
+  },
+  {
+    "id": "sqlstore-client-cache-ttl-ceiling",
+    "file": "sqlstore/db.go",
+    "old": "if opts.ClientCacheTTL > MaxClientCacheTTL {",
+    "new": "if opts.ClientCacheTTL > 10*MaxClientCacheTTL {",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestNewBoundsClientCacheTTL$",
+    "why": "New refuses a ClientCacheTTL over MaxClientCacheTTL, the staleness CrossInstanceConsistent allows for"
   }
 ]

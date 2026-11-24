@@ -619,16 +619,19 @@ type Config struct {
 	// for "openid" (see the package doc).
 	OAuthOnly bool
 
-	// RequireSignedUserInfo has FetchUserInfo refuse a plain JSON
-	// UserInfo response: only a signed one (or a signed-then-encrypted
-	// one, under Algorithms.UserInfoKeyManagement) is accepted. Set it
-	// when this client registered userinfo_signed_response_alg (OIDC
-	// Dynamic Client Registration §2: the response is then "JWT
-	// serialized, and signed using JWS"), so a response that arrives
-	// unsigned, which anyone able to answer for the endpoint can
-	// produce, isn't taken as the server's. Requires Algorithms.UserInfo.
-	// False (the default) accepts plain JSON or a signed response.
-	RequireSignedUserInfo bool
+	// AllowUnsignedUserInfo has FetchUserInfo accept a plain JSON
+	// UserInfo response although Algorithms.UserInfo is set. By
+	// default, a client with Algorithms.UserInfo set accepts only a
+	// signed response (or a signed-then-encrypted one, under
+	// Algorithms.UserInfoKeyManagement): setting the algorithm means
+	// it registered userinfo_signed_response_alg, so the server signs
+	// every response (OIDC Dynamic Client Registration §2: "JWT
+	// serialized, and signed using JWS"), and one arriving unsigned,
+	// which anyone able to answer for the endpoint can produce, isn't
+	// the server's. Set it only for a server that signs some responses
+	// and not others. Requires Algorithms.UserInfo; without it, only a
+	// plain JSON response is accepted anyway.
+	AllowUnsignedUserInfo bool
 }
 
 // clone returns c with a copy of each of its slices, TrustedIDTokenAudiences

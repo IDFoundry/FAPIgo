@@ -42,6 +42,9 @@ func newUserInfoTestClient(t *testing.T, ts *httptest.Server, userInfoKey *ecdsa
 	t.Helper()
 	cfg := validConfig(t)
 	cfg.Algorithms.UserInfo = fapi.ES256
+	// Its tests serve plain JSON as often as signed responses; the
+	// signed-only default is tested on its own, with this set false.
+	cfg.AllowUnsignedUserInfo = true
 	userInfoURL, err := fapi.ParseEndpointURL(ts.URL+"/userinfo", fapi.AllowLoopbackHTTP())
 	if err != nil {
 		t.Fatalf("ParseEndpointURL(userinfo): %v", err)
@@ -439,6 +442,7 @@ func TestFetchUserInfoSignedResponseWithoutUserInfoAlgorithm(t *testing.T) {
 
 	c := newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, func(cfg *client.Config) {
 		cfg.Algorithms.UserInfo = 0
+		cfg.AllowUnsignedUserInfo = false
 	}, nil)
 	_, err = c.FetchUserInfo(context.Background(), userInfoTestTokens())
 	var cerr *client.Error
@@ -787,11 +791,12 @@ func TestFetchUserInfoRejectsEncryptedWhenNotExpected(t *testing.T) {
 	}
 }
 
-// TestFetchUserInfoRequireSignedUserInfo: a client that registered
-// userinfo_signed_response_alg refuses a plain JSON response, which
-// anyone able to answer for the endpoint can produce, and accepts a
-// signed one.
-func TestFetchUserInfoRequireSignedUserInfo(t *testing.T) {
+// TestFetchUserInfoRequiresASignedResponseByDefault: a client with
+// Algorithms.UserInfo set registered userinfo_signed_response_alg, so it
+// refuses a plain JSON response, which anyone able to answer for the
+// endpoint can produce, and accepts a signed one, unless
+// AllowUnsignedUserInfo opts out. That opt-out needs the algorithm.
+func TestFetchUserInfoRequiresASignedResponseByDefault(t *testing.T) {
 	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generate userinfo key: %v", err)
@@ -809,21 +814,28 @@ func TestFetchUserInfoRequireSignedUserInfo(t *testing.T) {
 		})))
 	}))
 	defer ts.Close()
-	c := newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, func(cfg *client.Config) { cfg.RequireSignedUserInfo = true }, nil)
+	strict := newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, func(cfg *client.Config) { cfg.AllowUnsignedUserInfo = false }, nil)
+	lenient := newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, nil, nil)
 
-	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err != nil {
-		t.Fatalf("FetchUserInfo(signed) = %v", err)
+	for name, c := range map[string]*client.Client{"default": strict, "AllowUnsignedUserInfo": lenient} {
+		signed = true
+		if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err != nil {
+			t.Fatalf("%s: FetchUserInfo(signed) = %v", name, err)
+		}
 	}
 	signed = false
 	var cerr *client.Error
-	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
-		t.Fatalf("FetchUserInfo(plain JSON) = %v, want invalid_response", err)
+	if _, err := strict.FetchUserInfo(context.Background(), userInfoTestTokens()); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
+		t.Fatalf("default: FetchUserInfo(plain JSON) = %v, want invalid_response", err)
+	}
+	if _, err := lenient.FetchUserInfo(context.Background(), userInfoTestTokens()); err != nil {
+		t.Fatalf("AllowUnsignedUserInfo: FetchUserInfo(plain JSON) = %v", err)
 	}
 
 	cfg := validConfig(t)
-	cfg.RequireSignedUserInfo = true
-	if _, err := client.New(cfg, validDependencies(t)); err == nil || !strings.Contains(err.Error(), "require_signed_userinfo") {
-		t.Fatalf("New(RequireSignedUserInfo without algorithms.userinfo) = %v, want refused", err)
+	cfg.AllowUnsignedUserInfo = true
+	if _, err := client.New(cfg, validDependencies(t)); err == nil || !strings.Contains(err.Error(), "allow_unsigned_userinfo") {
+		t.Fatalf("New(AllowUnsignedUserInfo without algorithms.userinfo) = %v, want refused", err)
 	}
 }
 

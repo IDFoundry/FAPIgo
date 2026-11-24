@@ -88,8 +88,13 @@ the client the token was issued to, so the response can only be
 addressed to that client, and refuses claims whose `sub` isn't the
 token's subject.
 On the client, setting `Algorithms.UserInfo` makes `FetchUserInfo`
-verify the response; `VerifyIssuerJWS` verifies another generically
-typed issuer-signed JWS (`typ` absent or `JWT`) with the same keys.
+verify the response, and refuse a plain JSON one: setting it means the
+client registered `userinfo_signed_response_alg`, so every response
+from its server is signed, and an unsigned one could come from anyone
+able to answer for the endpoint. `AllowUnsignedUserInfo` opts out, for
+a server that signs some responses and not others. `VerifyIssuerJWS`
+verifies another generically typed issuer-signed JWS (`typ` absent or
+`JWT`) with the same keys.
 
 ## See it running
 

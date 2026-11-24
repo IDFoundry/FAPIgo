@@ -4090,5 +4090,53 @@
     ],
     "run": "^TestVerifyRefusesANonNormalPath$",
     "why": "a request path from VerifyRequestFromHTTP with a dot segment or a percent-encoded unreserved character is refused"
+  },
+  {
+    "id": "server-binding-message-refuses-default-ignorable",
+    "file": "server/backchannel_authentication.go",
+    "old": " || unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) {",
+    "new": " {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBindingMessageRefusesFormatCharacters$",
+    "why": "a binding_message holding a default-ignorable character outside Cf, such as a Hangul filler, is refused with invalid_binding_message"
+  },
+  {
+    "id": "server-binding-message-braille-blank-not-visible",
+    "file": "server/backchannel_authentication.go",
+    "old": "if r != brailleBlank && unicode.In(",
+    "new": "if unicode.In(",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRequireBindingMessage$",
+    "why": "a required binding_message of only blank Braille cells shows nothing and is refused"
+  },
+  {
+    "id": "server-notification-token-min-length",
+    "file": "server/backchannel_authentication.go",
+    "old": "len(token) < minClientNotificationTokenLength ||",
+    "new": "len(token) < 1 ||",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBeginBackchannelAuthenticationRefusesMalformedNotificationToken$",
+    "why": "a client_notification_token shorter than 22 characters can't hold CIBA §7.1's 128 bits and is refused"
+  },
+  {
+    "id": "server-ciba-pending-lifetime-ceiling",
+    "file": "server/server.go",
+    "old": "if cibaEnabled && l.BackchannelAuthenticationRequestLifetime > fapiMaxBackchannelRequestPendingLifetime {",
+    "new": "if false && cibaEnabled && l.BackchannelAuthenticationRequestLifetime > fapiMaxBackchannelRequestPendingLifetime {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewCapsCIBAPendingLifetimeUnderProduction$",
+    "why": "production assurance refuses a pending CIBA request lifetime over an hour"
   }
 ]

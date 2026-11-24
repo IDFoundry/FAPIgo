@@ -27,9 +27,19 @@
 //     authorization_details. The embedder may set the authorization
 //     attributes and delegation claims itself — they are its decision
 //     to make — but a client never may.
+//
+// Names are compared under Unicode simple case folding
+// (strings.EqualFold), so "Sub", "SUB" and "ſub" are as reserved as
+// "sub". JWT claim names are case-sensitive (RFC 7519 §4), but a
+// recipient decoding claims with Go's encoding/json, or another
+// case-insensitive decoder, reads a case variant as the claim itself,
+// and the last of the two wins.
 package claimnames
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 // Kind is the kind of JWT a claim is destined for.
 type Kind uint8
@@ -102,21 +112,27 @@ var standardClaims = []string{
 // Reserved reports whether a value source chose must not appear in a
 // JWT of kind under name.
 func Reserved(kind Kind, source Source, name string) bool {
-	if slices.Contains(setByIssuer[kind], name) || slices.Contains(processingClaims, name) {
+	in := func(list []string) bool { return ContainsFold(list, name) }
+	if in(setByIssuer[kind]) || in(processingClaims) {
 		return true
 	}
 	switch kind {
 	case IDToken:
-		if slices.Contains(idTokenBindingClaims, name) || slices.Contains(tokenMetadataClaims, name) ||
-			slices.Contains(authorizationResponseClaims, name) {
+		if in(idTokenBindingClaims) || in(tokenMetadataClaims) || in(authorizationResponseClaims) {
 			return true
 		}
 	case UserInfo:
-		if slices.Contains(idTokenBindingClaims, name) || slices.Contains(authorizationResponseClaims, name) {
+		if in(idTokenBindingClaims) || in(authorizationResponseClaims) {
 			return true
 		}
 	}
-	return source == Client && (slices.Contains(authorityClaims, name) || slices.Contains(standardClaims, name))
+	return source == Client && (in(authorityClaims) || in(standardClaims))
+}
+
+// ContainsFold reports whether names holds name under Unicode simple
+// case folding, the comparison Reserved makes.
+func ContainsFold(names []string, name string) bool {
+	return slices.ContainsFunc(names, func(n string) bool { return strings.EqualFold(n, name) })
 }
 
 // ReservedInTokens reports whether name is Reserved, for source, in

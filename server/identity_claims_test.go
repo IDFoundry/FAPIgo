@@ -199,7 +199,12 @@ func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityCl
 // TestExtensionCannotReturnAuthorityOrProcessingClaims); server.New
 // also refuses the ones this server adds to access tokens itself.
 func TestNewRejectsExtensionClaimShadowingManagedClaim(t *testing.T) {
-	for _, name := range []string{"requested_userinfo_claims", "grant_id", "code_grant_id", "grant_type", "pairwise_sector", "client_sub"} {
+	for _, name := range []string{
+		"requested_userinfo_claims", "grant_id", "code_grant_id", "grant_type", "pairwise_sector", "client_sub",
+		// Case variants, which a recipient decoding claims
+		// case-insensitively reads as the server's own.
+		"Grant_Type", "CLIENT_SUB", "Pairwise_\u017fector",
+	} {
 		t.Run(name, func(t *testing.T) {
 			registry, err := extension.NewRegistry(extension.Definition[string]{
 				Sensitivity: extension.NotSensitive,
@@ -247,6 +252,7 @@ func TestExtensionCannotReturnAuthorityOrProcessingClaims(t *testing.T) {
 		"roles", "groups", "entitlements", "act", "may_act",
 		"events", "_claim_names", "_claim_sources", "sub_jwk",
 		"code", "state", "error", "email", "acr",
+		"Roles", "EVENTS", "Email",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := extension.NewRegistry(extension.Definition[string]{

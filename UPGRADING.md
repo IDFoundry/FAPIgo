@@ -72,6 +72,34 @@ minutes FAPI-CIBA §5.2.2 allows a signed request's own lifetime.
 
 **What to change:** set the lifetime to 60 minutes or less.
 
+### Reserved claim names are reserved in any case (server, extension)
+
+**Affects:** an application whose claims for an ID token, access token
+or signed UserInfo response use a case variant of a name FAPIgo
+reserves, such as `Sub`, `ACR` or `Nonce`. This covers
+`GrantedAuthorization.IDTokenClaims`, an `IdentityClaimsSource`'s
+values, the claims passed to `SignUserInfoResponse`, and a custom
+`AccessTokenIssuer`'s claims. It also covers an extension registered
+with `ReturnInTokenClaims` under such a name, such as `Roles` or
+`Grant_Type`.
+
+**Why:** JWT claim names are case-sensitive, so `Sub` passed as an
+unreserved claim. But a recipient decoding claims with Go's
+`encoding/json`, or any other case-insensitive decoder, reads it as
+`sub`, and the last of the two wins. A value meant to describe the
+subject could replace the token's subject, nonce or roles.
+
+**What fails:** names are now compared under Unicode simple case
+folding, so `ſub` (long s) is reserved too. `extension.NewRegistry` or
+`server.New` refuses such an extension at startup. A case-variant claim
+is refused where the exact name is: `CompleteAuthorization` and
+`CompleteBackchannelAuthentication` return `invalid_request`,
+`SignUserInfoResponse` returns `server_error`, and token issuance
+fails.
+
+**What to change:** rename the claim so it isn't a case variant of a
+reserved name.
+
 ## v0.82.2
 
 ### `InteractionNeeded` answers only a `prompt=none` request (server)

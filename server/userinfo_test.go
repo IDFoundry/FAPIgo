@@ -167,6 +167,7 @@ func TestSignUserInfoResponseRejectsReservedClaims(t *testing.T) {
 	for _, reserved := range []string{
 		"iss", "aud", "events", "_claim_names", "_claim_sources", "sub_jwk",
 		"azp", "nonce", "at_hash", "c_hash", "s_hash", "code", "state", "error",
+		"ISS", "Aud", "Nonce", "\u017f_hash",
 	} {
 		claims := testUserInfoClaims(t)
 		v, err := json.Marshal("attacker-supplied-value")

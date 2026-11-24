@@ -123,6 +123,66 @@
     "why": "two member names that differ only in case count as one name repeated"
   },
   {
+    "id": "strictjson-scan-refuses-repeat",
+    "file": "internal/strictjson/members_scan.go",
+    "old": "if !ok || s.repeats(mark, span, &index) {",
+    "new": "if !ok || (s.repeats(mark, span, &index) && false) {",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^(TestScanMembersMatchesWalker|TestASCIIFoldMatchesFoldKey)$",
+    "why": "the byte scanner never accepts an object that repeats a member name, so the walker reports it"
+  },
+  {
+    "id": "strictjson-scan-repeat-past-small",
+    "file": "internal/strictjson/members_scan.go",
+    "old": "\tif _, ok := (*index)[string(name)]; ok {\n\t\treturn true\n\t}",
+    "new": "\tif _, ok := (*index)[string(name)]; ok && false {\n\t\treturn true\n\t}",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^(TestScanMembersMatchesWalker|TestASCIIFoldMatchesFoldKey)$",
+    "why": "a repeat in an object of more than smallObjectMembers members is caught too"
+  },
+  {
+    "id": "strictjson-scan-depth-cap",
+    "file": "internal/strictjson/members_scan.go",
+    "old": "\t\tif depth >= MaxNestingDepth {\n\t\t\treturn false\n\t\t}",
+    "new": "\t\tif depth > MaxNestingDepth {\n\t\t\treturn false\n\t\t}",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^(TestScanMembersMatchesWalker|TestASCIIFoldMatchesFoldKey)$",
+    "why": "the byte scanner refuses nesting deeper than MaxNestingDepth, as the walker does"
+  },
+  {
+    "id": "strictjson-scan-control-character",
+    "file": "internal/strictjson/members_scan.go",
+    "old": "\t\tcase c < 0x20:\n\t\t\treturn start, false, false",
+    "new": "\t\tcase c < 0x20 && false:\n\t\t\treturn start, false, false",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^(TestScanMembersMatchesWalker|TestASCIIFoldMatchesFoldKey)$",
+    "why": "the byte scanner refuses an unescaped control character in a string, as encoding/json does"
+  },
+  {
+    "id": "strictjson-scan-escape-unquoted",
+    "file": "internal/strictjson/members_scan.go",
+    "old": "\tif plain {",
+    "new": "if plain || !plain {",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^(TestScanMembersMatchesWalker|TestASCIIFoldMatchesFoldKey)$",
+    "why": "a name with an escape or a non-ASCII byte is unquoted before folding, so \\u006bid and kid are one name"
+  },
+  {
     "id": "jose-header-duplicate-members",
     "file": "internal/jose/header.go",
     "old": "if err := strictjson.CheckDuplicateMembers(data); err != nil {",

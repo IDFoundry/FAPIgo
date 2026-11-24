@@ -213,7 +213,7 @@ func TestClientCacheTTLKeys(t *testing.T) {
 // resolves as its row says.
 func TestClientCacheEvictionBound(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
-		for _, ttl := range []time.Duration{0, time.Hour} {
+		for _, ttl := range []time.Duration{0, sqlstore.MaxClientCacheTTL} {
 			t.Run(ttl.String(), func(t *testing.T) { testClientCacheEvictionBound(t, dialect, ttl) })
 		}
 	})
@@ -248,7 +248,7 @@ func testClientCacheEvictionBound(t *testing.T, dialect sqlstore.Dialect, ttl ti
 // would uncached.
 func TestClientCacheErrorsUnchanged(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
-		for _, ttl := range []time.Duration{0, time.Hour} {
+		for _, ttl := range []time.Duration{0, sqlstore.MaxClientCacheTTL} {
 			t.Run(ttl.String(), func(t *testing.T) { testClientCacheErrorsUnchanged(t, dialect, ttl) })
 		}
 	})
@@ -291,7 +291,7 @@ func testClientCacheErrorsUnchanged(t *testing.T, dialect sqlstore.Dialect, ttl 
 func TestClientCacheValuesCantBeMutated(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
 		ctx := context.Background()
-		c := newCachePlace(t, dialect, sqlstore.Options{ClientCacheTTL: time.Hour})
+		c := newCachePlace(t, dialect, sqlstore.Options{ClientCacheTTL: sqlstore.MaxClientCacheTTL})
 		cfg := keyedClient("c")
 		cfg.ClientAuthMethods = []storage.ClientAuthMethod{storage.ClientAuthMethodPrivateKeyJWT}
 		cfg.ClientAssertionAlgorithms = []fapi.SignatureAlgorithm{fapi.ES256}
@@ -361,7 +361,7 @@ func wantNoSharedMemory(t *testing.T, bodies []string, ids ...fapi.ClientID) {
 // hit, and once the row has changed.
 func TestClientCacheKeepsCopiesOfClientIDs(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
-		for _, ttl := range []time.Duration{0, time.Hour} {
+		for _, ttl := range []time.Duration{0, sqlstore.MaxClientCacheTTL} {
 			t.Run(ttl.String(), func(t *testing.T) { testClientCacheKeepsCopiesOfClientIDs(t, dialect, ttl) })
 		}
 	})
@@ -473,7 +473,7 @@ func lookUpFromBodies(t *testing.T, d *sqlstore.DB, id fapi.ClientID, keysFirst 
 // write.
 func TestClientCacheConcurrent(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
-		for _, ttl := range []time.Duration{0, time.Hour} {
+		for _, ttl := range []time.Duration{0, sqlstore.MaxClientCacheTTL} {
 			t.Run(ttl.String(), func(t *testing.T) { testClientCacheConcurrent(t, dialect, ttl) })
 		}
 	})
@@ -519,5 +519,29 @@ func TestNewRefusesNegativeClientCacheTTL(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	if _, err := sqlstore.New(db, sqlstore.SQLite, sqlstore.Options{ClientCacheTTL: -time.Second}); err == nil {
 		t.Fatal("New with a negative ClientCacheTTL = nil error, want an error")
+	}
+}
+
+// TestNewBoundsClientCacheTTL: a ClientCacheTTL up to MaxClientCacheTTL
+// is accepted, and a longer one refused, since a client removed or
+// rekeyed through another instance would be served as it was for that
+// long while the store declares itself consistent across instances.
+func TestNewBoundsClientCacheTTL(t *testing.T) {
+	db, err := sql.Open("sqlite", sqliteDSN(t.TempDir()+"/x.db"))
+	must(t, err)
+	defer func() { _ = db.Close() }()
+	for ttl, ok := range map[time.Duration]bool{
+		5 * time.Second:                              true,
+		sqlstore.MaxClientCacheTTL:                   true,
+		sqlstore.MaxClientCacheTTL + time.Nanosecond: false,
+		time.Hour: false,
+	} {
+		_, err := sqlstore.New(db, sqlstore.SQLite, sqlstore.Options{ClientCacheTTL: ttl})
+		if (err == nil) != ok {
+			t.Errorf("New(ClientCacheTTL %v) = %v, want accepted %v", ttl, err, ok)
+		}
+		if !ok && (err == nil || !strings.Contains(err.Error(), "ClientCacheTTL")) {
+			t.Errorf("New(ClientCacheTTL %v) = %v, want it named", ttl, err)
+		}
 	}
 }

@@ -111,6 +111,9 @@ type Options struct {
 	// DB's own writes drop
 	// their client at once; nothing reaches another DB. Set it only as
 	// short as an emergency revocation can wait — seconds, not minutes.
+	// New refuses one over MaxClientCacheTTL: the stores of a
+	// PostgreSQL DB declare CrossInstanceConsistent, which holds for
+	// the clients table only up to this staleness.
 	//
 	// With or without it, a client's parsed configuration and keys are
 	// kept, for a few thousand clients, and reused while its row reads
@@ -191,11 +194,19 @@ func New(db *sql.DB, dialect Dialect, opts Options) (*DB, error) {
 	if opts.ClientCacheTTL < 0 {
 		return nil, errors.New("sqlstore: negative ClientCacheTTL")
 	}
+	if opts.ClientCacheTTL > MaxClientCacheTTL {
+		return nil, fmt.Errorf("sqlstore: ClientCacheTTL %v is over %v: a client removed or rekeyed through another instance would go on authenticating here that long", opts.ClientCacheTTL, MaxClientCacheTTL)
+	}
 	d := &DB{db: db, dialect: dialect, prefix: prefix, busy: busy, sealer: opts.Sealer, readUnsealed: opts.ReadUnsealed, sqliteWrites: make(chan struct{}, 1)}
 	d.clients.ttl = opts.ClientCacheTTL
 	d.nonces = &NonceStore{d}
 	return d, nil
 }
+
+// MaxClientCacheTTL is the longest Options.ClientCacheTTL New accepts:
+// how long, at most, a client removed, reconfigured or rekeyed through
+// another instance goes on being served as it was by this one.
+const MaxClientCacheTTL = time.Minute
 
 // Dialect is the database's dialect.
 func (d *DB) Dialect() Dialect { return d.dialect }

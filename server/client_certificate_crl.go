@@ -8,6 +8,7 @@ import (
 	"encoding/asn1"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ClientCertificateCRLs checks a client certificate (TrustedClientCAs),
@@ -85,40 +86,97 @@ func (c ClientCertificateCRLs) CheckRevocation(ctx context.Context, check Client
 
 // checkAgainstCRLs reports an error wrapping ErrCertificateRevoked when
 // cert is revoked according to a usable CRL from issuer, and a plain
-// error when issuer has no usable CRL.
+// error when issuer has no usable CRL, saying why each list naming
+// issuer was skipped.
 func checkAgainstCRLs(cert, issuer *x509.Certificate, lists []*x509.RevocationList, check ClientCertificateRevocationCheck) error {
-	usable := false
+	var skipped crlSkips
 	for _, list := range lists {
-		if !crlUsableFor(list, issuer, check) {
+		verdict := crlVerdictFor(list, issuer, check)
+		if verdict != crlUsable {
+			skipped.count(verdict)
 			continue
 		}
-		usable = true
 		for _, entry := range list.RevokedCertificateEntries {
 			if entry.SerialNumber != nil && entry.SerialNumber.Cmp(cert.SerialNumber) == 0 {
 				return fmt.Errorf("client certificate CRLs: certificate %q (serial %s): %w", cert.Subject, cert.SerialNumber, ErrCertificateRevoked)
 			}
 		}
+		skipped.usable = true
 	}
-	if !usable {
-		return fmt.Errorf("client certificate CRLs: no current CRL from %q", issuer.Subject)
+	if !skipped.usable {
+		return fmt.Errorf("client certificate CRLs: %s", skipped.describe(issuer))
 	}
 	return nil
 }
 
-// crlUsableFor reports whether list is a current CRL that issuer
+// crlVerdict is why a list can or can't decide a certificate's status.
+type crlVerdict int
+
+const (
+	crlUsable       crlVerdict = iota
+	crlOtherIssuer             // nil, or names another issuer
+	crlOutOfDate               // not yet valid, expired, or without a nextUpdate
+	crlUnreadable              // incomplete, or marks critical an extension this type can't process
+	crlBadSignature            // names issuer, but issuer didn't sign it
+)
+
+// crlSkips counts the lists naming an issuer that were skipped, by why.
+type crlSkips struct {
+	usable                              bool
+	outOfDate, unreadable, badSignature int
+}
+
+func (s *crlSkips) count(v crlVerdict) {
+	switch v {
+	case crlOutOfDate:
+		s.outOfDate++
+	case crlUnreadable:
+		s.unreadable++
+	case crlBadSignature:
+		s.badSignature++
+	}
+}
+
+// describe says why issuer has no usable CRL: none of the lists names
+// it, or each one that does was skipped, counted by why.
+func (s crlSkips) describe(issuer *x509.Certificate) string {
+	var reasons []string
+	for _, r := range []struct {
+		n    int
+		what string
+	}{
+		{s.outOfDate, "not current"},
+		{s.unreadable, "unreadable (incomplete, or a critical extension it can't process)"},
+		{s.badSignature, "not signed by the issuer"},
+	} {
+		if r.n > 0 {
+			reasons = append(reasons, fmt.Sprintf("%d %s", r.n, r.what))
+		}
+	}
+	if len(reasons) == 0 {
+		return fmt.Sprintf("no usable CRL from %q: no list names it", issuer.Subject)
+	}
+	return fmt.Sprintf("no usable CRL from %q: lists naming it were skipped as %s", issuer.Subject, strings.Join(reasons, ", "))
+}
+
+// crlVerdictFor reports whether list is a current CRL that issuer
 // signed, complete and readable (crlExtensionsReadable,
-// crlEntryExtensionsReadable).
-func crlUsableFor(list *x509.RevocationList, issuer *x509.Certificate, check ClientCertificateRevocationCheck) bool {
+// crlEntryExtensionsReadable), and if not, why not. The signature is
+// checked last, as the costliest step.
+func crlVerdictFor(list *x509.RevocationList, issuer *x509.Certificate, check ClientCertificateRevocationCheck) crlVerdict {
 	if list == nil || !bytes.Equal(list.RawIssuer, issuer.RawSubject) {
-		return false
+		return crlOtherIssuer
 	}
 	if list.NextUpdate.IsZero() || check.Now.Before(list.ThisUpdate) || !check.Now.Before(list.NextUpdate) {
-		return false
+		return crlOutOfDate
 	}
 	if !crlExtensionsReadable(list.Extensions) || !crlEntryExtensionsReadable(list.RevokedCertificateEntries) {
-		return false
+		return crlUnreadable
 	}
-	return list.CheckSignatureFrom(issuer) == nil
+	if list.CheckSignatureFrom(issuer) != nil {
+		return crlBadSignature
+	}
+	return crlUsable
 }
 
 // crlExtensionsReadable reports whether a CRL with extensions is

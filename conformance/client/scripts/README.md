@@ -664,8 +664,11 @@ holding the client's PRIVATE key, matching the public JWK already
 handed to the suite through its own guided UI at plan-creation time —
 without it, `validate()` fails fast rather than signing every client
 assertion with a useless ephemeral key the suite was never told about.
-`client_jwks.go`'s `loadClientAuthenticationSigner` reads the first
-P-256 EC key it finds; `buildFixedClientKeyManager` builds the actual
+`client_jwks.go`'s `loadFixedClientSigner` reads the first P-256 EC
+key it finds, and refuses it unless `x`, `y` and `d` are each the full
+32 octets RFC 7518 §6.2 requires (write them with `FillBytes`, not
+`big.Int.Bytes`, which drops leading zeros) and `x` and `y` are `d`'s
+public key; `buildFixedClientKeyManager` builds the actual
 `keys.KeyManager` from it via `keys.NewKeyManagerFromSigners`
 (`keys/signer_keymanager.go`) — every OTHER signing purpose this run
 needs (DPoP proof signing, an optional signed request object) still

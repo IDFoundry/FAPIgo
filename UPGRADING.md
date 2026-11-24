@@ -40,6 +40,25 @@ assurance level.
 or `server.NewOpaqueAccessTokens`, which check the same things, or set
 the missing field.
 
+### A client assertion lives at most 5 minutes in production (server, *production only*)
+
+**Affects:** a server under `AssuranceProduction` whose
+`Limits.MaxClientAssertionLifetime` is over 5 minutes.
+
+**Why:** a client assertion's `exp` is how long a captured assertion
+stays usable, and how long its `jti` must be remembered to refuse a
+replay. Production assurance bounded the other proof lifetimes but not
+this one. Five minutes is the bound FAPIgo's client already puts on
+the assertions it makes under `AssuranceProduction`.
+`RecommendedLimits` uses 60 seconds.
+
+**What fails:** `server.New` returns an error naming
+`limits.max_client_assertion_lifetime`.
+
+**What to change:** set it to 5 minutes or less. Clients that make
+assertions with a longer `exp` must shorten it, since this server
+refuses an assertion whose `exp` is further away than the limit.
+
 ## v0.82.3
 
 ### CIBA: a `binding_message` may not hold characters that display as nothing (server)

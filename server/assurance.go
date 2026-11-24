@@ -113,7 +113,8 @@ const (
 	// most 60 seconds, PushedRequestLifetime under 600 seconds,
 	// MaxClockSkew from 10 to 60 seconds, and MaxRequestObjectLifetime
 	// at most 60 minutes — and to this module's bounds on the windows
-	// those numbers leave open: MaxDPoPProofAge at most 5 minutes (RFC
+	// those numbers leave open: MaxClientAssertionLifetime at most 5
+	// minutes, MaxDPoPProofAge at most 5 minutes (RFC
 	// 9449 §11.1's "seconds or minutes"), DPoPNonceLifetime at most 15
 	// minutes, JARMResponseLifetime at most 10 minutes (JARM §2.1),
 	// InteractionLifetime at most an hour, with CIBA

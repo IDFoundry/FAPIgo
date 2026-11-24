@@ -310,6 +310,7 @@ func TestNewEnforcesFAPILimitsUnderProduction(t *testing.T) {
 		"clock skew under 10s":         {func(l *server.Limits) { l.MaxClockSkew = 9 * time.Second }, "limits.max_clock_skew"},
 		"clock skew over 60s":          {func(l *server.Limits) { l.MaxClockSkew = 61 * time.Second }, "limits.max_clock_skew"},
 		"request object over 60m":      {func(l *server.Limits) { l.MaxRequestObjectLifetime = 61 * time.Minute }, "limits.max_request_object_lifetime"},
+		"client assertion over 5m":     {func(l *server.Limits) { l.MaxClientAssertionLifetime = 5*time.Minute + time.Second }, "limits.max_client_assertion_lifetime"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

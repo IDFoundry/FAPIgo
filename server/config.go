@@ -236,6 +236,7 @@ type Limits struct {
 
 	// MaxClientAssertionLifetime bounds how far in the future a client
 	// assertion's exp claim may be, relative to the time it's verified.
+	// Under AssuranceProduction it must be at most 5 minutes.
 	MaxClientAssertionLifetime time.Duration
 
 	// MaxRequestObjectLifetime bounds how far in the future a request

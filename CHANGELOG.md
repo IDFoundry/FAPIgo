@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.82.4](https://github.com/IDFoundry/FAPIgo/compare/v0.82.3...v0.82.4) (2026-11-24)
+
+
+### Bug Fixes
+
+* **federation:** read an empty naming_constraints permitted list as permitting nothing ([745ee70](https://github.com/IDFoundry/FAPIgo/commit/745ee7019cd99c382ecc9085aea712eb69ac3beb))
+* **federation:** walk a repeated authority hint once ([13cd63e](https://github.com/IDFoundry/FAPIgo/commit/13cd63e2fb89e55df4cbfa83b98d28186f5b04bf))
+* **server:** cap client assertion lifetimes at 5 minutes in production ([cdd5b70](https://github.com/IDFoundry/FAPIgo/commit/cdd5b703d46b92f3fe2e067deafe142d6a801135))
+* **server:** refuse a built-in access token issuer without its keys or store ([53f1e2f](https://github.com/IDFoundry/FAPIgo/commit/53f1e2f51c08ffbe2ba2764c3b04c078981a3788))
+
 ## [0.82.3](https://github.com/IDFoundry/FAPIgo/compare/v0.82.2...v0.82.3) (2026-11-24)
 
 

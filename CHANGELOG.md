@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.82.1](https://github.com/IDFoundry/FAPIgo/compare/v0.82.0...v0.82.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **federation:** read a historical key's revoked from its last copy ([0c2a58a](https://github.com/IDFoundry/FAPIgo/commit/0c2a58aa0e4616ca5971bd4ac246bd0319c6a1f9))
+* **federation:** refuse to sign a statement that repeats a member ([49780f4](https://github.com/IDFoundry/FAPIgo/commit/49780f4d2a95c2ec77d1f2e644fc8e3718e5e2f4))
+* **jose:** refuse an empty or off-curve key instead of panicking ([13afb02](https://github.com/IDFoundry/FAPIgo/commit/13afb02b71ed30238810cbb593efb69bc74882d0))
+* **server:** say why a CA's CRLs were skipped ([79ea77f](https://github.com/IDFoundry/FAPIgo/commit/79ea77f65b73d96b83d6ed6b25da6c8aeb1572ae))
+
 ## [0.82.0](https://github.com/IDFoundry/FAPIgo/compare/v0.81.0...v0.82.0) (2026-11-23)
 
 

@@ -11,10 +11,12 @@ import (
 	"testing"
 )
 
-// TestParseJWKSetWithSkipsReportsWhy: an entry ParseJWKSet skips is
-// reported with its kid and the reason, an encryption key isn't
-// reported, and the usable entries are the ones ParseJWKSet returns.
-func TestParseJWKSetWithSkipsReportsWhy(t *testing.T) {
+// skippedTestSet is a JWK Set of one usable key (kid "good") and four
+// entries ParseJWKSet skips: a short coordinate (kid "short"), an
+// encryption key (kid "enc"), an oct key (kid "secret") and an entry
+// with a member spelled in another case.
+func skippedTestSet(t *testing.T) []byte {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -28,15 +30,22 @@ func TestParseJWKSetWithSkipsReportsWhy(t *testing.T) {
 		{"kty":"oct","kid":"secret","k":"c2VjcmV0"},
 		{"kty":"EC","KID":"case"}
 	]}`, x, y, b64(make([]byte, 31)), y, x, y)
+	return []byte(set)
+}
 
-	keys, skipped, err := ParseJWKSetWithSkips([]byte(set))
+// TestParseJWKSetWithSkipsReportsWhy: an entry ParseJWKSet skips is
+// reported with its kid and the reason, an encryption key isn't
+// reported, and the usable entries are the ones ParseJWKSet returns.
+func TestParseJWKSetWithSkipsReportsWhy(t *testing.T) {
+	set := skippedTestSet(t)
+	keys, skipped, err := ParseJWKSetWithSkips(set)
 	if err != nil {
 		t.Fatalf("ParseJWKSetWithSkips: %v", err)
 	}
 	if len(keys) != 1 || keys[0].KeyID != "good" {
 		t.Fatalf("keys = %+v, want only the entry with kid good", keys)
 	}
-	plain, err := ParseJWKSet([]byte(set))
+	plain, err := ParseJWKSet(set)
 	if err != nil || len(plain) != 1 || plain[0].KeyID != "good" {
 		t.Fatalf("ParseJWKSet = %+v, %v; want the same usable entry", plain, err)
 	}
@@ -52,7 +61,16 @@ func TestParseJWKSetWithSkipsReportsWhy(t *testing.T) {
 	if skipped[2].KeyID != "" || skipped[2].Reason == nil {
 		t.Errorf("skipped[2] = %+v, want an entry that didn't decode, with no kid", skipped[2])
 	}
+}
 
+// TestSkippedKeyReasonsDescribeTheSkips: SkippedKeyReason names only the
+// skipped entries with the kid asked about, and SkippedKeysReason every
+// skipped entry.
+func TestSkippedKeyReasonsDescribeTheSkips(t *testing.T) {
+	_, skipped, err := ParseJWKSetWithSkips(skippedTestSet(t))
+	if err != nil {
+		t.Fatalf("ParseJWKSetWithSkips: %v", err)
+	}
 	if got := SkippedKeyReason(skipped, "short"); !strings.Contains(got, `entry with kid "short" was skipped`) || !strings.Contains(got, "octets") {
 		t.Errorf("SkippedKeyReason(short) = %q, want the entry's coordinate-length reason", got)
 	}

@@ -302,7 +302,7 @@
       "./internal/jose",
       "./federation"
     ],
-    "run": "^(TestParseJWKSetWithSkipsReportsWhy|TestNoCandidateKeySaysWhyTheEntryWasSkipped)$",
+    "run": "^(TestSkippedKeyReasonsDescribeTheSkips|TestNoCandidateKeySaysWhyTheEntryWasSkipped)$",
     "why": "a no-candidate-key error names only the skipped entries with the kid it looked for, not every skipped entry"
   },
   {

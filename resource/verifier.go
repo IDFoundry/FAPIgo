@@ -94,6 +94,9 @@ func validateDependencies(deps Dependencies) error {
 	if deps.Revocation == nil {
 		return fmt.Errorf("resource: dependencies: revocation is required (pass NoRevocation{} to explicitly decline, or NoRevocationUntilExpiry under AssuranceProduction)")
 	}
+	if embedsNilUnrevocable(deps.Revocation) {
+		return fmt.Errorf("resource: dependencies: revocation embeds a nil *NoRevocationUntilExpiry: embed it by value, or set the pointer")
+	}
 	if lifetime, ok := unrevocableLifetime(deps.Revocation); ok && lifetime <= 0 {
 		return fmt.Errorf("resource: dependencies: revocation's NoRevocationUntilExpiry.MaxTokenLifetime must be positive")
 	}

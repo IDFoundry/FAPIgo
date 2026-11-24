@@ -18,7 +18,7 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
-## v0.82.3
+## v0.82.2
 
 ### `InteractionNeeded` answers only a `prompt=none` request (server)
 

@@ -4175,5 +4175,55 @@
     ],
     "run": "^TestEssentialACRValues$",
     "why": "an essential acr with both value and values must equal value, not any of values"
+  },
+  {
+    "id": "client-token-response-strict",
+    "file": "client/exchange_code.go",
+    "old": "strictjson.UnmarshalNoRepeats(body, &raw); err != nil {",
+    "new": "json.Unmarshal(body, &raw); err != nil && strictjson.FoldKey(\"\") == \"\" {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestDecodeTokenResponseRefusesAmbiguousResponses$",
+    "why": "a token response with a repeated member, a case-variant member or data after the object is refused"
+  },
+  {
+    "id": "client-backchannel-response-strict",
+    "file": "client/backchannel.go",
+    "old": "strictjson.UnmarshalNoRepeats(body, &raw); err != nil {",
+    "new": "json.Unmarshal(body, &raw); err != nil {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestDecodeBackchannelAuthenticationResponseRefusesAmbiguousResponses$",
+    "why": "a backchannel authentication response a strict parser reads differently is refused"
+  },
+  {
+    "id": "par-response-strict",
+    "file": "internal/par/response.go",
+    "old": "strictjson.UnmarshalNoRepeats(body, &raw); err != nil {",
+    "new": "json.Unmarshal(body, &raw); err != nil && strictjson.FoldKey(\"\") == \"\" {",
+    "module": "root",
+    "packages": [
+      "./internal/par"
+    ],
+    "run": "^TestDecodeResultRefusesAmbiguousResponses$",
+    "why": "a PAR response with a repeated member, a case-variant member or data after the object is malformed"
+  },
+  {
+    "id": "strictjson-unmarshal-no-repeats-checks-repeats",
+    "file": "internal/strictjson/strictjson.go",
+    "old": "\tif err := CheckDuplicateMembers(data); err != nil {\n\t\treturn err\n\t}\n\treturn Unmarshal(data, v)",
+    "new": "\treturn Unmarshal(data, v)",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson",
+      "./client",
+      "./internal/par"
+    ],
+    "run": "^(TestDecodeTokenResponseRefusesAmbiguousResponses|TestDecodeBackchannelAuthenticationResponseRefusesAmbiguousResponses|TestDecodeResultRefusesAmbiguousResponses|TestUnmarshalNoRepeats)$",
+    "why": "UnmarshalNoRepeats refuses a member repeated in one object, exactly or as a case variant"
   }
 ]

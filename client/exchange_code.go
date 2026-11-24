@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"encoding/json"
@@ -19,6 +18,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/jwe"
 	"github.com/idfoundry/fapigo/internal/par"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -667,10 +667,16 @@ type rawTokenResponse struct {
 // client MUST ignore unrecognized value names in the response" — since
 // a real authorization server routinely adds parameters this module has
 // no reason to model (e.g. refresh_token_expires_in).
+//
+// It refuses what encoding/json would read differently from a strict
+// parser (strictjson.UnmarshalNoRepeats): a member repeated in one
+// object, a case variant of a member it reads (ACCESS_TOKEN for
+// access_token), and anything after the response's JSON object. Each
+// would let a response say two things, of which this client and another
+// reader of the same body pick different ones.
 func decodeTokenResponse(body []byte) (rawTokenResponse, error) {
-	dec := json.NewDecoder(bytes.NewReader(body))
 	var raw rawTokenResponse
-	if err := dec.Decode(&raw); err != nil {
+	if err := strictjson.UnmarshalNoRepeats(body, &raw); err != nil {
 		return rawTokenResponse{}, fmt.Errorf("decode token response: %w", err)
 	}
 	if raw.AccessToken == "" {

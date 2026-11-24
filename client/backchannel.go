@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"encoding/json"
@@ -439,11 +438,12 @@ type rawBackchannelAuthenticationResponse struct {
 // decodeBackchannelAuthenticationResponse parses body, tolerating any
 // member beyond rawBackchannelAuthenticationResponse's own fields —
 // same RFC 6749 §5.1 "ignore unrecognized parameters" reasoning
-// decodeTokenResponse already applies.
+// decodeTokenResponse already applies — and refusing, as it does, a
+// repeated member, a case variant of a member it reads, and anything
+// after the JSON object.
 func decodeBackchannelAuthenticationResponse(body []byte) (rawBackchannelAuthenticationResponse, error) {
-	dec := json.NewDecoder(bytes.NewReader(body))
 	var raw rawBackchannelAuthenticationResponse
-	if err := dec.Decode(&raw); err != nil {
+	if err := strictjson.UnmarshalNoRepeats(body, &raw); err != nil {
 		return rawBackchannelAuthenticationResponse{}, fmt.Errorf("decode backchannel authentication response: %w", err)
 	}
 	if raw.AuthReqID == "" {

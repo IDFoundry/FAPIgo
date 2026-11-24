@@ -118,6 +118,30 @@ backchannel authentication request. A voluntary `acr`, without
 
 **What to change:** send `value` or `values`, not both.
 
+### The client refuses an ambiguous token, CIBA or PAR response (client)
+
+**Affects:** a client talking to an authorization server whose token,
+backchannel authentication or pushed authorization response repeats a
+member, spells a member the client reads in another case
+(`ACCESS_TOKEN`), or has anything after its JSON object.
+
+**Why:** Go's `encoding/json` keeps the last copy of a repeated member,
+matches member names case-insensitively, and a `json.Decoder` stops
+after the first value. A strict parser reading the same body would
+pick different values, so a response could tell this client and a
+gateway or log processor two different things, such as two access
+tokens or two lifetimes.
+
+**What fails:** nothing at startup. The exchange, refresh, client
+credentials, CIBA poll, backchannel authentication or pushed
+authorization request fails with `ErrorInvalidResponse` (`client.Error`)
+for such a response. Members the client doesn't read are still ignored,
+as RFC 6749 §5.1 requires.
+
+**What to change:** nothing for a conforming authorization server. A
+server that sends such responses must send each member once, under its
+exact name.
+
 ## v0.82.2
 
 ### `InteractionNeeded` answers only a `prompt=none` request (server)

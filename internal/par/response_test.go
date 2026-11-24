@@ -147,3 +147,21 @@ func TestDecodeErrorResponseIgnoresUnknownField(t *testing.T) {
 		t.Fatalf("DecodeErrorResponse(unknown field) = %+v, want error still parsed", got)
 	}
 }
+
+// TestDecodeResultRefusesAmbiguousResponses: a PAR response a strict
+// parser and encoding/json would read differently (a repeated member,
+// a case variant of request_uri or expires_in, data after the object)
+// is refused as malformed.
+func TestDecodeResultRefusesAmbiguousResponses(t *testing.T) {
+	for name, body := range map[string]string{
+		"repeated request_uri":     `{"request_uri":"urn:a","expires_in":60,"request_uri":"urn:b"}`,
+		"case-variant request_uri": `{"REQUEST_URI":"urn:a","expires_in":60}`,
+		"case variant beside it":   `{"request_uri":"urn:a","expires_in":60,"Expires_In":6000}`,
+		"second object":            `{"request_uri":"urn:a","expires_in":60}{"request_uri":"urn:b"}`,
+		"trailing garbage":         `{"request_uri":"urn:a","expires_in":60}x`,
+	} {
+		if got, err := DecodeResult([]byte(body)); !errors.Is(err, ErrMalformedResponse) {
+			t.Errorf("%s: DecodeResult(%s) = %+v, %v; want ErrMalformedResponse", name, body, got, err)
+		}
+	}
+}

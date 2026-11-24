@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // maxResponseBytes bounds how large a PAR response body this package
@@ -50,9 +52,11 @@ func DecodeResult(body []byte) (PushResult, error) {
 	if len(body) > maxResponseBytes {
 		return PushResult{}, ErrResponseTooLarge
 	}
-	dec := json.NewDecoder(bytes.NewReader(body))
+	// A repeated member, a case variant of request_uri or expires_in, or
+	// anything after the object would let the response say two things,
+	// of which this client and another reader pick different ones.
 	var raw rawPushResult
-	if err := dec.Decode(&raw); err != nil {
+	if err := strictjson.UnmarshalNoRepeats(body, &raw); err != nil {
 		return PushResult{}, fmt.Errorf("%w: %v", ErrMalformedResponse, err)
 	}
 	if raw.RequestURI == "" {

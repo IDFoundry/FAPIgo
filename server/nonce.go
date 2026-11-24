@@ -63,13 +63,20 @@ func (s *Server) issueDPoPNonce(ctx context.Context, now time.Time) (string, err
 // each proof's "jti" is what refuses a replay. A missing, unknown or
 // expired nonce is rejected with the current nonce attached (via
 // *Error's own Nonce method) for the caller to retry with; a valid one
-// returns nil, letting the caller proceed.
+// returns nil, letting the caller proceed. A Lookup the store couldn't
+// answer (storeOutage) is a 500 server_error, not a challenge: a fresh
+// nonce wouldn't pass the next Lookup either, so the client would only
+// retry, and RFC 6749 §5.2 has no error for a store that is down.
 //
 // Called only when s.deps.Nonces != nil — every call site guards that.
 // New has already turned NoDPoPNonces into nil, so a declined store
 // never gets here.
 func (s *Server) checkDPoPNonce(ctx context.Context, presented string, now time.Time) *Error {
-	if valid, _ := dpopnonce.Valid(ctx, s.deps.Nonces, presented, now); valid {
+	valid, err := dpopnonce.Valid(ctx, s.deps.Nonces, presented, now)
+	if err != nil && storeOutage(ctx, err) {
+		return newError(ErrorServerError, 500, "failed to check dpop nonce", err)
+	}
+	if valid {
 		return nil
 	}
 

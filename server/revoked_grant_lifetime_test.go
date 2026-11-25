@@ -2,7 +2,6 @@ package server_test
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"slices"
@@ -98,7 +97,7 @@ func (c *lifetimeChanges) at(offset, refreshLifetime time.Duration) harness {
 
 // stored reports whether the GrantStore still redeems refreshToken.
 func (c *lifetimeChanges) stored(refreshToken string) bool {
-	_, err := c.h.deps.Grants.RedeemRefreshToken(context.Background(), storage.RefreshTokenRedemption{TokenHash: sha256.Sum256([]byte(refreshToken))})
+	_, err := c.h.deps.Grants.RedeemRefreshToken(context.Background(), storage.RefreshTokenRedemption{TokenHash: server.RefreshTokenHash(testIssuer, refreshToken)})
 	return err == nil
 }
 

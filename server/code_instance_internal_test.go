@@ -9,23 +9,29 @@ import (
 )
 
 // TestAuthorizationCodeHash covers the digest a code is stored under:
-// never the plain SHA-256 a refresh token with the same value is stored
-// under, and the SHA-256 of the prefix, each part of the binding
-// length-prefixed, and the code.
+// never a refresh token's or an auth_req_id's digest of the same value,
+// never the plain SHA-256 a server before v0.84.0 stored a refresh
+// token under, and the SHA-256 of the prefix, the issuer and each part
+// of the binding length-prefixed, and the code.
 func TestAuthorizationCodeHash(t *testing.T) {
-	const code = "code-value"
+	const code, issuer = "code-value", "https://as.example"
 	bound := codeBinding{codeChallenge: "challenge", redirectURI: "https://rp.example/cb"}
 	for _, binding := range []codeBinding{{}, bound, {instanceKey: "instance-a", codeChallenge: "challenge", dpopJKT: "jkt"}} {
-		if authorizationCodeHash(code, binding) == sha256.Sum256([]byte(code)) {
-			t.Errorf("authorizationCodeHash(%+v) is a refresh token's digest of the same value", binding)
+		got := authorizationCodeHash(issuer, code, binding)
+		if got == sha256.Sum256([]byte(code)) || got == refreshTokenHash(issuer, code) ||
+			got == backchannelAuthReqIDHash(issuer, code, binding.instanceKey, binding.dpopJKT) {
+			t.Errorf("authorizationCodeHash(%+v) is another kind of token's digest of the same value", binding)
 		}
 	}
-	got := authorizationCodeHash(code, bound)
-	if got != sha256.Sum256([]byte(codeHashPrefix+"0:"+"9:challenge"+"21:https://rp.example/cb"+"0:"+code)) {
-		t.Error("authorizationCodeHash isn't the SHA-256 of the prefix, the length-prefixed binding and the code")
+	got := authorizationCodeHash(issuer, code, bound)
+	if got != sha256.Sum256([]byte(codeHashPrefix+"18:https://as.example"+"0:"+"9:challenge"+"21:https://rp.example/cb"+"0:"+code)) {
+		t.Error("authorizationCodeHash isn't the SHA-256 of the prefix, the length-prefixed issuer and binding, and the code")
 	}
-	if authorizationCodeHash(code, bound) != got {
+	if authorizationCodeHash(issuer, code, bound) != got {
 		t.Error("authorizationCodeHash isn't deterministic")
+	}
+	if authorizationCodeHash("https://other.example", code, bound) == got {
+		t.Error("two issuers' codes of one value and binding share a digest")
 	}
 }
 
@@ -40,7 +46,7 @@ func TestAuthorizationCodeHashSeparatesBindings(t *testing.T) {
 		code    string
 		binding codeBinding
 	}
-	const code = "code-value"
+	const code, issuer = "code-value", "https://as.example"
 	issued := presented{code, codeBinding{instanceKey: "instance-a", codeChallenge: "challenge", redirectURI: "https://rp.example/cb", dpopJKT: "jkt"}}
 	for name, other := range map[string]presented{
 		"another instance":            {code, codeBinding{instanceKey: "instance-b", codeChallenge: "challenge", redirectURI: "https://rp.example/cb", dpopJKT: "jkt"}},
@@ -54,7 +60,7 @@ func TestAuthorizationCodeHashSeparatesBindings(t *testing.T) {
 		"redirect URI into DPoP key":  {code, codeBinding{instanceKey: "instance-a", codeChallenge: "challenge", redirectURI: "https://rp.example/c", dpopJKT: "bjkt"}},
 		"DPoP key into code":          {"t" + code, codeBinding{instanceKey: "instance-a", codeChallenge: "challenge", redirectURI: "https://rp.example/cb", dpopJKT: "jk"}},
 	} {
-		if authorizationCodeHash(other.code, other.binding) == authorizationCodeHash(issued.code, issued.binding) {
+		if authorizationCodeHash(issuer, other.code, other.binding) == authorizationCodeHash(issuer, issued.code, issued.binding) {
 			t.Errorf("authorizationCodeHash doesn't separate %s", name)
 		}
 	}

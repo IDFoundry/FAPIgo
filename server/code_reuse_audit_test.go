@@ -2,7 +2,6 @@ package server_test
 
 import (
 	"context"
-	"crypto/sha256"
 	"slices"
 	"strings"
 	"testing"
@@ -192,7 +191,7 @@ func newReuseRevocationStores(t *testing.T) reuseRevocationStores {
 
 // redeemable reports whether the GrantStore still redeems refreshToken.
 func (s reuseRevocationStores) redeemable(refreshToken string) bool {
-	_, err := s.grants.RedeemRefreshToken(context.Background(), storage.RefreshTokenRedemption{TokenHash: sha256.Sum256([]byte(refreshToken))})
+	_, err := s.grants.RedeemRefreshToken(context.Background(), storage.RefreshTokenRedemption{TokenHash: server.RefreshTokenHash(testIssuer, refreshToken)})
 	return err == nil
 }
 

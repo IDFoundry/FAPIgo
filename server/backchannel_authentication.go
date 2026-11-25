@@ -256,7 +256,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode backchannel authentication request", err)), nil
 	}
 	if storeErr := s.storeBackchannelRequest(ctx, handleRaw, resolvedSubject, storage.NewBackchannelAuthentication{
-		AuthReqIDHash:           backchannelAuthReqIDHash(authReqIDRaw, authn.InstanceKey, dpopJKT),
+		AuthReqIDHash:           backchannelAuthReqIDHash(s.cfg.Issuer.String(), authReqIDRaw, authn.InstanceKey, dpopJKT),
 		AuthReqID:               authReqIDForNotification,
 		HandleHash:              sha256.Sum256([]byte(handleRaw)),
 		ClientID:                client.ID(),

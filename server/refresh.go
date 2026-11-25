@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
 	"slices"
@@ -295,7 +294,7 @@ const refreshTokenUnknownDescription = "refresh_token is invalid, expired, or al
 // (empty unless it authenticated by Client Attestation); see
 // checkRefreshInstance for how it must match the grant's.
 func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID, instanceKey, rawToken string) (grantRecord, time.Time, *Error) {
-	tokenHash := sha256.Sum256([]byte(rawToken))
+	tokenHash := refreshTokenHash(s.cfg.Issuer.String(), rawToken)
 	redeemed, err := s.deps.Grants.RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{
 		TokenHash: tokenHash,
 	})

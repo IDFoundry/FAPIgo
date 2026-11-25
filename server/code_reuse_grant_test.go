@@ -126,7 +126,7 @@ func TestRefreshRefusesARevokedCodeGrant(t *testing.T) {
 		t.Fatalf("RefreshAccessToken before revocation: %v", err)
 	}
 	// The digest the server stores a code under (authorizationCodeHash).
-	codeHash := server.AuthorizationCodeHash(code, testCodeChallenge, testRedirectURI)
+	codeHash := server.AuthorizationCodeHash(testIssuer, code, testCodeChallenge, testRedirectURI)
 	if err := h.revocation.Revoke(context.Background(), grantrevocation.CodeKey(testIssuer, grantrevocation.CodeGrantID(codeHash)), h.now.Add(time.Hour)); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}

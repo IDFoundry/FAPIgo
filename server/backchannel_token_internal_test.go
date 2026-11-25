@@ -53,22 +53,28 @@ func TestBackchannelStatusError(t *testing.T) {
 }
 
 // TestBackchannelAuthReqIDHash covers the digest a CIBA request is
-// stored under: the plain SHA-256 of an unbound auth_req_id, as before
-// bindings existed, and one per client instance and dpop_jkt otherwise,
-// so a poll from another instance or with another key finds nothing.
+// stored under: one per issuer, client instance and dpop_jkt, so a
+// poll to another issuer's server sharing the store, from another
+// instance or with another key finds nothing, and never the plain
+// SHA-256 a server before v0.84.0 stored an unbound request under.
 func TestBackchannelAuthReqIDHash(t *testing.T) {
 	const id = "auth-req-id"
-	if backchannelAuthReqIDHash(id, "", "") != sha256.Sum256([]byte(id)) {
-		t.Error("an unbound auth_req_id's digest isn't its plain SHA-256")
+	if backchannelAuthReqIDHash("https://as.example", id, "", "") == sha256.Sum256([]byte(id)) {
+		t.Error("an unbound auth_req_id's digest is its plain SHA-256")
 	}
 	seen := map[[32]byte]string{}
-	for _, b := range [][2]string{{"", ""}, {"inst-a", ""}, {"inst-b", ""}, {"", "jkt-a"}, {"inst-a", "jkt-a"}, {"inst-a", "jkt-b"}, {"inst-aj", "kt-a"}, {"", "inst-a"}} {
-		h := backchannelAuthReqIDHash(id, b[0], b[1])
+	for _, b := range [][3]string{
+		{"https://as.example", "", ""}, {"https://other.example", "", ""}, {"https://as.example", "inst-a", ""},
+		{"https://as.example", "inst-b", ""}, {"https://as.example", "", "jkt-a"}, {"https://as.example", "inst-a", "jkt-a"},
+		{"https://as.example", "inst-a", "jkt-b"}, {"https://as.example", "inst-aj", "kt-a"}, {"https://as.example", "", "inst-a"},
+		{"https://as.exampleinst-a", "", ""}, {"", "https://as.example", ""},
+	} {
+		h := backchannelAuthReqIDHash(b[0], id, b[1], b[2])
 		if prev, ok := seen[h]; ok {
 			t.Errorf("binding %q shares a digest with %q", b, prev)
 		}
-		seen[h] = b[0] + "|" + b[1]
-		if h != backchannelAuthReqIDHash(id, b[0], b[1]) {
+		seen[h] = b[0] + "|" + b[1] + "|" + b[2]
+		if h != backchannelAuthReqIDHash(b[0], id, b[1], b[2]) {
 			t.Errorf("binding %q isn't deterministic", b)
 		}
 	}
@@ -76,8 +82,8 @@ func TestBackchannelAuthReqIDHash(t *testing.T) {
 
 // TestIsWellFormedAuthReqID: only the form generateAuthReqID gives an
 // auth_req_id is well-formed. The string a bound request's digest is
-// taken over, whose own unbound digest is that same digest, never is,
-// whatever the binding.
+// taken over never is, whatever the binding, and
+// its digest as an unbound auth_req_id isn't the bound request's.
 func TestIsWellFormedAuthReqID(t *testing.T) {
 	id, err := generateAuthReqID(nil)
 	if err != nil {
@@ -108,9 +114,9 @@ func TestIsWellFormedAuthReqID(t *testing.T) {
 		"client instance": {thumbprint, ""},
 		"both":            {thumbprint, thumbprint},
 	} {
-		preimage, collides := BoundAuthReqIDPreimage(id, binding[0], binding[1])
-		if !collides {
-			t.Fatalf("%s: the bound digest's preimage has another unbound digest", name)
+		preimage, collides := BoundAuthReqIDPreimage("https://as.example", id, binding[0], binding[1])
+		if collides {
+			t.Errorf("%s: the bound digest's preimage has the bound request's digest unbound", name)
 		}
 		if isWellFormedAuthReqID(preimage) {
 			t.Errorf("%s: the bound digest's preimage %q is well-formed", name, preimage)

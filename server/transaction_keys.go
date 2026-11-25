@@ -11,7 +11,7 @@ import (
 // parReferenceKeyPrefix and interactionHandleKeyPrefix separate the
 // digests a pushed authorization request and an interaction are stored
 // under from each other and from every other digest this server stores
-// (authorizationCodeHash's, a refresh token's).
+// (authorizationCodeHash's, refreshTokenHash's, backchannelAuthReqIDHash's).
 const (
 	parReferenceKeyPrefix      = "fapigo pushed authorization request\x00"
 	interactionHandleKeyPrefix = "fapigo interaction handle\x00"

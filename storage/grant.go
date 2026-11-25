@@ -132,8 +132,9 @@ func (e *AuthorizationCodeAlreadyRedeemedError) Error() string {
 
 // NewAuthorizationCode is what CreateAuthorizationCode persists for one
 // issued authorization code. CodeHash is a SHA-256 digest of the raw
-// code value, domain-separated so it never equals a refresh token's
-// digest (NewRefreshToken.TokenHash) of the same value — matching
+// code value and the issuer of the server that issued it,
+// domain-separated so it never equals a refresh token's digest
+// (NewRefreshToken.TokenHash) of the same value — matching
 // ReplayStore's digest-only philosophy — never the code itself; the raw value exists only long enough to be hashed
 // here and returned to the client in the redirect response. The digest
 // also covers the code's PKCE challenge, its redirect URI and the DPoP
@@ -141,8 +142,9 @@ func (e *AuthorizationCodeAlreadyRedeemedError) Error() string {
 // authenticated by Client Attestation, the client instance it was
 // issued to, so a token request presenting the code with another
 // code_verifier, redirect_uri or DPoP key, or from another instance of
-// the same client, finds none. A store just keys the record by it
-// either way. The server may look for a code under two digests, with
+// the same client, finds none, and a server of another issuer sharing
+// the store finds none either, so can't spend it. A store just keys the
+// record by it either way. The server may look for a code under two digests, with
 // the presented DPoP key and without, since it can't tell which the
 // code is bound to: a CodeHash the store doesn't know is only an error
 // (see RedeemAuthorizationCode), changing nothing.
@@ -190,9 +192,12 @@ type RedeemedAuthorizationCode struct {
 }
 
 // NewRefreshToken is what CreateRefreshToken persists for one issued
-// refresh token. TokenHash is the SHA-256 digest of the raw token value,
-// never the value itself — the same digest-only discipline as
-// NewAuthorizationCode.CodeHash.
+// refresh token. TokenHash is a SHA-256 digest of the raw token value
+// and the issuer of the server that issued it, never the value itself —
+// the same digest-only discipline as NewAuthorizationCode.CodeHash. As
+// for a code, the issuer keeps servers of different issuers sharing one
+// store apart: one's refresh token, presented to another, is unknown to
+// it. (A server before v0.84.0 stored the plain SHA-256 of the token.)
 type NewRefreshToken struct {
 	TokenHash [32]byte
 
@@ -218,8 +223,8 @@ type NewRefreshToken struct {
 
 // RefreshTokenRedemption is the input to GrantStore.RedeemRefreshToken.
 type RefreshTokenRedemption struct {
-	// TokenHash is the SHA-256 digest of the presented refresh token
-	// value — the same digest CreateRefreshToken stored it under.
+	// TokenHash is the digest of the presented refresh token value —
+	// the same digest CreateRefreshToken stored it under.
 	TokenHash [32]byte
 }
 

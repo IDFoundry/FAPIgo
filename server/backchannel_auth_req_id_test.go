@@ -24,13 +24,16 @@ const unknownAuthReqID = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 // boundDigestPreimage is the auth_req_id an attacker holding the
 // client's assertion key, but not the client instance or DPoP key,
 // crafts for the request authReqID names, bound to instanceKey and
-// dpopJKT: the string the request's digest is taken over, whose own
-// unbound digest is that digest.
+// dpopJKT: the string the request's digest is taken over, presented as
+// an unbound auth_req_id. The length-prefixed
+// binding keeps its digest from being the request's; the token endpoint
+// refuses it before any poll in any case, as not of the form this
+// server issues.
 func boundDigestPreimage(t *testing.T, authReqID, instanceKey, dpopJKT string) string {
 	t.Helper()
-	preimage, ok := server.BoundAuthReqIDPreimage(authReqID, instanceKey, dpopJKT)
-	if !ok {
-		t.Fatal("the bound digest's preimage has another unbound digest, so there's nothing left to refuse")
+	preimage, collides := server.BoundAuthReqIDPreimage(testIssuer, authReqID, instanceKey, dpopJKT)
+	if collides {
+		t.Fatal("the bound digest's preimage has the bound request's digest as an unbound auth_req_id")
 	}
 	return preimage
 }
@@ -165,11 +168,12 @@ func TestExchangeBackchannelAuthenticationRefusesMalformedAuthReqID(t *testing.T
 // TestCraftedAuthReqIDLeavesTheBoundApproval: the client's own
 // assertion key, without the client instance or DPoP key an approved
 // request is bound to, can't spend its approval by presenting the
-// string the request's digest is taken over, whose unbound digest is
-// the same: it's refused as an unknown auth_req_id, before any poll, so
+// string the request's digest is taken over: it's refused as an
+// unknown auth_req_id, before any poll (and its unbound digest isn't
+// the request's in any case), so
 // the instance and key the request is bound to still redeem it. That
 // holds for a dpop_jkt, for the key of a DPoP proof sent with the
-// request, with the NUL the string starts with sent as %00 over HTTP,
+// request, with the NUL the string's prefix holds sent as %00 over HTTP,
 // and for a client instance.
 func TestCraftedAuthReqIDLeavesTheBoundApproval(t *testing.T) {
 	for name, tc := range map[string]struct {

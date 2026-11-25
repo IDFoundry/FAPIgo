@@ -338,21 +338,30 @@ type codeBinding struct {
 }
 
 // codeHashPrefix starts the string an authorization code's digest is
-// taken over (authorizationCodeHash), separating that digest from the
-// plain SHA-256 a refresh token is stored under (issueRefreshToken).
-const codeHashPrefix = "fapigo authorization code\x00"
+// taken over (authorizationCodeHash), separating that digest from a
+// refresh token's (refreshTokenHash) and an auth_req_id's
+// (backchannelAuthReqIDHash) of the same value. The "v2" marks the
+// digests that cover the issuer: no code a server before v0.84.0
+// stored, under a digest without it, shares one with any code stored
+// since.
+const codeHashPrefix = "fapigo authorization code v2\x00"
 
 // authorizationCodeHash is the digest an authorization code is stored
 // and redeemed under (storage.NewAuthorizationCode.CodeHash): the
-// SHA-256 of codeHashPrefix, each part of binding length-prefixed, and
-// the code. The prefix keeps it from being a refresh token's digest
-// (the plain SHA-256 of the token, unprefixed so the refresh tokens
-// already stored stay valid) of the same value, so a store keeping
-// codes and refresh tokens in one table keyed by digest can't return
-// one for the other; the record's own grantRecord.Kind refuses it as
-// well. The length prefixes keep any two bindings apart, whatever their
-// parts hold: a code_challenge or redirect_uri is the client's to
-// choose.
+// SHA-256 of codeHashPrefix, issuer and each part of binding, each
+// length-prefixed, and the code. The prefix keeps it from being a
+// refresh token's digest of the same value, so a store keeping codes
+// and refresh tokens in one table keyed by digest can't return one for
+// the other; the record's own grantRecord.Kind refuses it as well. The
+// length prefixes keep any two bindings apart, whatever their parts
+// hold: a code_challenge or redirect_uri is the client's to choose.
+//
+// The issuer keeps servers of different issuers sharing one store
+// apart: a code one issued, presented to the other, is unknown to the
+// store, so it is neither spent nor treated as reused there. Without
+// it, the other server's store would spend the code (or report it
+// reused, revoking what it issued) before ownsRecord could refuse the
+// record as another issuer's.
 //
 // The store spends a code, or reports it reused, before the exchange
 // can check what the token request presented with it, and a reuse by
@@ -373,10 +382,29 @@ const codeHashPrefix = "fapigo authorization code\x00"
 // is different. And every installation of a wallet app shares one
 // client_id, so client_id alone can't keep one installation from
 // presenting a code another's user authorized.
-func authorizationCodeHash(code string, binding codeBinding) [32]byte {
-	return sha256.Sum256([]byte(codeHashPrefix +
+func authorizationCodeHash(issuer, code string, binding codeBinding) [32]byte {
+	return sha256.Sum256([]byte(codeHashPrefix + lengthPrefixed(issuer) +
 		lengthPrefixed(binding.instanceKey) + lengthPrefixed(binding.codeChallenge) +
 		lengthPrefixed(binding.redirectURI) + lengthPrefixed(binding.dpopJKT) + code))
+}
+
+// refreshHashPrefix starts the string a refresh token's digest is
+// taken over (refreshTokenHash), separating it from an authorization
+// code's (authorizationCodeHash) and an auth_req_id's
+// (backchannelAuthReqIDHash).
+const refreshHashPrefix = "fapigo refresh token\x00"
+
+// refreshTokenHash is the digest a refresh token is stored and redeemed
+// under (storage.NewRefreshToken.TokenHash): the SHA-256 of
+// refreshHashPrefix, the length-prefixed issuer and the token. The
+// issuer keeps servers of different issuers sharing one store apart, as
+// it does for a code (authorizationCodeHash): another issuer's refresh
+// token is unknown to this server's lookup, so it is never redeemed,
+// rotated or revoked here. A server before v0.84.0 stored each refresh
+// token under the plain SHA-256 of the token, which this digest never
+// equals, so those tokens are unknown after the upgrade.
+func refreshTokenHash(issuer, token string) [32]byte {
+	return sha256.Sum256([]byte(refreshHashPrefix + lengthPrefixed(issuer) + token))
 }
 
 // lengthPrefixed is part after its length in bytes and a colon: a
@@ -398,7 +426,7 @@ func lengthPrefixed(part string) string {
 // and answer it as unknown.
 func (s *Server) redeemAuthorizationCode(ctx context.Context, client storage.RegisteredClient, code string, presented codeExchange) (storage.RedeemedAuthorizationCode, [32]byte, error) {
 	redeem := func(dpopJKT string) (storage.RedeemedAuthorizationCode, [32]byte, error) {
-		hash := authorizationCodeHash(code, presented.binding(dpopJKT))
+		hash := authorizationCodeHash(s.cfg.Issuer.String(), code, presented.binding(dpopJKT))
 		redeemed, err := s.deps.Grants.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{
 			CodeHash: hash,
 			ClientID: client.ID(),
@@ -726,7 +754,7 @@ func (s *Server) issueCodeExchangeTokens(ctx context.Context, client storage.Reg
 		return issueErr
 	}
 	_ = recorder.RecordIssuedTokens(ctx, codeHash, accessKey, params.Now.Add(s.cfg.Limits.AccessTokenLifetime),
-		sha256.Sum256([]byte(refreshToken)), params.Now.Add(s.cfg.Limits.RefreshTokenLifetime))
+		refreshTokenHash(s.cfg.Issuer.String(), refreshToken), params.Now.Add(s.cfg.Limits.RefreshTokenLifetime))
 	result.AccessToken = fapi.NewSecret(accessToken)
 	result.RefreshToken = fapi.NewSecret(refreshToken)
 	result.HasRefreshToken = true
@@ -767,8 +795,8 @@ func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.R
 	// is the exact same hash CreateRefreshToken itself used to key
 	// the stored record — see RecordIssuedRefreshToken's own doc
 	// comment for why this association is recorded at all.
-	refreshTokenHash := sha256.Sum256([]byte(refreshToken))
-	_ = s.deps.Grants.RecordIssuedRefreshToken(ctx, codeHash, refreshTokenHash, now.Add(s.cfg.Limits.RefreshTokenLifetime))
+	tokenHash := refreshTokenHash(s.cfg.Issuer.String(), refreshToken)
+	_ = s.deps.Grants.RecordIssuedRefreshToken(ctx, codeHash, tokenHash, now.Add(s.cfg.Limits.RefreshTokenLifetime))
 	result.RefreshToken = fapi.NewSecret(refreshToken)
 	result.HasRefreshToken = true
 	return nil
@@ -1076,7 +1104,7 @@ func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, 
 	if err != nil {
 		return "", err
 	}
-	hash := sha256.Sum256([]byte(raw))
+	hash := refreshTokenHash(s.cfg.Issuer.String(), raw)
 	expiresAt := now.Add(s.cfg.Limits.RefreshTokenLifetime)
 	if err := s.recordGrant(ctx, clientID, grant, hash, now, expiresAt); err != nil {
 		return "", fmt.Errorf("record the grant: %w", err)

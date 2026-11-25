@@ -37,8 +37,10 @@ const (
 // NewBackchannelAuthentication is what CreateBackchannelAuthentication
 // persists for one client-initiated backchannel authentication request.
 type NewBackchannelAuthentication struct {
-	// AuthReqIDHash is the SHA-256 digest of the raw auth_req_id value
-	// handed to the client — matching NewAuthorizationCode.CodeHash's
+	// AuthReqIDHash is a SHA-256 digest of the raw auth_req_id value
+	// handed to the client and the issuer of the server that issued it
+	// (so a server of another issuer sharing the store finds no record)
+	// — matching NewAuthorizationCode.CodeHash's
 	// digest-only discipline, used to look this record up by the value a
 	// client presents back. Required unconditionally, regardless of
 	// DeliveryMode. For a request made by a client authenticated by

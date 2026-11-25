@@ -18,6 +18,57 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.85.0
+
+### Codes, refresh tokens and `auth_req_id`s are stored under digests covering the issuer (server, storage)
+
+**Affects:** every server, once, at deploy. Most visibly a server
+issuing refresh tokens (`offline_access`). No code changes.
+
+**Why:** the digest an authorization code, a refresh token or a CIBA
+`auth_req_id` is stored under (`NewAuthorizationCode.CodeHash`,
+`NewRefreshToken.TokenHash`, `NewBackchannelAuthentication.AuthReqIDHash`)
+didn't include the server's issuer. Two servers of different issuers
+sharing one store found each other's records: the store spent the code
+or the CIBA approval (or reported a code reused, revoking what it had
+issued) before the server could refuse the record as another issuer's.
+So one issuer's client could burn a code or `auth_req_id` the other
+issued. Each digest is now taken over the issuer as well, behind a new
+domain-separation prefix: a code, refresh token or `auth_req_id`
+presented to a server of another issuer is unknown to the store, and
+neither found nor consumed.
+
+**What fails:** every value stored before the upgrade is under the old
+digest, which the upgraded server no longer computes, so:
+
+- **Every refresh token issued before the upgrade stops working.**
+  `RefreshAccessToken` answers `invalid_grant` ("refresh_token is
+  invalid, expired, or already used"), as for a token that never
+  existed, and `RevokeToken` treats it as unknown too. Clients must get a new one through a new
+  authorization: the end user signs in (and consents) again. Access
+  tokens already issued are unaffected and run out their lifetime.
+- Authorization codes in flight at deploy (issued, not yet redeemed)
+  fail once: the exchange answers `invalid_grant` and the client starts
+  the authorization again. Codes live `Limits.AuthorizationCodeLifetime`
+  (a minute at most). A pre-upgrade code presented again after the
+  upgrade is unknown rather than reused, so it no longer revokes the
+  tokens issued from it; those tokens were issued at most a code
+  lifetime before the upgrade, and expire as usual.
+- CIBA requests in flight at deploy fail once: a poll answers
+  `invalid_grant` and the client starts a new request.
+- Rows a `GrantStore`, `BackchannelAuthenticationStore` or
+  `GrantRegistry` holds for the old digests are no longer reachable
+  through the server and expire as usual. `ListGrants` may still list
+  a pre-upgrade grant until its entry expires, and `RevokeListedGrant`
+  still revokes it.
+
+**What to change:** nothing in code, and no store migration: `memstore`,
+`sqlstore` and any custom store key records by whatever digest the
+server hands them. Plan the deploy: expect every refresh-token holder
+to re-authorize, and tell client operators (or their users) that a
+one-time sign-in is coming. A store shared by servers of different
+issuers needs nothing more; each server now sees only its own records.
+
 ## v0.84.0
 
 ### A JWT access token's `client_sub` claim no longer sets `ClientSubject` (resource)

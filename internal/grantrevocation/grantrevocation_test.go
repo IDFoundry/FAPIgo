@@ -51,3 +51,26 @@ func TestKeysAreNamespacedByIssuer(t *testing.T) {
 		})
 	}
 }
+
+func TestAccessTokenKeysAreNamespacedByIssuer(t *testing.T) {
+	const a, b = "https://a.example.com", "https://b.example.com"
+	if got, want := AccessTokenKey(a, "jti-1"), "access-token:21:"+a+"jti-1"; got != want {
+		t.Errorf("AccessTokenKey = %q, want %q", got, want)
+	}
+	if AccessTokenKey(a, "jti-1") == AccessTokenKey(b, "jti-1") {
+		t.Error("two issuers' tokens of one key share a revocation key")
+	}
+	// The length prefix splits issuer and key one way only, whatever
+	// either holds.
+	if AccessTokenKey("https://a.example.com/x", "y") == AccessTokenKey("https://a.example.com/", "xy") {
+		t.Error("two splits of the same text between issuer and key share a revocation key")
+	}
+	for _, other := range []string{Key(a, "jti-1"), CodeKey(a, "jti-1"), "jti-1"} {
+		if AccessTokenKey(a, "jti-1") == other {
+			t.Errorf("AccessTokenKey equals %q", other)
+		}
+	}
+	if got := AccessTokenKeys(a, "jti-1"); len(got) != 2 || got[0] != AccessTokenKey(a, "jti-1") || got[1] != "jti-1" {
+		t.Errorf("AccessTokenKeys = %q, want [the namespaced key, the raw key]", got)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,37 @@ func newIndexedToken(t *testing.T, g storage.GrantStore, name string, expires ti
 		TokenHash: hash, ClientID: "c", Grant: secretGrant, ExpiresAt: expires, GrantKeys: keys,
 	}))
 	return hash
+}
+
+// productionIssuer is the issuer productionServer and productionClient
+// configure.
+const productionIssuer = "https://as.example"
+
+// serverRefreshTokenHashes are the digests a server of issuer may store
+// refreshToken under: the issuer-bound one current servers use (the
+// SHA-256 of a fixed prefix, the length-prefixed issuer and the token,
+// following the server package's own, unexported derivation), then the
+// plain SHA-256 a fapigo release before it used. sqlstore's tests also
+// run against the fapigo release its go.mod requires (CI's "go test
+// against the required FAPIgo release" step), so they look a token up
+// under both rather than tie themselves to one release's derivation.
+func serverRefreshTokenHashes(issuer, refreshToken string) [][32]byte {
+	return [][32]byte{
+		sha256.Sum256([]byte("fapigo refresh token\x00" + strconv.Itoa(len(issuer)) + ":" + issuer + refreshToken)),
+		sha256.Sum256([]byte(refreshToken)),
+	}
+}
+
+// redeemableUnderAny reports whether g can redeem a refresh token stored
+// under any of hashes.
+func redeemableUnderAny(t *testing.T, g storage.GrantStore, hashes [][32]byte) bool {
+	t.Helper()
+	for _, hash := range hashes {
+		if redeemable(t, g, hash) {
+			return true
+		}
+	}
+	return false
 }
 
 // redeemable reports whether g redeems the refresh token stored under

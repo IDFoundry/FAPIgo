@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 
@@ -190,11 +189,7 @@ func (s *Server) backchannelTokenParameters(client storage.RegisteredClient, par
 		return "", requestedAuthorizationDetails{}, newError(ErrorInvalidRequest, 400, "auth_req_id is required", nil)
 	}
 	// A value of another form names no request, so it's answered as an
-	// unknown one is, without a poll. A poll could find a request all
-	// the same: the string a bound request's digest is taken over
-	// (backchannelAuthReqIDHash) has that digest as its own unbound one,
-	// and would spend the approval without the client instance or DPoP
-	// key the request is bound to.
+	// unknown one is, without a poll.
 	if !isWellFormedAuthReqID(authReqID) {
 		return "", requestedAuthorizationDetails{}, newError(ErrorInvalidGrant, 400, authReqIDUnknownDescription, nil)
 	}
@@ -205,46 +200,39 @@ func (s *Server) backchannelTokenParameters(client storage.RegisteredClient, par
 	return authReqID, details, nil
 }
 
-// backchannelAuthReqIDHashPrefix starts the string the digest of an
-// auth_req_id bound to a client instance or a DPoP key is taken over.
-// No auth_req_id this server issues starts with it (it has a space and
-// a NUL), so it separates that digest from the plain SHA-256 of every
-// unbound one, though not from that of an arbitrary string: see
-// backchannelAuthReqIDHash.
-const backchannelAuthReqIDHashPrefix = "fapigo bound auth_req_id\x00"
+// backchannelAuthReqIDHashPrefix starts the string an auth_req_id's
+// digest is taken over (backchannelAuthReqIDHash), separating it from
+// an authorization code's (authorizationCodeHash) and a refresh
+// token's (refreshTokenHash) of the same value.
+const backchannelAuthReqIDHashPrefix = "fapigo auth_req_id v2\x00"
 
 // backchannelAuthReqIDHash is the digest a CIBA request is stored and
 // polled under (storage.NewBackchannelAuthentication.AuthReqIDHash):
-// the plain SHA-256 of authReqID for a request bound to neither a
-// client instance nor a DPoP key, as before such bindings existed, and
-// otherwise the SHA-256 of authReqID bound to instanceKey (the
-// thumbprint of the Client Instance Key of a client authenticated by
-// Client Attestation) and dpopJKT (the thumbprint of the DPoP key the
-// request is bound to: its dpop_jkt, or the key of the DPoP proof sent
-// with it).
+// the SHA-256 of backchannelAuthReqIDHashPrefix, then issuer,
+// instanceKey (the thumbprint of the Client Instance Key of a client
+// authenticated by Client Attestation, or empty) and dpopJKT (the
+// thumbprint of the DPoP key the request is bound to: its dpop_jkt, or
+// the key of the DPoP proof sent with it; or empty), each
+// length-prefixed, then authReqID. The length prefixes keep any two
+// different bindings of one auth_req_id apart.
 //
 // The store spends an approval in the poll that observes it, before the
-// server can compare the poll's client instance or DPoP key with the
-// request's, and every installation of a wallet app shares one
-// client_id. Keyed by both, an auth_req_id presented by another
-// instance, or with another DPoP key, is simply unknown to the store,
-// as authorizationCodeHash makes another instance's code: the poll
-// neither spends the approval nor sees the request, so the poll from
-// the instance and key it was issued to still succeeds. Each part is
-// length-prefixed, so no two different bindings of one auth_req_id
-// share a digest. The plain digest of an arbitrary string can equal a
-// bound one, though: the string a bound digest is taken over, presented
-// as an unbound auth_req_id, has that same digest, and would find the
-// bound request. So the token endpoint polls only for an auth_req_id of
-// the form this server issues (isWellFormedAuthReqID), which that
-// string, starting with backchannelAuthReqIDHashPrefix, never has.
-func backchannelAuthReqIDHash(authReqID, instanceKey, dpopJKT string) [32]byte {
-	if instanceKey == "" && dpopJKT == "" {
-		return sha256.Sum256([]byte(authReqID))
-	}
-	return sha256.Sum256([]byte(backchannelAuthReqIDHashPrefix +
-		strconv.Itoa(len(instanceKey)) + ":" + instanceKey +
-		strconv.Itoa(len(dpopJKT)) + ":" + dpopJKT + authReqID))
+// server can compare the poll's issuer, client instance or DPoP key
+// with the request's, and every installation of a wallet app shares
+// one client_id. Keyed by all three, an auth_req_id presented to a
+// server of another issuer sharing the store, by another instance, or
+// with another DPoP key, is simply unknown to the store, as
+// authorizationCodeHash makes another issuer's or instance's code: the
+// poll neither spends the approval nor sees the request, so the poll
+// from the server, instance and key it was issued to still succeeds.
+//
+// A server before v0.84.0 stored an unbound request under the plain
+// SHA-256 of its auth_req_id and a bound one under a digest without the
+// issuer; this digest is neither, so those requests are unknown after
+// the upgrade.
+func backchannelAuthReqIDHash(issuer, authReqID, instanceKey, dpopJKT string) [32]byte {
+	return sha256.Sum256([]byte(backchannelAuthReqIDHashPrefix + lengthPrefixed(issuer) +
+		lengthPrefixed(instanceKey) + lengthPrefixed(dpopJKT) + authReqID))
 }
 
 // pollBackchannelAuthentication polls the CIBA request authReqID names
@@ -257,10 +245,6 @@ func backchannelAuthReqIDHash(authReqID, instanceKey, dpopJKT string) [32]byte {
 // polled as if it were the only one. A store that couldn't answer the
 // first isn't asked the second: had it recovered, the second would miss
 // a request stored under the DPoP key, and answer it as unknown.
-// Without an instanceKey, the lookup under no DPoP key is the plain
-// SHA-256 of authReqID, which the string a bound digest is taken over
-// would share with that bound request; backchannelTokenParameters has
-// refused every such string, as not of the form this server issues.
 func (s *Server) pollBackchannelAuthentication(ctx context.Context, client storage.RegisteredClient, authReqID, instanceKey, thumbprint string, now time.Time) (storage.PolledBackchannelAuthentication, [32]byte, error) {
 	poll := func(hash [32]byte) (storage.PolledBackchannelAuthentication, error) {
 		return s.deps.Backchannel.PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{
@@ -270,13 +254,13 @@ func (s *Server) pollBackchannelAuthentication(ctx context.Context, client stora
 		})
 	}
 	if client.SenderConstrain() != storage.SenderConstrainMTLS {
-		hash := backchannelAuthReqIDHash(authReqID, instanceKey, thumbprint)
+		hash := backchannelAuthReqIDHash(s.cfg.Issuer.String(), authReqID, instanceKey, thumbprint)
 		polled, err := poll(hash)
 		if err == nil || isBackchannelPollOutcome(err) || storeOutage(ctx, err) {
 			return polled, hash, err
 		}
 	}
-	hash := backchannelAuthReqIDHash(authReqID, instanceKey, "")
+	hash := backchannelAuthReqIDHash(s.cfg.Issuer.String(), authReqID, instanceKey, "")
 	polled, err := poll(hash)
 	return polled, hash, err
 }

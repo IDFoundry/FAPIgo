@@ -496,14 +496,28 @@ func (v *Verifier) checkNotRevoked(ctx context.Context, resolved ResolvedAccessT
 // checkEachNotRevoked is checkNotRevoked one IsRevoked call at a time:
 // the token's own key, then each of its grants' keys.
 func (v *Verifier) checkEachNotRevoked(ctx context.Context, resolved ResolvedAccessToken) *Error {
-	revoked, err := v.deps.Revocation.IsRevoked(ctx, resolved.Key)
-	if err != nil {
-		return newError(ErrorServerError, 500, "failed to check token revocation", err)
-	}
-	if revoked {
-		return newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
+	for _, key := range tokenRevocationKeys(resolved) {
+		revoked, err := v.deps.Revocation.IsRevoked(ctx, key)
+		if err != nil {
+			return newError(ErrorServerError, 500, "failed to check token revocation", err)
+		}
+		if revoked {
+			return newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
+		}
 	}
 	return v.checkGrantNotRevoked(ctx, resolved.Issuer, resolved.Claims)
+}
+
+// tokenRevocationKeys are the keys resolved itself may be revoked
+// under: its Key namespaced by its Issuer, as a server since v0.84.0
+// writes it, and Key itself, as older servers wrote it
+// (grantrevocation.AccessTokenKeys). A resolver reporting no Issuer
+// gets the raw Key alone: there is no issuer to namespace it by.
+func tokenRevocationKeys(resolved ResolvedAccessToken) []string {
+	if resolved.Issuer == "" {
+		return []string{resolved.Key}
+	}
+	return grantrevocation.AccessTokenKeys(resolved.Issuer, resolved.Key)
 }
 
 // resolveCredential verifies whichever sender-constraining credential
@@ -639,7 +653,7 @@ func (v *Verifier) checkAnyRevoked(ctx context.Context, resolved ResolvedAccessT
 	if !ok {
 		return false, false
 	}
-	revoked, err := batch.IsAnyRevoked(ctx, append([]string{resolved.Key}, keys...))
+	revoked, err := batch.IsAnyRevoked(ctx, append(tokenRevocationKeys(resolved), keys...))
 	if err != nil {
 		return false, false
 	}

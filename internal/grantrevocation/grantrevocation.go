@@ -1,12 +1,40 @@
-// Package grantrevocation is how a revoked grant is recorded and found:
-// shared by server, which revokes grants and refuses their codes and
-// refresh tokens, and resource, which refuses their access tokens.
+// Package grantrevocation is how a revoked grant, or a revoked access
+// token, is recorded and found: shared by server, which revokes grants
+// and access tokens and refuses the grants' codes and refresh tokens,
+// and resource, which refuses their access tokens.
 package grantrevocation
 
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"strconv"
 )
+
+// AccessTokenKey is the revocation-store key recording one access token
+// issuer issued, whose own revocation key (a JWT's jti, an opaque
+// token's hex SHA-256: resource.ResolvedAccessToken.Key) is key, as
+// revoked: "access-token:", the issuer's length in bytes, ":", the
+// issuer, then key. The prefix keeps it apart from Key's and CodeKey's,
+// and the issuer keeps one issuer's tokens apart from another's when
+// servers with different issuers share the store: one issuer's revoked
+// jti no longer refuses another issuer's token with the same jti. The
+// length prefix splits the key into issuer and token key one way only,
+// whatever either holds.
+func AccessTokenKey(issuer, key string) string {
+	return "access-token:" + strconv.Itoa(len(issuer)) + ":" + issuer + key
+}
+
+// AccessTokenKeys are the keys a server writes, and IsRevoked checks,
+// for the access token whose own revocation key is key: AccessTokenKey,
+// then key itself, the only form servers before v0.84.0 wrote and that
+// a custom RevocationChecker may still look for. Both are written so a
+// resource server not yet upgraded, or a checker that only knows the
+// raw form, still refuses a token a new server revoked; both are checked
+// so a record an older server wrote still refuses the token. The raw
+// form will be dropped in a later release.
+func AccessTokenKeys(issuer, key string) []string {
+	return []string{AccessTokenKey(issuer, key), key}
+}
 
 // Claim is the access token claim carrying the grant ID — the name the
 // OAuth Grant Management draft (FAPI working group) uses for the same

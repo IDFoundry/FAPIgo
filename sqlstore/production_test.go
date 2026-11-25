@@ -38,7 +38,7 @@ func (discardAudit) Record(context.Context, server.AuditEvent) error { return ni
 func productionServer(t *testing.T, d *sqlstore.DB, deployment server.Deployment) (server.Config, server.Dependencies) {
 	t.Helper()
 	url := func(raw string) fapi.URL { return mustURL(t, raw) }
-	issuer, err := fapi.ParseIssuerURL("https://as.example")
+	issuer, err := fapi.ParseIssuerURL(productionIssuer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func checkProductionPushedRequestLookup(t *testing.T, d *sqlstore.DB, deployment
 func productionClient(t *testing.T, d *sqlstore.DB) (client.Config, client.Dependencies) {
 	t.Helper()
 	url := func(raw string) fapi.URL { return mustURL(t, raw) }
-	issuer, err := fapi.ParseIssuerURL("https://as.example")
+	issuer, err := fapi.ParseIssuerURL(productionIssuer)
 	if err != nil {
 		t.Fatal(err)
 	}

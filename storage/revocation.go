@@ -37,8 +37,8 @@ type RevocationStore interface {
 // resource.RevocationChecker) may implement to answer several IsRevoked
 // questions in one round trip. The server and resource.Verifier each
 // check a handful of keys per request — an access token's own key, its
-// grant's key and its code grant's key, each also in the form a server
-// before v0.61.0 wrote — and use IsAnyRevoked, when the store has it,
+// grant's key and its code grant's key, each namespaced by issuer and
+// also in the un-namespaced form older servers wrote — and use IsAnyRevoked, when the store has it,
 // instead of one IsRevoked call per key. A store without it gets exactly
 // those IsRevoked calls.
 //
@@ -47,7 +47,7 @@ type RevocationStore interface {
 // first that is. An empty keys is false, nil. Keys are compared exactly,
 // as IsRevoked compares them. An error means the answer isn't known, as
 // for IsRevoked: the caller fails closed. Callers pass a few keys (at
-// most five today); a store may refuse an unreasonably long keys with an
+// most six today); a store may refuse an unreasonably long keys with an
 // error. TestRevocationStoreContract checks a store that implements it
 // against IsRevoked.
 //

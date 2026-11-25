@@ -13,10 +13,16 @@ import (
 // or NoRevocation{} to explicitly decline — see NoRevocation's own doc
 // comment for why declining must be a visible choice, not a silent one.
 type RevocationSink interface {
-	// Revoke marks key as revoked — a JWT's jti claim when the active
-	// AccessTokenIssuer is JWTAccessTokens, an opaque token's own hash
-	// when it's OpaqueAccessTokens; opaque either way from this
-	// interface's point of view. expiresAt is a conservative upper
+	// Revoke marks key as revoked. For an access token the server
+	// revokes it twice: under the token's own key — a JWT's jti claim
+	// when the active AccessTokenIssuer is JWTAccessTokens, an opaque
+	// token's own hash when it's OpaqueAccessTokens — namespaced by the
+	// server's issuer ("access-token:", the issuer's length in bytes,
+	// ":", the issuer, then the token's key), and under the token's key
+	// itself, the only form servers before v0.84.0 wrote, which
+	// resource servers not yet upgraded look for; a later release will
+	// stop writing it. Opaque either way from this interface's point of
+	// view. expiresAt is a conservative upper
 	// bound on the access token's own expiry (the server no longer has
 	// the token's real exp claim at this point in the flow) — a
 	// backend with native per-key TTL support (Redis EXPIRE, a

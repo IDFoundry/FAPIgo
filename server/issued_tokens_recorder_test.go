@@ -3,7 +3,6 @@ package server_test
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/sha256"
 	"errors"
 	"slices"
 	"sync"
@@ -170,9 +169,9 @@ func TestExchangeAuthorizationCodeRecordsBothTokensInOneWrite(t *testing.T) {
 func requireRecordedTokens(t *testing.T, h harness, store *recordingGrantStore, code string, result server.TokenResult) {
 	t.Helper()
 	got := store.recorded
-	wantCodeHash := server.AuthorizationCodeHash(code, testCodeChallenge, testRedirectURI)
+	wantCodeHash := server.AuthorizationCodeHash(testIssuer, code, testCodeChallenge, testRedirectURI)
 	if got.codeHash != wantCodeHash || got.accessKey != accessTokenJTI(t, h, result.AccessToken.Reveal()) ||
-		got.refreshHash != sha256.Sum256([]byte(result.RefreshToken.Reveal())) {
+		got.refreshHash != server.RefreshTokenHash(testIssuer, result.RefreshToken.Reveal()) {
 		t.Fatalf("RecordIssuedTokens recorded code %x, access key %q, refresh hash %x; want the exchange's code and tokens", got.codeHash, got.accessKey, got.refreshHash)
 	}
 	if !got.accessExpiresAt.Equal(h.now.Add(h.cfg.Limits.AccessTokenLifetime)) || !got.refreshExpireAt.Equal(h.now.Add(h.cfg.Limits.RefreshTokenLifetime)) {
@@ -198,7 +197,7 @@ func TestCodeReuseRevokesTokensRecordedInOneWrite(t *testing.T) {
 	if jti := accessTokenJTI(t, h, first.AccessToken.Reveal()); !slices.Contains(h.revocation.all(), jti) {
 		t.Fatalf("Revoke calls = %v, want the first access token's jti %q among them", h.revocation.all(), jti)
 	}
-	refreshHash := sha256.Sum256([]byte(first.RefreshToken.Reveal()))
+	refreshHash := server.RefreshTokenHash(testIssuer, first.RefreshToken.Reveal())
 	h.grants.mu.Lock()
 	revoked := h.grants.refreshRevoked[refreshHash]
 	h.grants.mu.Unlock()

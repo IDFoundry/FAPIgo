@@ -75,13 +75,14 @@ type batchRevocationCase struct {
 // batchRevocationClaims names, in the order Verify asks about them.
 var (
 	batchRevocationClaims = map[string]json.RawMessage{"grant_id": json.RawMessage(`"g-1"`), "code_grant_id": json.RawMessage(`"cg-1"`)}
-	batchRevocationKeys   = []string{"token-1", "grant:g-1@" + testIssuer, "grant:g-1", "code-grant:cg-1@" + testIssuer, "code-grant:cg-1"}
+	batchRevocationKeys   = []string{"access-token:22:" + testIssuer + "token-1", "token-1", "grant:g-1@" + testIssuer, "grant:g-1", "code-grant:cg-1@" + testIssuer, "code-grant:cg-1"}
 )
 
 // TestVerifyChecksRevocationInOneBatch: with a
 // storage.RevocationBatchChecker, a token carrying grant_id and
-// code_grant_id is checked in one IsAnyRevoked call covering its own key
-// and every grant key, current and pre-v0.61.0; anything but "none
+// code_grant_id is checked in one IsAnyRevoked call covering its own
+// keys, namespaced by issuer and raw, and every grant key, current and
+// pre-v0.61.0; anything but "none
 // revoked" falls back to the IsRevoked calls, so each outcome keeps the
 // response it has without a batch checker, and a batch answer of
 // revoked is never overturned.

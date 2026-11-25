@@ -125,7 +125,7 @@ func exchangeForRefreshToken(t *testing.T, h harness, dpopKey *ecdsa.PrivateKey)
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
 	}
 	// The digest the server stores a code under (authorizationCodeHash).
-	return result.RefreshToken.Reveal(), grantrevocation.CodeGrantID(server.AuthorizationCodeHash(code, testCodeChallenge, testRedirectURI))
+	return result.RefreshToken.Reveal(), grantrevocation.CodeGrantID(server.AuthorizationCodeHash(testIssuer, code, testCodeChallenge, testRedirectURI))
 }
 
 // requireTokenOutcome fails unless err is nil when want is empty, or a

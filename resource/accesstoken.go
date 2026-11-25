@@ -73,7 +73,8 @@ type ResolvedAccessToken struct {
 	// Key is this token's revocation-lookup identifier — a JWT's jti
 	// claim for JWTAccessTokens, an opaque token's own hash for
 	// OpaqueAccessTokens — passed to Dependencies.Revocation.IsRevoked
-	// exactly as returned; its shape is an implementation detail
+	// exactly as returned, and also namespaced by Issuer when Issuer is
+	// set (see RevocationChecker); its shape is an implementation detail
 	// specific to each AccessTokenResolver. Required: Verify answers a
 	// resolved token with no Key as 500 server_error, since revocation
 	// couldn't apply to it.

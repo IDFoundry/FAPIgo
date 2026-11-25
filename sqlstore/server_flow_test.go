@@ -235,9 +235,14 @@ func checkRevokedGrantStaysRevoked(t *testing.T, dialect sqlstore.Dialect, grant
 	refreshToken, err := app.exchange(ctx, long, app.code(ctx, long, clock.Now(), "grant-1"))
 	must(t, err)
 
+	hashes := serverRefreshTokenHashes(productionIssuer, refreshToken)
+	if !redeemableUnderAny(t, d.Grants(), hashes) {
+		t.Fatal("setup: the issued refresh token isn't in the store under the digest the server stores it under")
+	}
+
 	clock.advance(time.Minute)
 	must(t, short.RevokeGrant(ctx, "grant-1"))
-	if redeemable(t, d.Grants(), sha256.Sum256([]byte(refreshToken))) {
+	if redeemableUnderAny(t, d.Grants(), hashes) {
 		t.Fatal("RevokeGrant left the grant's refresh token in the store")
 	}
 

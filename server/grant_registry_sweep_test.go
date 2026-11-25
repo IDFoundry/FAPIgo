@@ -65,7 +65,7 @@ func newRecordedLifetimeChanges(t *testing.T, grants storage.GrantStore) (*lifet
 func (c *lifetimeChanges) issueGrant(grantID string, refreshLifetime time.Duration) (refreshToken, id string) {
 	c.t.Helper()
 	refreshToken = exchangeWithGrantID(c.t, c.at(0, refreshLifetime), grantID)
-	return refreshToken, server.GrantEntryKey(sha256.Sum256([]byte(refreshToken)))
+	return refreshToken, server.GrantEntryKey(server.RefreshTokenHash(testIssuer, refreshToken))
 }
 
 // revokeGrantAt revokes grantID a minute in, under a 1h refresh token
@@ -243,7 +243,7 @@ func testSweepBesideAListedGrant(t *testing.T) {
 	revoked, _ := c.issueGrant("grant-1", longRefreshLifetime)
 	listed, listedID := c.issueGrant("grant-2", longRefreshLifetime)
 	h := c.revokeGrantAt("grant-1")
-	grants.downTokens = map[[32]byte]bool{sha256.Sum256([]byte(revoked)): true}
+	grants.downTokens = map[[32]byte]bool{server.RefreshTokenHash(testIssuer, revoked): true}
 	if err := h.server.RevokeListedGrant(context.Background(), mustSubjectID(t, "user-1"), listedID); err != nil {
 		t.Fatalf("RevokeListedGrant(a listed grant), a revoked grant's refresh token failing to revoke = %v, want nil", err)
 	}

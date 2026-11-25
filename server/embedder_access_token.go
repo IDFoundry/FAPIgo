@@ -108,7 +108,10 @@ func (s *Server) IssueAccessToken(ctx context.Context, req IssueAccessTokenReque
 		s.audit(ctx, AuditEventIssueAccessToken, client.ID(), AuditOutcomeFailure, string(err.Code()))
 		return TokenResult{}, err
 	}
-	s.audit(ctx, AuditEventIssueAccessToken, client.ID(), AuditOutcomeSuccess, "")
+	if auditErr := s.auditRequired(ctx, AuditEventIssueAccessToken, client.ID(), AuditOutcomeSuccess, ""); auditErr != nil {
+		s.audit(ctx, AuditEventIssueAccessToken, client.ID(), AuditOutcomeFailure, string(auditErr.Code()))
+		return TokenResult{}, auditErr
+	}
 	return TokenResult{
 		AccessToken:          fapi.NewSecret(accessToken),
 		TokenType:            tokenTypeFor(client.SenderConstrain()),

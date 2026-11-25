@@ -168,7 +168,9 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 	if !result.Revoked {
 		description = "not revoked"
 	}
-	s.audit(ctx, AuditEventRevokeToken, client.ID(), AuditOutcomeSuccess, description)
+	if auditErr := s.auditRequired(ctx, AuditEventRevokeToken, client.ID(), AuditOutcomeSuccess, description); auditErr != nil {
+		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), auditErr)
+	}
 	return result, nil
 }
 

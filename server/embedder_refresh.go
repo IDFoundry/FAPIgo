@@ -103,7 +103,10 @@ func (s *Server) IssueRefreshToken(ctx context.Context, req IssueRefreshTokenReq
 		s.audit(ctx, AuditEventIssueRefreshToken, client.ID(), AuditOutcomeFailure, string(err.Code()))
 		return fapi.Secret{}, err
 	}
-	s.audit(ctx, AuditEventIssueRefreshToken, client.ID(), AuditOutcomeSuccess, "")
+	if auditErr := s.auditRequired(ctx, AuditEventIssueRefreshToken, client.ID(), AuditOutcomeSuccess, ""); auditErr != nil {
+		s.audit(ctx, AuditEventIssueRefreshToken, client.ID(), AuditOutcomeFailure, string(auditErr.Code()))
+		return fapi.Secret{}, auditErr
+	}
 	return fapi.NewSecret(raw), nil
 }
 

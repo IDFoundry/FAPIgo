@@ -133,6 +133,8 @@ type Dependencies struct {
 
 	// Audit records security-significant events. Required when
 	// Config.Assurance is AssuranceProduction; optional otherwise.
+	// Recording is best-effort unless the sink implements
+	// FailClosedAuditSink.
 	Audit AuditSink
 
 	// Revocation lets this server revoke an access token it already

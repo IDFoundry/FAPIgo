@@ -146,7 +146,9 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), nonceErr)
 	}
 
-	s.audit(ctx, AuditEventRequestClientCredentialsToken, client.ID(), AuditOutcomeSuccess, "")
+	if auditErr := s.auditRequired(ctx, AuditEventRequestClientCredentialsToken, client.ID(), AuditOutcomeSuccess, ""); auditErr != nil {
+		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), auditErr)
+	}
 	return result, nil
 }
 

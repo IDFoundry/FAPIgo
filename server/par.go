@@ -1157,21 +1157,6 @@ func jsonStringValue(raw json.RawMessage) (string, error) {
 	return s, nil
 }
 
-func (s *Server) audit(ctx context.Context, eventType AuditEventType, clientID fapi.ClientID, outcome AuditOutcome, description string) {
-	if s.deps.Audit == nil {
-		return
-	}
-	// Best-effort: PAR is not an issuance event, so a failure to record
-	// an audit entry does not fail the request itself.
-	_ = s.deps.Audit.Record(ctx, AuditEvent{
-		Type:        eventType,
-		Time:        s.deps.Clock.Now(),
-		ClientID:    clientID,
-		Outcome:     outcome,
-		Description: description,
-	})
-}
-
 func (s *Server) parFail(ctx context.Context, clientID fapi.ClientID, err *Error) (PushAuthorizationResult, error) {
 	s.audit(ctx, AuditEventPushAuthorizationRequest, clientID, AuditOutcomeFailure, string(err.Code()))
 	return PushAuthorizationResult{}, err

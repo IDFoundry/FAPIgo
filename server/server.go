@@ -21,6 +21,10 @@ type Server struct {
 	// nonces holds the DPoP nonce this server currently hands out, when
 	// deps.Nonces is set.
 	nonces dpopnonce.Rotator
+
+	// auditFailsClosed is deps.Audit's FailClosedAuditSink declaration,
+	// read once by New.
+	auditFailsClosed bool
 }
 
 // New validates cfg and deps and returns a Server. Construction fails
@@ -77,7 +81,7 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
 	}
-	s := &Server{cfg: cfg, deps: deps}
+	s := &Server{cfg: cfg, deps: deps, auditFailsClosed: auditFailsClosed(deps.Audit)}
 	if err := s.checkSigningKeys(); err != nil {
 		return nil, err
 	}

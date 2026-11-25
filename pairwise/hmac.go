@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/sealkeys"
 	"github.com/idfoundry/fapigo/keys"
 )
@@ -46,7 +47,7 @@ func NewHMAC(key []byte, opts ...keys.CustodyOption) (*HMACDeriver, error) {
 	if err := sealkeys.Check("pairwise: HMAC", [][]byte{key}); err != nil {
 		return nil, err
 	}
-	return NewHMACWith(memoryHMACOps{key: append([]byte(nil), key...)}, opts...)
+	return NewHMACWith(memoryHMACOps{key: fapi.NewSecret(string(key))}, opts...)
 }
 
 // HMACOps is the one keyed operation the one-way construction needs, for
@@ -89,13 +90,15 @@ func NewHMACWith(ops HMACOps, opts ...keys.CustodyOption) (*HMACDeriver, error) 
 }
 
 // memoryHMACOps is NewHMAC's HMACOps, over a key held in this process.
+// The key is a fapi.Secret, so even fmt's reflection fallback, which a
+// deriver in an unexported field gets, prints only an address.
 type memoryHMACOps struct {
-	key []byte
+	key fapi.Secret
 }
 
 // MAC implements HMACOps.
 func (o memoryHMACOps) MAC(_ context.Context, data []byte) ([]byte, error) {
-	mac := hmac.New(sha256.New, o.key)
+	mac := hmac.New(sha256.New, []byte(o.key.Reveal()))
 	mac.Write(data)
 	return mac.Sum(nil), nil
 }

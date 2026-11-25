@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/sealkeys"
 	"github.com/idfoundry/fapigo/keys"
 )
@@ -161,7 +162,7 @@ func newReversible(macKey, encKey []byte, opts ...keys.CustodyOption) (*Reversib
 	if err != nil {
 		return nil, fmt.Errorf("pairwise: reversible: %w", err)
 	}
-	return NewReversibleWith(memoryReversibleOps{macKey: append([]byte(nil), macKey...), block: block}, opts...)
+	return NewReversibleWith(memoryReversibleOps{macKey: fapi.NewSecret(string(macKey)), block: block}, opts...)
 }
 
 // NewReversibleWith returns the reversible Deriver (see NewReversible)
@@ -206,15 +207,17 @@ func NewReversibleWith(ops ReversibleOps, opts ...keys.CustodyOption) (*Reversib
 }
 
 // memoryReversibleOps is NewReversible's ReversibleOps, over keys held
-// in this process.
+// in this process. The MAC key is a fapi.Secret and the cipher a
+// pointer, so even fmt's reflection fallback, which a deriver in an
+// unexported field gets, prints only addresses.
 type memoryReversibleOps struct {
-	macKey []byte
+	macKey fapi.Secret
 	block  cipher.Block
 }
 
 // MAC implements ReversibleOps.
 func (o memoryReversibleOps) MAC(_ context.Context, data []byte) ([]byte, error) {
-	mac := hmac.New(sha256.New, o.macKey)
+	mac := hmac.New(sha256.New, []byte(o.macKey.Reveal()))
 	mac.Write(data)
 	return mac.Sum(nil), nil
 }

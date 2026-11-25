@@ -103,6 +103,7 @@ var keyHolders = map[string]keyHolder{
 		covers: []string{
 			"federation.HistoricalKeysIssueDependencies.Signer", "federation.ResolveIssueDependencies.Signer",
 			"federation.SelfIssueDependencies.Signer", "federation.SubordinateIssueDependencies.Signer",
+			"federation.jwksDependencyFields.signer",
 			"federation.TrustMarkIssueDependencies.Signer",
 		},
 		build: func(t *testing.T) (any, []string) {

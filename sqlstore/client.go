@@ -47,7 +47,9 @@ func (r *ClientRepository) ResolveClient(ctx context.Context, id fapi.ClientID) 
 }
 
 // config is the configuration document of the client registered as
-// id, for op: an error wrapping ErrNotFound for an unknown id.
+// id, for op: an error wrapping ErrNotFound for an unknown id. That
+// error doesn't name id: an unknown id is whatever a request sent, of
+// any length, so it's left out of text that reaches logs.
 func (r *ClientRepository) config(ctx context.Context, op string, id fapi.ClientID) ([]byte, error) {
 	if !validTextKey(string(id)) {
 		return nil, fmt.Errorf("sqlstore: %s: %w", op, notFound("client"))
@@ -56,7 +58,7 @@ func (r *ClientRepository) config(ctx context.Context, op string, id fapi.Client
 	err := r.d.queryRow(ctx, "SELECT config FROM {clients} WHERE client_id = ?", string(id)).Scan(&config)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return nil, fmt.Errorf("sqlstore: %s %q: %w", op, id, notFound("client"))
+		return nil, fmt.Errorf("sqlstore: %s: %w", op, notFound("client"))
 	case err != nil:
 		return nil, unavailable(op, err)
 	}

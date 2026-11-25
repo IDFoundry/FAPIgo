@@ -126,11 +126,11 @@ var keyHolders = map[string]keyHolder{
 			key := must(ecdh.P256().GenerateKey(rand.Reader))(t)
 			return must(keys.NewInMemoryECDH(key, "k"))(t), keySecrets(key)
 		}},
-	"ephemeral.NewKeyManager ES256 and PS256": {covers: []string{"ephemeral.KeyManager.keys"},
+	"ephemeral.NewKeyManager ES256 and PS256": {covers: []string{"ephemeral.signingKey.signer"},
 		build: func(t *testing.T) (any, []string) {
 			return ephemeralKeyManager(t, map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.JARMSigning: fapi.ES256, keys.IDTokenSigning: fapi.PS256}, nil)
 		}},
-	"ephemeral.NewKeyManager EdDSA": {covers: []string{"ephemeral.KeyManager.keys"}, knownLeak: leaksEd25519,
+	"ephemeral.NewKeyManager EdDSA": {covers: []string{"ephemeral.signingKey.signer"}, knownLeak: leaksEd25519,
 		build: func(t *testing.T) (any, []string) {
 			return ephemeralKeyManager(t, map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.JARMSigning: fapi.EdDSA}, nil)
 		}},
@@ -356,10 +356,14 @@ func unexportedField(v reflect.Value, name string) reflect.Value {
 	return reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
 }
 
-// mapKeySecrets is the key material of m's values.
+// mapKeySecrets is the key material of m's values: a key, or a pointer
+// to a struct holding one in its signer field.
 func mapKeySecrets(m reflect.Value) []string {
 	var secrets []string
 	for _, v := range m.Seq2() {
+		if v.Kind() == reflect.Pointer && v.Elem().Kind() == reflect.Struct {
+			v = unexportedField(v.Elem(), "signer")
+		}
 		secrets = append(secrets, keySecrets(v.Interface())...)
 	}
 	return secrets

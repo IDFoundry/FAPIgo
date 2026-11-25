@@ -67,6 +67,10 @@ type AutomaticRegistrationConfig struct {
 	// and a superior's metadata policy on authorization_details_types
 	// (subset_of, one_of, or a value) bounds them even when the RP leaves
 	// the parameter out, which the policy's operators then leave absent.
+	// A value null removes the parameter rather than bounding it, so an
+	// RP whose authorization_details_types a superior's value null
+	// removes gets every type here that no other operator withholds; a
+	// superior meaning to restrict the types uses subset_of or one_of.
 	AuthorizationDetailsTypes []string
 
 	// AllowedResources confines every automatically-registered client to

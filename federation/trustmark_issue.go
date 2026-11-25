@@ -31,6 +31,9 @@ type TrustMarkIssueConfig struct {
 type TrustMarkIssueDependencies struct {
 	// Signer produces every Trust Mark/Delegation's signature — this
 	// entity's own federation signing key.
+	//
+	// The dependencies print [REDACTED] for Signer and refuse to be
+	// encoded: see ErrIssueDependenciesSerialization.
 	Signer crypto.Signer
 
 	// Algorithm Signer signs with.
@@ -74,7 +77,7 @@ const TrustMarkContentType = "application/trust-mark+jwt"
 // an HTTPStatus to.
 type TrustMarkIssuer struct {
 	cfg  TrustMarkIssueConfig
-	deps TrustMarkIssueDependencies
+	deps *TrustMarkIssueDependencies
 }
 
 // NewTrustMarkIssuer validates cfg and deps and returns a
@@ -95,7 +98,7 @@ func NewTrustMarkIssuer(cfg TrustMarkIssueConfig, deps TrustMarkIssueDependencie
 	if deps.Clock == nil {
 		return nil, fmt.Errorf("federation: dependencies: clock is required")
 	}
-	return &TrustMarkIssuer{cfg: cfg, deps: deps}, nil
+	return &TrustMarkIssuer{cfg: cfg, deps: &deps}, nil
 }
 
 // TrustMarkParams describes one Trust Mark to issue.

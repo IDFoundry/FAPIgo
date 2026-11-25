@@ -5178,5 +5178,425 @@
     ],
     "run": "^TestCodeReuseWhileIssuedIsInvalidGrant$",
     "why": "a code exchange issuing its refresh token last answers invalid_grant when a reuse revokes the grant mid-issuance"
+  },
+  {
+    "id": "keys-signer-km-signer-redacted",
+    "file": "keys/key_holder_render.go",
+    "old": "Signer: keyMask(b.signer != nil)",
+    "new": "Signer: redact.Hidden(fmt.Sprint(b.signer))",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^(TestSignerKeyManagerPrintsNoKey|TestSignerKeyManagerLogsNoKey)$",
+    "why": "the signer KeyManager prints and logs [REDACTED] for each signer, an ed25519 private key included"
+  },
+  {
+    "id": "keys-signer-km-format",
+    "file": "keys/key_holder_render.go",
+    "old": "func (m signerKeyManager) Format(f fmt.State, verb rune) {",
+    "new": "func (m signerKeyManager) format(f fmt.State, verb rune) {",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestSignerKeyManagerPrintsNoKey$",
+    "why": "the signer KeyManager formats itself, so no verb reaches its signers"
+  },
+  {
+    "id": "keys-signer-km-logvalue",
+    "file": "keys/key_holder_render.go",
+    "old": "func (m signerKeyManager) LogValue() slog.Value {",
+    "new": "func (m signerKeyManager) logValue() slog.Value {",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestSignerKeyManagerLogsNoKey$",
+    "why": "log/slog logs the signer KeyManager's redacted shadow"
+  },
+  {
+    "id": "keys-custody-km-format",
+    "file": "keys/key_holder_render.go",
+    "old": "func (m custodyKeyManager) Format(f fmt.State, verb rune) {",
+    "new": "func (m custodyKeyManager) format(f fmt.State, verb rune) {",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestSignerKeyManagerPrintsNoKey$",
+    "why": "a custody-declaring signer KeyManager prints its own redacted shadow, custody included"
+  },
+  {
+    "id": "keys-inmemory-ecdh-priv-redacted",
+    "file": "keys/key_holder_render.go",
+    "old": "inMemoryKeyShadow{Priv: keyMask(k.priv != nil), KeyID: k.kid}, \"keys.inMemoryKeyShadow\", \"keys.inMemoryECDH\")",
+    "new": "inMemoryKeyShadow{Priv: redact.Hidden(fmt.Sprint(k.priv.Bytes())), KeyID: k.kid}, \"keys.inMemoryKeyShadow\", \"keys.inMemoryECDH\")",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestInMemoryKeysPrintNoKey$",
+    "why": "the in-memory ECDH backend prints [REDACTED] for its private key"
+  },
+  {
+    "id": "keys-inmemory-ecdh-format",
+    "file": "keys/key_holder_render.go",
+    "old": "func (k inMemoryECDH) Format(f fmt.State, verb rune) {",
+    "new": "func (k inMemoryECDH) format(f fmt.State, verb rune) {",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestInMemoryKeysPrintNoKey$",
+    "why": "the in-memory ECDH backend formats itself, so %s and %q don't print what its *ecdh.PrivateKey points to"
+  },
+  {
+    "id": "keys-inmemory-ecdh-logvalue",
+    "file": "keys/key_holder_render.go",
+    "old": "func (k inMemoryECDH) LogValue() slog.Value {",
+    "new": "func (k inMemoryECDH) logValue() slog.Value {",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestInMemoryKeysPrintNoKey$",
+    "why": "log/slog logs the in-memory ECDH backend's redacted shadow"
+  },
+  {
+    "id": "keys-inmemory-rsa-format",
+    "file": "keys/key_holder_render.go",
+    "old": "func (k inMemoryRSA) Format(f fmt.State, verb rune) {",
+    "new": "func (k inMemoryRSA) format(f fmt.State, verb rune) {",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestInMemoryKeysPrintNoKey$",
+    "why": "the in-memory RSA backend prints its redacted shadow"
+  },
+  {
+    "id": "ephemeral-km-signing-key-redacted",
+    "file": "keys/ephemeral/render.go",
+    "old": "sh.Keys[purpose] = keyShadow{Key: keyMask(held != nil && held.signer != nil), KeyID: m.kid[purpose]}",
+    "new": "sh.Keys[purpose] = keyShadow{Key: redact.Hidden(fmt.Sprint(held.signer)), KeyID: m.kid[purpose]}",
+    "module": "root",
+    "packages": [
+      "./keys/ephemeral"
+    ],
+    "run": "^(TestKeyManagerPrintsNoKey|TestKeyManagerLogsNoKey)$",
+    "why": "an ephemeral KeyManager prints and logs [REDACTED] for each signing key, an ed25519 private key included"
+  },
+  {
+    "id": "ephemeral-km-decryption-key-redacted",
+    "file": "keys/ephemeral/render.go",
+    "old": "sh.Decryption[purpose] = keyShadow{Key: keyMask(priv != nil), KeyID: m.decryption.kid[purpose]}",
+    "new": "sh.Decryption[purpose] = keyShadow{Key: redact.Hidden(fmt.Sprint(priv)), KeyID: m.decryption.kid[purpose]}",
+    "module": "root",
+    "packages": [
+      "./keys/ephemeral"
+    ],
+    "run": "^TestKeyManagerPrintsNoKey$",
+    "why": "an ephemeral KeyManager prints [REDACTED] for each decryption key"
+  },
+  {
+    "id": "ephemeral-km-format",
+    "file": "keys/ephemeral/render.go",
+    "old": "func (m *KeyManager) Format(f fmt.State, verb rune) {",
+    "new": "func (m *KeyManager) format(f fmt.State, verb rune) {",
+    "module": "root",
+    "packages": [
+      "./keys/ephemeral"
+    ],
+    "run": "^TestKeyManagerPrintsNoKey$",
+    "why": "an ephemeral KeyManager formats itself, so no verb reaches its keys"
+  },
+  {
+    "id": "ephemeral-km-logvalue",
+    "file": "keys/ephemeral/render.go",
+    "old": "func (m *KeyManager) LogValue() slog.Value {",
+    "new": "func (m *KeyManager) logValue() slog.Value {",
+    "module": "root",
+    "packages": [
+      "./keys/ephemeral"
+    ],
+    "run": "^TestKeyManagerLogsNoKey$",
+    "why": "log/slog logs an ephemeral KeyManager's redacted shadow"
+  },
+  {
+    "id": "fed-deps-signer-redacted",
+    "file": "federation/dependencies_render.go",
+    "old": "sh := issueDependenciesShadow{Signer: signerMask(signer),",
+    "new": "sh := issueDependenciesShadow{Signer: redact.Hidden(fmt.Sprint(signer)),",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestIssueDependenciesPrintNoKey|TestIssueDependenciesPrintTheirFields)$",
+    "why": "the resolve, subordinate and trust mark issuers' dependencies print [REDACTED] for their Signer"
+  },
+  {
+    "id": "fed-jwks-deps-signer-redacted",
+    "file": "federation/dependencies_render.go",
+    "old": "sh := jwksIssueDependenciesShadow{Signer: signerMask(signer),",
+    "new": "sh := jwksIssueDependenciesShadow{Signer: redact.Hidden(fmt.Sprint(signer)),",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestIssueDependenciesPrintNoKey|TestIssueDependenciesPrintTheirFields)$",
+    "why": "the self and historical keys issuers' dependencies print [REDACTED] for their Signer"
+  },
+  {
+    "id": "fed-deps-log-signer-redacted",
+    "file": "federation/dependencies_render.go",
+    "old": "slog.String(\"Signer\", string(signerMask(signer)))",
+    "new": "slog.String(\"Signer\", fmt.Sprint(signer))",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestIssueDependenciesPrintNoKey|TestIssueDependenciesLogNoKey)$",
+    "why": "log/slog logs [REDACTED] for an issuer's dependencies' Signer"
+  },
+  {
+    "id": "fed-historicalkeys-deps-refuse-json",
+    "file": "federation/dependencies_render.go",
+    "old": "func (HistoricalKeysIssueDependencies) MarshalJSON() ([]byte, error) {\n\treturn nil, ErrIssueDependenciesSerialization\n}",
+    "new": "func (HistoricalKeysIssueDependencies) MarshalJSON() ([]byte, error) {\n\treturn []byte(\"{}\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssueDependenciesRefuseEncoding$",
+    "why": "encoding/json refuses HistoricalKeysIssueDependencies rather than writing its Signer"
+  },
+  {
+    "id": "fed-historicalkeys-deps-refuse-text",
+    "file": "federation/dependencies_render.go",
+    "old": "func (HistoricalKeysIssueDependencies) MarshalText() ([]byte, error) {\n\treturn nil, ErrIssueDependenciesSerialization\n}",
+    "new": "func (HistoricalKeysIssueDependencies) MarshalText() ([]byte, error) {\n\treturn []byte(\"x\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssueDependenciesRefuseEncoding$",
+    "why": "encoding/xml and other TextMarshaler encoders refuse HistoricalKeysIssueDependencies rather than writing its Signer"
+  },
+  {
+    "id": "fed-resolve-deps-refuse-json",
+    "file": "federation/dependencies_render.go",
+    "old": "func (ResolveIssueDependencies) MarshalJSON() ([]byte, error) {\n\treturn nil, ErrIssueDependenciesSerialization\n}",
+    "new": "func (ResolveIssueDependencies) MarshalJSON() ([]byte, error) {\n\treturn []byte(\"{}\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssueDependenciesRefuseEncoding$",
+    "why": "encoding/json refuses ResolveIssueDependencies rather than writing its Signer"
+  },
+  {
+    "id": "fed-resolve-deps-refuse-text",
+    "file": "federation/dependencies_render.go",
+    "old": "func (ResolveIssueDependencies) MarshalText() ([]byte, error) {\n\treturn nil, ErrIssueDependenciesSerialization\n}",
+    "new": "func (ResolveIssueDependencies) MarshalText() ([]byte, error) {\n\treturn []byte(\"x\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssueDependenciesRefuseEncoding$",
+    "why": "encoding/xml and other TextMarshaler encoders refuse ResolveIssueDependencies rather than writing its Signer"
+  },
+  {
+    "id": "fed-self-deps-refuse-json",
+    "file": "federation/dependencies_render.go",
+    "old": "func (SelfIssueDependencies) MarshalJSON() ([]byte, error) {\n\treturn nil, ErrIssueDependenciesSerialization\n}",
+    "new": "func (SelfIssueDependencies) MarshalJSON() ([]byte, error) {\n\treturn []byte(\"{}\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssueDependenciesRefuseEncoding$",
+    "why": "encoding/json refuses SelfIssueDependencies rather than writing its Signer"
+  },
+  {
+    "id": "fed-self-deps-refuse-text",
+    "file": "federation/dependencies_render.go",
+    "old": "func (SelfIssueDependencies) MarshalText() ([]byte, error) {\n\treturn nil, ErrIssueDependenciesSerialization\n}",
+    "new": "func (SelfIssueDependencies) MarshalText() ([]byte, error) {\n\treturn []byte(\"x\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssueDependenciesRefuseEncoding$",
+    "why": "encoding/xml and other TextMarshaler encoders refuse SelfIssueDependencies rather than writing its Signer"
+  },
+  {
+    "id": "fed-subordinate-deps-refuse-json",
+    "file": "federation/dependencies_render.go",
+    "old": "func (SubordinateIssueDependencies) MarshalJSON() ([]byte, error) {\n\treturn nil, ErrIssueDependenciesSerialization\n}",
+    "new": "func (SubordinateIssueDependencies) MarshalJSON() ([]byte, error) {\n\treturn []byte(\"{}\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssueDependenciesRefuseEncoding$",
+    "why": "encoding/json refuses SubordinateIssueDependencies rather than writing its Signer"
+  },
+  {
+    "id": "fed-subordinate-deps-refuse-text",
+    "file": "federation/dependencies_render.go",
+    "old": "func (SubordinateIssueDependencies) MarshalText() ([]byte, error) {\n\treturn nil, ErrIssueDependenciesSerialization\n}",
+    "new": "func (SubordinateIssueDependencies) MarshalText() ([]byte, error) {\n\treturn []byte(\"x\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssueDependenciesRefuseEncoding$",
+    "why": "encoding/xml and other TextMarshaler encoders refuse SubordinateIssueDependencies rather than writing its Signer"
+  },
+  {
+    "id": "fed-trustmark-deps-refuse-json",
+    "file": "federation/dependencies_render.go",
+    "old": "func (TrustMarkIssueDependencies) MarshalJSON() ([]byte, error) {\n\treturn nil, ErrIssueDependenciesSerialization\n}",
+    "new": "func (TrustMarkIssueDependencies) MarshalJSON() ([]byte, error) {\n\treturn []byte(\"{}\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssueDependenciesRefuseEncoding$",
+    "why": "encoding/json refuses TrustMarkIssueDependencies rather than writing its Signer"
+  },
+  {
+    "id": "fed-trustmark-deps-refuse-text",
+    "file": "federation/dependencies_render.go",
+    "old": "func (TrustMarkIssueDependencies) MarshalText() ([]byte, error) {\n\treturn nil, ErrIssueDependenciesSerialization\n}",
+    "new": "func (TrustMarkIssueDependencies) MarshalText() ([]byte, error) {\n\treturn []byte(\"x\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssueDependenciesRefuseEncoding$",
+    "why": "encoding/xml and other TextMarshaler encoders refuse TrustMarkIssueDependencies rather than writing its Signer"
+  },
+  {
+    "id": "fed-historicalkeys-issuer-format",
+    "file": "federation/issuers_render.go",
+    "old": "func (i HistoricalKeysIssuer) Format(f fmt.State, verb rune) {",
+    "new": "func (i HistoricalKeysIssuer) format(f fmt.State, verb rune) {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssuersPrintNoKey$",
+    "why": "a HistoricalKeysIssuer formats itself, so no verb reaches its dependencies' Signer"
+  },
+  {
+    "id": "fed-historicalkeys-issuer-logvalue",
+    "file": "federation/issuers_render.go",
+    "old": "func (i HistoricalKeysIssuer) LogValue() slog.Value {",
+    "new": "func (i HistoricalKeysIssuer) logValue() slog.Value {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssuersPrintNoKey$",
+    "why": "log/slog logs a HistoricalKeysIssuer's redacted shadow"
+  },
+  {
+    "id": "fed-resolve-issuer-format",
+    "file": "federation/issuers_render.go",
+    "old": "func (i ResolveIssuer) Format(f fmt.State, verb rune) {",
+    "new": "func (i ResolveIssuer) format(f fmt.State, verb rune) {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssuersPrintNoKey$",
+    "why": "a ResolveIssuer formats itself, so no verb reaches its dependencies' Signer"
+  },
+  {
+    "id": "fed-resolve-issuer-logvalue",
+    "file": "federation/issuers_render.go",
+    "old": "func (i ResolveIssuer) LogValue() slog.Value {",
+    "new": "func (i ResolveIssuer) logValue() slog.Value {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssuersPrintNoKey$",
+    "why": "log/slog logs a ResolveIssuer's redacted shadow"
+  },
+  {
+    "id": "fed-self-issuer-format",
+    "file": "federation/issuers_render.go",
+    "old": "func (s SelfIssuer) Format(f fmt.State, verb rune) {",
+    "new": "func (s SelfIssuer) format(f fmt.State, verb rune) {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssuersPrintNoKey$",
+    "why": "a SelfIssuer formats itself, so no verb reaches its dependencies' Signer"
+  },
+  {
+    "id": "fed-self-issuer-logvalue",
+    "file": "federation/issuers_render.go",
+    "old": "func (s SelfIssuer) LogValue() slog.Value {",
+    "new": "func (s SelfIssuer) logValue() slog.Value {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssuersPrintNoKey$",
+    "why": "log/slog logs a SelfIssuer's redacted shadow"
+  },
+  {
+    "id": "fed-subordinate-issuer-format",
+    "file": "federation/issuers_render.go",
+    "old": "func (s SubordinateIssuer) Format(f fmt.State, verb rune) {",
+    "new": "func (s SubordinateIssuer) format(f fmt.State, verb rune) {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssuersPrintNoKey$",
+    "why": "a SubordinateIssuer formats itself, so no verb reaches its dependencies' Signer"
+  },
+  {
+    "id": "fed-subordinate-issuer-logvalue",
+    "file": "federation/issuers_render.go",
+    "old": "func (s SubordinateIssuer) LogValue() slog.Value {",
+    "new": "func (s SubordinateIssuer) logValue() slog.Value {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssuersPrintNoKey$",
+    "why": "log/slog logs a SubordinateIssuer's redacted shadow"
+  },
+  {
+    "id": "fed-trustmark-issuer-format",
+    "file": "federation/issuers_render.go",
+    "old": "func (i TrustMarkIssuer) Format(f fmt.State, verb rune) {",
+    "new": "func (i TrustMarkIssuer) format(f fmt.State, verb rune) {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssuersPrintNoKey$",
+    "why": "a TrustMarkIssuer formats itself, so no verb reaches its dependencies' Signer"
+  },
+  {
+    "id": "fed-trustmark-issuer-logvalue",
+    "file": "federation/issuers_render.go",
+    "old": "func (i TrustMarkIssuer) LogValue() slog.Value {",
+    "new": "func (i TrustMarkIssuer) logValue() slog.Value {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestIssuersPrintNoKey$",
+    "why": "log/slog logs a TrustMarkIssuer's redacted shadow"
   }
 ]

@@ -24,11 +24,22 @@ import (
 // since most callers never need it, and decryption is not merely an
 // addition to keys.KeyManager (the underlying key types and use cases
 // differ), so plain NewKeyManager leaves the decryption field nil.
+//
+// A KeyManager prints [REDACTED] for its keys, under every fmt verb and
+// in log/slog (see render.go).
 type KeyManager struct {
 	mu         sync.Mutex
-	keys       map[keys.SigningPurpose]crypto.Signer
+	keys       map[keys.SigningPurpose]*signingKey
 	kid        map[keys.SigningPurpose]string
 	decryption *decryptionKeys
+}
+
+// signingKey holds one purpose's signer behind a pointer, so fmt's
+// reflection fallback, which calls no Format method (%w outside Errorf,
+// say), prints an address where the key is, not the bytes of an
+// ed25519.PrivateKey.
+type signingKey struct {
+	signer crypto.Signer
 }
 
 // NewKeyManager generates one key per purpose in purposes, sized for
@@ -36,7 +47,7 @@ type KeyManager struct {
 // Ed25519 for EdDSA — the three algorithms this module supports).
 func NewKeyManager(purposes map[keys.SigningPurpose]fapi.SignatureAlgorithm) (*KeyManager, error) {
 	m := &KeyManager{
-		keys: make(map[keys.SigningPurpose]crypto.Signer, len(purposes)),
+		keys: make(map[keys.SigningPurpose]*signingKey, len(purposes)),
 		kid:  make(map[keys.SigningPurpose]string, len(purposes)),
 	}
 	for purpose, alg := range purposes {
@@ -44,7 +55,7 @@ func NewKeyManager(purposes map[keys.SigningPurpose]fapi.SignatureAlgorithm) (*K
 		if err != nil {
 			return nil, fmt.Errorf("generate key for purpose %v: %w", purpose, err)
 		}
-		m.keys[purpose] = signer
+		m.keys[purpose] = &signingKey{signer: signer}
 		m.kid[purpose] = fmt.Sprintf("ephemeral-%d-%s", purpose, alg.String())
 	}
 	return m, nil
@@ -73,12 +84,13 @@ func GenerateSigner(alg fapi.SignatureAlgorithm) (crypto.Signer, error) {
 // Sign implements keys.KeyManager.
 func (m *KeyManager) Sign(_ context.Context, req keys.SigningRequest) (keys.Signature, error) {
 	m.mu.Lock()
-	signer, ok := m.keys[req.Purpose]
+	held, ok := m.keys[req.Purpose]
 	kid := m.kid[req.Purpose]
 	m.mu.Unlock()
 	if !ok {
 		return keys.Signature{}, fmt.Errorf("ephemeral: no key for purpose %v", req.Purpose)
 	}
+	signer := held.signer
 
 	switch key := signer.(type) {
 	case *ecdsa.PrivateKey:
@@ -109,11 +121,11 @@ func (m *KeyManager) Sign(_ context.Context, req keys.SigningRequest) (keys.Sign
 // PublicKey implements keys.KeyManager.
 func (m *KeyManager) PublicKey(_ context.Context, purpose keys.SigningPurpose, _ fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
 	m.mu.Lock()
-	signer, ok := m.keys[purpose]
+	held, ok := m.keys[purpose]
 	kid := m.kid[purpose]
 	m.mu.Unlock()
 	if !ok {
 		return keys.PublicKeyInfo{}, fmt.Errorf("ephemeral: no key for purpose %v", purpose)
 	}
-	return keys.PublicKeyInfo{KeyID: kid, PublicKey: signer.Public()}, nil
+	return keys.PublicKeyInfo{KeyID: kid, PublicKey: held.signer.Public()}, nil
 }

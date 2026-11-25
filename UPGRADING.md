@@ -78,6 +78,47 @@ withdraw the token, still answers `server_error`.
 500: expect a 400 `invalid_grant` instead, and the client starts a new
 authorization as for any other refused grant.
 
+### Encoding a federation issuer's dependencies fails (federation)
+
+**Affects:** code that encodes a `federation.HistoricalKeysIssueDependencies`,
+`ResolveIssueDependencies`, `SelfIssueDependencies`,
+`SubordinateIssueDependencies` or `TrustMarkIssueDependencies`, or a
+struct holding one, with `encoding/json`, `encoding/xml` or another
+encoder that uses `MarshalText` or `MarshalJSON`. Building and running
+the issuers is unchanged.
+
+**Why:** their `Signer` is often the private key itself, and an encoder
+wrote it out: `encoding/json`, `encoding/xml` and `log/slog`'s JSON
+handler encoded an ECDSA or RSA key's private exponent, into a config
+dump or a log line, say. `keys.SignerSpec` already refuses encoding for
+the same reason.
+
+**What fails:** encoding returns an error wrapping
+`federation.ErrIssueDependenciesSerialization`.
+
+**What to change:** encode the entity's public keys instead (the
+`JWKS` you pass `SelfIssueDependencies`, say), or the fields you need
+without `Signer`.
+
+### Key holders print `[REDACTED]` for their keys (keys, federation)
+
+**Affects:** only code that compares the `fmt` or `log/slog` output of
+the `KeyManager` `keys.NewKeyManagerFromSigners` returns, a
+`keys/ephemeral.KeyManager`, the backends `keys.NewInMemoryECDH` and
+`keys.NewInMemoryRSA` return, or a federation issuer or its
+dependencies.
+
+**Why:** they printed whatever `fmt` makes of their keys, which for an
+`ed25519.PrivateKey`, a byte slice, is every byte of it, and for an
+`*ecdh.PrivateKey` under `%s` is what it points to. An issuer printed
+its dependencies field by field, its `Signer` included.
+
+**What fails:** nothing fails. Each now prints its kids and the rest
+of what it holds but its keys, with `[REDACTED]` for each private key
+or signer, under every verb and in `log/slog`.
+
+**What to change:** nothing, unless a test matched the old output.
+
 ## v0.85.0
 
 ### Codes, refresh tokens and `auth_req_id`s are stored under digests covering the issuer (server, storage)

@@ -81,6 +81,9 @@ type HistoricalKeysIssueDependencies struct {
 	// Resolver.FetchHistoricalKeys verifies against after resolving this
 	// entity's Trust Chain. Never one of the retired keys the response
 	// reports on: Response refuses to publish Signer's own key.
+	//
+	// The dependencies print [REDACTED] for Signer and refuse to be
+	// encoded: see ErrIssueDependenciesSerialization.
 	Signer crypto.Signer
 
 	// Algorithm Signer signs with.
@@ -128,7 +131,7 @@ type HistoricalKeysIssueDependencies struct {
 // supplies Response's input.
 type HistoricalKeysIssuer struct {
 	cfg    HistoricalKeysIssueConfig
-	deps   HistoricalKeysIssueDependencies
+	deps   *HistoricalKeysIssueDependencies
 	active []jose.ParsedJWK
 }
 
@@ -162,7 +165,7 @@ func NewHistoricalKeysIssuer(cfg HistoricalKeysIssueConfig, deps HistoricalKeysI
 		active = parsed
 	}
 	cfg.AdditionalRevocationReasons = slices.Clone(cfg.AdditionalRevocationReasons)
-	return &HistoricalKeysIssuer{cfg: cfg, deps: deps, active: active}, nil
+	return &HistoricalKeysIssuer{cfg: cfg, deps: &deps, active: active}, nil
 }
 
 // Response signs and returns a Federation Historical Keys response

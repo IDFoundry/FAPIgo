@@ -40,6 +40,9 @@ type SubordinateIssueDependencies struct {
 	// entity's own federation signing key, the same one
 	// SelfIssueDependencies.Signer would use for its own Entity
 	// Configuration when this entity also self-issues one.
+	//
+	// The dependencies print [REDACTED] for Signer and refuse to be
+	// encoded: see ErrIssueDependenciesSerialization.
 	Signer crypto.Signer
 
 	// Algorithm Signer signs with.
@@ -65,7 +68,7 @@ type SubordinateIssueDependencies struct {
 // WellKnownPath.
 type SubordinateIssuer struct {
 	cfg  SubordinateIssueConfig
-	deps SubordinateIssueDependencies
+	deps *SubordinateIssueDependencies
 }
 
 // NewSubordinateIssuer validates cfg and deps and returns a
@@ -86,7 +89,7 @@ func NewSubordinateIssuer(cfg SubordinateIssueConfig, deps SubordinateIssueDepen
 	if deps.Clock == nil {
 		return nil, fmt.Errorf("federation: dependencies: clock is required")
 	}
-	return &SubordinateIssuer{cfg: cfg, deps: deps}, nil
+	return &SubordinateIssuer{cfg: cfg, deps: &deps}, nil
 }
 
 // SubordinateStatementParams describes one Subordinate Statement to

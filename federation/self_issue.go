@@ -60,6 +60,9 @@ type SelfIssueDependencies struct {
 	// signs OAuth/OIDC artifacts with, matching this module's existing
 	// key-separation precedent for every other signing use
 	// (ARCHITECTURE.md).
+	//
+	// The dependencies print [REDACTED] for Signer and refuse to be
+	// encoded: see ErrIssueDependenciesSerialization.
 	Signer crypto.Signer
 
 	// Algorithm Signer signs with.
@@ -87,7 +90,7 @@ type SelfIssueDependencies struct {
 // capability. Construct one with NewSelfIssuer.
 type SelfIssuer struct {
 	cfg  SelfIssueConfig
-	deps SelfIssueDependencies
+	deps *SelfIssueDependencies
 }
 
 // NewSelfIssuer validates cfg and deps and returns a SelfIssuer.
@@ -118,7 +121,7 @@ func NewSelfIssuer(cfg SelfIssueConfig, deps SelfIssueDependencies) (*SelfIssuer
 	if deps.Clock == nil {
 		return nil, fmt.Errorf("federation: dependencies: clock is required")
 	}
-	return &SelfIssuer{cfg: cfg, deps: deps}, nil
+	return &SelfIssuer{cfg: cfg, deps: &deps}, nil
 }
 
 // clone returns c with a copy of AuthorityHints and of TrustMarkIssuers,

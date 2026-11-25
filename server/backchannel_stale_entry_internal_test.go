@@ -32,3 +32,26 @@ func TestStaleBackchannelEntry(t *testing.T) {
 		}
 	}
 }
+
+// TestGoneBackchannelRequest: a listed entry's request is gone, and the
+// entry skipped, only when the lookup says its client is no longer
+// registered or the store says it holds no such request; any other
+// refusal, an outage, or an error that isn't the server's is not.
+func TestGoneBackchannelRequest(t *testing.T) {
+	gone := fmt.Errorf("store: %w", storage.ErrBackchannelAuthenticationNotFound)
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"not a server error", gone, false},
+		{"client no longer registered", newError(ErrorUnauthorizedClient, 400, "client is no longer registered", nil), true},
+		{"not found", newError(ErrorInvalidRequest, 400, "backchannel authentication handle is unknown", gone), true},
+		{"plain refusal", newError(ErrorInvalidRequest, 400, "backchannel authentication handle is unknown", errors.New("store: refused")), false},
+		{"outage", newError(ErrorServerError, 500, "failed to look up the backchannel authentication request", gone), false},
+	} {
+		if got := goneBackchannelRequest(tc.err); got != tc.want {
+			t.Errorf("%s: goneBackchannelRequest = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

@@ -217,6 +217,29 @@ func TestBackchannelAuthenticationStoreRefusesAnotherClientsPoll(t *testing.T) {
 	}
 }
 
+// TestBackchannelAuthenticationStoreReportsAnAlreadyDecidedRequest pins
+// that memstore wraps storage.ErrBackchannelAuthenticationAlreadyDecided
+// for a second decision, so the contract's subtest for it runs rather
+// than skips here.
+func TestBackchannelAuthenticationStoreReportsAnAlreadyDecidedRequest(t *testing.T) {
+	store := NewBackchannelAuthenticationStore()
+	ctx := context.Background()
+	handleHash := sha256.Sum256([]byte("handle"))
+	if err := store.CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
+		AuthReqIDHash: sha256.Sum256([]byte("auth-req")), HandleHash: handleHash, ClientID: "client-1",
+		DeliveryMode: "poll", PollInterval: time.Second, ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	decision := storage.DecideBackchannelAuthentication{HandleHash: handleHash, Status: storage.BackchannelAuthenticationDenied}
+	if _, err := store.DecideBackchannelAuthentication(ctx, decision); err != nil {
+		t.Fatalf("first DecideBackchannelAuthentication: %v", err)
+	}
+	if _, err := store.DecideBackchannelAuthentication(ctx, decision); !errors.Is(err, storage.ErrBackchannelAuthenticationAlreadyDecided) {
+		t.Fatalf("second DecideBackchannelAuthentication = %v, want it to wrap ErrBackchannelAuthenticationAlreadyDecided", err)
+	}
+}
+
 // TestBackchannelAuthenticationStoreRefusesDecisionOnUnknownHandle: a
 // decision for a handle no request was created with is refused.
 func TestBackchannelAuthenticationStoreRefusesDecisionOnUnknownHandle(t *testing.T) {

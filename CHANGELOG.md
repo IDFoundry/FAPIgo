@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.83.0](https://github.com/IDFoundry/FAPIgo/compare/v0.82.4...v0.83.0) (2026-11-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **client:** Config.RequireSignedUserInfo is removed, and a client with Algorithms.UserInfo set refuses a plain JSON UserInfo response with ErrorInvalidResponse. Delete RequireSignedUserInfo, which is now the default, or set AllowUnsignedUserInfo for a server that doesn't sign every response. UPGRADING.md has a section under v0.83.0.
+
+### Bug Fixes
+
+* **client:** accept a JARM response whose aud is a one-element array ([90f7c9a](https://github.com/IDFoundry/FAPIgo/commit/90f7c9a55d026e7663b67dd25c62521b5ec127bd))
+* **client:** accept only signed UserInfo once Algorithms.UserInfo is set ([266d2db](https://github.com/IDFoundry/FAPIgo/commit/266d2db234b03f9f7d766097f9044c8a1ebf38fb))
+* **client:** bound the in-memory DPoP nonce cache ([bd53104](https://github.com/IDFoundry/FAPIgo/commit/bd531043cd717afa703e087c6824fa82ecfeea51))
+* **client:** fetch discovery at an issuer's escaped path ([b2d4983](https://github.com/IDFoundry/FAPIgo/commit/b2d49831bd0ae69edecbc73ce861e271748bf956))
+* **client:** refuse a request object parameter named sub ([670db8e](https://github.com/IDFoundry/FAPIgo/commit/670db8e9c20b07b4f581f78f2f57a71d239dfc2d))
+* **client:** require a client certificate for mutual TLS in production ([864afb2](https://github.com/IDFoundry/FAPIgo/commit/864afb20669d629e32a40074c73ba754d3f91192))
+* **resource:** refuse a nil embedded NoRevocationUntilExpiry instead of panicking ([1306695](https://github.com/IDFoundry/FAPIgo/commit/13066952eb26afff356a9d52d53978dea0d0b2e4))
+* **server:** refuse a request object that nests request or omits client_id ([b2ec3be](https://github.com/IDFoundry/FAPIgo/commit/b2ec3be056119d06e916674b3f9ed26793cc9a74))
+
 ## [0.82.4](https://github.com/IDFoundry/FAPIgo/compare/v0.82.3...v0.82.4) (2026-11-24)
 
 

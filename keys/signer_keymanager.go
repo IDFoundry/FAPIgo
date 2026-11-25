@@ -62,9 +62,13 @@ type signerBackend struct {
 }
 
 // signerKeyManager implements RotatingKeyManager over a caller-supplied
-// crypto.Signer per SigningPurpose. See NewKeyManagerFromSigners.
+// crypto.Signer per SigningPurpose. See NewKeyManagerFromSigners. Each
+// backend is held behind a pointer, so fmt's reflection fallback, which
+// calls no Format method, prints an address where the signer is, not
+// the key an ed25519.PrivateKey carries in its bytes (see
+// key_holder_render.go).
 type signerKeyManager struct {
-	backends map[SigningPurpose]signerBackend
+	backends map[SigningPurpose]*signerBackend
 }
 
 // NewKeyManagerFromSigners builds a KeyManager over specs, one per
@@ -109,7 +113,7 @@ func NewKeyManagerFromSigners(specs []SignerSpec, opts ...CustodyOption) (KeyMan
 	if len(specs) == 0 {
 		return nil, fmt.Errorf("keys: NewKeyManagerFromSigners requires at least one SignerSpec")
 	}
-	backends := make(map[SigningPurpose]signerBackend, len(specs))
+	backends := make(map[SigningPurpose]*signerBackend, len(specs))
 	kids := make(map[string]crypto.PublicKey)
 	for _, spec := range specs {
 		backend, err := newSignerBackend(spec)
@@ -127,7 +131,7 @@ func NewKeyManagerFromSigners(specs []SignerSpec, opts ...CustodyOption) (KeyMan
 				return nil, err
 			}
 		}
-		backends[spec.Purpose] = backend
+		backends[spec.Purpose] = &backend
 	}
 	km := &signerKeyManager{backends: backends}
 	if d := applyCustodyOptions(opts); d.declared {

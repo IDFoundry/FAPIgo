@@ -105,3 +105,24 @@ func TestCodeExchangeAsksResourcePolicyOnce(t *testing.T) {
 		t.Fatalf("policy asked %v, want once", policy.asked)
 	}
 }
+
+// TestCodeExchangeNamingResourcesRechecksTheGrant covers an exchange
+// naming a resource after the client's registration has dropped a
+// scope the code was granted: the resources pass the check made before
+// redemption, but the grant itself is checked against the registration
+// afterwards, as for an exchange naming none, and refused.
+func TestCodeExchangeNamingResourcesRechecksTheGrant(t *testing.T) {
+	h := withResources(t, newHarness(t, server.ProfileFAPISecurity, true), []string{resourceA}, nil)
+	code := grantForResources(t, h, resourceA)
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID: testClientID, RedirectURIs: []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256, RequestObjectAlgorithm: fapi.ES256,
+		AllowedScopes: []string{"openid"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	h.clients.clients[testClientID] = client
+	_, err = exchangeWithResources(t, h, code, resourceA)
+	wantErrorCode(t, err, server.ErrorInvalidScope)
+}

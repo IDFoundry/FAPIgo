@@ -239,8 +239,8 @@ func TestLeakedHandleInPlainCookieCompletesVictimsInteraction(t *testing.T) {
 // the key ID any sealed cookie shows, with the value unencrypted.
 func forgedSealedCookie(t *testing.T, sealed *http.Cookie, handle, tag string, now time.Time) *http.Cookie {
 	t.Helper()
-	real, err := base64.RawURLEncoding.DecodeString(sealed.Value)
-	if err != nil || len(real) < 5 {
+	sealedBytes, err := base64.RawURLEncoding.DecodeString(sealed.Value)
+	if err != nil || len(sealedBytes) < 5 {
 		t.Fatalf("sealed cookie value %q", sealed.Value)
 	}
 	in, err := server.InteractionRequest{ClientID: ClientID, Scope: []string{"openid"}}.MarshalText()
@@ -249,7 +249,7 @@ func forgedSealedCookie(t *testing.T, sealed *http.Cookie, handle, tag string, n
 	}
 	value, _ := json.Marshal(map[string]string{"tag": tag, "handle": handle, "request": string(in)})
 	envelope, _ := json.Marshal(map[string]any{"exp": now.Add(time.Hour).Unix(), "v": json.RawMessage(value)})
-	box := append(append([]byte{}, real[:5]...), make([]byte, 12)...)
+	box := append(append([]byte{}, sealedBytes[:5]...), make([]byte, 12)...)
 	return &http.Cookie{Name: sealed.Name, Value: base64.RawURLEncoding.EncodeToString(append(box, envelope...))}
 }
 

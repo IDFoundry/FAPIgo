@@ -236,7 +236,9 @@ func (s *Server) checkPendingBackchannelRequests(ctx context.Context, clientID f
 //
 // A request leaves the inbox once decided, or when it expires. One whose
 // decision was recorded but whose removal failed is still listed until
-// it expires, and completing it again is refused as already decided.
+// it expires, or until DenyBackchannelInteractions finds it already
+// decided (see there), and completing it again is refused as already
+// decided.
 //
 // Each request listed costs store reads. Once ctx ends,
 // ListBackchannelInteractions reads no more of them and fails with
@@ -369,16 +371,20 @@ func (s *Server) unfileBackchannelRequest(ctx context.Context, handleHash [32]by
 // wants every pending request refused at once. Each is completed as
 // CompleteBackchannelAuthentication with Deny(reason) would: its client
 // gets access_denied, a ping client is notified, and it leaves the
-// inbox. One CompleteBackchannelAuthentication refuses as invalid or
-// expired is passed over and not counted: decided meanwhile, by another
-// call or instance, or expired — or not recorded because the store
-// failed, which CompleteBackchannelAuthentication reports the same way,
-// so check ListBackchannelInteractions when every request must be gone.
-// Any other failure, or an entry it can't read, doesn't stop it: it
-// denies every other request, then returns how many it denied with every
-// failure joined. What failed is still listed, so calling it again
-// finishes the job. If ctx ends before the requests are all listed, it
-// denies none of them and returns ctx's error.
+// inbox. One already decided, by another call or instance, or by an
+// earlier call whose removal from the inbox failed, is passed over, not
+// counted, and taken out of the inbox; so is one that has expired. A
+// request counts as already decided only when the store says so by
+// wrapping storage.ErrBackchannelAuthenticationAlreadyDecided: any other
+// refusal, such as a store outage the store reports as a plain error,
+// is a failure for that request, which stays listed. Any failure, or an
+// entry it can't read, doesn't stop it: it denies every other request,
+// then returns how many it denied with every failure joined. What failed
+// is still listed, so calling it again finishes the job. (With a store
+// that doesn't wrap the sentinel, an entry left behind for a decided
+// request is reported each time, until the request expires.) If ctx ends
+// before the requests are all listed, it denies none of them and returns
+// ctx's error.
 //
 // Every denial is recorded before any ping client is notified, so a
 // client whose notification endpoint doesn't answer can't hold up the
@@ -409,8 +415,7 @@ func (s *Server) DenyBackchannelInteractions(ctx context.Context, subject Subjec
 		switch {
 		case failure == nil:
 			decided = append(decided, denial)
-		case failure.Code() == ErrorInvalidRequest || failure.Code() == ErrorExpiredToken:
-			// Decided or expired since it was listed: its entry is stale.
+		case staleBackchannelEntry(failure):
 			s.unfileBackchannelRequest(ctx, backchannelHandleHash(p.Handle))
 		default:
 			failures = append(failures, failure)
@@ -422,4 +427,20 @@ func (s *Server) DenyBackchannelInteractions(ctx context.Context, subject Subjec
 		return len(decided), fmt.Errorf("server: deny backchannel interactions: %w", err)
 	}
 	return len(decided), nil
+}
+
+// staleBackchannelEntry reports whether failure, recordBackchannelDecision's
+// refusal of a listed request, means the request's inbox entry is stale:
+// the request has expired, which the server decides itself, or the store
+// says it was already decided (storage.ErrBackchannelAuthenticationAlreadyDecided).
+// Any other invalid_request may be a store outage reported as a plain
+// error, so the entry is kept for the request still awaiting a decision.
+func staleBackchannelEntry(failure *Error) bool {
+	switch failure.Code() {
+	case ErrorExpiredToken:
+		return true
+	case ErrorInvalidRequest:
+		return errors.Is(failure, storage.ErrBackchannelAuthenticationAlreadyDecided)
+	}
+	return false
 }

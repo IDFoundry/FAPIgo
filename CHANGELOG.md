@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.84.0](https://github.com/IDFoundry/FAPIgo/compare/v0.83.0...v0.84.0) (2026-11-25)
+
+
+### Features
+
+* **server:** add an opt-in fail-closed audit mode ([88c8fd1](https://github.com/IDFoundry/FAPIgo/commit/88c8fd1a457e6babe75612f325fe5ce2d5c0140b))
+* **storage:** add ErrBackchannelAuthenticationAlreadyDecided ([1902db5](https://github.com/IDFoundry/FAPIgo/commit/1902db5dc9971d6e4c668bef5542410e4ddaf7ea))
+
+
+### Bug Fixes
+
+* **client:** refuse an OP's federation entity key as a protocol key ([b40a515](https://github.com/IDFoundry/FAPIgo/commit/b40a515198a41ee9038d6973cca31d6728d3a319))
+* **federation:** hold default scope and subject type to the metadata policy ([339bcd3](https://github.com/IDFoundry/FAPIgo/commit/339bcd36d10c53ddd0fe5b234faeb59cbc205c69))
+* **federation:** quote fetched names in error text ([288cfe1](https://github.com/IDFoundry/FAPIgo/commit/288cfe108c06de902497324a826c702f875ddf70))
+* **federation:** register only x5c certificates holding their JWK's key ([e711b57](https://github.com/IDFoundry/FAPIgo/commit/e711b57a0701f8d775ee43fb452dd00efe332bc9))
+* **keys:** honour a JWK Set entry's key_ops ([4eaeb69](https://github.com/IDFoundry/FAPIgo/commit/4eaeb6996eb3039c947507ef98616576d1cce9af))
+* **keys:** print no private key from a SignerSpec ([19b3924](https://github.com/IDFoundry/FAPIgo/commit/19b39242fa1cd7ed8a7816ebc4e2cb4bbfbfea81))
+* **keys:** refuse to encode a SignerSpec ([71d8588](https://github.com/IDFoundry/FAPIgo/commit/71d8588882a4630e3243acafc34e574d905ad17e))
+* **pairwise:** print no key from HMACDeriver or ReversibleDeriver ([efc7740](https://github.com/IDFoundry/FAPIgo/commit/efc7740e806b8c0ba7cb1e1651fba52a51386d04))
+* **resource:** take client_sub only from opaque token records ([7d522e8](https://github.com/IDFoundry/FAPIgo/commit/7d522e8e56d2dcd3030bc5d8d874f5d5ed583a08))
+* **server:** check a code exchange's request before redeeming the code ([bca86f2](https://github.com/IDFoundry/FAPIgo/commit/bca86f290a948973a62680c56cc5e4feea5122e0))
+* **server:** check a public client's CIBA resolver against its id_token_hint ([2257c67](https://github.com/IDFoundry/FAPIgo/commit/2257c67e32093d4544e19e9b350960116eaa444f))
+* **server:** check a StaticAttesterKeys' keys at New ([5f09436](https://github.com/IDFoundry/FAPIgo/commit/5f09436733eb1e21e369011676889d82d7400fd2))
+* **server:** copy managed token claims without computing a map size ([2e99b18](https://github.com/IDFoundry/FAPIgo/commit/2e99b181b0de914ea908113c92acda1caafdbb05))
+* **server:** keep CIBA requests listed unless the store says decided ([8309227](https://github.com/IDFoundry/FAPIgo/commit/83092275869af84068d5fc70b076d801f0280934))
+* **server:** let the server's own access token claims win over stored ones ([fd81601](https://github.com/IDFoundry/FAPIgo/commit/fd8160131e45e9e22bbf2364d1eaf9414e9cb5c8))
+* **server:** list a CIBA inbox's readable requests past an unreadable entry ([f7a3a56](https://github.com/IDFoundry/FAPIgo/commit/f7a3a563ac23689d501b080353c1b652e786c02e))
+
 ## [0.83.0](https://github.com/IDFoundry/FAPIgo/compare/v0.82.4...v0.83.0) (2026-11-25)
 
 

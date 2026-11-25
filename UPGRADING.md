@@ -147,6 +147,30 @@ else: `fmt.Errorf("...: %w", storage.ErrBackchannelAuthenticationAlreadyDecided)
 `storage.TestBackchannelAuthenticationStoreContract` checks it once you
 do.
 
+### A JWK Set entry's `key_ops` decides what it is used for (keys, client, server, federation)
+
+**Affects:** a party whose JWK Set lists a key with a `key_ops` member
+that doesn't name the operation FAPIgo uses the key for: a client's
+JWK Set (registered, fetched, or published through federation), an
+authorization server's `jwks_uri`, or a federation entity's `jwks`.
+
+**Why:** RFC 7517 §4.3's `key_ops` says which operations a key is
+for. FAPIgo ignored it, so a key its publisher marked for encryption
+only (`["encrypt"]`, say) was still used to verify signatures, and one
+marked `["verify"]` could still be encrypted to.
+
+**What fails:** an entry whose `key_ops` lists operations but not
+`verify` is no longer a verification key: it is skipped, and when a
+JWS names its kid the error says why. An entry whose `key_ops` lists
+none of `encrypt`, `wrapKey`, `deriveKey` and `deriveBits` is no
+longer a key to encrypt to. An entry whose `key_ops` isn't an array of
+strings is skipped. Entries with no `key_ops`, or an empty one, are
+unchanged.
+
+**What to change:** publish `key_ops` that list the key's real
+operations (`["verify"]` for a signing key's public half), or leave
+`key_ops` out.
+
 ## v0.83.0
 
 ### A client with `Algorithms.UserInfo` accepts only signed UserInfo (client)

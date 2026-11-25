@@ -27,8 +27,10 @@ type ParsedEncryptionJWK struct {
 // encryption key when its "alg" is a supported key management
 // algorithm, or when it has no "alg" but "use":"enc" (RFC 7517 §4.2),
 // in which case its key type decides: RSA keys are RSAOAEP256, P-256
-// keys ECDHESA256KW. An entry with "use":"sig", a signature "alg", no
-// "alg" and no "use", or key material that doesn't fit its algorithm is
+// keys ECDHESA256KW. An entry with "use":"sig", a "key_ops" (RFC 7517
+// §4.3) listing operations but none of "encrypt", "wrapKey",
+// "deriveKey" or "deriveBits", a signature "alg", no "alg" and no
+// "use", or key material that doesn't fit its algorithm is
 // skipped, as ParseJWKSet skips entries it can't use: one unusable entry
 // doesn't invalidate the rest of the set. As with ParseJWKSet, the keys
 // are treated as caller-supplied (a client's own), so an RSA entry over
@@ -59,7 +61,11 @@ func parseEncryptionEntry(data []byte) (ParsedEncryptionJWK, bool) {
 	if strictjson.CheckFieldCase(data, &raw) != nil || json.Unmarshal(data, &raw) != nil {
 		return ParsedEncryptionJWK{}, false
 	}
-	if raw.Use == string(jwkUseSignature) {
+	var ops keyOpsMember
+	if strictjson.Unmarshal(data, &ops) != nil {
+		return ParsedEncryptionJWK{}, false
+	}
+	if raw.Use == string(jwkUseSignature) || checkKeyOps(ops.KeyOps, keyOpsEncryption...) != nil {
 		return ParsedEncryptionJWK{}, false
 	}
 	if raw.D != nil || raw.K != nil || raw.P != nil || raw.Q != nil ||

@@ -344,7 +344,8 @@ func (t Thumbprint) Equal(other Thumbprint) bool {
 // every other member (certificate-chain hints, "key_ops", ...) is left
 // for encoding/json's own default behavior (silently ignored) rather
 // than modeled, per RFC 7517 §4's own ignore-unknown-members rule; see
-// ParseJWK's doc comment. "use" is marshaled (MarshalJSON sets it from
+// ParseJWK's doc comment. (The JWK Set parsers read "key_ops" on their
+// own: see checkKeyOps.) "use" is marshaled (MarshalJSON sets it from
 // JWK.use) but still not read back on parse — ParseJWK's caller already
 // states which alg/purpose it expects a JWK to satisfy, the same way
 // every other role-declared expectation in this module isn't

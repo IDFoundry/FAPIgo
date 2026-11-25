@@ -234,6 +234,27 @@ func (e *BackchannelAuthenticationSlowDownError) Error() string {
 // request.
 var ErrBackchannelAuthenticationAlreadyDecided = errors.New("storage: backchannel authentication request already decided")
 
+// ErrBackchannelAuthenticationNotFound is the error
+// BackchannelAuthenticationStore.LookupBackchannelAuthentication, and
+// DecideBackchannelAuthentication, wrap
+// (fmt.Errorf("...: %w", storage.ErrBackchannelAuthenticationNotFound))
+// when the store holds no request under the handle: one never stored,
+// or one gone since, expired and purged say. Never for an outage, and
+// never for a request that is stored, decided or not. The server tells
+// it apart with errors.Is: server.Server.ListBackchannelInteractions
+// leaves out an inbox entry whose request the store says is gone, and
+// server.Server.DenyBackchannelInteractions passes over such a request
+// and takes its entry out of the inbox; any other refusal they report,
+// so an entry the store can't answer for isn't hidden from the
+// operator.
+//
+// Wrapping it is optional. A store that doesn't keeps working: an
+// unknown handle is still refused, but ListBackchannelInteractions
+// reports an entry whose request is gone as one it couldn't read, until
+// the entry expires. TestBackchannelAuthenticationStoreContract checks
+// a store that wraps it wraps it only for an unknown handle.
+var ErrBackchannelAuthenticationNotFound = errors.New("storage: backchannel authentication request not found")
+
 // BackchannelAuthenticationStore persists CIBA backchannel
 // authentication requests: creation, the out-of-band decision, and
 // client polling for that decision.
@@ -253,7 +274,9 @@ type BackchannelAuthenticationStore interface {
 	// validate a decision (e.g. that a narrowed authorization_details
 	// grant is an acceptable subset of what was requested) against the
 	// original request before calling DecideBackchannelAuthentication to
-	// record it. Returns a plain error if HandleHash is unknown.
+	// record it. Returns an error if HandleHash is unknown, which should
+	// wrap ErrBackchannelAuthenticationNotFound (optional; see its doc
+	// comment).
 	LookupBackchannelAuthentication(ctx context.Context, handleHash [32]byte) (LookedUpBackchannelAuthentication, error)
 
 	// DecideBackchannelAuthentication atomically records the terminal
@@ -263,7 +286,8 @@ type BackchannelAuthenticationStore interface {
 	// exactly one decision may ever be recorded, the same way
 	// CompleteAuthorization's interaction handle is single-use — and
 	// should wrap ErrBackchannelAuthenticationAlreadyDecided (optional;
-	// see its doc comment). For a
+	// see its doc comment). An unknown HandleHash fails too, and should
+	// wrap ErrBackchannelAuthenticationNotFound (optional). For a
 	// request whose DeliveryMode is "ping", recording the decision also
 	// exempts the client's next PollBackchannelAuthentication from the
 	// PollInterval check: the ping notification is its signal to fetch

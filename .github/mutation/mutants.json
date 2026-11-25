@@ -4682,5 +4682,17 @@
     ],
     "run": "^TestSignerSpecPrintsNoKey$",
     "why": "a SignerSpec prints [REDACTED] for its Signer, an ed25519 private key included"
+  },
+  {
+    "id": "keys-signer-spec-refuses-json",
+    "file": "keys/signer_spec_render.go",
+    "old": "func (SignerSpec) MarshalJSON() ([]byte, error) {\n\treturn nil, ErrSignerSpecSerialization\n}",
+    "new": "func (SignerSpec) MarshalJSON() ([]byte, error) {\n\treturn []byte(\"{}\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestSignerSpecRefusesEncoding$",
+    "why": "encoding/json refuses a SignerSpec rather than writing its Signer"
   }
 ]

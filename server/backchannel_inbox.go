@@ -242,6 +242,13 @@ func (s *Server) checkPendingBackchannelRequests(ctx context.Context, clientID f
 // ListBackchannelInteractions reads no more of them and fails with
 // ctx's error, rather than returning part of the inbox.
 //
+// An entry it can't read (a record that won't decode, or a request the
+// backchannel or client store couldn't answer for) doesn't hide the
+// others: it returns every request it could read, with an error joining
+// one for each entry it couldn't. So a non-nil error, with or without
+// requests, means the list may be incomplete; when every request must
+// be accounted for, as when closing an account, treat it as a failure.
+//
 // ListBackchannelInteractions doesn't check who is asking: the
 // application must make sure the user is subject, as it does before
 // approving.
@@ -250,10 +257,7 @@ func (s *Server) ListBackchannelInteractions(ctx context.Context, subject Subjec
 	if err != nil {
 		return nil, err
 	}
-	if unreadable != nil {
-		return nil, unreadable
-	}
-	return pending, nil
+	return pending, unreadable
 }
 
 // listBackchannelInteractions returns the requests awaiting subject,

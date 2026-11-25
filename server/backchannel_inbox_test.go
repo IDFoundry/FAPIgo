@@ -285,8 +285,8 @@ func TestListBackchannelInteractionsReadsEntries(t *testing.T) {
 }
 
 // TestListBackchannelInteractionsFails: a store or record it can't read,
-// a client it can't resolve, or no subject fails the listing rather than
-// hiding a request.
+// a client it can't resolve, or no subject is an error rather than a
+// request silently hidden.
 func TestListBackchannelInteractionsFails(t *testing.T) {
 	t.Run("store can't answer", func(t *testing.T) {
 		h := inboxHarness(t, &stubInbox{BackchannelInbox: memstore.NewBackchannelInbox(), listErr: errors.New("inbox down")})
@@ -316,6 +316,22 @@ func TestListBackchannelInteractionsFails(t *testing.T) {
 			t.Fatal("ListBackchannelInteractions(zero SubjectID) = nil error, want error")
 		}
 	})
+}
+
+// TestListBackchannelInteractionsListsWhatItCanRead: an entry it can't
+// read is reported, with every request it could read still returned.
+func TestListBackchannelInteractionsListsWhatItCanRead(t *testing.T) {
+	inbox := &stubInbox{BackchannelInbox: memstore.NewBackchannelInbox()}
+	h := inboxHarness(t, inbox)
+	required := beginFiled(t, h, "user-1")
+	inbox.extra = []storage.BackchannelInboxEntry{{Record: json.RawMessage(`{`), ExpiresAt: h.now.Add(time.Hour)}}
+	pending, err := h.server.ListBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1"))
+	if err == nil {
+		t.Fatal("ListBackchannelInteractions with an undecodable entry = nil error, want error")
+	}
+	if len(pending) != 1 || pending[0].Handle.String() != required.Handle.String() {
+		t.Fatalf("ListBackchannelInteractions with an undecodable entry = %d requests, want the one readable", len(pending))
+	}
 }
 
 // emptySubjects resolves every hint to no subject, breaking its contract.

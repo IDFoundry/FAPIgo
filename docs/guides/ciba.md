@@ -206,7 +206,11 @@ link to, and the `Handle` to complete it with, which stays on your
 server. A request leaves the inbox once decided, or when it expires.
 Each request listed costs store reads, so pass the listing your
 request's context: once it ends, the listing reads no more and fails
-with the context's error, rather than returning part of the inbox.
+with the context's error, rather than returning part of the inbox. An
+entry it can't read, one whose record won't decode or whose request a
+store couldn't answer for, doesn't hide the rest: it returns what it
+could read with an error for each entry it couldn't, so treat any error
+as a possibly incomplete list.
 
 The resolver also binds the request to that user: an `Authorize` for
 anyone else is a failed authentication (`access_denied`). That matters

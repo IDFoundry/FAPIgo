@@ -76,7 +76,7 @@ func TestBackchannelPollInterval(t *testing.T) {
 }
 
 // A decision for an unknown handle is ErrNotFound; for a decided one,
-// not. Lookup keeps answering after the decision, and an approval
+// storage.ErrBackchannelAuthenticationAlreadyDecided. Lookup keeps answering after the decision, and an approval
 // polled once is spent even after the request expires.
 func TestBackchannelDecisionsAndExpiry(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
@@ -90,8 +90,8 @@ func TestBackchannelDecisionsAndExpiry(t *testing.T) {
 		approve := storage.DecideBackchannelAuthentication{HandleHash: r.HandleHash, Status: storage.BackchannelAuthenticationApproved, Grant: secretGrant}
 		_, err := b.DecideBackchannelAuthentication(ctx, approve)
 		must(t, err)
-		if _, err := b.DecideBackchannelAuthentication(ctx, approve); err == nil || errors.Is(err, sqlstore.ErrNotFound) || errors.Is(err, storage.ErrStoreUnavailable) {
-			t.Fatalf("second DecideBackchannelAuthentication = %v, want a refusal that isn't ErrNotFound", err)
+		if _, err := b.DecideBackchannelAuthentication(ctx, approve); !errors.Is(err, storage.ErrBackchannelAuthenticationAlreadyDecided) || errors.Is(err, sqlstore.ErrNotFound) || errors.Is(err, storage.ErrStoreUnavailable) {
+			t.Fatalf("second DecideBackchannelAuthentication = %v, want ErrBackchannelAuthenticationAlreadyDecided, not ErrNotFound", err)
 		}
 		if got, err := b.LookupBackchannelAuthentication(ctx, r.HandleHash); err != nil || got.ClientID != "c" || string(got.Request) != string(secretGrant) {
 			t.Fatalf("LookupBackchannelAuthentication after the decision = %+v, %v", got, err)

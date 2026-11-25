@@ -62,8 +62,10 @@ var (
 	errBackchannelOtherClient = errors.New("sqlstore: poll backchannel authentication: auth_req_id belongs to another client")
 
 	// errBackchannelDecided is DecideBackchannelAuthentication's answer
-	// for a request already decided.
-	errBackchannelDecided = errors.New("sqlstore: decide backchannel authentication: already decided")
+	// for a request already decided, wrapping
+	// storage.ErrBackchannelAuthenticationAlreadyDecided so the server
+	// can tell it from an outage.
+	errBackchannelDecided = fmt.Errorf("sqlstore: decide backchannel authentication: %w", storage.ErrBackchannelAuthenticationAlreadyDecided)
 
 	// errRefused rolls back a transaction whose outcome is a refusal
 	// that leaves the row as it was.

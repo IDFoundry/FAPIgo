@@ -429,16 +429,15 @@ func (r fixedSubjects) ResolveBackchannelSubject(context.Context, fapi.ClientID,
 	return server.NewSubjectID(r.subject)
 }
 
-// TestBackchannelSubjectsMustAgreeWithTheIDTokenHint: when the server
-// can map an id_token_hint back to the user it names, a resolver naming
-// someone else is a misconfiguration, refused rather than letting the
-// resolver's user approve.
-func TestBackchannelSubjectsMustAgreeWithTheIDTokenHint(t *testing.T) {
-	h := cibaWithPairwise(t, newMappingDeriver())
+// beginWithIDTokenHint begins a CIBA request at h whose id_token_hint
+// names sub, with Dependencies.BackchannelSubjects resolving every hint
+// to resolved.
+func beginWithIDTokenHint(t *testing.T, h harness, sub, resolved string) server.BackchannelAuthenticationAction {
+	t.Helper()
 	params := standardBackchannelParams(t)
 	delete(params, "login_hint")
-	params["id_token_hint"] = jsonRaw(t, serverHint(t, h, func(c map[string]any) { c["sub"] = clientSubjectOf(t, h, "user-1") }))
-	h.deps.BackchannelSubjects = fixedSubjects{subject: "user-2"}
+	params["id_token_hint"] = jsonRaw(t, serverHint(t, h, func(c map[string]any) { c["sub"] = sub }))
+	h.deps.BackchannelSubjects = fixedSubjects{subject: resolved}
 	srv, err := server.New(h.cfg, h.deps)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -450,10 +449,36 @@ func TestBackchannelSubjectsMustAgreeWithTheIDTokenHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginBackchannelAuthentication: %v", err)
 	}
-	local, ok := action.(server.BackchannelAuthenticationLocalError)
-	if !ok || local.Error.Code() != server.ErrorServerError {
-		t.Fatalf("begin with a resolver disagreeing with the id_token_hint = %+v, want server_error", action)
-	}
+	return action
+}
+
+// TestBackchannelSubjectsMustAgreeWithTheIDTokenHint: when the server
+// can tell which user an id_token_hint names (a public client's sub is
+// the internal subject; a pairwise one it can map back), a resolver
+// naming someone else is a misconfiguration, refused rather than letting
+// the resolver's user approve.
+func TestBackchannelSubjectsMustAgreeWithTheIDTokenHint(t *testing.T) {
+	t.Run("pairwise", func(t *testing.T) {
+		h := cibaWithPairwise(t, newMappingDeriver())
+		action := beginWithIDTokenHint(t, h, clientSubjectOf(t, h, "user-1"), "user-2")
+		if local, ok := action.(server.BackchannelAuthenticationLocalError); !ok || local.Error.Code() != server.ErrorServerError {
+			t.Fatalf("begin with a resolver disagreeing with the id_token_hint = %+v, want server_error", action)
+		}
+	})
+	t.Run("public", func(t *testing.T) {
+		h, _ := newHarnessWithBackchannel(t)
+		action := beginWithIDTokenHint(t, h, "user-1", "user-2")
+		if local, ok := action.(server.BackchannelAuthenticationLocalError); !ok || local.Error.Code() != server.ErrorServerError {
+			t.Fatalf("begin with a resolver disagreeing with the id_token_hint = %+v, want server_error", action)
+		}
+	})
+	t.Run("public, agreeing", func(t *testing.T) {
+		h, _ := newHarnessWithBackchannel(t)
+		required, ok := beginWithIDTokenHint(t, h, "user-1", "user-1").(server.BackchannelInteractionRequired)
+		if !ok || required.Interaction.RequiredSubject != "user-1" {
+			t.Fatalf("begin with a resolver agreeing with the id_token_hint = %+v, want an interaction for user-1", required)
+		}
+	})
 }
 
 // TestBackchannelInboxSkipsADeregisteredClient: a request from a client

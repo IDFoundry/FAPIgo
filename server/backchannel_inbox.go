@@ -28,7 +28,9 @@ type BackchannelSubjectResolver interface {
 	//
 	// For an id_token_hint, hints.IDTokenHint is already verified, and
 	// the user it names, when the server can tell, must be the one
-	// returned.
+	// returned, or the request is refused with server_error: the user
+	// it names at a public client, whose sub is the internal subject,
+	// and at a pairwise client whose subs the server can map back.
 	ResolveBackchannelSubject(ctx context.Context, clientID fapi.ClientID, hints BackchannelAuthenticationHints) (SubjectID, error)
 }
 
@@ -54,9 +56,10 @@ func backchannelHintError(err error) *Error {
 // resolveBackchannelSubject checks the request's hints
 // (checkBackchannelHints), then applies Dependencies.BackchannelSubjects,
 // when set, returning the internal subject the request is bound to, or
-// "" without a resolver. requiredInternal is the subject an
-// id_token_hint already named, if the server could map it: the
-// resolver must agree with it.
+// "" without a resolver. requiredInternal is the internal subject the
+// request already named, if the server could tell
+// (backchannelRequiredSubjects.resolverMust): the resolver must agree
+// with it.
 func (s *Server) resolveBackchannelSubject(ctx context.Context, clientID fapi.ClientID, hints BackchannelAuthenticationHints, requiredInternal string) (string, *Error) {
 	if hintErr := s.checkBackchannelHints(ctx, clientID, hints); hintErr != nil {
 		return "", hintErr

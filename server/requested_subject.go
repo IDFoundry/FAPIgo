@@ -214,24 +214,36 @@ func meetsRequiredSubject(required, clientSub string) bool {
 	return required == "" || clientSub == required
 }
 
+// backchannelRequiredSubjects is what backchannelSubjects finds a CIBA
+// request requires of its end user.
+type backchannelRequiredSubjects struct {
+	// required is the sub the request requires, its id_token_hint's or
+	// "claims" sub value, "" for none: the client's view of the user.
+	required string
+	// internal is required's internal subject, for
+	// requestRecord.RequiredInternalSubject
+	// (backchannelRequiredInternalSubject).
+	internal string
+	// resolverMust is the internal subject Dependencies.BackchannelSubjects
+	// must resolve the request's hint to, "" when the server can't tell:
+	// internal for a pairwise client, or, for a public client, whose sub
+	// is the internal subject itself, the sub its id_token_hint names.
+	resolverMust string
+}
+
 // backchannelSubjects refuses a client whose sub couldn't be issued at
 // completion (checkClientSubjectIssuable), before its user is asked to
-// approve anything, and returns the sub the request requires (its
-// id_token_hint's or "claims" sub, "" for none) with its internal
-// subject (backchannelRequiredInternalSubject).
-func (s *Server) backchannelSubjects(ctx context.Context, client storage.RegisteredClient, params map[string]json.RawMessage) (string, string, *Error) {
+// approve anything, and returns what the request requires of its end
+// user (backchannelRequiredSubjects).
+func (s *Server) backchannelSubjects(ctx context.Context, client storage.RegisteredClient, params map[string]json.RawMessage) (backchannelRequiredSubjects, *Error) {
 	if err := s.checkClientSubjectIssuable(client); err != nil {
-		return "", "", err
+		return backchannelRequiredSubjects{}, err
 	}
 	required, err := s.requiredSubject(ctx, params, client.ID())
 	if err != nil {
-		return "", "", err
+		return backchannelRequiredSubjects{}, err
 	}
-	internal, err := s.backchannelRequiredInternalSubject(ctx, client, params, required)
-	if err != nil {
-		return "", "", err
-	}
-	return required, internal, nil
+	return s.backchannelRequiredInternalSubject(ctx, client, params, required)
 }
 
 // backchannelRequiredInternalSubject is requiredInternalSubject for a
@@ -241,13 +253,20 @@ func (s *Server) backchannelSubjects(ctx context.Context, client storage.Registe
 // with no Dependencies.PairwiseSubjectResolver), the hint can't identify
 // anyone, and is invalid_request. Its login_hint and login_hint_token forms are
 // unaffected, and a "claims" sub value is still enforced at completion.
-func (s *Server) backchannelRequiredInternalSubject(ctx context.Context, client storage.RegisteredClient, params map[string]json.RawMessage, required string) (string, *Error) {
+func (s *Server) backchannelRequiredInternalSubject(ctx context.Context, client storage.RegisteredClient, params map[string]json.RawMessage, required string) (backchannelRequiredSubjects, *Error) {
 	internal, unmappable, mapErr := s.requiredInternalSubject(ctx, client, required)
 	if mapErr != nil {
-		return "", mapErr
+		return backchannelRequiredSubjects{}, mapErr
 	}
-	if _, hinted := params["id_token_hint"]; hinted && unmappable {
-		return "", newError(ErrorInvalidRequest, 400, "id_token_hint can't identify an end user of a pairwise client when pairwise subjects are derived one way; use login_hint or login_hint_token", nil)
+	_, hinted := params["id_token_hint"]
+	if hinted && unmappable {
+		return backchannelRequiredSubjects{}, newError(ErrorInvalidRequest, 400, "id_token_hint can't identify an end user of a pairwise client when pairwise subjects are derived one way; use login_hint or login_hint_token", nil)
 	}
-	return internal, nil
+	subjects := backchannelRequiredSubjects{required: required, internal: internal, resolverMust: internal}
+	if subjects.resolverMust == "" && hinted {
+		// No pairwise sub to map: the id_token_hint's sub is the
+		// internal subject itself.
+		subjects.resolverMust = required
+	}
+	return subjects, nil
 }

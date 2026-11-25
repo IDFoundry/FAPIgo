@@ -11,9 +11,10 @@ import (
 // §6.1.3.1), at the Trust Anchor or an Intermediate, and under none. An
 // operator that acts on an absent parameter (value, add, default)
 // decides what the RP is registered with; one that only checks a
-// present value (subset_of, superset_of, essential false) leaves the
-// absent parameter's default, which subset_of narrows further where the
-// default is the operator's own list; essential true refuses the RP.
+// present value (one_of, subset_of, superset_of, essential false) leaves
+// the absent parameter's default, which one_of and subset_of narrow
+// further where the default is the operator's own list; essential true
+// refuses the RP.
 // scope and subject_type, whose defaults under a policy are their own,
 // aren't in it.
 
@@ -61,6 +62,14 @@ func TestAutomaticRegistrationGrantTypesAbsentUnderEachOperator(t *testing.T) {
 		{name: "Intermediate's add under a Trust Anchor's subset_of withholding it",
 			taPolicy: grantTypesPolicy(`{"subset_of":["authorization_code","refresh_token"]}`),
 			imPolicy: grantTypesPolicy(`{"add":["client_credentials"]}`), wantRefused: true},
+		{name: "one_of", taPolicy: grantTypesPolicy(`{"one_of":["client_credentials","` + cibaGrantType + `"]}`)},
+		{name: "Intermediate's one_of", imPolicy: grantTypesPolicy(`{"one_of":[["client_credentials"]]}`)},
+		{name: "Intermediate's default among a Trust Anchor's one_of",
+			taPolicy: grantTypesPolicy(`{"one_of":[["authorization_code"],` + codeAndClientCreds + `]}`),
+			imPolicy: grantTypesPolicy(`{"default":` + codeAndClientCreds + `}`), wantClientCreds: true},
+		{name: "Intermediate's default outside a Trust Anchor's one_of",
+			taPolicy: grantTypesPolicy(`{"one_of":[["authorization_code"]]}`),
+			imPolicy: grantTypesPolicy(`{"default":` + codeAndClientCreds + `}`), wantRefused: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client, err := resolveWithGrantTypes(t, tc.taPolicy, tc.imPolicy, nil)
@@ -87,10 +96,13 @@ func rarTypesPolicy(operators string) string {
 // TestAutomaticRegistrationRARTypesAbsentUnderEachOperator: an RP
 // leaving authorization_details_types out is registered for every Rich
 // Authorization Request type the operator allows (payment and
-// account_information here) that each superior's subset_of permits,
-// unless a value, add or default sets the parameter, which then decides;
-// a policy that checks values alone narrows nothing, and essential
-// refuses it.
+// account_information here) that each superior's subset_of and one_of
+// permit (a one_of's options listing the types it permits between
+// them), unless a value, add or default sets the parameter, which then
+// decides; a policy that only checks values otherwise narrows nothing,
+// essential refuses the RP, and so does an Intermediate's value null
+// under a Trust Anchor's one_of, a combination the merged policy can't
+// hold (a value must be among one_of's values).
 func TestAutomaticRegistrationRARTypesAbsentUnderEachOperator(t *testing.T) {
 	both, accounts := []string{"account_information", "payment"}, []string{"account_information"}
 	for _, tc := range []struct {
@@ -116,6 +128,18 @@ func TestAutomaticRegistrationRARTypesAbsentUnderEachOperator(t *testing.T) {
 			taPolicy: rarTypesPolicy(`{"subset_of":["account_information","payment"]}`), imPolicy: rarTypesPolicy(`{"add":["payment"]}`), want: []string{"payment"}},
 		{name: "Intermediate's add under a Trust Anchor's subset_of withholding it",
 			taPolicy: rarTypesPolicy(`{"subset_of":["account_information"]}`), imPolicy: rarTypesPolicy(`{"add":["payment"]}`)},
+		{name: "value null", taPolicy: rarTypesPolicy(`{"value":null}`), want: both},
+		{name: "one_of", taPolicy: rarTypesPolicy(`{"one_of":["account_information"]}`), want: accounts},
+		{name: "one_of permitting more", taPolicy: rarTypesPolicy(`{"one_of":[["account_information"],["payment","other"]]}`), want: both},
+		{name: "Intermediate's one_of", imPolicy: rarTypesPolicy(`{"one_of":["account_information","other"]}`), want: accounts},
+		{name: "one_of at both, intersected",
+			taPolicy: rarTypesPolicy(`{"one_of":["account_information","payment"]}`), imPolicy: rarTypesPolicy(`{"one_of":["account_information","other"]}`), want: accounts},
+		{name: "Intermediate's default among a Trust Anchor's one_of",
+			taPolicy: rarTypesPolicy(`{"one_of":[["account_information"],["payment"]]}`), imPolicy: rarTypesPolicy(`{"default":["payment"]}`), want: []string{"payment"}},
+		{name: "Intermediate's default outside a Trust Anchor's one_of",
+			taPolicy: rarTypesPolicy(`{"one_of":[["account_information"]]}`), imPolicy: rarTypesPolicy(`{"default":["payment"]}`)},
+		{name: "Intermediate's value null under a Trust Anchor's one_of",
+			taPolicy: rarTypesPolicy(`{"one_of":["account_information"]}`), imPolicy: rarTypesPolicy(`{"value":null}`)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client, err := resolveWithRARTypes(t, tc.taPolicy, tc.imPolicy, map[string]any{
@@ -129,6 +153,40 @@ func TestAutomaticRegistrationRARTypesAbsentUnderEachOperator(t *testing.T) {
 				}
 				return
 			}
+			if err != nil {
+				t.Fatalf("ResolveClient: %v", err)
+			}
+			if got := client.AuthorizationDetailsTypes(); !slices.Equal(got, tc.want) {
+				t.Errorf("AuthorizationDetailsTypes() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAutomaticRegistrationRARTypesRemovedByValueNull: a superior's value
+// null removes the authorization_details_types an RP publishes, which then
+// reads as left out, so the RP is registered for every type the operator
+// allows, more than it listed: value null removes a parameter, it doesn't
+// restrict it. A Trust Anchor meaning to withhold types uses subset_of or
+// one_of, which bound the parameter whether or not it is present.
+func TestAutomaticRegistrationRARTypesRemovedByValueNull(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		taPolicy, imPolicy string
+		want               []string
+	}{
+		{name: "value null", taPolicy: rarTypesPolicy(`{"value":null}`), want: []string{"account_information", "payment"}},
+		{name: "Intermediate's value null", imPolicy: rarTypesPolicy(`{"value":null}`), want: []string{"account_information", "payment"}},
+		{name: "value null with subset_of",
+			taPolicy: rarTypesPolicy(`{"subset_of":["account_information"]}`), imPolicy: rarTypesPolicy(`{"value":null}`), want: []string{"account_information"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, err := resolveWithRARTypes(t, tc.taPolicy, tc.imPolicy, map[string]any{
+				"redirect_uris":                   []string{"https://rp.example.org/cb"},
+				"token_endpoint_auth_method":      "private_key_jwt",
+				"token_endpoint_auth_signing_alg": "ES256",
+				"authorization_details_types":     []string{"payment"},
+			})
 			if err != nil {
 				t.Fatalf("ResolveClient: %v", err)
 			}

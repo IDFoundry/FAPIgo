@@ -18,6 +18,43 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.86.0
+
+### A `one_of` on an omitted `authorization_details_types` bounds the types registered (federation)
+
+**Affects:** an `AutomaticClientRepository` whose
+`AuthorizationDetailsTypes` is non-empty, registering Relying Parties
+under a Trust Anchor or Intermediate whose metadata policy sets
+`one_of` on `authorization_details_types`.
+
+**Why:** `one_of` acts only on a parameter that is present (OpenID
+Federation 1.0 §6.1.3.1.4), and registration reads an omitted
+`authorization_details_types` as every type the operator allows. A
+Relying Party publishing the parameter under
+`{"one_of":["account_information"]}` was refused, but one leaving it out
+was registered for every `AuthorizationDetailsTypes` entry, `payment`
+included, so leaving the parameter out escaped the policy. A `one_of` on
+the merged policy now bounds an omitted array parameter the way
+`subset_of` already did: a Relying Party leaving
+`authorization_details_types` out is registered only for the
+`AuthorizationDetailsTypes` the `one_of`'s options list between them (a
+string option lists itself, an array option its elements), intersected
+across the chain as `one_of` merges. `grant_types` is read the same way,
+though a Relying Party leaving it out already got no grant beyond the
+authorization code flow; `scope` already worked this way.
+
+**What fails:** nothing is refused that was accepted. A Relying Party
+leaving `authorization_details_types` out under such a policy is
+registered for fewer Rich Authorization Request types (possibly none),
+once its cached registration expires (`MaxCacheAge`): an authorization
+request naming a type the `one_of` doesn't list is refused, and so is a
+refresh of a grant for one.
+
+**What to change:** nothing, if the policy meant what it says. If a
+federation relied on Relying Parties that leave the parameter out getting
+every type, list those types in the Trust Anchor's or Intermediate's
+`one_of`, or have the Relying Parties publish the types they use.
+
 ## v0.85.0
 
 ### Codes, refresh tokens and `auth_req_id`s are stored under digests covering the issuer (server, storage)

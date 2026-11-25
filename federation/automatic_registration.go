@@ -65,8 +65,12 @@ type AutomaticRegistrationConfig struct {
 	// resolved metadata has authorization_details_types, the client gets
 	// only the types that also lists (none, when it lists none of them),
 	// and a superior's metadata policy on authorization_details_types
-	// (subset_of, or a value) bounds them even when the RP leaves the
-	// parameter out, which the policy's operators then leave absent.
+	// (subset_of, one_of, or a value) bounds them even when the RP leaves
+	// the parameter out, which the policy's operators then leave absent.
+	// A value null removes the parameter rather than bounding it, so an
+	// RP whose authorization_details_types a superior's value null
+	// removes gets every type here that no other operator withholds; a
+	// superior meaning to restrict the types uses subset_of or one_of.
 	AuthorizationDetailsTypes []string
 
 	// AllowedResources confines every automatically-registered client to
@@ -1703,8 +1707,8 @@ func supportedAssertionAlgorithms(list []string, permitted *permittedValues) ([]
 //     plural sibling token_endpoint_auth_signing_alg_values_supported
 //     instead, would register a value the policy forbids, and likewise
 //     for token_endpoint_auth_method;
-//   - an RP leaving out authorization_details_types under a subset_of on
-//     it would keep it absent, which registration reads as every type
+//   - an RP leaving out authorization_details_types under a subset_of or
+//     one_of on it would keep it absent, which registration reads as every type
 //     the operator allows, so the policy would withhold nothing, and
 //     likewise for scope (every AllowedScopes) under a subset_of or
 //     one_of on it;
@@ -1713,8 +1717,9 @@ func supportedAssertionAlgorithms(list []string, permitted *permittedValues) ([]
 //
 // An RP leaving out grant_types is registered for no grant beyond the
 // authorization code flow, whatever the policy (see grantTypePermitted),
-// so grantTypes bounds only the grants a grant_types that is present
-// lists, which the policy's operators have already bounded too.
+// so grantTypes, read the same way (subset_of, value and one_of), bounds
+// only the grants a grant_types that is present lists, which the
+// policy's operators have already bounded too.
 //
 // Each nil field means no policy restricts that parameter.
 type choiceLimits struct {

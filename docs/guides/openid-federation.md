@@ -67,11 +67,17 @@ never its own metadata's: `AllowedScopes`, `AuthorizationDetailsTypes`,
 never widen them: when the Relying Party's resolved metadata (after every
 superior's metadata policy) has `scope`, it gets only the `AllowedScopes`
 that also lists; and when it has `authorization_details_types`, only the
-`AuthorizationDetailsTypes` that lists. A superior's `subset_of` or
-`value` on `authorization_details_types` withholds the types it leaves
+`AuthorizationDetailsTypes` that lists. A superior's `subset_of`, `one_of`
+or `value` on `authorization_details_types` withholds the types it leaves
 out even from a Relying Party that leaves the parameter out of its
-metadata, which the policy's operators leave absent; so does a
-`subset_of`, `one_of` or `value` on `scope` for the scopes it leaves out.
+metadata, which the policy's operators leave absent (a `one_of`'s options
+permit the types they list between them); so does a `subset_of`, `one_of`
+or `value` on `scope` for the scopes it leaves out. A `value` of `null`
+removes the parameter rather than restricting it: a Relying Party whose
+`authorization_details_types` a superior's `"value": null` removes reads
+as having left it out, and gets every `AuthorizationDetailsTypes` entry no
+other operator withholds, however few it listed. A Trust Anchor meaning to
+restrict the types uses `subset_of` or `one_of` instead.
 
 `client_credentials` and CIBA go only to a Relying Party whose resolved
 `grant_types` lists them (`client_credentials`,

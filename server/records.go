@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/claimnames"
 	"github.com/idfoundry/fapigo/internal/claimvalues"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/strictjson"
@@ -349,10 +351,12 @@ func issuedWithin(issuedAt *time.Time, lifetime time.Duration, now time.Time) bo
 // accessTokenClaims returns the non-standard claims for an access token
 // issued from g: its extension claims, the "claims" parameter's
 // userinfo-scoped names and requested values (see
-// RequestedUserinfoClaimsKey, RequestedUserinfoClaimValuesKey), and its
-// granted authorization_details.
+// RequestedUserinfoClaimsKey, RequestedUserinfoClaimValuesKey), its
+// granted authorization_details, and the claims naming its grant. The
+// server's own claims take precedence: an extension claim stored under
+// one of their names is dropped (withoutServerTokenClaims).
 func (g grantRecord) accessTokenClaims() (map[string]json.RawMessage, error) {
-	claims, err := withRequestedUserinfoClaims(g.RequestedUserinfoClaims, g.RequestedUserinfoClaimValues, g.TokenClaims)
+	claims, err := withRequestedUserinfoClaims(g.RequestedUserinfoClaims, g.RequestedUserinfoClaimValues, withoutServerTokenClaims(g.TokenClaims))
 	if err != nil {
 		return nil, err
 	}
@@ -366,16 +370,45 @@ func (g grantRecord) accessTokenClaims() (map[string]json.RawMessage, error) {
 }
 
 // withManagedClaim returns claims with name set to value, unless value
-// is empty. name is a managed claim (serverTokenClaims), so never
-// among claims already.
+// is empty, leaving claims itself unchanged. name is a managed claim
+// (serverTokenClaims): value, the server's own, replaces whatever
+// claims holds under it.
 func withManagedClaim(claims map[string]json.RawMessage, name, value string) map[string]json.RawMessage {
 	if value == "" {
 		return claims
 	}
 	raw, _ := json.Marshal(value) // a string always marshals
-	with := map[string]json.RawMessage{name: raw}
+	with := make(map[string]json.RawMessage, len(claims)+1)
 	maps.Copy(with, claims)
+	with[name] = raw
 	return with
+}
+
+// withoutServerTokenClaims returns claims, a grant's stored extension
+// claims (grantRecord.TokenClaims), without any claim accessTokenClaims
+// sets from the grant itself: those in serverTokenClaims, and
+// authorization_details. checkExtensionClaimNames keeps an extension's
+// value from being stored under one of them, but a stored record isn't
+// checked against it again when it's read, and a value there must
+// neither override the server's own nor stand in for one the grant
+// doesn't have (a grant_id naming another grant, or a grant_type
+// marking the token as a client credentials grant's). claims itself is
+// left unchanged.
+func withoutServerTokenClaims(claims map[string]json.RawMessage) map[string]json.RawMessage {
+	var without map[string]json.RawMessage
+	for name := range claims {
+		if !claimnames.ContainsFold(serverTokenClaims, name) && !strings.EqualFold(name, authorizationDetailsParameter) {
+			continue
+		}
+		if without == nil {
+			without = maps.Clone(claims)
+		}
+		delete(without, name)
+	}
+	if without == nil {
+		return claims
+	}
+	return without
 }
 
 // encodeRequestRecord and encodeGrantRecord stamp a record with this

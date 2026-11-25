@@ -4754,5 +4754,41 @@
     ],
     "run": "^(TestFailClosedAuditFailsIssuance|TestBestEffortAuditKeepsIssuing|TestFailClosedAuditOnCodeReuse|TestFailClosedAuditLeavesOtherEventsBestEffort)$",
     "why": "an unrecorded revocation endpoint answer fails closed"
+  },
+  {
+    "id": "server-ciba-deny-keeps-plain-refusals-filed",
+    "file": "server/backchannel_inbox.go",
+    "old": "return errors.Is(failure, storage.ErrBackchannelAuthenticationAlreadyDecided)",
+    "new": "return true || errors.Is(failure, storage.ErrBackchannelAuthenticationAlreadyDecided)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestDenyBackchannelInteractionsKeepsARequestThePlainErrorRefused$",
+    "why": "DenyBackchannelInteractions keeps a request listed when the store refuses its denial with a plain error, which may be an outage"
+  },
+  {
+    "id": "server-ciba-deny-unfiles-already-decided",
+    "file": "server/backchannel_inbox.go",
+    "old": "return errors.Is(failure, storage.ErrBackchannelAuthenticationAlreadyDecided)",
+    "new": "return false && errors.Is(failure, storage.ErrBackchannelAuthenticationAlreadyDecided)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestDenyBackchannelInteractionsClearsWhatTheStoreSaysWasDecided|TestDenyBackchannelInteractionsClearsStaleEntries)$",
+    "why": "DenyBackchannelInteractions removes the inbox entry of a request the store reports already decided"
+  },
+  {
+    "id": "memstore-ciba-decide-wraps-already-decided",
+    "file": "storage/memstore/backchannel_authentication_store.go",
+    "old": "fmt.Errorf(\"memstore: decide backchannel authentication: %w\", storage.ErrBackchannelAuthenticationAlreadyDecided)",
+    "new": "fmt.Errorf(\"memstore: decide backchannel authentication: already decided\")",
+    "module": "root",
+    "packages": [
+      "./storage/memstore"
+    ],
+    "run": "^TestBackchannelAuthenticationStoreReportsAnAlreadyDecidedRequest$",
+    "why": "memstore wraps ErrBackchannelAuthenticationAlreadyDecided for a second decision"
   }
 ]

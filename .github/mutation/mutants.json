@@ -4441,5 +4441,29 @@
     ],
     "run": "^TestNewVerifierRefusesANilEmbeddedUnrevocable$",
     "why": "NewVerifier refuses a nil embedded *NoRevocationUntilExpiry instead of panicking"
+  },
+  {
+    "id": "client-userinfo-signed-by-default",
+    "file": "client/userinfo.go",
+    "old": "if c.cfg.Algorithms.UserInfo != 0 && !c.cfg.AllowUnsignedUserInfo {",
+    "new": "if c.cfg.Algorithms.UserInfo != 0 && c.cfg.AllowUnsignedUserInfo {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestFetchUserInfoRequiresASignedResponseByDefault$",
+    "why": "with Algorithms.UserInfo set, a plain JSON UserInfo response is refused unless AllowUnsignedUserInfo opts out"
+  },
+  {
+    "id": "client-allow-unsigned-userinfo-needs-algorithm",
+    "file": "client/client.go",
+    "old": "if cfg.AllowUnsignedUserInfo && cfg.Algorithms.UserInfo == 0 {",
+    "new": "if false && cfg.AllowUnsignedUserInfo && cfg.Algorithms.UserInfo == 0 {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestFetchUserInfoRequiresASignedResponseByDefault$",
+    "why": "New refuses AllowUnsignedUserInfo without Algorithms.UserInfo"
   }
 ]

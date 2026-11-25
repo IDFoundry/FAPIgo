@@ -61,7 +61,7 @@ func userInfoFuzzClient(mode uint8) *Client {
 	c := &Client{}
 	switch mode % 3 {
 	case 1:
-		c.cfg.RequireSignedUserInfo = true
+		c.cfg.Algorithms.UserInfo = fapi.ES256
 	case 2:
 		c.cfg.Algorithms.UserInfoKeyManagement = fapi.ECDHESA256KW
 		c.cfg.Algorithms.UserInfoContentEncryption = fapi.A256GCM

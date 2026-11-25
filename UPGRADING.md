@@ -18,6 +18,29 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.83.0
+
+### A client with `Algorithms.UserInfo` accepts only signed UserInfo (client)
+
+**Affects:** a client that sets `Config.Algorithms.UserInfo`, and code
+that sets `Config.RequireSignedUserInfo`, which is removed.
+
+**Why:** setting `Algorithms.UserInfo` means the client registered
+`userinfo_signed_response_alg`, so its server signs every UserInfo
+response (OIDC Dynamic Client Registration §2). `FetchUserInfo` still
+accepted a plain JSON response unless `RequireSignedUserInfo` was also
+set, and anyone able to answer for the UserInfo endpoint can produce a
+plain JSON one. Requiring a signature is now the default.
+
+**What fails:** code setting `RequireSignedUserInfo` no longer
+compiles. With `Algorithms.UserInfo` set, `FetchUserInfo` refuses a
+plain JSON response with `ErrorInvalidResponse`. `client.New` refuses
+`AllowUnsignedUserInfo` without `Algorithms.UserInfo`.
+
+**What to change:** delete `RequireSignedUserInfo: true`; it is now the
+default. If your server signs some UserInfo responses and not others,
+set `AllowUnsignedUserInfo: true`.
+
 ## v0.82.5
 
 ### A mutual-TLS client must present a certificate in production (client, *production only*)

@@ -70,11 +70,11 @@ func parseMetadataClaim(raw json.RawMessage) (map[string]json.RawMessage, error)
 	for entityType, value := range metadata {
 		var params map[string]json.RawMessage
 		if err := json.Unmarshal(value, &params); err != nil || params == nil {
-			return nil, fmt.Errorf("%w: metadata.%s must be a JSON object (OpenID Federation 1.0 §5)", ErrMalformedClaims, entityType)
+			return nil, fmt.Errorf("%w: metadata.%q must be a JSON object (OpenID Federation 1.0 §5)", ErrMalformedClaims, entityType)
 		}
 		for name, param := range params {
 			if isJSONNull(param) {
-				return nil, fmt.Errorf("%w: metadata.%s.%s is null (OpenID Federation 1.0 §5)", ErrMalformedClaims, entityType, name)
+				return nil, fmt.Errorf("%w: metadata.%q.%q is null (OpenID Federation 1.0 §5)", ErrMalformedClaims, entityType, name)
 			}
 		}
 	}

@@ -139,7 +139,7 @@ func (i *ResolveIssuer) Response(resolved ResolvedEntity, trustAnchors, entityTy
 		return "", fmt.Errorf("federation: resolved entity has no trust chain tokens")
 	}
 	if !slices.Contains(trustAnchors, resolved.TrustAnchor) {
-		return "", fmt.Errorf("federation: resolved trust anchor %q is not among the requested trust anchors %v", resolved.TrustAnchor, trustAnchors)
+		return "", fmt.Errorf("federation: resolved trust anchor %q is not among the requested trust anchors %q", resolved.TrustAnchor, trustAnchors)
 	}
 
 	metadata := resolved.Metadata

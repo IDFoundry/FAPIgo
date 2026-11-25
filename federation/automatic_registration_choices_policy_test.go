@@ -165,3 +165,22 @@ func TestAutomaticRegistrationRefusesEmptyStringParameters(t *testing.T) {
 		})
 	}
 }
+
+// TestAutomaticRegistrationFailureQuotesRPChoices: the plural choices a
+// registration fails over are the RP's own, so the failure
+// OnResolutionFailure sees quotes them rather than letting a value with
+// a newline forge a log line.
+func TestAutomaticRegistrationFailureQuotesRPChoices(t *testing.T) {
+	const forged = "x\nlevel=INFO msg=ok"
+	for _, members := range []map[string]any{
+		{"token_endpoint_auth_methods_supported": []string{forged}},
+		{"token_endpoint_auth_method": "private_key_jwt", "token_endpoint_auth_signing_alg_values_supported": []string{forged}},
+	} {
+		members["redirect_uris"] = []string{"https://rp.example.org/cb"}
+		f := setupAutomaticRegistrationFixture(t, rpMetadataMembers(t, members))
+		_, failure := resolveWith(t, f, validAutomaticRegistrationConfig())
+		if failure == nil || !strings.Contains(failure.Error(), "none of") || strings.Contains(failure.Error(), "\n") {
+			t.Errorf("registration failure = %q, want one quoting the RP's choices", failure)
+		}
+	}
+}

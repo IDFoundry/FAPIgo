@@ -1590,7 +1590,7 @@ func (a *AutomaticClientRepository) declaredClientAuthMethods(m relyingPartyMeta
 		declared = append(declared, declaredMethod{method: method})
 	}
 	if len(declared) == 0 {
-		return nil, fmt.Errorf("none of token_endpoint_auth_methods_supported %v is supported and permitted by allowed_client_auth_methods and the metadata policy", list)
+		return nil, fmt.Errorf("none of token_endpoint_auth_methods_supported %q is supported and permitted by allowed_client_auth_methods and the metadata policy", list)
 	}
 	return declared, nil
 }
@@ -1686,7 +1686,7 @@ func supportedAssertionAlgorithms(list []string, permitted *permittedValues) ([]
 		}
 	}
 	if len(algs) == 0 {
-		return nil, fmt.Errorf("none of token_endpoint_auth_signing_alg_values_supported %v is supported and permitted by the metadata policy", list)
+		return nil, fmt.Errorf("none of token_endpoint_auth_signing_alg_values_supported %q is supported and permitted by the metadata policy", list)
 	}
 	return algs, nil
 }

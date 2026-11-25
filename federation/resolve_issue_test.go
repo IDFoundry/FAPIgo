@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -276,6 +277,12 @@ func TestResolveIssuerResponseRejectsWrongTrustAnchor(t *testing.T) {
 	}
 	if _, err := issuer.Response(resolved, []string{"https://not-the-actual-anchor.example.org"}, nil, nil); err == nil {
 		t.Fatalf("Response(wrong trust anchor) = nil error, want error")
+	}
+	// The requested trust anchors come from the resolve request, so the
+	// error quotes them rather than letting one forge a log line.
+	_, err = issuer.Response(resolved, []string{"https://forged.example.org\nlevel=INFO msg=ok"}, nil, nil)
+	if err == nil || strings.Contains(err.Error(), "\n") {
+		t.Fatalf("Response(trust anchor with a newline) = %q, want an error quoting it", err)
 	}
 }
 

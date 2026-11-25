@@ -181,7 +181,8 @@
 // token_endpoint_auth_method, RP Metadata Choices 1.0's
 // token_endpoint_auth_methods_supported, or both (private_key_jwt, and
 // every RFC 8705 mTLS method — self_signed_tls_client_auth accepts the
-// certificate in the "x5c" member of any key of its jwks/jwks_uri;
+// certificate in the "x5c" member of any key of its jwks/jwks_uri
+// whose certificate holds that same key (RFC 7517 §4.7);
 // tls_client_auth and the four SAN-typed siblings each read their own
 // plain-string RFC 8705 §2.1.2 metadata parameter directly, and require
 // the certificate to carry a key of that JWK Set, per OpenID

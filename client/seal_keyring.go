@@ -13,6 +13,10 @@ import (
 // BackchannelSessionSealer seal with: keys[0] seals, any key opens, and
 // each sealed value names its key by the first four bytes of the key's
 // SHA-256, so rotating in a new key first keeps older values readable.
+//
+// keys[0] seals under a random 96-bit nonce, so NIST SP 800-38D (§8.3)
+// bounds it to 2^32 seals, past which a repeated nonce becomes too
+// likely; the exported sealers' constructors say to rotate before then.
 type sealKeyring struct {
 	keys []sealKey
 }

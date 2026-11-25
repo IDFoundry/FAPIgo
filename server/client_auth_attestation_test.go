@@ -669,6 +669,12 @@ func TestRequestClientCredentialsToken_AttestationRejectsDisallowedAttestationAl
 	instanceKey := generateKey(t)
 	dpopKey := generateKey(t)
 	serverKey := generateKey(t)
+	// The attester's registered EdDSA key: New refuses one that doesn't
+	// suit its algorithm.
+	attesterEdKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
 
 	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
 		ID: testClientID, RedirectURIs: []fapi.RegisteredRedirectURI{testRedirectURI},
@@ -712,7 +718,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsDisallowedAttestationAl
 		Keys: serverKeyManager, AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation: &fakeRevocationSink{}, Audit: &fakeAuditSink{}, Clock: fixedClock{now: now}, Random: rand.Reader,
 		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
-		AttesterTrust:          registeredAttesterTrust(fapi.EdDSA, &attesterKey.PublicKey),
+		AttesterTrust:          registeredAttesterTrust(fapi.EdDSA, attesterEdKey),
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

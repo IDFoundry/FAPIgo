@@ -85,6 +85,14 @@ type BackchannelSessionSealer struct {
 // bytes the application keeps secret. Rotate by putting a new key
 // first: Open says when a session it opened was sealed with an older
 // key; sessions live minutes, so the old key can go once they're done.
+//
+// Each Seal is one AES-256-GCM encryption under a random 96-bit nonce,
+// and NIST SP 800-38D (§8.3) allows at most 2^32 of those under one
+// key: past that, a repeated nonce becomes too likely, and two values
+// sealed under one nonce let whoever holds them forge others under
+// that key. Put a new key first well before keys[0] has sealed that
+// many (say, at a quarter of the budget: about a billion seals, some
+// twelve days at 1,000 a second).
 func NewBackchannelSessionSealer(c *Client, keys [][]byte) (*BackchannelSessionSealer, error) {
 	if c == nil {
 		return nil, errors.New("client: NewBackchannelSessionSealer needs a Client")

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"crypto"
 	"errors"
 	"fmt"
 	"net/url"
@@ -29,6 +30,12 @@ type Client struct {
 	// DiscoverViaFederation's metadata; zero otherwise. See
 	// checkTrustChain.
 	trustChainExpiresAt time.Time
+
+	// issuerEntityKeys are the authorization server's federation entity
+	// keys, for a Client NewFromDiscovery built from
+	// DiscoverViaFederation's metadata; nil otherwise. None of them is
+	// accepted as a protocol key: see refuseEntityKeys.
+	issuerEntityKeys []crypto.PublicKey
 }
 
 // New validates cfg and deps and returns a Client. Construction fails
@@ -114,6 +121,16 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 //     advertises exactly one this module supports. When it advertises
 //     several, the one it uses for this client is a matter of the
 //     client's registration, so it's left zero and New asks for it.
+//  6. For metadata DiscoverViaFederation resolved, the Client refuses
+//     anything the issuer signed with one of its federation entity keys
+//     (the Trust Chain's keys for it, and its Entity Configuration's
+//     own "jwks"): an ID token, a JARM response, a signed UserInfo
+//     response, or a JWS given to VerifyIssuerJWS. Entity keys vouch
+//     for the issuer's Entity Configuration, its protocol keys
+//     included, and are never protocol keys themselves, so a key
+//     Dependencies.IssuerKeys returns that is also an entity key isn't
+//     tried, and a JWS only such a key matches fails with
+//     ErrorInvalidResponse.
 //
 // A DiscoveredMetadata assembled by hand (Issuer() zero) skips step 1:
 // cfg.Issuer must then be set, exactly as for New.
@@ -144,6 +161,7 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 	}
 	if resolved, ok := discovered.ResolvedEntity(); ok {
 		c.trustChainExpiresAt = resolved.ExpiresAt
+		c.issuerEntityKeys = federationEntityKeys(resolved)
 	}
 	return c, nil
 }

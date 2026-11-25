@@ -143,7 +143,10 @@ CIBA, also name `backchannel_authentication_request_signing_alg` and
 `backchannel_token_delivery_mode`. To find a provider through the
 federation rather than plain discovery, `client.DiscoverViaFederation`
 resolves the provider's Trust Chain with a `federation.Resolver` and
-returns the same `DiscoveredMetadata`.
+returns the same `DiscoveredMetadata`. A client `NewFromDiscovery`
+builds from it refuses an ID token, JARM response or signed UserInfo
+response signed with one of the provider's federation entity keys:
+those vouch for the provider's protocol keys and are never one.
 
 ## Trust Anchors and Intermediates
 

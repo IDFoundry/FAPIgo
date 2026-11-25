@@ -1659,8 +1659,8 @@
   {
     "id": "client-issuer-key-candidate-cap",
     "file": "client/issuer_key_candidates.go",
-    "old": "return set.Keys[:min(len(set.Keys), maxIssuerKeyCandidates)], nil",
-    "new": "return set.Keys, nil",
+    "old": "return candidates[:min(len(candidates), maxIssuerKeyCandidates)], nil",
+    "new": "return candidates, nil",
     "module": "root",
     "packages": [
       "./client"
@@ -4790,5 +4790,113 @@
     ],
     "run": "^TestBackchannelAuthenticationStoreReportsAnAlreadyDecidedRequest$",
     "why": "memstore wraps ErrBackchannelAuthenticationAlreadyDecided for a second decision"
+  },
+  {
+    "id": "jose-jwkset-honours-key-ops-verify",
+    "file": "internal/jose/jwkset.go",
+    "old": "if err := checkKeyOps(hint.KeyOps, keyOpVerify); err != nil {",
+    "new": "if err := checkKeyOps(hint.KeyOps, keyOpVerify); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/jose"
+    ],
+    "run": "^TestParseJWKSetHonoursKeyOps$",
+    "why": "a JWK Set entry whose key_ops doesn't list verify isn't used as a verification key"
+  },
+  {
+    "id": "jose-encryption-jwkset-honours-key-ops",
+    "file": "internal/jose/jwkset_encryption.go",
+    "old": "if raw.Use == string(jwkUseSignature) || checkKeyOps(ops.KeyOps, keyOpsEncryption...) != nil {",
+    "new": "if raw.Use == string(jwkUseSignature) || checkKeyOps(ops.KeyOps, keyOpsEncryption...) != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/jose"
+    ],
+    "run": "^TestParseEncryptionJWKSetHonoursKeyOps$",
+    "why": "a JWK Set entry whose key_ops lists no encryption operation isn't encrypted to"
+  },
+  {
+    "id": "jose-key-ops-empty-is-unrestricted",
+    "file": "internal/jose/keyops.go",
+    "old": "\tif len(keyOps) == 0 {\n\t\treturn nil\n\t}",
+    "new": "\tif keyOps == nil {\n\t\treturn nil\n\t}",
+    "module": "root",
+    "packages": [
+      "./internal/jose"
+    ],
+    "run": "^(TestParseJWKSetHonoursKeyOps|TestParseEncryptionJWKSetHonoursKeyOps)$",
+    "why": "an empty key_ops (Web Crypto's ECDH public keys) states no restriction"
+  },
+  {
+    "id": "federation-x5c-must-hold-the-jwk-key",
+    "file": "federation/automatic_registration.go",
+    "old": "if !ok || !pub.Equal(cert.PublicKey) {",
+    "new": "if !ok || !pub.Equal(cert.PublicKey) && false {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestCertificateThumbprintsFromJWKSRequiresTheEntrysOwnKey$",
+    "why": "self_signed_tls_client_auth registers only an x5c certificate holding its entry's own key (RFC 7517 §4.7)"
+  },
+  {
+    "id": "server-static-attester-keys-validated",
+    "file": "server/attester_trust.go",
+    "old": "if _, err := jose.NewJWK(k.PublicKey, k.Algorithm); err != nil {",
+    "new": "if _, err := jose.NewJWK(k.PublicKey, k.Algorithm); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewValidatesStaticAttesterKeys$",
+    "why": "New refuses a StaticAttesterKeys key that could never verify an attestation"
+  },
+  {
+    "id": "server-static-attester-keys-kid-names-one-key",
+    "file": "server/attester_trust.go",
+    "old": "if k.KeyID != \"\" && earlier.KeyID == k.KeyID && !samePublicKey(earlier.PublicKey, k.PublicKey) {",
+    "new": "if k.KeyID != \"\" && earlier.KeyID == k.KeyID && !samePublicKey(earlier.PublicKey, k.PublicKey) && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewValidatesStaticAttesterKeys$",
+    "why": "New refuses one kid naming two different keys of an attester"
+  },
+  {
+    "id": "server-static-attester-keys-pointer-validated",
+    "file": "server/attester_trust.go",
+    "old": "\t\tstatic, ok = *pointer, true",
+    "new": "\t\tstatic, ok = *pointer, false",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestNewValidatesStaticAttesterKeys$",
+    "why": "a *StaticAttesterKeys is checked as a StaticAttesterKeys is"
+  },
+  {
+    "id": "client-refuses-federation-entity-key",
+    "file": "client/federation.go",
+    "old": "\t\tif isEntityKey(candidate.PublicKey, c.issuerEntityKeys) {",
+    "new": "\t\tif isEntityKey(candidate.PublicKey, c.issuerEntityKeys) && false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^(TestClientRefusesFederationEntityKeyAsProtocolKey|TestClientRefusesEntityConfigurationKeyAsProtocolKey)$",
+    "why": "a client built from federation discovery never accepts an OP's federation entity key as a protocol key"
+  },
+  {
+    "id": "client-entity-keys-include-entity-configuration-jwks",
+    "file": "client/federation.go",
+    "old": "for _, set := range []json.RawMessage{resolved.JWKS, entityConfigurationJWKS(resolved)} {",
+    "new": "for _, set := range []json.RawMessage{resolved.JWKS} {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestClientRefusesEntityConfigurationKeyAsProtocolKey$",
+    "why": "the OP's Entity Configuration jwks count as federation entity keys, not only the Trust Chain's"
   }
 ]

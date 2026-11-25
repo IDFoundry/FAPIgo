@@ -110,6 +110,15 @@
 // full size, RSA values minimally), never of the member strings
 // received, so a key written two ways has one thumbprint.
 //
+// Key operations: in each of those JWK Sets, an entry whose "key_ops"
+// (RFC 7517 §4.3) lists operations is used only for one it lists — as
+// a signature verification key when it lists "verify", as a key to
+// encrypt to when it lists "encrypt", "wrapKey", "deriveKey" or
+// "deriveBits" — and is otherwise skipped, as an entry marked "use"
+// for the other purpose is. An entry with no "key_ops", or an empty
+// one (Web Crypto exports an ECDH public key that way), isn't
+// restricted by it.
+//
 // Publishing this party's own keys as a JWK Set (RFC 7517 §5) is
 // publicjwks.go's PublicJWKS: resolve every SigningKeyUse (honoring
 // RotatingKeyManager) and EncryptionKeyUse it's given, deduplicated by

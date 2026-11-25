@@ -147,6 +147,88 @@ else: `fmt.Errorf("...: %w", storage.ErrBackchannelAuthenticationAlreadyDecided)
 `storage.TestBackchannelAuthenticationStoreContract` checks it once you
 do.
 
+### A JWK Set entry's `key_ops` decides what it is used for (keys, client, server, federation)
+
+**Affects:** a party whose JWK Set lists a key with a `key_ops` member
+that doesn't name the operation FAPIgo uses the key for: a client's
+JWK Set (registered, fetched, or published through federation), an
+authorization server's `jwks_uri`, or a federation entity's `jwks`.
+
+**Why:** RFC 7517 §4.3's `key_ops` says which operations a key is
+for. FAPIgo ignored it, so a key its publisher marked for encryption
+only (`["encrypt"]`, say) was still used to verify signatures, and one
+marked `["verify"]` could still be encrypted to.
+
+**What fails:** an entry whose `key_ops` lists operations but not
+`verify` is no longer a verification key: it is skipped, and when a
+JWS names its kid the error says why. An entry whose `key_ops` lists
+none of `encrypt`, `wrapKey`, `deriveKey` and `deriveBits` is no
+longer a key to encrypt to. An entry whose `key_ops` isn't an array of
+strings is skipped. Entries with no `key_ops`, or an empty one, are
+unchanged.
+
+**What to change:** publish `key_ops` that list the key's real
+operations (`["verify"]` for a signing key's public half), or leave
+`key_ops` out.
+
+### A self-signed certificate must hold its JWK's own key (federation)
+
+**Affects:** an `AutomaticClientRepository` registering a relying party
+for `self_signed_tls_client_auth` whose RP JWK Set entry carries an
+`x5c` certificate for a different key from the entry's own.
+
+**Why:** RFC 7517 §4.7 requires the key in an entry's first `x5c`
+certificate to match the entry's key. The thumbprint of that
+certificate was registered whatever key it held, so an RP JWK Set could
+register a certificate for a key it doesn't list.
+
+**What fails:** such an entry no longer registers its certificate. When
+no entry is left, registration fails with "jwks has no usable x5c
+certificate", naming the entry and the reason.
+
+**What to change:** publish, in each entry's `x5c`, the certificate for
+that entry's own key.
+
+### `server.New` checks a `keys.StaticAttesterKeys` (server)
+
+**Affects:** a server with `Dependencies.AttesterTrust` set to
+`server.RegisteredAttesterKeys` over a `keys.StaticAttesterKeys`.
+
+**Why:** a key that could never verify an attestation (nil, a private
+key, a point off its curve, a key of the wrong type for its
+`Algorithm`) was accepted at `New` and only showed up as
+`invalid_client` at the first attestation it should have verified.
+
+**What fails:** `New` refuses the configuration, naming the attester
+and the key, when a key's `PublicKey` doesn't suit its `Algorithm`, an
+attester's issuer is empty, or one kid names two different keys of one
+attester.
+
+**What to change:** register each attester's public keys with the
+algorithm they sign with, and give different keys of one attester
+different kids.
+
+### A client refuses an OP's federation entity key as a protocol key (client)
+
+**Affects:** a client built with `client.NewFromDiscovery` from
+`client.DiscoverViaFederation`'s metadata, for an OP that signs ID
+tokens, JARM responses or UserInfo responses with one of its federation
+entity keys.
+
+**Why:** a federation entity key signs the OP's Entity Configuration,
+which vouches for its protocol keys. OpenID Federation keeps the two
+apart, and a FAPIgo server already refuses to reuse one; the client
+accepted such a key whenever `Dependencies.IssuerKeys` returned it.
+
+**What fails:** a key `Dependencies.IssuerKeys` returns that is also
+one of the OP's entity keys (its Trust Chain's keys for it, or its
+Entity Configuration's `jwks`) isn't tried. A JWS only such a key
+matches fails with `ErrorInvalidResponse`, saying its only matching key
+is a federation entity key.
+
+**What to change:** have the OP sign protocol messages with a key
+distinct from its federation entity keys.
+
 ## v0.83.0
 
 ### A client with `Algorithms.UserInfo` accepts only signed UserInfo (client)

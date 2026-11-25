@@ -61,13 +61,17 @@ type jwkSetAlgHint struct {
 	Kid string   `json:"kid,omitempty"`
 	Use string   `json:"use,omitempty"`
 	X5C []string `json:"x5c,omitempty"`
+
+	KeyOps []string `json:"key_ops,omitempty"`
 }
 
 // ParseJWKSet parses a JWK Set (RFC 7517 §5)'s signature verification
 // keys into this module's closed algorithm set, skipping any entry whose
-// algorithm isn't supported, whose shape doesn't parse, or that is
-// marked "use":"enc" — one malformed or unsupported entry does not
-// invalidate an otherwise usable key set.
+// algorithm isn't supported, whose shape doesn't parse, that is marked
+// "use":"enc", or whose "key_ops" (RFC 7517 §4.3) lists operations but
+// not "verify" — one malformed or unsupported entry does not invalidate
+// an otherwise usable key set. An entry with no "key_ops", or an empty
+// one, isn't restricted by it.
 //
 // Its keys are treated as ones a caller supplied, like ParseJWK's: an
 // RSA entry over 4096 bits (maxCallerRSAModulusBits) is skipped. Use
@@ -197,7 +201,9 @@ func parseJWKSet(body []byte, maxRSABits int) ([]ParsedJWK, []SkippedJWK, error)
 // parseJWKSetEntry parses one JWK Set entry as a verification key. When
 // it can't be used, ok is false and skip says why, except for an entry
 // marked "use":"enc", which is skipped with no reason: it is a key for
-// another purpose (RFC 7517 §4.2; see ParseEncryptionJWKSet).
+// another purpose (RFC 7517 §4.2; see ParseEncryptionJWKSet). An entry
+// whose "key_ops" (RFC 7517 §4.3) doesn't list "verify" is skipped with
+// its reason (see checkKeyOps).
 func parseJWKSetEntry(raw json.RawMessage, maxRSABits int) (key ParsedJWK, skip SkippedJWK, ok bool) {
 	// Strictly, like ParseJWK: rawJWK doesn't model "x5c", so a case
 	// variant ("X5C") would otherwise reach Certificates.
@@ -207,6 +213,9 @@ func parseJWKSetEntry(raw json.RawMessage, maxRSABits int) (key ParsedJWK, skip 
 	}
 	if hint.Use == string(jwkUseEncryption) {
 		return ParsedJWK{}, SkippedJWK{}, false
+	}
+	if err := checkKeyOps(hint.KeyOps, keyOpVerify); err != nil {
+		return ParsedJWK{}, SkippedJWK{KeyID: hint.Kid, Reason: err}, false
 	}
 	alg, ok := algorithmForJWKSetHint(hint)
 	if !ok {

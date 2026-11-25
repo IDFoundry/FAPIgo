@@ -37,7 +37,8 @@ type InteractionRequired struct {
 	// ExpiresAt is when Handle expires (Limits.InteractionLifetime from
 	// now, by Dependencies.Clock): CompleteAuthorization refuses it after
 	// that, so whatever carries the interaction until then — a cookie, a
-	// session — can expire with it.
+	// session — can expire with it. It may be after the pushed request's
+	// own expiry: see Limits.InteractionLifetime.
 	ExpiresAt time.Time
 }
 

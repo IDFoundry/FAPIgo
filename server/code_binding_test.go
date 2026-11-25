@@ -156,6 +156,10 @@ func requireReuseWithoutBindingRevokesNothing(t *testing.T, missing missingBindi
 	h, clock := harnessOnStepClock(t)
 	own := codePresentation{verifier: testCodeVerifier, redirectURI: testRedirectURI, dpopKey: generateKey(t)}
 	code := dpopBoundCode(t, h, own.dpopKey)
+	// The other redirect URI is registered, so a presentation naming it
+	// passes the check made before redemption and reaches the code's
+	// digest, which it's not part of.
+	reregisterRedirectURIs(t, h, testRedirectURI, unregisteredRedirectURI)
 	first, err := presentCode(t, h, code, own)
 	if err != nil || !first.HasRefreshToken {
 		t.Fatalf("ExchangeAuthorizationCode = %v (refresh token %v)", err, first.HasRefreshToken)
@@ -190,6 +194,9 @@ func TestCodeIsNotSpentWithoutItsBinding(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)
 			own := codePresentation{verifier: testCodeVerifier, redirectURI: testRedirectURI, dpopKey: generateKey(t)}
 			code := dpopBoundCode(t, h, own.dpopKey)
+			// Registered, so it reaches the digest (see
+			// requireReuseWithoutBindingRevokesNothing).
+			reregisterRedirectURIs(t, h, testRedirectURI, unregisteredRedirectURI)
 			_, err := presentCode(t, h, code, missing.of(t, own))
 			requireInvalidGrant(t, err)
 			if _, err := presentCode(t, h, code, own); err != nil {
@@ -352,21 +359,24 @@ func (g *digestBlindGrants) RedeemAuthorizationCode(ctx context.Context, redempt
 // TestRedeemedCodeIsCheckedAgainstItsBinding covers a store that returns
 // a code for a digest it wasn't stored under: the redeemed record's own
 // PKCE challenge, redirect URI and dpop_jkt still refuse a presentation
-// without them, as its client instance does (checkCodeInstance).
+// without them, as its client instance does (checkCodeInstance). The
+// other redirect URI is registered too, so the exchange reaches the
+// record (checkCodeExchangeRequest refuses an unregistered one first).
 func TestRedeemedCodeIsCheckedAgainstItsBinding(t *testing.T) {
 	for name, tc := range map[string]struct {
 		missing missingBinding
 		want    string
 	}{
-		"another code_verifier":        {missingBinding{verifier: true}, "code_verifier does not match code_challenge"},
-		"an unregistered redirect_uri": {missingBinding{redirectURI: true}, "redirect_uri does not match the authorization request"},
-		"another DPoP key":             {missingBinding{dpopKey: true}, "DPoP proof key does not match the dpop_jkt bound to this authorization code"},
+		"another code_verifier":           {missingBinding{verifier: true}, "code_verifier does not match code_challenge"},
+		"another registered redirect_uri": {missingBinding{redirectURI: true}, "redirect_uri does not match the authorization request"},
+		"another DPoP key":                {missingBinding{dpopKey: true}, "DPoP proof key does not match the dpop_jkt bound to this authorization code"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)
 			h = withDependencies(t, h, func(d *server.Dependencies) { d.Grants = &digestBlindGrants{GrantStore: h.grants} })
 			own := codePresentation{verifier: testCodeVerifier, redirectURI: testRedirectURI, dpopKey: generateKey(t)}
 			code := dpopBoundCode(t, h, own.dpopKey)
+			reregisterRedirectURIs(t, h, testRedirectURI, unregisteredRedirectURI)
 			_, err := presentCode(t, h, code, tc.missing.of(t, own))
 			if serverErrorCode(t, err) != server.ErrorInvalidGrant || serverErrorDescription(t, err) != tc.want {
 				t.Fatalf("%v, want invalid_grant: %s", err, tc.want)

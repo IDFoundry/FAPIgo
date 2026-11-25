@@ -119,7 +119,8 @@ your operator why a client was refused, once per resolution attempted; the
 client itself only sees `invalid_client`. The hook runs on a goroutine of
 the library's own, shared by the requests for that client_id made while it
 resolves, and can run after the request that triggered the resolution has
-returned. It must not block, panic, or resolve the same client_id. A panic
+returned. It must not block or panic; resolving the same client_id from it
+gets the failure it reports at once, rather than waiting on itself. A panic
 in it is recovered rather than ending the process: the requests waiting on
 that resolution get `server_error`, and the failure is remembered as if the
 hook had returned.

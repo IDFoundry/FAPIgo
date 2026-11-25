@@ -44,6 +44,10 @@ type automaticRegistrationFixture struct {
 	rpConfigCalls       *int32
 	rpMux               *http.ServeMux
 
+	// pool trusts both servers' certificates, for a test building a
+	// fetcher of its own over them.
+	pool *x509.CertPool
+
 	// setTAPolicy, set by setupAutomaticRegistrationFixtureUnderIntermediate
 	// only, has the Trust Anchor sign and serve its Subordinate Statement
 	// about the Intermediate with another metadata policy from then on.
@@ -140,7 +144,7 @@ func setupAutomaticRegistrationFixtureWithPolicy(t *testing.T, metadataFn func(r
 		taID: taID, rpID: rpID, taKey: taKey, taJWKS: taJWKS,
 		rpFedKey: rpFedKey, rpOIDCKey: rpOIDCKey,
 		fetcher: fetcher, now: now, rpConfigCalls: &calls,
-		rpMux: rpMux,
+		rpMux: rpMux, pool: pool,
 	}
 }
 

@@ -189,6 +189,25 @@ certificate", naming the entry and the reason.
 **What to change:** publish, in each entry's `x5c`, the certificate for
 that entry's own key.
 
+### `server.New` checks a `keys.StaticAttesterKeys` (server)
+
+**Affects:** a server with `Dependencies.AttesterTrust` set to
+`server.RegisteredAttesterKeys` over a `keys.StaticAttesterKeys`.
+
+**Why:** a key that could never verify an attestation (nil, a private
+key, a point off its curve, a key of the wrong type for its
+`Algorithm`) was accepted at `New` and only showed up as
+`invalid_client` at the first attestation it should have verified.
+
+**What fails:** `New` refuses the configuration, naming the attester
+and the key, when a key's `PublicKey` doesn't suit its `Algorithm`, an
+attester's issuer is empty, or one kid names two different keys of one
+attester.
+
+**What to change:** register each attester's public keys with the
+algorithm they sign with, and give different keys of one attester
+different kids.
+
 ## v0.83.0
 
 ### A client with `Algorithms.UserInfo` accepts only signed UserInfo (client)

@@ -94,7 +94,10 @@ type RegisteredAttesterKeys struct {
 	// Keys resolves each attester's verification keys, by its issuer —
 	// keys.StaticAttesterKeys, or your own keys.AttesterKeySource.
 	// Required; under AssuranceProduction it must declare
-	// keys.KeySourceAssurance, as Dependencies.ClientKeys must.
+	// keys.KeySourceAssurance, as Dependencies.ClientKeys must. New
+	// checks every key a keys.StaticAttesterKeys holds, refusing one
+	// that could never verify an attestation, an attester with no
+	// issuer, and a kid naming two different keys of one attester.
 	Keys keys.AttesterKeySource
 }
 
@@ -134,7 +137,61 @@ func (r RegisteredAttesterKeys) validate() error {
 	if found, ok := depcheck.FindTypedNil(r, map[string]string{"Keys": "Keys"}); ok {
 		return fmt.Errorf("server: dependencies: attester trust: RegisteredAttesterKeys.%s is a nil %s", found.Name, found.Type)
 	}
+	static, ok := r.Keys.(keys.StaticAttesterKeys)
+	if pointer, isPointer := r.Keys.(*keys.StaticAttesterKeys); isPointer {
+		static, ok = *pointer, true
+	}
+	if !ok {
+		return nil
+	}
+	if err := validateStaticAttesterKeys(static); err != nil {
+		return fmt.Errorf("server: dependencies: attester trust: RegisteredAttesterKeys.Keys: %w", err)
+	}
 	return nil
+}
+
+// validateStaticAttesterKeys checks, at New, every key a
+// keys.StaticAttesterKeys registers, so one that could never verify an
+// attestation fails at startup rather than as invalid_client at the
+// first attestation it should have verified: an attester without an
+// issuer; a key whose PublicKey doesn't suit its Algorithm (nil, a
+// private key, an EC point off its curve, an RSA modulus outside 2048
+// to 8192 bits, a key of another type, or an unsupported algorithm);
+// and one kid naming two different keys of an attester, since the kid
+// is how an attestation selects its key.
+func validateStaticAttesterKeys(static keys.StaticAttesterKeys) error {
+	for issuer, registered := range static {
+		if issuer == "" {
+			return errors.New("an attester has no issuer")
+		}
+		if err := validateAttesterKeys(registered); err != nil {
+			return fmt.Errorf("attester %q: %w", issuer, err)
+		}
+	}
+	return nil
+}
+
+// validateAttesterKeys is validateStaticAttesterKeys for one attester's
+// keys.
+func validateAttesterKeys(registered []keys.VerificationKey) error {
+	for i, k := range registered {
+		if _, err := jose.NewJWK(k.PublicKey, k.Algorithm); err != nil {
+			return fmt.Errorf("key %d (kid %q): %w", i, k.KeyID, err)
+		}
+		for j, earlier := range registered[:i] {
+			if k.KeyID != "" && earlier.KeyID == k.KeyID && !samePublicKey(earlier.PublicKey, k.PublicKey) {
+				return fmt.Errorf("keys %d and %d share kid %q but are different keys", j, i, k.KeyID)
+			}
+		}
+	}
+	return nil
+}
+
+// samePublicKey reports whether a and b are the same public key. Every
+// key jose.NewJWK accepts has an Equal method.
+func samePublicKey(a, b crypto.PublicKey) bool {
+	equal, ok := a.(interface{ Equal(crypto.PublicKey) bool })
+	return ok && equal.Equal(b)
 }
 
 // X5CAttesterChain verifies a client's attestation with the key of the

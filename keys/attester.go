@@ -37,6 +37,13 @@ type AttesterKeySource interface {
 // StaticAttesterKeys is an AttesterKeySource holding each trusted
 // Attester's keys, by issuer, administratively registered. It never
 // fetches: rotating an Attester's key means updating the map.
+//
+// server.New, given one in server.RegisteredAttesterKeys, checks it:
+// each key's PublicKey must be a public key suiting its Algorithm (not
+// nil, not a private key, an EC point on its curve, an RSA modulus of
+// 2048 to 8192 bits), no issuer may be empty, and no kid may name two
+// different keys of one Attester. Changing the map after server.New
+// isn't checked.
 type StaticAttesterKeys map[string][]VerificationKey
 
 // ResolveAttesterKeys implements AttesterKeySource: the keys registered

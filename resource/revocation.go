@@ -19,14 +19,28 @@ import (
 type RevocationChecker interface {
 	// IsRevoked reports whether key has been revoked. Verify asks about
 	// two kinds of key, which must both be answered from what the
-	// server recorded: the token's own key (ResolvedAccessToken.Key —
-	// a JWT's jti claim for JWTAccessTokens, an opaque token's own hash
-	// for OpaqueAccessTokens), and, for a token carrying a grant_id
+	// server recorded: the token's own key, and, for a token carrying a grant_id
 	// claim, the key server.Server.RevokeGrant records that grant under,
 	// and for one carrying a code_grant_id claim, the key the server
 	// records when the authorization code the token's grant came from
 	// is reused. Run storage.TestRevocationStoreContract against an
-	// implementation. An implementation that is also a
+	// implementation.
+	//
+	// The token's own key comes in two forms, and Verify asks about
+	// both. ResolvedAccessToken.Key is the raw form: a JWT's jti claim
+	// for JWTAccessTokens, an opaque token's own hash (hex SHA-256) for
+	// OpaqueAccessTokens. A server since v0.84.0 also records it
+	// namespaced by its issuer, as "access-token:", the length of the
+	// issuer in bytes, ":", the issuer, then the raw key (for issuer
+	// "https://as.example" and jti "j1",
+	// "access-token:18:https://as.example" followed by "j1"), so a jti
+	// one issuer revoked doesn't refuse another issuer's token sharing
+	// the store. Verify asks about the namespaced form first, when the
+	// resolver reports the token's Issuer, then the raw one. The server
+	// writes both for now, so a checker that only knows the raw form
+	// keeps working; the raw form will be dropped in a later release,
+	// so a checker that derives or filters keys itself should accept
+	// the namespaced one too. An implementation that is also a
 	// storage.RevocationBatchChecker is asked about all of a token's
 	// keys in one IsAnyRevoked call instead.
 	IsRevoked(ctx context.Context, key string) (bool, error)

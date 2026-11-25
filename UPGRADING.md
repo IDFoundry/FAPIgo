@@ -71,6 +71,41 @@ issuers needs nothing more; each server now sees only its own records.
 
 ## v0.84.0
 
+### A reused code's access token is revoked under an issuer-namespaced key too (server, resource)
+
+**Affects:** a deployment with its own `server.RevocationSink` or
+`resource.RevocationChecker` that does more than store and compare keys
+exactly, such as one that only accepts keys shaped like a jti or an
+opaque token's hex hash, or limits a key's length.
+
+**Why:** the server revoked a reused code's access token under the
+token's own key alone (a JWT's `jti`, an opaque token's hex SHA-256).
+With servers of different issuers sharing one revocation store, one
+issuer's revoked `jti` would refuse another issuer's token with the same
+`jti`. The server now also revokes it under that key namespaced by its
+issuer: `access-token:`, the issuer's length in bytes, `:`, the issuer,
+then the token's key. It still writes the raw key as well, so a resource
+server that hasn't been upgraded, or a checker that knows only the raw
+form, keeps refusing the token. `resource.Verifier` asks about the
+namespaced key (when the resolver reports the token's issuer) and then
+the raw one, so a record an older server wrote still refuses the token.
+A later release will stop writing and checking the raw key.
+
+**What fails:** nothing for `memstore`, `sqlstore` or any store that
+keeps keys as given and compares them exactly; such a store holds one
+more record per reused code. A sink that refuses the new key makes a
+code reuse's revocation report a failure
+(`AuditEventRevokeReusedAuthorizationCode` with
+`AuditOutcomeFailure`), though the raw key is still written.
+
+**What to change:** make a custom sink accept any key (an opaque
+token's namespaced key runs about 30 bytes longer than the
+`code-grant:` keys it already stores for the same issuer), and a custom
+checker answer the namespaced key from what the sink stored, as it
+answers every other key. Don't rely on the raw key alone: it will be
+dropped.
+
+
 ### A JWT access token's `client_sub` claim no longer sets `ClientSubject` (resource)
 
 **Affects:** a resource server using `resource.JWTAccessTokens` with an

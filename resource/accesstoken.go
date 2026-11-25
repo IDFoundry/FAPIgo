@@ -97,6 +97,13 @@ type ResolvedAccessToken struct {
 	Issuer   string
 	Audience []string
 	IssuedAt time.Time
+
+	// selfContained is set by JWTAccessTokens: the token's claims are
+	// its own signed claims, not a server-side record's, so a
+	// token.ClientSubjectClaim among them isn't one a FAPIgo server
+	// recorded (it never puts one in a self-contained token) and
+	// Verify doesn't take ClientSubject from it.
+	selfContained bool
 }
 
 // AccessTokenResolver resolves a presented access token's raw bytes to
@@ -338,10 +345,11 @@ func (j JWTAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveAcce
 		// internal, JWT-only by construction (internal/token never
 		// handles opaque tokens, see internal/token/doc.go). Only this
 		// package-level ResolvedAccessToken.Key is.
-		Key:      validated.JTI,
-		Issuer:   validated.Issuer,
-		Audience: validated.Audience,
-		IssuedAt: validated.IssuedAt,
+		Key:           validated.JTI,
+		Issuer:        validated.Issuer,
+		Audience:      validated.Audience,
+		IssuedAt:      validated.IssuedAt,
+		selfContained: true,
 	}, nil
 }
 

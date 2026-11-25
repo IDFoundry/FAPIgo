@@ -4465,5 +4465,29 @@
     ],
     "run": "^TestFetchUserInfoRequiresASignedResponseByDefault$",
     "why": "New refuses AllowUnsignedUserInfo without Algorithms.UserInfo"
+  },
+  {
+    "id": "resource-jwt-client-sub-ignored",
+    "file": "resource/verify.go",
+    "old": "ok && !resolved.selfContained {",
+    "new": "ok && (!resolved.selfContained || true) {",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyIgnoresClientSubInJWTAccessTokens$",
+    "why": "a JWT access token's client_sub isn't taken as ClientSubject, nor its sub as the internal subject"
+  },
+  {
+    "id": "resource-jwt-marked-self-contained",
+    "file": "resource/accesstoken.go",
+    "old": "selfContained: true,",
+    "new": "selfContained: false,",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyIgnoresClientSubInJWTAccessTokens$",
+    "why": "JWTAccessTokens marks its tokens self-contained, so Verify ignores their client_sub"
   }
 ]

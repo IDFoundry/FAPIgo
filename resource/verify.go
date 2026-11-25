@@ -687,11 +687,14 @@ func (v *Verifier) checkKeysNotRevoked(ctx context.Context, keys []string) *Erro
 // token's sub is the client's; when it's pairwise
 // (token.PairwiseSectorClaim), the internal subject is looked up under
 // the sector it was derived for (mapPairwiseSubject). A public sub is
-// both. Under PairwiseClientSubjectsOnly a pairwise sub is never mapped
-// back, whatever the token's format, and InternalSubject is "".
+// both. A JWT access token (JWTAccessTokens) is self-contained whatever
+// claims it carries: a client_sub among them isn't a record's, so it
+// can't make the token's sub the internal subject and skip the lookup.
+// Under PairwiseClientSubjectsOnly a pairwise sub is never mapped back,
+// whatever the token's format, and InternalSubject is "".
 func (v *Verifier) resolveSubjects(ctx context.Context, resolved ResolvedAccessToken) (internal, clientSubject string, verr *Error) {
 	clientOnly := v.cfg.PairwiseResolution == PairwiseClientSubjectsOnly
-	if raw, ok := resolved.Claims[token.ClientSubjectClaim]; ok {
+	if raw, ok := resolved.Claims[token.ClientSubjectClaim]; ok && !resolved.selfContained {
 		var sub string
 		if err := json.Unmarshal(raw, &sub); err != nil || sub == "" {
 			return "", "", newError(ErrorInvalidToken, 401, "access token's client subject is malformed", err)

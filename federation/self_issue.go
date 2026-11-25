@@ -60,6 +60,9 @@ type SelfIssueDependencies struct {
 	// signs OAuth/OIDC artifacts with, matching this module's existing
 	// key-separation precedent for every other signing use
 	// (ARCHITECTURE.md).
+	//
+	// The dependencies print [REDACTED] for Signer and refuse to be
+	// encoded: see ErrIssueDependenciesSerialization.
 	Signer crypto.Signer
 
 	// Algorithm Signer signs with.

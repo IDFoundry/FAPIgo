@@ -81,6 +81,9 @@ type HistoricalKeysIssueDependencies struct {
 	// Resolver.FetchHistoricalKeys verifies against after resolving this
 	// entity's Trust Chain. Never one of the retired keys the response
 	// reports on: Response refuses to publish Signer's own key.
+	//
+	// The dependencies print [REDACTED] for Signer and refuse to be
+	// encoded: see ErrIssueDependenciesSerialization.
 	Signer crypto.Signer
 
 	// Algorithm Signer signs with.

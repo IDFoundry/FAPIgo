@@ -31,6 +31,9 @@ type TrustMarkIssueConfig struct {
 type TrustMarkIssueDependencies struct {
 	// Signer produces every Trust Mark/Delegation's signature — this
 	// entity's own federation signing key.
+	//
+	// The dependencies print [REDACTED] for Signer and refuse to be
+	// encoded: see ErrIssueDependenciesSerialization.
 	Signer crypto.Signer
 
 	// Algorithm Signer signs with.

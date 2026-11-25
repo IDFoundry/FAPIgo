@@ -40,6 +40,9 @@ type SubordinateIssueDependencies struct {
 	// entity's own federation signing key, the same one
 	// SelfIssueDependencies.Signer would use for its own Entity
 	// Configuration when this entity also self-issues one.
+	//
+	// The dependencies print [REDACTED] for Signer and refuse to be
+	// encoded: see ErrIssueDependenciesSerialization.
 	Signer crypto.Signer
 
 	// Algorithm Signer signs with.

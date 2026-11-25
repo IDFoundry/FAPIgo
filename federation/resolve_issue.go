@@ -29,6 +29,9 @@ type ResolveIssueConfig struct {
 type ResolveIssueDependencies struct {
 	// Signer produces every Resolve Response's signature — this
 	// entity's own federation key.
+	//
+	// The dependencies print [REDACTED] for Signer and refuse to be
+	// encoded: see ErrIssueDependenciesSerialization.
 	Signer crypto.Signer
 
 	// Algorithm Signer signs with.

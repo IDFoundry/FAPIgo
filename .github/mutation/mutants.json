@@ -1076,7 +1076,7 @@
     "packages": [
       "./fapitest"
     ],
-    "run": "^TestRevokeGrantBeforeTheCodeIsRedeemed$",
+    "run": "^(TestRevokeGrantBeforeTheCodeIsRedeemed|TestRevokeGrantBeforeAnOnlineCodeIsRedeemed)$",
     "why": "a code whose grant was revoked before redemption is refused"
   },
   {

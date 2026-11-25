@@ -69,8 +69,6 @@ to re-authorize, and tell client operators (or their users) that a
 one-time sign-in is coming. A store shared by servers of different
 issuers needs nothing more; each server now sees only its own records.
 
-## v0.84.0
-
 ### A reused code's access token is revoked under an issuer-namespaced key too (server, resource)
 
 **Affects:** a deployment with its own `server.RevocationSink` or
@@ -105,6 +103,7 @@ checker answer the namespaced key from what the sink stored, as it
 answers every other key. Don't rely on the raw key alone: it will be
 dropped.
 
+## v0.84.0
 
 ### A JWT access token's `client_sub` claim no longer sets `ClientSubject` (resource)
 

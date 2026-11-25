@@ -18,6 +18,35 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.83.1
+
+### A JWT access token's `client_sub` claim no longer sets `ClientSubject` (resource)
+
+**Affects:** a resource server using `resource.JWTAccessTokens` with an
+authorization server, other than FAPIgo's, whose JWT access tokens carry
+a `client_sub` claim.
+
+**Why:** `client_sub` is how a FAPIgo server-side access token record
+(`OpaqueAccessTokens`) keeps the client's pairwise sub beside the end
+user's internal subject. A FAPIgo server never puts it in a JWT access
+token, whose `sub` is already the client's. `Verify` still read it from
+a JWT: such a token's `sub` became `InternalSubject` and its
+`client_sub` became `ClientSubject`, skipping the pairwise lookup a
+token with `pairwise_sector` needs, so a pairwise sub could be reported
+as the internal subject.
+
+**What fails:** for a JWT access token carrying `client_sub`,
+`ClientSubject` is now its `sub`. One that also carries
+`pairwise_sector` is now mapped back through
+`Dependencies.PairwiseSubjects` or `PairwiseSubjectResolver`, and is
+refused when neither can map it, as any other pairwise JWT is. The
+claim itself is still in `AuthorizationContext.Claims`. Opaque tokens
+and custom `AccessTokenResolver`s are unchanged.
+
+**What to change:** nothing for FAPIgo's own tokens. If your
+authorization server's `client_sub` means something you rely on, read
+it from `AuthorizationContext.Claims`.
+
 ## v0.83.0
 
 ### A client with `Algorithms.UserInfo` accepts only signed UserInfo (client)

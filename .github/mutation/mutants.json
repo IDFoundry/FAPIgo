@@ -1215,8 +1215,8 @@
   {
     "id": "srv-code-reuse-audit-access-token-failure",
     "file": "server/token.go",
-    "old": "failures = append(failures, s.deps.Revocation.Revoke(ctx, reused.IssuedAccessTokenKey, s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew))))",
-    "new": "_ = s.deps.Revocation.Revoke(ctx, reused.IssuedAccessTokenKey, s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew)))",
+    "old": "failures = append(failures, s.deps.Revocation.Revoke(ctx, key, until))",
+    "new": "_ = s.deps.Revocation.Revoke(ctx, key, until)",
     "module": "root",
     "packages": [
       "./server"
@@ -4910,5 +4910,113 @@
     ],
     "run": "^TestBackchannelDecisionsAndExpiry$",
     "why": "sqlstore wraps ErrBackchannelAuthenticationAlreadyDecided for a second decision"
+  },
+  {
+    "id": "server-code-digest-covers-issuer",
+    "file": "server/token.go",
+    "old": "codeHashPrefix + lengthPrefixed(issuer) +",
+    "new": "codeHashPrefix + lengthPrefixed(\"\") +",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestAnotherIssuersCodeIsLeftUnspent|TestAuthorizationCodeHash)$",
+    "why": "an authorization code's digest covers the issuer, so another issuer's server sharing the store neither finds nor spends it"
+  },
+  {
+    "id": "server-refresh-digest-covers-issuer",
+    "file": "server/token.go",
+    "old": "refreshHashPrefix + lengthPrefixed(issuer) + token",
+    "new": "refreshHashPrefix + lengthPrefixed(\"\") + token",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestAnotherIssuersRefreshTokenIsNotFound$",
+    "why": "a refresh token's digest covers the issuer, so another issuer's server sharing the store doesn't find it"
+  },
+  {
+    "id": "server-auth-req-id-digest-covers-issuer",
+    "file": "server/backchannel_token.go",
+    "old": "backchannelAuthReqIDHashPrefix + lengthPrefixed(issuer) +",
+    "new": "backchannelAuthReqIDHashPrefix + lengthPrefixed(\"\") +",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestAnotherIssuersAuthReqIDIsLeftUnspent|TestBackchannelAuthReqIDHash)$",
+    "why": "an auth_req_id's digest covers the issuer, so another issuer's server sharing the store neither polls nor spends it"
+  },
+  {
+    "id": "server-reuse-revokes-namespaced-access-token-key",
+    "file": "server/token.go",
+    "old": "range grantrevocation.AccessTokenKeys(s.cfg.Issuer.String(), reused.IssuedAccessTokenKey)",
+    "new": "range []string{reused.IssuedAccessTokenKey}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestExchangeAuthorizationCodeReuseRevokesAccessToken|TestExchangeAuthorizationCodeReuseRevokesOpaqueAccessToken)$",
+    "why": "a reused code's access token is revoked under its issuer-namespaced key"
+  },
+  {
+    "id": "server-reuse-still-revokes-raw-access-token-key",
+    "file": "server/token.go",
+    "old": "range grantrevocation.AccessTokenKeys(s.cfg.Issuer.String(), reused.IssuedAccessTokenKey)",
+    "new": "range grantrevocation.AccessTokenKeys(s.cfg.Issuer.String(), reused.IssuedAccessTokenKey)[:1]",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestExchangeAuthorizationCodeReuseRevokesAccessToken|TestExchangeAuthorizationCodeReuseRevokesOpaqueAccessToken)$",
+    "why": "during the transition a reused code's access token is still revoked under its raw key, for resource servers not yet upgraded"
+  },
+  {
+    "id": "resource-checks-namespaced-token-key",
+    "file": "resource/verify.go",
+    "old": "\treturn grantrevocation.AccessTokenKeys(resolved.Issuer, resolved.Key)\n",
+    "new": "\treturn []string{resolved.Key}\n",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyChecksTheTokenRevocationKeys$",
+    "why": "Verify refuses a token revoked under its issuer-namespaced key"
+  },
+  {
+    "id": "resource-still-checks-raw-token-key",
+    "file": "resource/verify.go",
+    "old": "\treturn grantrevocation.AccessTokenKeys(resolved.Issuer, resolved.Key)\n",
+    "new": "\treturn grantrevocation.AccessTokenKeys(resolved.Issuer, resolved.Key)[:1]\n",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestVerifyChecksTheTokenRevocationKeys$",
+    "why": "Verify still refuses a token an older server revoked under its raw key"
+  },
+  {
+    "id": "resource-batch-checks-namespaced-token-key",
+    "file": "resource/verify.go",
+    "old": "batch.IsAnyRevoked(ctx, append(tokenRevocationKeys(resolved), keys...))",
+    "new": "batch.IsAnyRevoked(ctx, append([]string{resolved.Key}, keys...))",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^(TestVerifyChecksTheTokenRevocationKeys|TestVerifyChecksRevocationInOneBatch)$",
+    "why": "a batch revocation check covers the token's issuer-namespaced key, so its 'none revoked' answer can't pass a revoked token"
+  },
+  {
+    "id": "grantrevocation-access-token-key-length-prefix",
+    "file": "internal/grantrevocation/grantrevocation.go",
+    "old": "\"access-token:\" + strconv.Itoa(len(issuer)) + \":\" + issuer + key",
+    "new": "\"access-token:\" + strconv.Itoa(0*len(issuer)) + \":\" + issuer + key",
+    "module": "root",
+    "packages": [
+      "./internal/grantrevocation"
+    ],
+    "run": "^TestAccessTokenKeysAreNamespacedByIssuer$",
+    "why": "the issuer's length prefix splits an access token revocation key into issuer and token key one way only"
   }
 ]

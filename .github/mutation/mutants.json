@@ -1076,7 +1076,7 @@
     "packages": [
       "./fapitest"
     ],
-    "run": "^TestRevokeGrantBeforeTheCodeIsRedeemed$",
+    "run": "^(TestRevokeGrantBeforeTheCodeIsRedeemed|TestRevokeGrantBeforeAnOnlineCodeIsRedeemed)$",
     "why": "a code whose grant was revoked before redemption is refused"
   },
   {
@@ -1563,8 +1563,8 @@
   {
     "id": "srv-issuance-rechecks-revocation",
     "file": "server/grant_revocation.go",
-    "old": "if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {\n\t\treturn s.withdrawRefreshToken(",
-    "new": "if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil && false {\n\t\treturn s.withdrawRefreshToken(",
+    "old": "if revErr == nil {\n\t\treturn nil\n\t}\n\tcause := fmt.Errorf(\"confirm the grant isn't revoked",
+    "new": "if revErr == nil || true {\n\t\treturn nil\n\t}\n\tcause := fmt.Errorf(\"confirm the grant isn't revoked",
     "module": "root",
     "packages": [
       "./server"
@@ -1575,8 +1575,8 @@
   {
     "id": "srv-issuance-recheck-fails-closed",
     "file": "server/grant_revocation.go",
-    "old": "if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {\n\t\treturn s.withdrawRefreshToken(",
-    "new": "if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil && revErr.Code() == ErrorInvalidGrant {\n\t\treturn s.withdrawRefreshToken(",
+    "old": "if revErr == nil {\n\t\treturn nil\n\t}\n\tcause := fmt.Errorf(\"confirm the grant isn't revoked",
+    "new": "if revErr == nil || revErr.Code() != ErrorInvalidGrant {\n\t\treturn nil\n\t}\n\tcause := fmt.Errorf(\"confirm the grant isn't revoked",
     "module": "root",
     "packages": [
       "./server"
@@ -1599,8 +1599,8 @@
   {
     "id": "srv-withdrawal-failure-keeps-entry",
     "file": "server/grant_registry.go",
-    "old": "if err := s.deps.Grants.RevokeRefreshToken(ctx, refreshTokenHash); err != nil {\n\t\treturn errors.Join(cause, fmt.Errorf(\"withdraw the refresh token: %w\", err))",
-    "new": "if err := s.deps.Grants.RevokeRefreshToken(ctx, refreshTokenHash); err != nil {\n\t\t_ = s.forgetRevokedRefreshToken(ctx, refreshTokenHash)\n\t\treturn errors.Join(cause, fmt.Errorf(\"withdraw the refresh token: %w\", err))",
+    "old": "if err := s.deps.Grants.RevokeRefreshToken(ctx, refreshTokenHash); err != nil {\n\t\treturn errors.Join(cause, fmt.Errorf(\"%w: %w\", errRefreshTokenNotWithdrawn, err))",
+    "new": "if err := s.deps.Grants.RevokeRefreshToken(ctx, refreshTokenHash); err != nil {\n\t\t_ = s.forgetRevokedRefreshToken(ctx, refreshTokenHash)\n\t\treturn errors.Join(cause, fmt.Errorf(\"%w: %w\", errRefreshTokenNotWithdrawn, err))",
     "module": "root",
     "packages": [
       "./server"
@@ -5070,5 +5070,113 @@
     ],
     "run": "^(TestPermittedArrayStrings|TestAutomaticRegistrationRARTypesAbsentUnderEachOperator)$",
     "why": "a one_of alone bounds an omitted array parameter to its listed values, not to nothing"
+  },
+  {
+    "id": "race-invalid-grant-mapping",
+    "file": "server/grant_registry.go",
+    "old": "if errors.Is(err, errGrantRevokedWhileIssued) && !errors.Is(err, errRefreshTokenNotWithdrawn) {",
+    "new": "if errors.Is(err, errGrantRevokedWhileIssued) && !errors.Is(err, errRefreshTokenNotWithdrawn) && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestGrantRevokedWhileIssuedIsInvalidGrant|TestGrantEntryGoneWhileIssuedIsInvalidGrant)$",
+    "why": "a grant revoked while its refresh token was issued is invalid_grant, not server_error"
+  },
+  {
+    "id": "race-invalid-grant-only-revoked",
+    "file": "server/grant_registry.go",
+    "old": "if errors.Is(err, errGrantRevokedWhileIssued) && !errors.Is(err, errRefreshTokenNotWithdrawn) {",
+    "new": "if (true || errors.Is(err, errGrantRevokedWhileIssued)) && !errors.Is(err, errRefreshTokenNotWithdrawn) {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestGrantRevocationUncheckableWhileIssuedIsServerError|TestGrantEntryGoneWhileIssuedIsInvalidGrant)$",
+    "why": "a store failure while issuing a refresh token stays server_error"
+  },
+  {
+    "id": "race-invalid-grant-withdraw-failure",
+    "file": "server/grant_registry.go",
+    "old": "if errors.Is(err, errGrantRevokedWhileIssued) && !errors.Is(err, errRefreshTokenNotWithdrawn) {",
+    "new": "if errors.Is(err, errGrantRevokedWhileIssued) && (true || !errors.Is(err, errRefreshTokenNotWithdrawn)) {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestGrantRevokedWhileIssuedWithdrawalFailsIsServerError|TestGrantEntryGoneWhileIssuedIsInvalidGrant)$",
+    "why": "a revoked grant whose refresh token can't be withdrawn is a store failure, server_error: a live token may remain"
+  },
+  {
+    "id": "race-invalid-grant-revocation-found",
+    "file": "server/grant_revocation.go",
+    "old": "if revErr.Code() == ErrorInvalidGrant {",
+    "new": "if revErr.Code() == ErrorInvalidGrant && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestGrantRevokedWhileIssuedIsInvalidGrant|TestCodeReuseWhileIssuedIsInvalidGrant|TestCIBAGrantRevokedWhileIssuedIsInvalidGrant)$",
+    "why": "the check that the grant isn't revoked marks a revocation found after storing the token as revoked-while-issued"
+  },
+  {
+    "id": "race-invalid-grant-revocation-uncheckable",
+    "file": "server/grant_revocation.go",
+    "old": "if revErr.Code() == ErrorInvalidGrant {",
+    "new": "if revErr.Code() == ErrorInvalidGrant || true {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestGrantRevocationUncheckableWhileIssuedIsServerError$",
+    "why": "a revocation store that can't answer after the token is stored is server_error, not invalid_grant"
+  },
+  {
+    "id": "race-invalid-grant-ciba",
+    "file": "server/backchannel_token.go",
+    "old": "return refreshTokenIssueFailure(err)",
+    "new": "return newError(ErrorServerError, 500, \"failed to issue refresh token\", err)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCIBAGrantRevokedWhileIssuedIsInvalidGrant$",
+    "why": "the CIBA token request answers invalid_grant for a grant revoked while its refresh token was issued"
+  },
+  {
+    "id": "race-invalid-grant-embedder",
+    "file": "server/embedder_refresh.go",
+    "old": "err := refreshTokenIssueFailure(issueErr)",
+    "new": "err := newError(ErrorServerError, 500, \"failed to issue refresh token\", issueErr)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestGrantRevokedWhileIssuedIsInvalidGrant$",
+    "why": "IssueRefreshToken answers invalid_grant for a grant revoked while its refresh token was issued"
+  },
+  {
+    "id": "race-invalid-grant-code-recorder",
+    "file": "server/token.go",
+    "old": "\t\treturn refreshTokenIssueFailure(err)\n\t}\n\taccessToken, accessKey, issueErr",
+    "new": "\t\treturn newError(ErrorServerError, 500, \"failed to issue refresh token\", err)\n\t}\n\taccessToken, accessKey, issueErr",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCodeReuseWhileIssuedIsInvalidGrant$",
+    "why": "a code exchange recording its tokens together answers invalid_grant when a reuse revokes the grant mid-issuance"
+  },
+  {
+    "id": "race-invalid-grant-code-optional",
+    "file": "server/token.go",
+    "old": "\t\treturn refreshTokenIssueFailure(err)\n\t}\n\t// Recomputed",
+    "new": "\t\treturn newError(ErrorServerError, 500, \"failed to issue refresh token\", err)\n\t}\n\t// Recomputed",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCodeReuseWhileIssuedIsInvalidGrant$",
+    "why": "a code exchange issuing its refresh token last answers invalid_grant when a reuse revokes the grant mid-issuance"
   }
 ]

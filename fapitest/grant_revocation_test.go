@@ -123,6 +123,29 @@ func TestRevokeGrantBeforeTheCodeIsRedeemed(t *testing.T) {
 	}
 }
 
+// TestRevokeGrantBeforeAnOnlineCodeIsRedeemed: a code whose grant was
+// revoked before redemption is refused even when the exchange would
+// issue no refresh token, so nothing after redemption re-checks the
+// grant: the check before issuance is all that refuses it.
+func TestRevokeGrantBeforeAnOnlineCodeIsRedeemed(t *testing.T) {
+	h := fapitest.New(t, fapitest.Config{Profile: server.ProfileFAPISecurity, GrantID: "grant-1"})
+	ctx := context.Background()
+	session, err := h.Client.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	callback, err := h.CaptureCallback(ctx, session)
+	if err != nil {
+		t.Fatalf("CaptureCallback: %v", err)
+	}
+	if err := h.RevokeGrant(ctx, "grant-1"); err != nil {
+		t.Fatalf("RevokeGrant: %v", err)
+	}
+	if _, err := h.RunAuthorizationCodeFlowWithCallback(ctx, session.Handle(), callback); serverErrorCodeOf(err) != "invalid_grant" {
+		t.Fatalf("code exchange after revocation = %v, want invalid_grant", err)
+	}
+}
+
 // TestRevokeGrantLeavesOtherGrantsAlone covers tokens from a grant with
 // no grant ID: revoking a grant ID doesn't touch them, and they carry no
 // grant_id claim.

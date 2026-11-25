@@ -974,7 +974,7 @@ stored before the store had it, only the record refuses them (one
 issued while `RevokeGrant` runs isn't left to the record alone unless
 the grant's others are: the issuance checks the grant's revocation
 again once it has stored the token, and withdraws it instead if the
-record is there by then): raising
+record is there by then, answering the token request `invalid_grant`): raising
 `Limits.RefreshTokenLifetime` later, or running instances with longer
 `Limits`, can't bring a revoked grant back unless a refresh token
 lifetime over 400 days applies. With sqlstore, refresh tokens stored

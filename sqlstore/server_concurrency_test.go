@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -135,19 +137,26 @@ func (r *serverRace) wantRefused(what string, issued server.TokenResult) {
 
 // isRevokedWhileIssued reports whether err is a token request refused
 // because its grant was revoked while its refresh token was being
-// stored. Today that is a server_error, in one of two forms, depending
+// stored: invalid_grant, "the grant has been revoked". FAPIgo before
+// v0.86.0 answered server_error instead, in one of two forms, depending
 // on which of the server's two checks after storing the token saw the
-// revocation:
-//   - the check that the grant isn't revoked: its cause is the
-//     invalid_grant that check found;
-//   - the check that the grant registry still lists the grant: its
-//     cause is the server's (unexported) "revoked while its refresh
-//     token was being issued" error, matched here by its text.
-//
-// See TestServerCodeReuseRacingIssuanceIsInvalidGrant.
+// revocation (the check that the grant isn't revoked: its cause is the
+// invalid_grant that check found; the check that the grant registry
+// still lists the grant: its cause is the server's "revoked while its
+// refresh token was being issued" error, matched by its text). Those
+// forms are accepted only when these tests are built against a released
+// FAPIgo (fapigoFromTree): CI also runs them against the release this
+// module's go.mod requires, which may predate v0.86.0. Built against the
+// tree beside it, as they are otherwise, only invalid_grant is.
 func isRevokedWhileIssued(err error) bool {
 	var outer *server.Error
-	if !errors.As(err, &outer) || outer.Code() != server.ErrorServerError {
+	if !errors.As(err, &outer) {
+		return false
+	}
+	if outer.Code() == server.ErrorInvalidGrant {
+		return outer.PublicDescription() == "the grant has been revoked"
+	}
+	if fapigoFromTree || outer.Code() != server.ErrorServerError {
 		return false
 	}
 	cause := errors.Unwrap(outer)
@@ -158,14 +167,33 @@ func isRevokedWhileIssued(err error) bool {
 	return cause != nil && cause.Error() == "the grant was revoked while its refresh token was being issued"
 }
 
+// fapigoFromTree reports whether this module's go.mod replaces FAPIgo
+// with the tree beside it, so these tests are built against that tree,
+// not a released version (CI's run against the release drops the
+// replace with go mod edit). A test binary carries no build info about
+// its dependencies, so go.mod is read instead.
+var fapigoFromTree = func() bool {
+	mod, err := os.ReadFile("go.mod")
+	if err != nil {
+		return false
+	}
+	for line := range strings.Lines(string(mod)) {
+		if strings.HasPrefix(strings.TrimSpace(line), "replace github.com/idfoundry/fapigo =>") {
+			return true
+		}
+	}
+	return false
+}()
+
 // Concurrent exchanges of one authorization code: at most one issues
 // tokens and every other is invalid_grant, and the others' reuse of the
 // code revokes what the one issued (RFC 6749 §4.1.2) — its access token
 // at the resource server and its refresh token at the server — however
 // the reuse and the issuance interleave. None may issue: the exchange
 // that redeemed the code stores its refresh token and then confirms the
-// code's grant isn't revoked, and a reuse may have revoked it by then
-// (isRevokedWhileIssued), so nothing is issued.
+// code's grant isn't revoked, and a reuse may have revoked it by then,
+// so it withdraws the token and is invalid_grant too
+// (isRevokedWhileIssued).
 func TestServerConcurrentCodeExchanges(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
 		for name, grants := range grantStores {
@@ -187,17 +215,15 @@ func TestServerConcurrentCodeExchanges(t *testing.T) {
 
 // When a reuse of an authorization code revokes its grant while the
 // exchange that redeemed it is storing its refresh token, that exchange
-// issues nothing, as it must — but it answers server_error (500), a
-// store failure to the client, rather than invalid_grant: the
-// confirmation that the grant isn't revoked (confirmGrantNotRevoked)
-// finds invalid_grant, and the exchange wraps every failure to issue a
-// refresh token as server_error.
+// issues nothing and answers invalid_grant (400), the grant refused, not
+// the server_error (500) of a store failure: every loser of the race is
+// invalid_grant. (Against a FAPIgo release before v0.86.0, which
+// answered server_error, isRevokedWhileIssued accepts that too.)
 func TestServerCodeReuseRacingIssuanceIsInvalidGrant(t *testing.T) {
-	t.Skip("the exchange whose grant a racing reuse revokes answers server_error, not invalid_grant; awaiting a decision")
 	forEachDialect(t, func(t *testing.T, dialect sqlstore.Dialect) {
 		r := newServerRace(t, dialect, grantStores["Grants"], false)
 		for range serverRaceIterations {
-			r.checkCodeExchanges(r.raceCodeExchanges(), isInvalidGrant)
+			r.checkCodeExchanges(r.raceCodeExchanges(), isInvalidGrant, isRevokedWhileIssued)
 		}
 	})
 }

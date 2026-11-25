@@ -131,7 +131,7 @@ type HistoricalKeysIssueDependencies struct {
 // supplies Response's input.
 type HistoricalKeysIssuer struct {
 	cfg    HistoricalKeysIssueConfig
-	deps   HistoricalKeysIssueDependencies
+	deps   *HistoricalKeysIssueDependencies
 	active []jose.ParsedJWK
 }
 
@@ -165,7 +165,7 @@ func NewHistoricalKeysIssuer(cfg HistoricalKeysIssueConfig, deps HistoricalKeysI
 		active = parsed
 	}
 	cfg.AdditionalRevocationReasons = slices.Clone(cfg.AdditionalRevocationReasons)
-	return &HistoricalKeysIssuer{cfg: cfg, deps: deps, active: active}, nil
+	return &HistoricalKeysIssuer{cfg: cfg, deps: &deps, active: active}, nil
 }
 
 // Response signs and returns a Federation Historical Keys response

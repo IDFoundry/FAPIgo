@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -115,6 +116,11 @@ var keyHolders = map[string]keyHolder{
 				federation.SubordinateIssueDependencies{Signer: key, Algorithm: fapi.ES256},
 				federation.TrustMarkIssueDependencies{Signer: key, Algorithm: fapi.ES256},
 			}, keySecrets(key)
+		}},
+	"federation issuers": {
+		build: func(t *testing.T) (any, []string) {
+			key := ed25519Key(t)
+			return federationIssuers(t, key), keySecrets(key)
 		}},
 	"keys.NewInMemoryRSA": {covers: []string{"keys.inMemoryRSA.priv"},
 		build: func(t *testing.T) (any, []string) {
@@ -324,6 +330,32 @@ func ed25519Key(t *testing.T) ed25519.PrivateKey {
 		t.Fatal(err)
 	}
 	return key
+}
+
+// federationIssuers is one of each federation issuer, signing with key.
+func federationIssuers(t *testing.T, key ed25519.PrivateKey) any {
+	t.Helper()
+	const id = "https://entity.example"
+	clock := federation.SystemClock{}
+	jwks := []byte(`{"keys":[]}`)
+	return struct {
+		Historical  *federation.HistoricalKeysIssuer
+		Resolve     *federation.ResolveIssuer
+		Self        *federation.SelfIssuer
+		Subordinate *federation.SubordinateIssuer
+		TrustMark   *federation.TrustMarkIssuer
+	}{
+		must(federation.NewHistoricalKeysIssuer(federation.HistoricalKeysIssueConfig{EntityID: id},
+			federation.HistoricalKeysIssueDependencies{Signer: key, Algorithm: fapi.EdDSA, KeyID: "k", Clock: clock}))(t),
+		must(federation.NewResolveIssuer(federation.ResolveIssueConfig{EntityID: id},
+			federation.ResolveIssueDependencies{Signer: key, Algorithm: fapi.EdDSA, KeyID: "k", Clock: clock}))(t),
+		must(federation.NewSelfIssuer(federation.SelfIssueConfig{EntityID: id, Lifetime: time.Hour},
+			federation.SelfIssueDependencies{Signer: key, Algorithm: fapi.EdDSA, KeyID: "k", JWKS: jwks, Clock: clock}))(t),
+		must(federation.NewSubordinateIssuer(federation.SubordinateIssueConfig{EntityID: id, Lifetime: time.Hour},
+			federation.SubordinateIssueDependencies{Signer: key, Algorithm: fapi.EdDSA, KeyID: "k", Clock: clock}))(t),
+		must(federation.NewTrustMarkIssuer(federation.TrustMarkIssueConfig{EntityID: id},
+			federation.TrustMarkIssueDependencies{Signer: key, Algorithm: fapi.EdDSA, KeyID: "k", Clock: clock}))(t),
+	}
 }
 
 // signerKeyManager is keys.NewKeyManagerFromSigners over signer, with

@@ -63,7 +63,7 @@ type ResolveIssueDependencies struct {
 // it never resolves a Trust Chain itself — see its own doc comment.
 type ResolveIssuer struct {
 	cfg  ResolveIssueConfig
-	deps ResolveIssueDependencies
+	deps *ResolveIssueDependencies
 }
 
 // NewResolveIssuer validates cfg and deps and returns a ResolveIssuer.
@@ -83,7 +83,7 @@ func NewResolveIssuer(cfg ResolveIssueConfig, deps ResolveIssueDependencies) (*R
 	if deps.Clock == nil {
 		return nil, fmt.Errorf("federation: dependencies: clock is required")
 	}
-	return &ResolveIssuer{cfg: cfg, deps: deps}, nil
+	return &ResolveIssuer{cfg: cfg, deps: &deps}, nil
 }
 
 // VerifiedTrustMark pairs an already-verified Trust Mark's own wire

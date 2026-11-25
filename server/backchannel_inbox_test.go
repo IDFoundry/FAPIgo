@@ -285,8 +285,8 @@ func TestListBackchannelInteractionsReadsEntries(t *testing.T) {
 }
 
 // TestListBackchannelInteractionsFails: a store or record it can't read,
-// a client it can't resolve, or no subject fails the listing rather than
-// hiding a request.
+// a client it can't resolve, or no subject is an error rather than a
+// request silently hidden.
 func TestListBackchannelInteractionsFails(t *testing.T) {
 	t.Run("store can't answer", func(t *testing.T) {
 		h := inboxHarness(t, &stubInbox{BackchannelInbox: memstore.NewBackchannelInbox(), listErr: errors.New("inbox down")})
@@ -316,6 +316,22 @@ func TestListBackchannelInteractionsFails(t *testing.T) {
 			t.Fatal("ListBackchannelInteractions(zero SubjectID) = nil error, want error")
 		}
 	})
+}
+
+// TestListBackchannelInteractionsListsWhatItCanRead: an entry it can't
+// read is reported, with every request it could read still returned.
+func TestListBackchannelInteractionsListsWhatItCanRead(t *testing.T) {
+	inbox := &stubInbox{BackchannelInbox: memstore.NewBackchannelInbox()}
+	h := inboxHarness(t, inbox)
+	required := beginFiled(t, h, "user-1")
+	inbox.extra = []storage.BackchannelInboxEntry{{Record: json.RawMessage(`{`), ExpiresAt: h.now.Add(time.Hour)}}
+	pending, err := h.server.ListBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1"))
+	if err == nil {
+		t.Fatal("ListBackchannelInteractions with an undecodable entry = nil error, want error")
+	}
+	if len(pending) != 1 || pending[0].Handle.String() != required.Handle.String() {
+		t.Fatalf("ListBackchannelInteractions with an undecodable entry = %d requests, want the one readable", len(pending))
+	}
 }
 
 // emptySubjects resolves every hint to no subject, breaking its contract.
@@ -429,16 +445,15 @@ func (r fixedSubjects) ResolveBackchannelSubject(context.Context, fapi.ClientID,
 	return server.NewSubjectID(r.subject)
 }
 
-// TestBackchannelSubjectsMustAgreeWithTheIDTokenHint: when the server
-// can map an id_token_hint back to the user it names, a resolver naming
-// someone else is a misconfiguration, refused rather than letting the
-// resolver's user approve.
-func TestBackchannelSubjectsMustAgreeWithTheIDTokenHint(t *testing.T) {
-	h := cibaWithPairwise(t, newMappingDeriver())
+// beginWithIDTokenHint begins a CIBA request at h whose id_token_hint
+// names sub, with Dependencies.BackchannelSubjects resolving every hint
+// to resolved.
+func beginWithIDTokenHint(t *testing.T, h harness, sub, resolved string) server.BackchannelAuthenticationAction {
+	t.Helper()
 	params := standardBackchannelParams(t)
 	delete(params, "login_hint")
-	params["id_token_hint"] = jsonRaw(t, serverHint(t, h, func(c map[string]any) { c["sub"] = clientSubjectOf(t, h, "user-1") }))
-	h.deps.BackchannelSubjects = fixedSubjects{subject: "user-2"}
+	params["id_token_hint"] = jsonRaw(t, serverHint(t, h, func(c map[string]any) { c["sub"] = sub }))
+	h.deps.BackchannelSubjects = fixedSubjects{subject: resolved}
 	srv, err := server.New(h.cfg, h.deps)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -450,10 +465,36 @@ func TestBackchannelSubjectsMustAgreeWithTheIDTokenHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginBackchannelAuthentication: %v", err)
 	}
-	local, ok := action.(server.BackchannelAuthenticationLocalError)
-	if !ok || local.Error.Code() != server.ErrorServerError {
-		t.Fatalf("begin with a resolver disagreeing with the id_token_hint = %+v, want server_error", action)
-	}
+	return action
+}
+
+// TestBackchannelSubjectsMustAgreeWithTheIDTokenHint: when the server
+// can tell which user an id_token_hint names (a public client's sub is
+// the internal subject; a pairwise one it can map back), a resolver
+// naming someone else is a misconfiguration, refused rather than letting
+// the resolver's user approve.
+func TestBackchannelSubjectsMustAgreeWithTheIDTokenHint(t *testing.T) {
+	t.Run("pairwise", func(t *testing.T) {
+		h := cibaWithPairwise(t, newMappingDeriver())
+		action := beginWithIDTokenHint(t, h, clientSubjectOf(t, h, "user-1"), "user-2")
+		if local, ok := action.(server.BackchannelAuthenticationLocalError); !ok || local.Error.Code() != server.ErrorServerError {
+			t.Fatalf("begin with a resolver disagreeing with the id_token_hint = %+v, want server_error", action)
+		}
+	})
+	t.Run("public", func(t *testing.T) {
+		h, _ := newHarnessWithBackchannel(t)
+		action := beginWithIDTokenHint(t, h, "user-1", "user-2")
+		if local, ok := action.(server.BackchannelAuthenticationLocalError); !ok || local.Error.Code() != server.ErrorServerError {
+			t.Fatalf("begin with a resolver disagreeing with the id_token_hint = %+v, want server_error", action)
+		}
+	})
+	t.Run("public, agreeing", func(t *testing.T) {
+		h, _ := newHarnessWithBackchannel(t)
+		required, ok := beginWithIDTokenHint(t, h, "user-1", "user-1").(server.BackchannelInteractionRequired)
+		if !ok || required.Interaction.RequiredSubject != "user-1" {
+			t.Fatalf("begin with a resolver agreeing with the id_token_hint = %+v, want an interaction for user-1", required)
+		}
+	})
 }
 
 // TestBackchannelInboxSkipsADeregisteredClient: a request from a client

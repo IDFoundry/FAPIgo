@@ -47,6 +47,30 @@ and custom `AccessTokenResolver`s are unchanged.
 authorization server's `client_sub` means something you rely on, read
 it from `AuthorizationContext.Claims`.
 
+### A CIBA resolver must agree with a public client's `id_token_hint` (server)
+
+**Affects:** a server with `Dependencies.BackchannelSubjects` set whose
+resolver, for a CIBA request carrying an `id_token_hint` from a client
+with public subject identifiers, returns a different end user than the
+hint's `sub`.
+
+**Why:** the resolver's contract already requires it to return the user
+an `id_token_hint` names, and for a pairwise client the server checked
+this. For a public client, whose `sub` is the internal subject itself,
+it didn't, so a resolver bug bound the request to someone other than the
+user the client asked for.
+
+**What fails:** `BeginBackchannelAuthentication` refuses such a request
+with `server_error` (500) instead of starting it. Before, it started,
+but any approval of it was recorded as a failed authentication: it
+requires the resolver's user, while the `id_token_hint` requires the
+hint's.
+
+**What to change:** make the resolver return the hint's `sub` for an
+`id_token_hint` from a public-subject client
+(`hints.IDTokenHint` is already verified; `Server.VerifyIDTokenHint`
+returns its `sub`).
+
 ## v0.83.0
 
 ### A client with `Algorithms.UserInfo` accepts only signed UserInfo (client)

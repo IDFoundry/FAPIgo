@@ -196,7 +196,8 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), validateErr), nil
 	}
 
-	requiredSubject, requiredInternal, subjectErr := s.backchannelSubjects(ctx, client, validated.params)
+	subjects, subjectErr := s.backchannelSubjects(ctx, client, validated.params)
+	requiredSubject, requiredInternal := subjects.required, subjects.internal
 	if subjectErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), subjectErr), nil
 	}
@@ -211,7 +212,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "validated extension parameters could not be read back", err)), nil
 	}
 	interaction.RequiredSubject = requestRecord{RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal}.requiredSubjectForApplication()
-	resolvedSubject, resolveSubjectErr := s.resolveBackchannelSubject(ctx, client.ID(), interaction.Hints, requiredInternal)
+	resolvedSubject, resolveSubjectErr := s.resolveBackchannelSubject(ctx, client.ID(), interaction.Hints, subjects.resolverMust)
 	if resolveSubjectErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), resolveSubjectErr), nil
 	}

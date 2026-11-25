@@ -244,10 +244,12 @@ func raced(t *testing.T, srv *server.Server, grants storage.GrantStore, app flow
 		out.refreshToken, out.exchangeErr = app.exchange(ctx, srv, code)
 		if out.exchangeErr == nil {
 			await(ctx, race.revoked)
-			_, err := grants.RedeemRefreshToken(context.Background(), storage.RefreshTokenRedemption{TokenHash: serverRefreshTokenHash(productionIssuer, out.refreshToken)})
-			out.liveAfter = err == nil
-			if err != nil && !isNotFound(err) {
-				out.checkErr = err
+			for _, hash := range serverRefreshTokenHashes(productionIssuer, out.refreshToken) {
+				_, err := grants.RedeemRefreshToken(context.Background(), storage.RefreshTokenRedemption{TokenHash: hash})
+				out.liveAfter = out.liveAfter || err == nil
+				if err != nil && !isNotFound(err) {
+					out.checkErr = err
+				}
 			}
 		}
 	})

@@ -2,6 +2,7 @@ package federation
 
 import (
 	"context"
+	"crypto"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -434,7 +435,7 @@ func newRememberedFailure(err error) error {
 // including every RFC 8705 mTLS method: ClientAuthMethodSelfSignedTLSClientAuth
 // reads the RP's own certificates from the "x5c" members of its
 // jwks/jwks_uri entries (RFC 8705 §2.2) and accepts the certificate of
-// any of them; ClientAuthMethodTLSClientAuth and its four SAN-typed
+// any of them that holds its entry's own key (RFC 7517 §4.7); ClientAuthMethodTLSClientAuth and its four SAN-typed
 // siblings read their own plain-string metadata parameter directly (RFC
 // 8705 §2.1.2: tls_client_auth_subject_dn/tls_client_auth_san_dns/
 // _san_uri/_san_ip/_san_email) — see registeredClientConfigFromMetadata
@@ -1894,6 +1895,13 @@ func parseEncryptionAlgorithmPair(algValue, encValue *string, algLabel, encLabel
 // RP may authenticate with the certificate of any key in its RP JWK Set
 // (OpenID Federation 1.0 §12.1.1.2: "an x5c Claim for a key in the
 // Entity's RP JWK Set"), the second one during a key rollover, say.
+//
+// RFC 7517 §4.7 says the key in that first certificate "MUST match the
+// public key represented by other members of the JWK". An entry whose
+// certificate doesn't parse, or holds a different key, contributes no
+// thumbprint, and is named among the skipped entries when none is
+// left: the certificate registered is always one for a key in the RP
+// JWK Set, never one the entry merely carries.
 func certificateThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
 	candidates, skipped, err := jose.ParseJWKSetWithSkips(jwks)
 	if err != nil {
@@ -1904,8 +1912,9 @@ func certificateThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
 		if len(c.Certificates) == 0 {
 			continue
 		}
-		cert, err := x509.ParseCertificate(c.Certificates[0])
+		cert, err := entryCertificate(c)
 		if err != nil {
+			skipped = append(skipped, jose.SkippedJWK{KeyID: c.KeyID, Reason: err})
 			continue
 		}
 		if t := mtls.Thumbprint(cert); !slices.Contains(thumbprints, t) {
@@ -1916,6 +1925,20 @@ func certificateThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
 		return nil, fmt.Errorf("jwks has no usable x5c certificate%s", jose.SkippedKeysReason(skipped))
 	}
 	return thumbprints, nil
+}
+
+// entryCertificate parses c's first "x5c" certificate, refusing one
+// whose public key isn't c's own key (RFC 7517 §4.7).
+func entryCertificate(c jose.ParsedJWK) (*x509.Certificate, error) {
+	cert, err := x509.ParseCertificate(c.Certificates[0])
+	if err != nil {
+		return nil, fmt.Errorf("its x5c certificate doesn't parse: %w", err)
+	}
+	pub, ok := c.PublicKey.(interface{ Equal(crypto.PublicKey) bool })
+	if !ok || !pub.Equal(cert.PublicKey) {
+		return nil, errors.New("its x5c certificate holds a different key from the JWK's own (RFC 7517 §4.7)")
+	}
+	return cert, nil
 }
 
 // keyThumbprintsFromJWKS is internal/mtls.PublicKeyThumbprint of every

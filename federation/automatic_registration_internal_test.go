@@ -298,6 +298,55 @@ func TestRegisteredClientConfigFromMetadataSkipsUnparseableX5C(t *testing.T) {
 	}
 }
 
+// TestCertificateThumbprintsFromJWKSRequiresTheEntrysOwnKey: an entry
+// whose x5c certificate holds another key than the JWK's own (RFC 7517
+// §4.7) contributes no thumbprint, so a JWK Set can't register, for
+// self_signed_tls_client_auth, a certificate for a key it doesn't
+// list; the entry is named, with the reason, when nothing is left.
+func TestCertificateThumbprintsFromJWKSRequiresTheEntrysOwnKey(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	otherKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	foreign := testSelfSignedCert(t, otherKey)
+	mismatched := jwksWithCertificate(t, key, foreign)
+	if got, err := certificateThumbprintsFromJWKS(json.RawMessage(mismatched)); err == nil || !strings.Contains(err.Error(), `kid "rp-cert": its x5c certificate holds a different key`) {
+		t.Fatalf("certificateThumbprintsFromJWKS(mismatched x5c) = %v, %v; want the entry skipped, with the reason", got, err)
+	}
+
+	own := testSelfSignedCert(t, key)
+	var bad, good map[string][]map[string]any
+	if err := json.Unmarshal([]byte(mismatched), &bad); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(jwksWithCertificate(t, otherKey, own)), &good); err != nil {
+		t.Fatal(err)
+	}
+	// The second entry is otherKey's JWK carrying key's certificate:
+	// mismatched too. Only an entry whose certificate is its own counts.
+	good["keys"][0]["kid"] = "rp-other"
+	var ok map[string][]map[string]any
+	if err := json.Unmarshal([]byte(jwksWithCertificate(t, key, own)), &ok); err != nil {
+		t.Fatal(err)
+	}
+	ok["keys"][0]["kid"] = "rp-own"
+	body, err := json.Marshal(map[string]any{"keys": []map[string]any{bad["keys"][0], good["keys"][0], ok["keys"][0]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := certificateThumbprintsFromJWKS(body)
+	if err != nil {
+		t.Fatalf("certificateThumbprintsFromJWKS: %v", err)
+	}
+	if len(got) != 1 || got[0] != mtls.Thumbprint(own) {
+		t.Errorf("thumbprints = %q, want only the matching entry's %q", got, mtls.Thumbprint(own))
+	}
+}
+
 // TestRegisteredClientConfigFromMetadataRejectsJWKSURIServingNoJWKS: a
 // jwks_uri whose document, though served as JSON, isn't a JWK Set is
 // refused at registration, not registered as the client's keys.

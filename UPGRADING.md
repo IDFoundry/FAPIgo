@@ -171,6 +171,24 @@ unchanged.
 operations (`["verify"]` for a signing key's public half), or leave
 `key_ops` out.
 
+### A self-signed certificate must hold its JWK's own key (federation)
+
+**Affects:** an `AutomaticClientRepository` registering a relying party
+for `self_signed_tls_client_auth` whose RP JWK Set entry carries an
+`x5c` certificate for a different key from the entry's own.
+
+**Why:** RFC 7517 §4.7 requires the key in an entry's first `x5c`
+certificate to match the entry's key. The thumbprint of that
+certificate was registered whatever key it held, so an RP JWK Set could
+register a certificate for a key it doesn't list.
+
+**What fails:** such an entry no longer registers its certificate. When
+no entry is left, registration fails with "jwks has no usable x5c
+certificate", naming the entry and the reason.
+
+**What to change:** publish, in each entry's `x5c`, the certificate for
+that entry's own key.
+
 ## v0.83.0
 
 ### A client with `Algorithms.UserInfo` accepts only signed UserInfo (client)

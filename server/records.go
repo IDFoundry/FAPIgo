@@ -378,8 +378,10 @@ func withManagedClaim(claims map[string]json.RawMessage, name, value string) map
 		return claims
 	}
 	raw, _ := json.Marshal(value) // a string always marshals
-	with := make(map[string]json.RawMessage, len(claims)+1)
-	maps.Copy(with, claims)
+	with := maps.Clone(claims)
+	if with == nil {
+		with = map[string]json.RawMessage{}
+	}
 	with[name] = raw
 	return with
 }

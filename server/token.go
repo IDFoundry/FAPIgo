@@ -199,6 +199,13 @@ func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCod
 // spent nor treated as reused, so a reuse revokes what the code issued
 // (RFC 6749 §4.1.2) only when it comes from the code's own client
 // presenting all of them.
+//
+// Everything that doesn't depend on the code's record is checked before
+// the code is redeemed: the client's authentication and DPoP proof or
+// certificate, the request's parameters, its authorization_details'
+// shape, whether its redirect_uri is still registered, and the
+// resources it names (checkCodeExchangeRequest). A request refused for
+// any of them leaves the code redeemable.
 func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req AuthorizationCodeExchangeRequest) (_ TokenResult, retErr error) {
 	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
 	params, err := formParametersToMap(formParams)
@@ -232,6 +239,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	// attachNextDPoPNonceOnFailure.
 	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
 	presented.thumbprint, presented.instanceKey = thumbprint, authn.InstanceKey
+	if preErr := s.checkCodeExchangeRequest(ctx, client, presented.redirectURI, requestedResources); preErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), preErr)
+	}
 
 	redeemed, codeHash, err := s.redeemAuthorizationCode(ctx, client, code, presented)
 	if err != nil {
@@ -245,7 +255,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 	// The refresh token keeps all of grant: only the access token is
 	// narrowed to the authorization_details and resources requested.
-	accessGrant, audience, audiences, allowedErr := s.allowedGrantAudience(ctx, client, grant, grant.Scope, details, requestedResources)
+	accessGrant, audience, audiences, allowedErr := s.codeExchangeAudience(ctx, client, grant, details, requestedResources)
 	if allowedErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), allowedErr)
 	}
@@ -439,8 +449,8 @@ func (s *Server) codeRedemptionFailed(ctx context.Context, clientID fapi.ClientI
 // code hashing to codeHash, and checks it may still be exchanged as
 // presented: written by this server (ownsRecord), unexpired, matching
 // the request's redirect_uri, binding, PKCE verifier and client
-// instance, not revoked, and for a client still registered for the
-// authorization code grant.
+// instance, and not revoked. What doesn't depend on the record was
+// checked before the code was redeemed (checkCodeExchangeRequest).
 func (s *Server) redeemedCodeGrant(ctx context.Context, client storage.RegisteredClient, redeemed storage.RedeemedAuthorizationCode, codeHash [32]byte, presented codeExchange, now time.Time) (grantRecord, *Error) {
 	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
 	if err != nil {
@@ -469,18 +479,66 @@ func (s *Server) redeemedCodeGrant(ctx context.Context, client storage.Registere
 	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
 		return grantRecord{}, revErr
 	}
-	// The registration may have changed since the code was issued (a
-	// scope or RAR type removed, Config.OAuthOnly turned on, the client's
-	// redirect URIs removed), as at refresh and the CIBA token exchange.
-	if !client.AllowsAuthorizationCodeGrant() {
-		return grantRecord{}, newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil)
-	}
-	// Equal to the code's own redirect URI (validateRedeemedAuthorizationCode):
-	// one since removed from the registration is refused, as at completion.
-	if !client.HasRedirectURI(presented.redirectURI) {
-		return grantRecord{}, newError(ErrorInvalidGrant, 400, "redirect_uri is no longer registered for this client", nil)
-	}
 	return grant, nil
+}
+
+// checkCodeExchangeRequest refuses an authorization code token request
+// that the code's record couldn't make acceptable, before the code is
+// redeemed (redeemAuthorizationCode), so a request refused anyway
+// doesn't spend the code: the client's own exchange can still succeed.
+// The registration may have changed since the code was issued, as at
+// refresh and the CIBA token exchange: a client whose redirect URIs
+// were all removed is no longer registered for the authorization code
+// grant, and one since removed is refused as at completion. The
+// redirect_uri presented must equal the code's own
+// (validateRedeemedAuthorizationCode, and the code's digest), so one
+// not registered now can't be the code's and still be accepted. The
+// resources the request names, if any, are checked as
+// checkRequestedResources checks them: the access token would be
+// restricted to exactly those, and codeExchangeAudience then only
+// checks they were granted.
+//
+// A request refused here doesn't reach the store, so it isn't taken as
+// a reuse of a code already redeemed either: a reuse revokes what the
+// code issued (codeRedemptionFailed) only when it's otherwise a request
+// this server could accept.
+func (s *Server) checkCodeExchangeRequest(ctx context.Context, client storage.RegisteredClient, redirectURI string, requestedResources []string) *Error {
+	if !client.AllowsAuthorizationCodeGrant() {
+		return newError(ErrorUnauthorizedClient, 400, "the client is not registered for the authorization code grant", nil)
+	}
+	if !client.HasRedirectURI(redirectURI) {
+		return newError(ErrorInvalidGrant, 400, "redirect_uri is not registered for this client", nil)
+	}
+	if len(requestedResources) > 0 {
+		if _, err := s.checkRequestedResources(ctx, client, requestedResources); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// codeExchangeAudience is allowedGrantAudience for the authorization
+// code exchange of grant. checkCodeExchangeRequest has already checked
+// the resources the request names, if any, before the code was
+// redeemed, so they're only checked against the grant here
+// (narrowResources), and ResourcePolicy isn't asked about them again.
+func (s *Server) codeExchangeAudience(ctx context.Context, client storage.RegisteredClient, grant grantRecord, details requestedAuthorizationDetails, requested []string) (grantRecord, string, []string, *Error) {
+	if len(requested) == 0 {
+		return s.allowedGrantAudience(ctx, client, grant, grant.Scope, details, nil)
+	}
+	if err := s.checkGrantStillAllowed(client, grant, grant.Scope); err != nil {
+		return grantRecord{}, "", nil, err
+	}
+	accessGrant, err := s.accessTokenGrant(grant, grant.Scope, details)
+	if err != nil {
+		return grantRecord{}, "", nil, err
+	}
+	resources, err := narrowResources(grant.Resources, requested)
+	if err != nil {
+		return grantRecord{}, "", nil, err
+	}
+	audience, audiences := s.accessTokenAudience(resources)
+	return accessGrant, audience, audiences, nil
 }
 
 // checkCodeInstance refuses an authorization code grant presented by a

@@ -2646,8 +2646,8 @@
   {
     "id": "fed-resolution-failure-remembered-before-hook",
     "file": "federation/automatic_registration.go",
-    "old": "a.rememberFailure(id, err, a.clock.Now())\n\t\tif a.cfg.OnResolutionFailure != nil {\n\t\t\ta.cfg.OnResolutionFailure(ctx, id, err)\n\t\t}",
-    "new": "if a.cfg.OnResolutionFailure != nil {\n\t\t\ta.cfg.OnResolutionFailure(ctx, id, err)\n\t\t}\n\t\ta.rememberFailure(id, err, a.clock.Now())",
+    "old": "a.rememberFailure(id, err, a.clock.Now())\n\t\ta.publishFailure(call, err)\n\t\tif a.cfg.OnResolutionFailure != nil {\n\t\t\ta.cfg.OnResolutionFailure(ctx, id, err)\n\t\t}",
+    "new": "a.publishFailure(call, err)\n\t\tif a.cfg.OnResolutionFailure != nil {\n\t\t\ta.cfg.OnResolutionFailure(ctx, id, err)\n\t\t}\n\t\ta.rememberFailure(id, err, a.clock.Now())",
     "module": "root",
     "packages": [
       "./federation"
@@ -5598,5 +5598,65 @@
     ],
     "run": "^TestIssuersPrintNoKey$",
     "why": "log/slog logs a TrustMarkIssuer's redacted shadow"
+  },
+  {
+    "id": "fed-chain-expiry-skew",
+    "file": "federation/resolver.go",
+    "old": "if now.After(expiresAt.Add(r.cfg.Limits.MaxClockSkew)) {",
+    "new": "if now.After(expiresAt) {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestResolveRefusesChainExpiredWhileResolving|TestAutomaticRegistrationRefusesChainExpiredWhileRegistering|TestAutomaticRegistrationRefusesChainExpiredWhileResolving)$",
+    "why": "a chain still within MaxClockSkew of its exp when its resolution finishes is accepted, as each statement's exp check accepts it"
+  },
+  {
+    "id": "fed-resolve-end-expiry-check",
+    "file": "federation/resolver.go",
+    "old": "if err := r.checkChainUnexpired(subjectID, resolved.ExpiresAt, r.deps.Clock.Now()); err != nil {",
+    "new": "if err := r.checkChainUnexpired(subjectID, resolved.ExpiresAt, r.deps.Clock.Now()); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestResolveRefusesChainExpiredWhileResolving|TestAutomaticRegistrationRefusesChainExpiredWhileRegistering|TestAutomaticRegistrationRefusesChainExpiredWhileResolving)$",
+    "why": "Resolve refuses a Trust Chain that expired before its resolution finished"
+  },
+  {
+    "id": "fed-register-expiry-check",
+    "file": "federation/automatic_registration.go",
+    "old": "if err := a.resolver.checkChainUnexpired(string(id), resolved.ExpiresAt, now); err != nil {",
+    "new": "if err := a.resolver.checkChainUnexpired(string(id), resolved.ExpiresAt, now); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestResolveRefusesChainExpiredWhileResolving|TestAutomaticRegistrationRefusesChainExpiredWhileRegistering|TestAutomaticRegistrationRefusesChainExpiredWhileResolving)$",
+    "why": "automatic registration refuses a chain that expired while the registration was built (jwks_uri fetch)"
+  },
+  {
+    "id": "fed-reentrant-hook-published-failure",
+    "file": "federation/automatic_registration.go",
+    "old": "if ok && call.failure != nil {",
+    "new": "if ok && call.failure != nil && false {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestReentrantResolutionFailureHookReturns|TestReentrantResolutionFailureHookReturnsWhenMemoryFull)$",
+    "why": "a request for a client_id whose resolution is reporting its failure gets it at once instead of waiting on the hook"
+  },
+  {
+    "id": "fed-reentrant-hook-publish",
+    "file": "federation/automatic_registration.go",
+    "old": "\t\ta.publishFailure(call, err)\n",
+    "new": "\t\t_ = call\n",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^(TestReentrantResolutionFailureHookReturns|TestReentrantResolutionFailureHookReturnsWhenMemoryFull)$",
+    "why": "the failure is published on the in-flight resolution before OnResolutionFailure runs"
   }
 ]

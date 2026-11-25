@@ -44,7 +44,10 @@ import (
 //
 // A case whose renderings print its key today is skipped, with the
 // reason in knownLeak, so the matrix records the gap without failing
-// the build; removing knownLeak is how a fix proves itself.
+// the build; removing knownLeak is how a fix proves itself. A case
+// whose key sits in an exported field the caller fills, which fmt's
+// reflection fallback prints as it prints any exported field, accepts
+// that fallback, with the reason in inputField.
 
 // keyHolder is one case of the key-material matrix.
 type keyHolder struct {
@@ -55,14 +58,15 @@ type keyHolder struct {
 	build func(t *testing.T) (value any, secrets []string)
 	// knownLeak, when set, skips the case: some rendering prints the key.
 	knownLeak string
+	// inputField, when set, accepts what fmt's reflection fallback
+	// prints, which calls none of the value's methods: the key is in an
+	// exported field of an input type the caller fills.
+	inputField string
 }
 
-// The known leaks the skipped cases record.
-const (
-	leaksEd25519     = "fmt's %v prints an ed25519.PrivateKey held behind crypto.Signer: it is a byte slice, which fmt prints at any depth"
-	leaksSignerJSON  = "encoding/json, encoding/xml and slog's JSON handler encode an *ecdsa.PrivateKey held in the exported Signer field, D included"
-	leaksECDHBadVerb = "fmt's %s and %q print the *ecdh.PrivateKey's bytes: a verb a pointer field doesn't take makes fmt print what it points to"
-)
+// signerSpecEd25519 is why the keys.SignerSpec EdDSA case accepts fmt's
+// reflection fallback.
+const signerSpecEd25519 = "an ed25519.PrivateKey in SignerSpec's exported Signer field is a byte slice, which fmt's reflection fallback (%w outside Errorf, %p, a SignerSpec in an unexported field) prints byte by byte; an *ecdsa.PrivateKey or *rsa.PrivateKey sits behind a pointer it prints as an address"
 
 // keyHolders are the key-material matrix's cases, by name.
 var keyHolders = map[string]keyHolder{
@@ -80,7 +84,7 @@ var keyHolders = map[string]keyHolder{
 		build: func(t *testing.T) (any, []string) { return signerKeyManager(t, fapi.ES256, ecdsaKey(t)) }},
 	"keys.NewKeyManagerFromSigners PS256": {covers: []string{"keys.signerBackend.signer"},
 		build: func(t *testing.T) (any, []string) { return signerKeyManager(t, fapi.PS256, rsaKey(t)) }},
-	"keys.NewKeyManagerFromSigners EdDSA": {covers: []string{"keys.signerBackend.signer"}, knownLeak: leaksEd25519,
+	"keys.NewKeyManagerFromSigners EdDSA": {covers: []string{"keys.signerBackend.signer"},
 		build: func(t *testing.T) (any, []string) { return signerKeyManager(t, fapi.EdDSA, ed25519Key(t)) }},
 	"keys.SignerSpec ES256 and PS256": {covers: []string{"keys.SignerSpec.Signer"},
 		build: func(t *testing.T) (any, []string) {
@@ -90,12 +94,12 @@ var keyHolders = map[string]keyHolder{
 				{Purpose: keys.IDTokenSigning, Algorithm: fapi.PS256, Signer: rsa},
 			}, append(keySecrets(ec), keySecrets(rsa)...)
 		}},
-	"keys.SignerSpec EdDSA": {covers: []string{"keys.SignerSpec.Signer"}, knownLeak: leaksEd25519,
+	"keys.SignerSpec EdDSA": {covers: []string{"keys.SignerSpec.Signer"}, inputField: signerSpecEd25519,
 		build: func(t *testing.T) (any, []string) {
 			key := ed25519Key(t)
 			return keys.SignerSpec{Purpose: keys.JARMSigning, Algorithm: fapi.EdDSA, Signer: key}, keySecrets(key)
 		}},
-	"federation issuers' Dependencies": {knownLeak: leaksSignerJSON,
+	"federation issuers' Dependencies": {
 		covers: []string{
 			"federation.HistoricalKeysIssueDependencies.Signer", "federation.ResolveIssueDependencies.Signer",
 			"federation.SelfIssueDependencies.Signer", "federation.SubordinateIssueDependencies.Signer",
@@ -127,7 +131,7 @@ var keyHolders = map[string]keyHolder{
 			key := rsaKey(t)
 			return must(keys.NewInMemoryRSA(key, "k"))(t), keySecrets(key)
 		}},
-	"keys.NewInMemoryECDH": {covers: []string{"keys.inMemoryECDH.priv"}, knownLeak: leaksECDHBadVerb,
+	"keys.NewInMemoryECDH": {covers: []string{"keys.inMemoryECDH.priv"},
 		build: func(t *testing.T) (any, []string) {
 			key := must(ecdh.P256().GenerateKey(rand.Reader))(t)
 			return must(keys.NewInMemoryECDH(key, "k"))(t), keySecrets(key)
@@ -136,7 +140,7 @@ var keyHolders = map[string]keyHolder{
 		build: func(t *testing.T) (any, []string) {
 			return ephemeralKeyManager(t, map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.JARMSigning: fapi.ES256, keys.IDTokenSigning: fapi.PS256}, nil)
 		}},
-	"ephemeral.NewKeyManager EdDSA": {covers: []string{"ephemeral.signingKey.signer"}, knownLeak: leaksEd25519,
+	"ephemeral.NewKeyManager EdDSA": {covers: []string{"ephemeral.signingKey.signer"},
 		build: func(t *testing.T) (any, []string) {
 			return ephemeralKeyManager(t, map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.JARMSigning: fapi.EdDSA}, nil)
 		}},
@@ -172,7 +176,11 @@ func TestKeyHoldersDontPrintTheirKeys(t *testing.T) {
 				t.Skip("known leak, awaiting a decision: " + tc.knownLeak)
 			}
 			value, secrets := tc.build(t)
-			rendertest.Check(t, value, secrets, rendertest.Quick())
+			opts := []rendertest.Option{rendertest.Quick()}
+			if tc.inputField != "" {
+				opts = append(opts, rendertest.Allow(rendertest.Fallback))
+			}
+			rendertest.Check(t, value, secrets, opts...)
 		})
 	}
 }

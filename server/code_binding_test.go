@@ -156,6 +156,10 @@ func requireReuseWithoutBindingRevokesNothing(t *testing.T, missing missingBindi
 	h, clock := harnessOnStepClock(t)
 	own := codePresentation{verifier: testCodeVerifier, redirectURI: testRedirectURI, dpopKey: generateKey(t)}
 	code := dpopBoundCode(t, h, own.dpopKey)
+	// The other redirect URI is registered, so a presentation naming it
+	// passes the check made before redemption and reaches the code's
+	// digest, which it's not part of.
+	reregisterRedirectURIs(t, h, testRedirectURI, unregisteredRedirectURI)
 	first, err := presentCode(t, h, code, own)
 	if err != nil || !first.HasRefreshToken {
 		t.Fatalf("ExchangeAuthorizationCode = %v (refresh token %v)", err, first.HasRefreshToken)
@@ -190,6 +194,9 @@ func TestCodeIsNotSpentWithoutItsBinding(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)
 			own := codePresentation{verifier: testCodeVerifier, redirectURI: testRedirectURI, dpopKey: generateKey(t)}
 			code := dpopBoundCode(t, h, own.dpopKey)
+			// Registered, so it reaches the digest (see
+			// requireReuseWithoutBindingRevokesNothing).
+			reregisterRedirectURIs(t, h, testRedirectURI, unregisteredRedirectURI)
 			_, err := presentCode(t, h, code, missing.of(t, own))
 			requireInvalidGrant(t, err)
 			if _, err := presentCode(t, h, code, own); err != nil {

@@ -167,7 +167,9 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), nonceErr)
 	}
 
-	s.audit(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), AuditOutcomeSuccess, "")
+	if auditErr := s.auditRequired(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), AuditOutcomeSuccess, ""); auditErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), auditErr)
+	}
 	return result, nil
 }
 

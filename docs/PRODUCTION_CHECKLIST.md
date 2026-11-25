@@ -35,7 +35,13 @@ are things no constructor can check.
   pass `keys.TestClientKeySourceContract`.
   [Step 1](../GETTING_STARTED.md#1-dependencies-use-the-reference-implementations-to-start)
 - [ ] **An audit sink** (`Dependencies.Audit`), `server.SystemClock{}`
-  and `crypto/rand.Reader`.
+  and `crypto/rand.Reader`. Auditing is best-effort: an event the sink
+  can't record is lost and the request carries on. If a token must
+  never be issued without a record, have the sink implement
+  `server.FailClosedAuditSink` (returning true): token issuance,
+  revocation and a revoking code reuse then fail with `server_error`
+  when their event can't be recorded, after the state change, so a
+  spent code or `auth_req_id` stays spent.
   [Step 4](../GETTING_STARTED.md#4-wire-dependencies-and-construct-the-server)
 - [ ] **A revocation choice:** a revocation store the resource servers
   share, or `server.NoRevocation{}` with short access token lifetimes,

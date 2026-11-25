@@ -284,7 +284,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), nonceErr)
 	}
 
-	s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeSuccess, "")
+	if auditErr := s.auditRequired(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeSuccess, ""); auditErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), auditErr)
+	}
 	return result, nil
 }
 
@@ -438,9 +440,13 @@ func isCodeAlreadyRedeemed(err error) bool {
 // of them finds the code (authorizationCodeHash).
 func (s *Server) codeRedemptionFailed(ctx context.Context, clientID fapi.ClientID, err error, codeHash [32]byte) (TokenResult, error) {
 	invalidErr := newError(ErrorInvalidGrant, 400, codeUnknownDescription, err)
-	if s.revokeTokensForReusedCode(ctx, err, clientID, codeHash) {
+	crossClient, auditErr := s.revokeTokensForReusedCode(ctx, err, clientID, codeHash)
+	if crossClient {
 		s.audit(ctx, AuditEventExchangeAuthorizationCode, clientID, AuditOutcomeFailure, "code reused by another client")
 		return TokenResult{}, invalidErr
+	}
+	if auditErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, clientID, auditErr)
 	}
 	return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, clientID, storeFailure(ctx, err, "failed to redeem the authorization code", invalidErr))
 }
@@ -614,21 +620,21 @@ const codeVerifierMismatchDescription = "code_verifier does not match code_chall
 // the code. A revocation is audited on its own, as
 // AuditEventRevokeReusedAuthorizationCode: a failure when one of its
 // writes failed (revokeReusedCodeTokens), so something issued from the
-// code may still be accepted.
-func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, presentedBy fapi.ClientID, codeHash [32]byte) (crossClient bool) {
+// code may still be accepted. auditErr is the server_error to answer
+// with when a FailClosedAuditSink couldn't record that event.
+func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, presentedBy fapi.ClientID, codeHash [32]byte) (crossClient bool, auditErr *Error) {
 	var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
 	if !errors.As(err, &alreadyRedeemed) {
-		return false
+		return false, nil
 	}
 	if alreadyRedeemed.ClientID != "" && alreadyRedeemed.ClientID != presentedBy {
-		return true
+		return true, nil
 	}
 	outcome, description := AuditOutcomeSuccess, ""
 	if s.revokeReusedCodeTokens(ctx, alreadyRedeemed, codeHash) != nil {
 		outcome, description = AuditOutcomeFailure, "the tokens issued from the code could not all be revoked"
 	}
-	s.audit(ctx, AuditEventRevokeReusedAuthorizationCode, presentedBy, outcome, description)
-	return false
+	return false, s.auditRequired(ctx, AuditEventRevokeReusedAuthorizationCode, presentedBy, outcome, description)
 }
 
 // revokeReusedCodeTokens revokes what reused, the reuse of the code

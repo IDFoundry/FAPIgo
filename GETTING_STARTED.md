@@ -536,6 +536,21 @@ who can have a client generate proofs for later, or capture them, can
 use one until it ages out (RFC 9449 §11, the FAPI 2.0 attacker model's
 A5). See [docs/guides/dpop.md](docs/guides/dpop.md).
 
+`Dependencies.Audit` (required under `AssuranceProduction`) is a
+`server.AuditSink` the server hands an `AuditEvent` for every
+security-significant outcome. Auditing is best-effort by default: an
+error from `Record` is ignored. If your deployment must not hand out a
+token without a record of it, have the sink also implement
+`server.FailClosedAuditSink`, with `AuditFailsClosed` returning true:
+a token response (code, refresh, CIBA and client credentials grants,
+`IssueAccessToken`, `IssueRefreshToken`), a revocation endpoint answer
+and a revoking authorization code reuse then fail with `server_error`
+when their event can't be recorded. The event is recorded after the
+state change, so a failure can't undo it: the code or `auth_req_id` is
+spent and the client starts over, and the tokens minted for the failed
+response may already be in your stores but are never returned. Other
+events stay best-effort. See `FailClosedAuditSink`'s doc comment.
+
 (`fetcher` is a `*fapihttp.Client` — only needed if any client's keys
 are fetched live from a `jwks_uri` rather than supplied inline; pass
 `nil` if every client uses an inline `jwks`. Build one with

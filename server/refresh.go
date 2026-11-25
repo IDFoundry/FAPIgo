@@ -199,7 +199,9 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), nonceErr)
 	}
 
-	s.audit(ctx, AuditEventRefreshAccessToken, client.ID(), AuditOutcomeSuccess, "")
+	if auditErr := s.auditRequired(ctx, AuditEventRefreshAccessToken, client.ID(), AuditOutcomeSuccess, ""); auditErr != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), auditErr)
+	}
 	return result, nil
 }
 

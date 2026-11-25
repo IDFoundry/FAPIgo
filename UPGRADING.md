@@ -208,6 +208,27 @@ attester.
 algorithm they sign with, and give different keys of one attester
 different kids.
 
+### A client refuses an OP's federation entity key as a protocol key (client)
+
+**Affects:** a client built with `client.NewFromDiscovery` from
+`client.DiscoverViaFederation`'s metadata, for an OP that signs ID
+tokens, JARM responses or UserInfo responses with one of its federation
+entity keys.
+
+**Why:** a federation entity key signs the OP's Entity Configuration,
+which vouches for its protocol keys. OpenID Federation keeps the two
+apart, and a FAPIgo server already refuses to reuse one; the client
+accepted such a key whenever `Dependencies.IssuerKeys` returned it.
+
+**What fails:** a key `Dependencies.IssuerKeys` returns that is also
+one of the OP's entity keys (its Trust Chain's keys for it, or its
+Entity Configuration's `jwks`) isn't tried. A JWS only such a key
+matches fails with `ErrorInvalidResponse`, saying its only matching key
+is a federation entity key.
+
+**What to change:** have the OP sign protocol messages with a key
+distinct from its federation entity keys.
+
 ## v0.83.0
 
 ### A client with `Algorithms.UserInfo` accepts only signed UserInfo (client)

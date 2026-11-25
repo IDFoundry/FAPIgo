@@ -185,21 +185,26 @@ func TestClientEntityConfiguration(t *testing.T) {
 // *federation.Resolver already configured to trust it.
 func selfAnchoredOpenIDProvider(t *testing.T, buildMetadata func(entityID string) map[string]json.RawMessage) (entityID string, resolver *federation.Resolver) {
 	t.Helper()
+	entityID, resolver, _ = selfAnchoredOpenIDProviderKeys(t, buildMetadata, nil)
+	return entityID, resolver
+}
+
+// selfAnchoredOpenIDProviderKeys is selfAnchoredOpenIDProvider, also
+// returning the federation entity key the Entity Configuration is
+// signed with (the Trust Anchor's key for it). extra, when set, is
+// published in the Entity Configuration's "jwks" beside that key, but
+// isn't in the Trust Anchor's JWK Set.
+func selfAnchoredOpenIDProviderKeys(t *testing.T, buildMetadata func(entityID string) map[string]json.RawMessage, extra *ecdsa.PublicKey) (entityID string, resolver *federation.Resolver, entityKey *ecdsa.PrivateKey) {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	jwk, err := jose.NewJWK(&key.PublicKey, fapi.ES256)
-	if err != nil {
-		t.Fatalf("jose.NewJWK: %v", err)
-	}
-	jwkJSON, err := jwk.WithKeyID("as-federation-key").MarshalJSON()
-	if err != nil {
-		t.Fatalf("marshal jwk: %v", err)
-	}
-	jwks, err := json.Marshal(map[string][]json.RawMessage{"keys": {jwkJSON}})
-	if err != nil {
-		t.Fatalf("marshal jwk set: %v", err)
+	jwkJSON := marshalTestJWK(t, &key.PublicKey, "as-federation-key")
+	jwks := mustMarshal(t, map[string][]json.RawMessage{"keys": {jwkJSON}})
+	configurationJWKS := jwks
+	if extra != nil {
+		configurationJWKS = mustMarshal(t, map[string][]json.RawMessage{"keys": {jwkJSON, marshalTestJWK(t, extra, "as-federation-key-2")}})
 	}
 
 	mux := http.NewServeMux()
@@ -217,7 +222,7 @@ func selfAnchoredOpenIDProvider(t *testing.T, buildMetadata func(entityID string
 	token, err := intfed.CreateUncheckedForTesting(intfed.CreateParams{
 		Signer: key, Algorithm: fapi.ES256, KeyID: "as-federation-key",
 		Issuer: entityID, Subject: entityID, Now: time.Now(), Lifetime: time.Hour,
-		JWKS: jwks, Metadata: metadata,
+		JWKS: configurationJWKS, Metadata: metadata,
 	})
 	if err != nil {
 		t.Fatalf("intfed.CreateUncheckedForTesting: %v", err)
@@ -244,7 +249,21 @@ func selfAnchoredOpenIDProvider(t *testing.T, buildMetadata func(entityID string
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	return entityID, resolver
+	return entityID, resolver, key
+}
+
+// marshalTestJWK is pub as an ES256 JWK with kid.
+func marshalTestJWK(t *testing.T, pub *ecdsa.PublicKey, kid string) json.RawMessage {
+	t.Helper()
+	jwk, err := jose.NewJWK(pub, fapi.ES256)
+	if err != nil {
+		t.Fatalf("jose.NewJWK: %v", err)
+	}
+	out, err := jwk.WithKeyID(kid).MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshal jwk: %v", err)
+	}
+	return out
 }
 
 func mustMarshal(t *testing.T, v any) json.RawMessage {

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
+	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/metadata"
 	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/keys"
@@ -99,7 +101,9 @@ func (c *Client) EntityConfiguration(ctx context.Context, metadata map[string]js
 // are: resolved.JWKS is a different key entirely (this issuer's own
 // federation signing key, used to sign Entity/Subordinate Statements —
 // see federation/doc.go), never the operational key it signs ID tokens
-// or JARM responses with.
+// or JARM responses with. A Client NewFromDiscovery builds from this
+// metadata enforces that: it refuses a key Dependencies.IssuerKeys
+// returns that is also one of the issuer's federation entity keys.
 //
 // In production, resolver's Dependencies.HTTP must be fapihttp.New over
 // fapihttp.NewClient's client (HardenedForProduction): neither this nor
@@ -210,4 +214,74 @@ func (c *Client) checkTrustChain() error {
 	}
 	return newError(ErrorTrustChainExpired, "the authorization server's Trust Chain has expired",
 		fmt.Errorf("%w (it expired at %s)", ErrTrustChainExpired, c.trustChainExpiresAt.UTC().Format(time.RFC3339)))
+}
+
+// federationEntityKeys are resolved's federation entity keys: the JWK
+// Set its Trust Chain trusts for it (resolved.JWKS) and the one its own
+// Entity Configuration publishes (the "jwks" of resolved.Tokens[0]),
+// which Resolve has verified with the first. Entries ParseTrustedJWKSet
+// skips are left out: no signature is verified with them either.
+func federationEntityKeys(resolved federation.ResolvedEntity) []crypto.PublicKey {
+	var out []crypto.PublicKey
+	for _, set := range []json.RawMessage{resolved.JWKS, entityConfigurationJWKS(resolved)} {
+		parsed, err := jose.ParseTrustedJWKSet(set)
+		if err != nil {
+			continue
+		}
+		for _, k := range parsed {
+			out = append(out, k.PublicKey)
+		}
+	}
+	return out
+}
+
+// entityConfigurationJWKS is the "jwks" claim of resolved's own Entity
+// Configuration (resolved.Tokens[0]), nil when there is none to read.
+// Resolve verified the token, so it is read without verifying again.
+func entityConfigurationJWKS(resolved federation.ResolvedEntity) json.RawMessage {
+	if len(resolved.Tokens) == 0 {
+		return nil
+	}
+	compact, err := jose.ParseCompactMax(resolved.Tokens[0], len(resolved.Tokens[0]))
+	if err != nil {
+		return nil
+	}
+	var claims struct {
+		JWKS json.RawMessage `json:"jwks"`
+	}
+	if strictjson.Unmarshal(compact.Payload, &claims) != nil {
+		return nil
+	}
+	return claims.JWKS
+}
+
+// refuseEntityKeys drops from candidates every key that is also one of
+// the authorization server's federation entity keys (issuerEntityKeys),
+// reporting whether any was dropped. A federation entity key signs the
+// issuer's Entity Configuration, which vouches for its protocol keys;
+// accepting one as a protocol key would let anything it signs (an
+// Entity Statement, say) stand in for an ID token or JARM response,
+// which is why the server refuses to reuse one too.
+func (c *Client) refuseEntityKeys(candidates []keys.IssuerKey) (kept []keys.IssuerKey, dropped bool) {
+	if len(c.issuerEntityKeys) == 0 {
+		return candidates, false
+	}
+	kept = make([]keys.IssuerKey, 0, len(candidates))
+	for _, candidate := range candidates {
+		if isEntityKey(candidate.PublicKey, c.issuerEntityKeys) {
+			dropped = true
+			continue
+		}
+		kept = append(kept, candidate)
+	}
+	return kept, dropped
+}
+
+// isEntityKey reports whether pub is one of entityKeys.
+func isEntityKey(pub crypto.PublicKey, entityKeys []crypto.PublicKey) bool {
+	equal, ok := pub.(interface{ Equal(crypto.PublicKey) bool })
+	if !ok {
+		return false
+	}
+	return slices.ContainsFunc(entityKeys, func(entityKey crypto.PublicKey) bool { return equal.Equal(entityKey) })
 }

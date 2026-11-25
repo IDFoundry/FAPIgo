@@ -29,7 +29,9 @@ const maxIssuerKeyCandidates = 8
 // errors. verifyIssuerSigned uses it for every check of something the
 // issuer signed (a JARM response, an ID token, and, via VerifyIssuerJWS,
 // any other artifact a caller asks about), so "resolution failed" and
-// "no matching key" are handled in one place.
+// "no matching key" are handled in one place. A key that is also one of
+// the issuer's federation entity keys is never a candidate (see
+// refuseEntityKeys).
 func (c *Client) resolveIssuerKeyCandidates(ctx context.Context, what string, purpose keys.IssuerVerificationPurpose, algorithm fapi.SignatureAlgorithm, keyID string) ([]keys.IssuerKey, *Error) {
 	if c.deps.IssuerKeys == nil {
 		return nil, newError(ErrorInternal, "no issuer keys configured (Dependencies.IssuerKeys is nil, which Config.OAuthOnly permits only when nothing issuer-signed is verified)", nil)
@@ -40,10 +42,14 @@ func (c *Client) resolveIssuerKeyCandidates(ctx context.Context, what string, pu
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to resolve issuer keys", err)
 	}
-	if len(set.Keys) == 0 {
+	candidates, dropped := c.refuseEntityKeys(set.Keys)
+	if len(candidates) == 0 {
+		if dropped {
+			return nil, newError(ErrorInvalidResponse, "the issuer's only matching key for "+what+" is one of its federation entity keys, which are never protocol keys", nil)
+		}
 		return nil, newError(ErrorInvalidResponse, "no matching issuer key for "+what, nil)
 	}
-	return set.Keys[:min(len(set.Keys), maxIssuerKeyCandidates)], nil
+	return candidates[:min(len(candidates), maxIssuerKeyCandidates)], nil
 }
 
 // verifyIssuerSigned checks a JWS the authorization server signed (what

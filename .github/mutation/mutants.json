@@ -4588,16 +4588,16 @@
   },
   {
     "id": "federation-scope-one-of-bounds-absent-scope",
-    "file": "internal/federation/policy_space_delimited.go",
-    "old": "\traw, ok := split[opOneOf]\n\tif !ok {",
-    "new": "\traw, ok := split[opOneOf]\n\tif !ok || true {",
+    "file": "internal/federation/policy.go",
+    "old": "\tif !ok {\n\t\treturn permitted, constrained, nil\n\t}\n\toptions, err := decodeArray(raw)",
+    "new": "\tif !ok || true {\n\t\treturn permitted, constrained, nil\n\t}\n\toptions, err := decodeArray(raw)",
     "module": "root",
     "packages": [
       "./internal/federation",
       "./federation"
     ],
-    "run": "^(TestPermittedSpaceDelimitedStrings|TestAutomaticRegistrationNarrowsGrantsByResolvedMetadata)$",
-    "why": "a one_of on scope bounds the scopes an RP leaving scope out gets"
+    "run": "^(TestPermittedSpaceDelimitedStrings|TestAutomaticRegistrationNarrowsGrantsByResolvedMetadata|TestAutomaticRegistrationRARTypesAbsentUnderEachOperator)$",
+    "why": "a one_of bounds the scopes, or the authorization_details_types, an RP leaving the parameter out gets"
   },
   {
     "id": "federation-null-metadata-parameter-quoted",
@@ -5018,5 +5018,57 @@
     ],
     "run": "^TestAccessTokenKeysAreNamespacedByIssuer$",
     "why": "the issuer's length prefix splits an access token revocation key into issuer and token key one way only"
+  },
+  {
+    "id": "federation-array-one-of-string-option-lists-itself",
+    "file": "internal/federation/policy.go",
+    "old": "\t\tif json.Unmarshal(option, &s) == nil && s != nil {",
+    "new": "\t\tif json.Unmarshal(option, &s) == nil && s != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/federation",
+      "./federation"
+    ],
+    "run": "^(TestPermittedArrayStrings|TestAutomaticRegistrationRARTypesAbsentUnderEachOperator)$",
+    "why": "a string one_of option on an array parameter permits that value when the parameter is left out"
+  },
+  {
+    "id": "federation-array-one-of-array-option-lists-elements",
+    "file": "internal/federation/policy.go",
+    "old": "\t\tlisted = append(listed, stringElements(values)...)",
+    "new": "\t\tlisted = append(listed, stringElements(values[:0])...)",
+    "module": "root",
+    "packages": [
+      "./internal/federation",
+      "./federation"
+    ],
+    "run": "^(TestPermittedArrayStrings|TestAutomaticRegistrationRARTypesAbsentUnderEachOperator)$",
+    "why": "an array one_of option on an array parameter permits its elements when the parameter is left out"
+  },
+  {
+    "id": "federation-array-permitted-intersects-operators",
+    "file": "internal/federation/policy.go",
+    "old": "\treturn intersectStrings(permitted, allowed), true",
+    "new": "\treturn append(permitted, allowed...), true",
+    "module": "root",
+    "packages": [
+      "./internal/federation",
+      "./federation"
+    ],
+    "run": "^(TestPermittedArrayStrings|TestPermittedSpaceDelimitedStrings)$",
+    "why": "subset_of, value and one_of each bound an omitted array parameter, so it holds only what all of them permit"
+  },
+  {
+    "id": "federation-array-permitted-unconstrained-takes-operand",
+    "file": "internal/federation/policy.go",
+    "old": "\tif !constrained {\n\t\treturn allowed, true\n\t}",
+    "new": "\tif !constrained && false {\n\t\treturn allowed, true\n\t}",
+    "module": "root",
+    "packages": [
+      "./internal/federation",
+      "./federation"
+    ],
+    "run": "^(TestPermittedArrayStrings|TestAutomaticRegistrationRARTypesAbsentUnderEachOperator)$",
+    "why": "a one_of alone bounds an omitted array parameter to its listed values, not to nothing"
   }
 ]

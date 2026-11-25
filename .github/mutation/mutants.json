@@ -4898,5 +4898,17 @@
     ],
     "run": "^TestClientRefusesEntityConfigurationKeyAsProtocolKey$",
     "why": "the OP's Entity Configuration jwks count as federation entity keys, not only the Trust Chain's"
+  },
+  {
+    "id": "sqlstore-ciba-decide-wraps-already-decided",
+    "file": "sqlstore/backchannel.go",
+    "old": "fmt.Errorf(\"sqlstore: decide backchannel authentication: %w\", storage.ErrBackchannelAuthenticationAlreadyDecided)",
+    "new": "errors.New(\"sqlstore: decide backchannel authentication: already decided\")",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestBackchannelDecisionsAndExpiry$",
+    "why": "sqlstore wraps ErrBackchannelAuthenticationAlreadyDecided for a second decision"
   }
 ]

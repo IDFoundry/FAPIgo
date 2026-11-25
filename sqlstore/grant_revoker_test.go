@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,19 @@ func newIndexedToken(t *testing.T, g storage.GrantStore, name string, expires ti
 		TokenHash: hash, ClientID: "c", Grant: secretGrant, ExpiresAt: expires, GrantKeys: keys,
 	}))
 	return hash
+}
+
+// productionIssuer is the issuer productionServer and productionClient
+// configure.
+const productionIssuer = "https://as.example"
+
+// serverRefreshTokenHash is the digest a server of issuer stores
+// refreshToken under: the SHA-256 of a fixed prefix, the length-prefixed
+// issuer and the token. It follows the server package's own
+// (unexported) derivation; a test checking a token is gone from the
+// store under it first checks the token is there under it.
+func serverRefreshTokenHash(issuer, refreshToken string) [32]byte {
+	return sha256.Sum256([]byte("fapigo refresh token\x00" + strconv.Itoa(len(issuer)) + ":" + issuer + refreshToken))
 }
 
 // redeemable reports whether g redeems the refresh token stored under

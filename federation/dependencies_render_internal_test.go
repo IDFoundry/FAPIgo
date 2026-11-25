@@ -79,7 +79,7 @@ func TestIssueDependenciesPrintTheirFields(t *testing.T) {
 	checkAllDependencies(ec, func(name string, deps any, _ func(func(any))) {
 		want := "{Signer:[REDACTED] Algorithm:ES256 KeyID:k1 Clock:{}}"
 		if strings.HasPrefix(name, "Historical") || strings.HasPrefix(name, "Self") {
-			want = "{Signer:[REDACTED] Algorithm:ES256 KeyID:k1 JWKS:" + fmt.Sprintf("%+v", []byte(testJWKS)) + " Clock:{}}"
+			want = "{Signer:[REDACTED] Algorithm:ES256 KeyID:k1 JWKS:" + fmt.Sprintf("%+v", testJWKS) + " Clock:{}}"
 		}
 		if got := fmt.Sprintf("%+v", deps); got != want {
 			t.Errorf("%s: %%+v = %q, want %q", name, got, want)

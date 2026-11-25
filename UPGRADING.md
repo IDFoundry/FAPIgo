@@ -50,6 +50,43 @@ that expire mid-resolution.
 little lifetime for how long its endpoints take to answer: ask the
 superior or RP to issue them for longer.
 
+### A store of your own should report an unknown CIBA handle as not found (server, storage)
+
+**Affects:** a deployment with `Dependencies.BackchannelInbox` set that
+calls `Server.ListBackchannelInteractions` or
+`Server.DenyBackchannelInteractions`, with a
+`storage.BackchannelAuthenticationStore` of its own. `memstore` and
+`sqlstore` (from the release that wraps it) need nothing.
+
+**Why:** the listing left out every inbox entry whose request lookup
+the store refused with anything but an outage, taking each for a
+request that is gone. A store that refuses a lookup for another reason
+with a plain error, or a request record the server can't read as its
+own, was therefore hidden from the operator, and an account closure
+could look finished while such an entry remained. A store now says a
+request is gone by wrapping the new
+`storage.ErrBackchannelAuthenticationNotFound`, and only such an entry
+(or one whose client is no longer registered) is left out; any other is
+reported. `DenyBackchannelInteractions` also passes over, and takes out
+of the inbox, a request the store says is gone when it comes to deny
+it.
+
+**What fails:** with a store that doesn't wrap it, an inbox entry whose
+request the store no longer holds is no longer left out silently:
+`ListBackchannelInteractions` still returns every other request, but
+with an error for that entry, and `DenyBackchannelInteractions` reports
+it in its error, until the entry expires. `LookupBackchannelInteraction`
+and `CompleteBackchannelAuthentication` answer an unknown handle as
+before.
+
+**What to change:** in `LookupBackchannelAuthentication`, and
+`DecideBackchannelAuthentication`, wrap the sentinel for a handle the
+store doesn't hold, and for nothing else (not an outage, not a request
+already decided):
+`fmt.Errorf("...: %w", storage.ErrBackchannelAuthenticationNotFound)`.
+`storage.TestBackchannelAuthenticationStoreContract` checks it once you
+do.
+
 ## v0.85.0
 
 ### Codes, refresh tokens and `auth_req_id`s are stored under digests covering the issuer (server, storage)

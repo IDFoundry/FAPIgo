@@ -793,8 +793,11 @@ func (s *Server) backchannelInteraction(client storage.RegisteredClient, params 
 // decided or has expired (BackchannelAuthenticationStore's lookup doesn't
 // say); CompleteBackchannelAuthentication is what enforces both, so a
 // stale lookup can at most show a request that can no longer be
-// completed. An unknown handle is an ErrorInvalidRequest *Error, and a
-// request whose client is no longer registered ErrorUnauthorizedClient;
+// completed. An unknown handle is an ErrorInvalidRequest *Error, which
+// wraps the store's error (so errors.Is finds
+// storage.ErrBackchannelAuthenticationNotFound with a store that wraps
+// it), and a request whose client is no longer registered
+// ErrorUnauthorizedClient;
 // a store or client repository that couldn't answer is
 // ErrorServerError.
 func (s *Server) LookupBackchannelInteraction(ctx context.Context, handle BackchannelAuthenticationHandle) (BackchannelInteractionRequest, error) {

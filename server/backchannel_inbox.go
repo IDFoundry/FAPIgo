@@ -244,12 +244,20 @@ func (s *Server) checkPendingBackchannelRequests(ctx context.Context, clientID f
 // ListBackchannelInteractions reads no more of them and fails with
 // ctx's error, rather than returning part of the inbox.
 //
-// An entry it can't read (a record that won't decode, or a request the
-// backchannel or client store couldn't answer for) doesn't hide the
-// others: it returns every request it could read, with an error joining
-// one for each entry it couldn't. So a non-nil error, with or without
-// requests, means the list may be incomplete; when every request must
-// be accounted for, as when closing an account, treat it as a failure.
+// An entry whose request is gone is left out: one the backchannel store
+// says it holds no such request for, by wrapping
+// storage.ErrBackchannelAuthenticationNotFound, or one whose client is
+// no longer registered. An entry it can't read otherwise (a record that
+// won't decode, a request the backchannel or client store couldn't
+// answer for, or a lookup the backchannel store refused with an error
+// that doesn't wrap the sentinel) doesn't hide the others: it returns
+// every request it could read, with an error joining one for each entry
+// it couldn't. So a non-nil error, with or without requests, means the
+// list may be incomplete; when every request must be accounted for, as
+// when closing an account, treat it as a failure. (With a store that
+// doesn't wrap the sentinel, an entry left behind for a request the
+// store no longer holds is reported this way each time, until the
+// entry expires.)
 //
 // ListBackchannelInteractions doesn't check who is asking: the
 // application must make sure the user is subject, as it does before
@@ -264,7 +272,8 @@ func (s *Server) ListBackchannelInteractions(ctx context.Context, subject Subjec
 
 // listBackchannelInteractions returns the requests awaiting subject,
 // and, separately, the entries it couldn't read (an undecodable record,
-// or a request the backchannel store couldn't answer for) joined into
+// or a request the backchannel store couldn't answer for or refused
+// other than as gone) joined into
 // unreadable, so one bad entry doesn't hide the others from
 // DenyBackchannelInteractions. err is for a listing that failed as a
 // whole, ctx ending before it finished among them.
@@ -306,9 +315,10 @@ func (s *Server) listBackchannelInteractions(ctx context.Context, subject Subjec
 
 // pendingBackchannelInteraction rebuilds entry's request, reporting
 // false for one that isn't a live request of subject's at this server:
-// written by another issuer, expired, gone from the backchannel store,
-// from a client no longer registered, or bound to another subject than
-// the one it's filed under.
+// written by another issuer, expired, gone from the backchannel store
+// (goneBackchannelRequest), from a client no longer registered, or bound
+// to another subject than the one it's filed under. Any other failure to
+// read the request is an error.
 func (s *Server) pendingBackchannelInteraction(ctx context.Context, subject SubjectID, entry storage.BackchannelInboxEntry) (PendingBackchannelInteraction, bool, error) {
 	var record backchannelInboxRecord
 	if err := decodeRecord(entry.Record, &record.Version, &record); err != nil {
@@ -323,8 +333,7 @@ func (s *Server) pendingBackchannelInteraction(ctx context.Context, subject Subj
 	}
 	interaction, resolved, err := s.lookupBackchannelInteraction(ctx, handle)
 	if err != nil {
-		var serverErr *Error
-		if errors.As(err, &serverErr) && (serverErr.Code() == ErrorInvalidRequest || serverErr.Code() == ErrorUnauthorizedClient) {
+		if goneBackchannelRequest(err) {
 			return PendingBackchannelInteraction{}, false, nil
 		}
 		return PendingBackchannelInteraction{}, false, err
@@ -335,6 +344,28 @@ func (s *Server) pendingBackchannelInteraction(ctx context.Context, subject Subj
 		return PendingBackchannelInteraction{}, false, nil
 	}
 	return PendingBackchannelInteraction{ID: backchannelInboxID(entry.HandleHash), Handle: handle, Interaction: interaction, ExpiresAt: entry.ExpiresAt}, true, nil
+}
+
+// goneBackchannelRequest reports whether err, lookupBackchannelInteraction's
+// refusal of a listed request, means the request is no longer one to
+// list: the store says it holds no such request
+// (storage.ErrBackchannelAuthenticationNotFound), or its client is no
+// longer registered. Any other invalid_request, a refusal the store
+// reported as a plain error or a request record the server can't read
+// as its own, is an entry the listing couldn't read, not a request
+// gone.
+func goneBackchannelRequest(err error) bool {
+	var serverErr *Error
+	if !errors.As(err, &serverErr) {
+		return false
+	}
+	switch serverErr.Code() {
+	case ErrorUnauthorizedClient:
+		return true
+	case ErrorInvalidRequest:
+		return errors.Is(serverErr, storage.ErrBackchannelAuthenticationNotFound)
+	}
+	return false
 }
 
 // inboxWriteTimeout bounds each inbox write that doesn't end with its
@@ -373,16 +404,20 @@ func (s *Server) unfileBackchannelRequest(ctx context.Context, handleHash [32]by
 // gets access_denied, a ping client is notified, and it leaves the
 // inbox. One already decided, by another call or instance, or by an
 // earlier call whose removal from the inbox failed, is passed over, not
-// counted, and taken out of the inbox; so is one that has expired. A
-// request counts as already decided only when the store says so by
-// wrapping storage.ErrBackchannelAuthenticationAlreadyDecided: any other
+// counted, and taken out of the inbox; so is one that has expired, and
+// one gone from the store since it was listed. A request counts as
+// already decided only when the store says so by wrapping
+// storage.ErrBackchannelAuthenticationAlreadyDecided, and as gone only
+// when it wraps storage.ErrBackchannelAuthenticationNotFound: any other
 // refusal, such as a store outage the store reports as a plain error,
 // is a failure for that request, which stays listed. Any failure, or an
-// entry it can't read, doesn't stop it: it denies every other request,
-// then returns how many it denied with every failure joined. What failed
-// is still listed, so calling it again finishes the job. (With a store
-// that doesn't wrap the sentinel, an entry left behind for a decided
-// request is reported each time, until the request expires.) If ctx ends
+// entry the listing couldn't read (see ListBackchannelInteractions),
+// doesn't stop it: it denies every other request, then returns how many
+// it denied with every failure joined; an entry it couldn't read isn't
+// counted, and stays in the inbox. What failed is still listed, so
+// calling it again finishes the job. (With a store that doesn't wrap
+// the sentinels, an entry left behind for a decided or gone request is
+// reported each time, until it expires.) If ctx ends
 // before the requests are all listed, it denies none of them and returns
 // ctx's error.
 //
@@ -432,15 +467,18 @@ func (s *Server) DenyBackchannelInteractions(ctx context.Context, subject Subjec
 // staleBackchannelEntry reports whether failure, recordBackchannelDecision's
 // refusal of a listed request, means the request's inbox entry is stale:
 // the request has expired, which the server decides itself, or the store
-// says it was already decided (storage.ErrBackchannelAuthenticationAlreadyDecided).
-// Any other invalid_request may be a store outage reported as a plain
-// error, so the entry is kept for the request still awaiting a decision.
+// says it was already decided (storage.ErrBackchannelAuthenticationAlreadyDecided)
+// or holds no such request any more
+// (storage.ErrBackchannelAuthenticationNotFound). Any other
+// invalid_request may be a store outage reported as a plain error, so
+// the entry is kept for the request still awaiting a decision.
 func staleBackchannelEntry(failure *Error) bool {
 	switch failure.Code() {
 	case ErrorExpiredToken:
 		return true
 	case ErrorInvalidRequest:
-		return errors.Is(failure, storage.ErrBackchannelAuthenticationAlreadyDecided)
+		return errors.Is(failure, storage.ErrBackchannelAuthenticationAlreadyDecided) ||
+			errors.Is(failure, storage.ErrBackchannelAuthenticationNotFound)
 	}
 	return false
 }

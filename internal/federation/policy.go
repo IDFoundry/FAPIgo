@@ -427,21 +427,24 @@ func PermittedStrings(ops PolicyOperators) (permitted []string, constrained bool
 // policy for one array-valued metadata parameter, such as grant_types —
 // lets that parameter hold, whether or not it is present: the subset_of
 // operator's values, intersected with the value operator's own when it
-// sets one. constrained is false when ops has neither (value null removes
-// the parameter rather than restricting it), so the parameter may hold
-// any value; an element that isn't a string permits nothing, and nor does
-// a value that isn't an array. ops must already have passed
-// ValidatePolicy (as a policy ApplyPolicy accepted has). The operands are
-// read as given, so this isn't for a space-delimited parameter (scope),
-// whose value may be a string.
+// sets one, and with the values the one_of operator's options list
+// between them (an option that is a string lists itself, one that is an
+// array its string elements). constrained is false when ops has none of
+// the three (value null removes the parameter rather than restricting
+// it), so the parameter may hold any value; an element that isn't a
+// string permits nothing, and nor does a value that isn't an array. ops
+// must already have passed ValidatePolicy (as a policy ApplyPolicy
+// accepted has). The operands are read as given, so a space-delimited
+// parameter (scope), whose value and one_of options may be strings, goes
+// through PermittedSpaceDelimitedStrings.
 //
-// subset_of acts on a parameter only "if the metadata parameter is
-// present" (§6.1.3.1.5), so a Relying Party that leaves an array
-// parameter out keeps it absent under a superior's subset_of, and so
-// does one whose parameter a subordinate's value null removed. A caller
-// reading an absent parameter as permitting whatever it would otherwise
-// grant uses this to keep that within what the policy lets the
-// parameter hold.
+// subset_of and one_of act on a parameter only "if the metadata
+// parameter is present" (§6.1.3.1.4, §6.1.3.1.5), so a Relying Party
+// that leaves an array parameter out keeps it absent under a superior's
+// subset_of or one_of, and so does one whose parameter a subordinate's
+// value null removed. A caller reading an absent parameter as permitting
+// whatever it would otherwise grant uses this to keep that within what
+// the policy lets the parameter hold.
 func PermittedArrayStrings(ops PolicyOperators) (permitted []string, constrained bool, err error) {
 	if raw, ok := ops[opSubsetOf]; ok {
 		var options []json.RawMessage
@@ -450,15 +453,47 @@ func PermittedArrayStrings(ops PolicyOperators) (permitted []string, constrained
 		}
 		permitted, constrained = stringElements(options), true
 	}
-	raw, ok := ops[opValue]
-	if !ok || isJSONNull(raw) {
+	if raw, ok := ops[opValue]; ok && !isJSONNull(raw) {
+		values, _ := decodeArray(raw) // a value that isn't an array holds no string
+		permitted, constrained = narrowPermitted(permitted, constrained, stringElements(values))
+	}
+	raw, ok := ops[opOneOf]
+	if !ok {
 		return permitted, constrained, nil
 	}
-	values, _ := decodeArray(raw) // a value that isn't an array holds no string
-	if !constrained {
-		return stringElements(values), true, nil
+	options, err := decodeArray(raw)
+	if err != nil {
+		return nil, false, err
 	}
-	return intersectStrings(stringElements(values), permitted), true, nil
+	permitted, constrained = narrowPermitted(permitted, constrained, oneOfListedStrings(options))
+	return permitted, constrained, nil
+}
+
+// narrowPermitted is what both permitted (when constrained) and allowed
+// permit: allowed alone when permitted isn't constrained, else
+// permitted's values that allowed also has, in permitted's order.
+func narrowPermitted(permitted []string, constrained bool, allowed []string) ([]string, bool) {
+	if !constrained {
+		return allowed, true
+	}
+	return intersectStrings(permitted, allowed), true
+}
+
+// oneOfListedStrings is the strings a one_of operand's options list
+// between them, in order: an option that is a string lists itself, one
+// that is an array its string elements, and any other option nothing.
+func oneOfListedStrings(options []json.RawMessage) []string {
+	listed := []string{}
+	for _, option := range options {
+		var s *string
+		if json.Unmarshal(option, &s) == nil && s != nil {
+			listed = append(listed, *s)
+			continue
+		}
+		values, _ := decodeArray(option) // an option that is neither lists no value
+		listed = append(listed, stringElements(values)...)
+	}
+	return listed
 }
 
 // stringElements is the strings among values, in order: any other value,

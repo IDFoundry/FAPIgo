@@ -36,8 +36,9 @@ func TestPermittedStrings(t *testing.T) {
 
 // TestPermittedArrayStrings pins which policy shapes restrict the values
 // an array parameter may hold whether or not it is present, and to what:
-// subset_of and a value other than null, never an operator that only
-// adds to a parameter or checks it.
+// subset_of, a value other than null and one_of (the values its options
+// list between them), never an operator that only adds to a parameter or
+// checks it.
 func TestPermittedArrayStrings(t *testing.T) {
 	for _, tc := range []struct {
 		ops             string
@@ -63,6 +64,16 @@ func TestPermittedArrayStrings(t *testing.T) {
 		// ValidatePolicy refuses a value outside subset_of; what the two
 		// permit is still only what both name.
 		{`{"value":["b","c"],"subset_of":["a","b"]}`, []string{"b"}, true},
+		{`{"one_of":["a","b"]}`, []string{"a", "b"}, true},
+		{`{"one_of":[["a","b"],["c"]]}`, []string{"a", "b", "c"}, true},
+		{`{"one_of":[]}`, []string{}, true},
+		{`{"one_of":[1,null,{"b":"c"},"a"]}`, []string{"a"}, true},
+		{`{"one_of":[["a"],["b"]],"value":["a"]}`, []string{"a"}, true},
+		{`{"one_of":[["a"]],"value":null}`, []string{"a"}, true},
+		// ValidatePolicy refuses a value outside one_of; what the two
+		// permit is still only what both name, in value's order.
+		{`{"one_of":["a","b"],"value":["c","b"]}`, []string{"b"}, true},
+		{`{"one_of":["a","b"],"subset_of":["b","c"]}`, []string{"b"}, true},
 	} {
 		var ops PolicyOperators
 		if err := json.Unmarshal([]byte(tc.ops), &ops); err != nil {
@@ -74,8 +85,14 @@ func TestPermittedArrayStrings(t *testing.T) {
 			t.Errorf("PermittedArrayStrings(%s) = %#v, %v, %v; want %v, %v", tc.ops, got, constrained, err, tc.want, tc.wantConstrained)
 		}
 	}
-	if _, _, err := PermittedArrayStrings(PolicyOperators{"subset_of": json.RawMessage(`"a"`)}); err == nil {
-		t.Error(`PermittedArrayStrings({"subset_of":"a"}) = nil error, want an error`)
+	for _, ops := range []string{`{"subset_of":"a"}`, `{"one_of":"a"}`} {
+		var parsed PolicyOperators
+		if err := json.Unmarshal([]byte(ops), &parsed); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := PermittedArrayStrings(parsed); err == nil {
+			t.Errorf("PermittedArrayStrings(%s) = nil error, want an error", ops)
+		}
 	}
 }
 

@@ -133,33 +133,13 @@ func applyParameterPolicy(claim string, ops PolicyOperators, crit critSet, value
 // PermittedSpaceDelimitedStrings is PermittedArrayStrings for a
 // space-delimited parameter (scope), whose value and one_of options may
 // be strings (§6.1.3.1.8): the individual values ops, the merged policy
-// for that parameter, lets it hold whether or not it is present. Besides
-// subset_of and value, a one_of bounds it to the values its options
-// list between them, since one_of, like subset_of, acts only on a
-// parameter that is present (§6.1.3.1.4): a Relying Party leaving scope
-// out keeps it absent under a superior's one_of too. constrained is
-// false when ops has none of the three. ops must already have passed
-// ValidatePolicy.
+// for that parameter, lets it hold whether or not it is present. The
+// operands are split into the string arrays §6.1.3.1.8 says operators
+// work on first, so a one_of bounds scope to the individual values its
+// options list between them: a Relying Party leaving scope out keeps it
+// absent under a superior's one_of too (§6.1.3.1.4). constrained is
+// false when ops has none of subset_of, value (other than null) and
+// one_of. ops must already have passed ValidatePolicy.
 func PermittedSpaceDelimitedStrings(ops PolicyOperators) (permitted []string, constrained bool, err error) {
-	split := splitSpaceDelimitedOperators(ops)
-	if permitted, constrained, err = PermittedArrayStrings(split); err != nil {
-		return nil, false, err
-	}
-	raw, ok := split[opOneOf]
-	if !ok {
-		return permitted, constrained, nil
-	}
-	options, err := decodeArray(raw)
-	if err != nil {
-		return nil, false, err
-	}
-	listed := []string{}
-	for _, option := range options {
-		values, _ := decodeArray(option) // an option that isn't an array lists no value
-		listed = append(listed, stringElements(values)...)
-	}
-	if !constrained {
-		return listed, true, nil
-	}
-	return intersectStrings(permitted, listed), true, nil
+	return PermittedArrayStrings(splitSpaceDelimitedOperators(ops))
 }

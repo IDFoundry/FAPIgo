@@ -49,8 +49,10 @@ type AutomaticRegistrationConfig struct {
 	// would let any RP grant itself unlimited scope. The federation can
 	// still narrow it: when the RP's resolved metadata (its own, after
 	// every superior's metadata policy) has a scope parameter, the
-	// client gets only the AllowedScopes that also lists, and fails to
-	// register if that leaves none. Required — at least one.
+	// client gets only the AllowedScopes that also lists, and one leaving
+	// scope out gets only those a superior's subset_of, one_of or value
+	// on scope permits; it fails to register if that leaves none.
+	// Required — at least one.
 	AllowedScopes []string
 
 	// AuthorizationDetailsTypes are the Rich Authorization Request types
@@ -227,7 +229,10 @@ type AutomaticRegistrationConfig struct {
 
 	// DefaultSubjectType is the subject type a Relying Party gets when
 	// its metadata names none, one of SubjectTypes. Zero means public.
-	// server.New sets it from server.Config.Subjects.
+	// When a superior's metadata policy on subject_type (a one_of, say)
+	// forbids it, such a Relying Party gets the first of SubjectTypes
+	// the policy permits instead, and fails to register if there is
+	// none. server.New sets it from server.Config.Subjects.
 	DefaultSubjectType fapi.SubjectType
 
 	// OnResolutionFailure, if set, is called with the reason whenever a
@@ -1130,7 +1135,8 @@ type relyingPartyMetadata struct {
 	// narrowedAuthorizationDetailsTypes); nil means left out, while an
 	// empty array, which a superior's subset_of or value can leave,
 	// lists nothing. A scope or authorization_details_types left out
-	// narrows nothing, but a grant_types left out means
+	// narrows nothing but what the policy permits it to hold (see
+	// choiceLimits), and a grant_types left out means
 	// authorization_code alone, so it lists no grant grantTypePermitted
 	// is asked about.
 	Scope                     *string  `json:"scope"`
@@ -1146,23 +1152,30 @@ const cibaGrantType = "urn:openid:params:grant-type:ciba"
 const clientCredentialsGrantType = "client_credentials"
 
 // narrowedScopes returns the operator's allowed scopes that the RP's
-// resolved scope metadata also lists, or all of them when it has none.
-// The resolved scope is the RP's own value after every superior's
-// metadata policy (OpenID Federation 1.0 §6.1), so it is where the
-// federation narrows what a member may ask for; it can never add a scope
-// the operator didn't grant.
-func narrowedScopes(allowed []string, resolved *string) ([]string, error) {
-	if resolved == nil {
-		return allowed, nil
+// resolved scope metadata also lists, or all of them when it has none,
+// less any that permitted, what the Trust Chain's metadata policy lets
+// scope hold (choiceLimits.scopes), doesn't allow either way. The
+// resolved scope is the RP's own value after every superior's metadata
+// policy (OpenID Federation 1.0 §6.1), so it is where the federation
+// narrows what a member may ask for; but the policy's operators act only
+// on a scope that is present, so permitted is what holds an RP leaving
+// scope out to the policy too. It can never add a scope the operator
+// didn't grant, and leaving none fails the registration.
+func narrowedScopes(allowed []string, resolved *string, permitted *permittedValues) ([]string, error) {
+	var listed []string
+	if resolved != nil {
+		listed = strings.Fields(*resolved)
 	}
-	listed := strings.Fields(*resolved)
 	var scopes []string
 	for _, s := range allowed {
-		if slices.Contains(listed, s) {
+		if (resolved == nil || slices.Contains(listed, s)) && permitted.allows(s) {
 			scopes = append(scopes, s)
 		}
 	}
 	if len(scopes) == 0 {
+		if resolved == nil {
+			return nil, errors.New("the metadata policy on scope permits none of the allowed scopes")
+		}
 		return nil, fmt.Errorf("scope %q permits none of the allowed scopes", *resolved)
 	}
 	return scopes, nil
@@ -1278,7 +1291,7 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 	if err := a.applyGrants(&cfg, m, limits); err != nil {
 		return storage.RegisteredClientConfig{}, nil, err
 	}
-	if err := a.applyDisplayAndSubjectType(&cfg, id, m); err != nil {
+	if err := a.applyDisplayAndSubjectType(&cfg, id, m, limits.subjectTypes); err != nil {
 		return storage.RegisteredClientConfig{}, nil, err
 	}
 
@@ -1346,7 +1359,8 @@ func requestObjectAlgorithm(m relyingPartyMetadata) (fapi.SignatureAlgorithm, er
 
 // applyGrants sets what cfg's client may do beyond the authorization
 // code flow, from AutomaticRegistrationConfig and never beyond it:
-// AllowedScopes narrowed by the scope of m, the RP's resolved metadata;
+// AllowedScopes narrowed by the scope of m, the RP's resolved metadata,
+// and limits.scopes;
 // AuthorizationDetailsTypes by m's authorization_details_types and
 // limits.authorizationDetailsTypes, which also bounds an RP leaving
 // authorization_details_types out (see choiceLimits); and
@@ -1354,7 +1368,7 @@ func requestObjectAlgorithm(m relyingPartyMetadata) (fapi.SignatureAlgorithm, er
 // that goes with it) by m's grant_types, which must list each (see
 // grantTypePermitted), and limits.grantTypes.
 func (a *AutomaticClientRepository) applyGrants(cfg *storage.RegisteredClientConfig, m relyingPartyMetadata, limits choiceLimits) error {
-	scopes, err := narrowedScopes(a.cfg.AllowedScopes, m.Scope)
+	scopes, err := narrowedScopes(a.cfg.AllowedScopes, m.Scope, limits.scopes)
 	if err != nil {
 		return err
 	}
@@ -1690,7 +1704,11 @@ func supportedAssertionAlgorithms(list []string, permitted *permittedValues) ([]
 //     for token_endpoint_auth_method;
 //   - an RP leaving out authorization_details_types under a subset_of on
 //     it would keep it absent, which registration reads as every type
-//     the operator allows, so the policy would withhold nothing.
+//     the operator allows, so the policy would withhold nothing, and
+//     likewise for scope (every AllowedScopes) under a subset_of or
+//     one_of on it;
+//   - an RP leaving out subject_type under a one_of on it would get
+//     DefaultSubjectType, a kind of sub the policy may forbid.
 //
 // An RP leaving out grant_types is registered for no grant beyond the
 // authorization code flow, whatever the policy (see grantTypePermitted),
@@ -1703,6 +1721,8 @@ type choiceLimits struct {
 	signingAlgs               *permittedValues // token_endpoint_auth_signing_alg
 	grantTypes                *permittedValues // grant_types' values
 	authorizationDetailsTypes *permittedValues // authorization_details_types' values
+	scopes                    *permittedValues // scope's values
+	subjectTypes              *permittedValues // subject_type
 }
 
 // permittedValues is the set of values a metadata policy allows a
@@ -1728,6 +1748,8 @@ func choiceLimitsFromPolicy(policy map[string]intfed.PolicyOperators) (choiceLim
 		{"token_endpoint_auth_signing_alg", intfed.PermittedStrings, &limits.signingAlgs},
 		{"grant_types", intfed.PermittedArrayStrings, &limits.grantTypes},
 		{"authorization_details_types", intfed.PermittedArrayStrings, &limits.authorizationDetailsTypes},
+		{"scope", intfed.PermittedSpaceDelimitedStrings, &limits.scopes},
+		{"subject_type", intfed.PermittedStrings, &limits.subjectTypes},
 	} {
 		permitted, constrained, err := field.permitted(policy[field.param])
 		if err != nil {
@@ -1919,13 +1941,13 @@ func keyThumbprintsFromJWKS(jwks json.RawMessage) ([]string, error) {
 
 // applyDisplayAndSubjectType sets cfg's Display and SubjectType from m:
 // what a consent screen shows about the client, and the kind of sub its
-// end users get.
-func (a *AutomaticClientRepository) applyDisplayAndSubjectType(cfg *storage.RegisteredClientConfig, id fapi.ClientID, m relyingPartyMetadata) error {
+// end users get, within permitted (see subjectTypeFromMetadata).
+func (a *AutomaticClientRepository) applyDisplayAndSubjectType(cfg *storage.RegisteredClientConfig, id fapi.ClientID, m relyingPartyMetadata, permitted *permittedValues) error {
 	display, err := clientDisplayFromMetadata(m)
 	if err != nil {
 		return err
 	}
-	subjectType, err := a.subjectTypeFromMetadata(m)
+	subjectType, err := a.subjectTypeFromMetadata(m, permitted)
 	if err != nil {
 		return err
 	}
@@ -1990,6 +2012,22 @@ func validateSubjectTypes(types []fapi.SubjectType, def fapi.SubjectType) error 
 	return nil
 }
 
+// defaultSubjectType is the subject type an RP naming none gets:
+// DefaultSubjectType (public when zero) if permitted allows it, else the
+// first of the OP's subject types that permitted does.
+func (a *AutomaticClientRepository) defaultSubjectType(permitted *permittedValues) (fapi.SubjectType, error) {
+	def := a.cfg.DefaultSubjectType
+	if def == 0 {
+		def = fapi.SubjectTypePublic
+	}
+	for _, t := range append([]fapi.SubjectType{def}, effectiveSubjectTypes(a.cfg.SubjectTypes)...) {
+		if permitted.allows(t.String()) {
+			return t, nil
+		}
+	}
+	return 0, errors.New("the metadata policy on subject_type permits none of the subject types this OP issues")
+}
+
 // effectiveSubjectTypes is types, or public alone when it is empty.
 func effectiveSubjectTypes(types []fapi.SubjectType) []fapi.SubjectType {
 	if len(types) == 0 {
@@ -1999,10 +2037,16 @@ func effectiveSubjectTypes(types []fapi.SubjectType) []fapi.SubjectType {
 }
 
 // subjectTypeFromMetadata returns the subject type an automatically
-// registered client gets: its metadata's subject_type, or
-// DefaultSubjectType when it names none. It's recorded on the client
-// rather than left to the server's default, so the decision made here,
-// against this OP's SubjectTypes, is the one every grant uses.
+// registered client gets: its metadata's subject_type, or, when it names
+// none, DefaultSubjectType if permitted (what the Trust Chain's metadata
+// policy lets subject_type be, choiceLimits.subjectTypes) allows it, else
+// the first of SubjectTypes that permitted does. A policy's one_of acts
+// only on a subject_type that is present (OpenID Federation 1.0
+// §6.1.3.1.4), so without this an RP leaving it out would get a default
+// the policy forbids; when no type this OP issues is permitted, the
+// registration fails. It's recorded on the client rather than left to the
+// server's default, so the decision made here, against this OP's
+// SubjectTypes, is the one every grant uses.
 //
 // A subject_type this OP doesn't issue is refused. So is a pairwise one
 // with a sector_identifier_uri: that names the sector the Relying Party
@@ -2013,17 +2057,16 @@ func effectiveSubjectTypes(types []fapi.SubjectType) []fapi.SubjectType {
 // change. A public client's sector_identifier_uri changes nothing, and
 // is ignored. A pairwise client's sector is its Entity Identifier's host
 // (see entitySector).
-func (a *AutomaticClientRepository) subjectTypeFromMetadata(m relyingPartyMetadata) (fapi.SubjectType, error) {
-	subjectType := a.cfg.DefaultSubjectType
-	if subjectType == 0 {
-		subjectType = fapi.SubjectTypePublic
-	}
+func (a *AutomaticClientRepository) subjectTypeFromMetadata(m relyingPartyMetadata, permitted *permittedValues) (fapi.SubjectType, error) {
+	subjectType, err := a.defaultSubjectType(permitted)
 	if m.SubjectType != "" {
-		parsed, err := fapi.ParseSubjectType(m.SubjectType)
+		subjectType, err = fapi.ParseSubjectType(m.SubjectType)
 		if err != nil {
-			return 0, fmt.Errorf("subject_type: %w", err)
+			err = fmt.Errorf("subject_type: %w", err)
 		}
-		subjectType = parsed
+	}
+	if err != nil {
+		return 0, err
 	}
 	if !slices.Contains(effectiveSubjectTypes(a.cfg.SubjectTypes), subjectType) {
 		return 0, fmt.Errorf("subject_type %s is not one this OP issues", subjectType)

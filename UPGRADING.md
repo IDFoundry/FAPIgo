@@ -71,6 +71,37 @@ hint's.
 (`hints.IDTokenHint` is already verified; `Server.VerifyIDTokenHint`
 returns its `sub`).
 
+### An automatically registered Relying Party's default scope and subject type follow the metadata policy (federation)
+
+**Affects:** an OP with automatic registration whose federation has a
+superior publishing a `scope` policy (`subset_of`, `one_of` or `value`)
+or a `subject_type` `one_of` for its Relying Parties, where some of
+those Relying Parties leave the parameter out of their own metadata.
+
+**Why:** OpenID Federation 1.0 has a policy operator act on a parameter
+only when it is present, so a Relying Party leaving `scope` out was
+registered for every `AllowedScopes`, and one leaving `subject_type`
+out for `DefaultSubjectType`, whatever the policy permitted. A superior
+couldn't withhold a scope or require pairwise identifiers from such a
+Relying Party.
+
+**What fails:** such a Relying Party now gets only the `AllowedScopes`
+the policy permits, and fails to register (`invalid_client`, with the
+reason passed to `OnResolutionFailure`) if that is none. One leaving
+`subject_type` out gets the first of `SubjectTypes` the policy permits
+when it forbids `DefaultSubjectType` — so its end users' `sub` values
+change, for example from public to pairwise — and fails to register if
+the policy permits none of `SubjectTypes`, or if a pairwise
+registration's redirect URIs aren't all https on its Entity
+Identifier's host.
+
+**What to change:** nothing, if the policy says what the federation
+meant. Otherwise have the superior publish a policy that includes the
+scopes and subject type its Relying Parties should get, or have the
+Relying Party publish `scope` and `subject_type` itself. For a
+Relying Party's users to keep their public `sub` values, the superior's
+`subject_type` `one_of` must include `public`.
+
 ## v0.83.0
 
 ### A client with `Algorithms.UserInfo` accepts only signed UserInfo (client)

@@ -103,6 +103,47 @@ func TestAutomaticRegistrationPolicyForcesPairwise(t *testing.T) {
 	}
 }
 
+// TestAutomaticRegistrationSubjectTypeDefaultHeldToPolicy: a superior's
+// one_of on subject_type acts only on a subject_type that is present, so
+// an RP naming none gets the OP's default only when the policy permits
+// it, else the first of SubjectTypes it does; when it permits none the
+// OP issues, the registration fails.
+func TestAutomaticRegistrationSubjectTypeDefaultHeldToPolicy(t *testing.T) {
+	both := []fapi.SubjectType{fapi.SubjectTypePublic, fapi.SubjectTypePairwise}
+	for _, tc := range []struct {
+		name    string
+		oneOf   string
+		cfg     federation.AutomaticRegistrationConfig
+		want    fapi.SubjectType
+		wantErr bool
+	}{
+		{"one_of pairwise over a public default", `["pairwise"]`, subjectTypesConfig(fapi.SubjectTypePublic, both...), fapi.SubjectTypePairwise, false},
+		{"one_of public over a pairwise default", `["public"]`, subjectTypesConfig(fapi.SubjectTypePairwise, fapi.SubjectTypePairwise, fapi.SubjectTypePublic), fapi.SubjectTypePublic, false},
+		{"one_of keeping the default", `["public","pairwise"]`, subjectTypesConfig(fapi.SubjectTypePairwise, both...), fapi.SubjectTypePairwise, false},
+		{"one_of pairwise, public-only OP", `["pairwise"]`, validAutomaticRegistrationConfig(), 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			policy := intfed.MetadataPolicy{"openid_relying_party": {
+				"subject_type": {"one_of": json.RawMessage(tc.oneOf)},
+			}}
+			f := setupAutomaticRegistrationFixtureWithPolicy(t, rpMetadataWith(t, nil), policy)
+			client, failure := resolveWith(t, f, tc.cfg)
+			if tc.wantErr {
+				if failure == nil || !strings.Contains(failure.Error(), "permits none of the subject types") {
+					t.Fatalf("registration failure = %v, want the registration refused", failure)
+				}
+				return
+			}
+			if failure != nil {
+				t.Fatalf("registration failed: %v", failure)
+			}
+			if got := client.SubjectType(); got != tc.want {
+				t.Errorf("SubjectType() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestAutomaticRegistrationPairwiseSector: a pairwise client's sector is
 // its Entity Identifier's host, and its redirect URIs must all be https
 // on that host; redirect URIs elsewhere fail the registration. A public

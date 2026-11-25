@@ -70,7 +70,8 @@ that also lists; and when it has `authorization_details_types`, only the
 `AuthorizationDetailsTypes` that lists. A superior's `subset_of` or
 `value` on `authorization_details_types` withholds the types it leaves
 out even from a Relying Party that leaves the parameter out of its
-metadata, which the policy's operators leave absent.
+metadata, which the policy's operators leave absent; so does a
+`subset_of`, `one_of` or `value` on `scope` for the scopes it leaves out.
 
 `client_credentials` and CIBA go only to a Relying Party whose resolved
 `grant_types` lists them (`client_credentials`,
@@ -94,8 +95,11 @@ superior publish a `grant_types` policy, such as a `subset_of` of
 
 A Relying Party's `subject_type` is
 honoured within `AutomaticRegistration.SubjectTypes` (pairwise alone by
-default when `Config.Subjects.Default` is pairwise), and
-`EntityConfiguration` advertises that list as the `openid_provider`
+default when `Config.Subjects.Default` is pairwise). One that names none
+gets `Config.Subjects.Default`, unless a superior's `one_of` on
+`subject_type` forbids it: then it gets the first of `SubjectTypes` the
+policy permits, or fails to register if there is none.
+`EntityConfiguration` advertises `SubjectTypes` as the `openid_provider`
 metadata's `subject_types_supported`; a pairwise Relying Party's sector
 is its Entity Identifier's host. A resolved registration is cached for at most
 `MaxCacheAge`, so a superior that stops vouching for a client takes

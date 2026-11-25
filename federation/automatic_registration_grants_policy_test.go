@@ -76,6 +76,23 @@ func TestAutomaticRegistrationNarrowsGrantsByResolvedMetadata(t *testing.T) {
 			members: base(map[string]any{"scope": "accounts"}),
 			wantErr: true,
 		},
+		// The policy's operators act only on a scope that is present, so
+		// these hold an RP leaving it out to what the policy permits.
+		"absent scope under subset_of": {
+			members:    base(nil),
+			policy:     `{"openid_relying_party":{"scope":{"subset_of":["openid","accounts"]}}}`,
+			wantScopes: map[string]bool{"openid": true, "payments": false},
+		},
+		"absent scope under one_of": {
+			members:    base(nil),
+			policy:     `{"openid_relying_party":{"scope":{"one_of":["payments","payments accounts"]}}}`,
+			wantScopes: map[string]bool{"openid": false, "payments": true},
+		},
+		"absent scope under subset_of permitting none of the allowed scopes fails": {
+			members: base(nil),
+			policy:  `{"openid_relying_party":{"scope":{"subset_of":["accounts"]}}}`,
+			wantErr: true,
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -685,8 +685,15 @@ func (s *Server) revokeReusedCodeTokens(ctx context.Context, reused *storage.Aut
 	if reused.IssuedAccessTokenKey != "" {
 		// Resource servers accept the token until exp+MaxClockSkew by
 		// their own clocks, which may lag this one's by another
-		// MaxClockSkew: the record must outlast both.
-		failures = append(failures, s.deps.Revocation.Revoke(ctx, reused.IssuedAccessTokenKey, s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew))))
+		// MaxClockSkew: the record must outlast both. The store recorded
+		// the token's own key; it is revoked under that key namespaced
+		// by this server's issuer and, for resource servers and
+		// checkers that look only for it, the key itself
+		// (grantrevocation.AccessTokenKeys).
+		until := s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew))
+		for _, key := range grantrevocation.AccessTokenKeys(s.cfg.Issuer.String(), reused.IssuedAccessTokenKey) {
+			failures = append(failures, s.deps.Revocation.Revoke(ctx, key, until))
+		}
 	}
 	if reused.IssuedRefreshTokenHash != nil {
 		revokeErr := s.deps.Grants.RevokeRefreshToken(ctx, *reused.IssuedRefreshTokenHash)

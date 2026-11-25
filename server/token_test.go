@@ -14,6 +14,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
@@ -527,11 +528,20 @@ func TestExchangeAuthorizationCodeReuseRevokesAccessToken(t *testing.T) {
 		t.Fatalf("second ExchangeAuthorizationCode (replayed code) = nil error, want error")
 	}
 
-	// The first access token, and the code's grant (whatever else was
-	// issued from it).
-	revoked := h.revocation.all()
-	if len(revoked) != 2 || revoked[0] != validatedAT.JTI || !strings.HasPrefix(revoked[1], "code-grant:") {
-		t.Fatalf("Revoke calls = %v, want [%q code-grant:...]", revoked, validatedAT.JTI)
+	// The first access token, under its jti namespaced by the issuer
+	// and its bare jti, and the code's grant (whatever else was issued
+	// from it).
+	requireReuseRevocations(t, h.revocation.all(), validatedAT.JTI)
+}
+
+// requireReuseRevocations fails unless revoked, a code reuse's Revoke
+// calls, revoke the first access token, whose own key is key, under
+// that key namespaced by the issuer and as is, then the code's grant.
+func requireReuseRevocations(t *testing.T, revoked []string, key string) {
+	t.Helper()
+	want := grantrevocation.AccessTokenKeys(testIssuer, key)
+	if len(revoked) != 3 || revoked[0] != want[0] || revoked[1] != want[1] || !strings.HasPrefix(revoked[2], "code-grant:") {
+		t.Fatalf("Revoke calls = %v, want %q, code-grant:...", revoked, want)
 	}
 }
 
@@ -775,11 +785,7 @@ func TestExchangeAuthorizationCodeReuseRevokesOpaqueAccessToken(t *testing.T) {
 		t.Fatalf("second ExchangeAuthorizationCode (replayed code) = nil error, want error")
 	}
 
-	wantKey := hex.EncodeToString(tokenHash[:])
-	revoked := h.revocation.all()
-	if len(revoked) != 2 || revoked[0] != wantKey || !strings.HasPrefix(revoked[1], "code-grant:") {
-		t.Fatalf("Revoke calls = %v, want [%q code-grant:...]", revoked, wantKey)
-	}
+	requireReuseRevocations(t, h.revocation.all(), hex.EncodeToString(tokenHash[:]))
 
 	// ... and confirm the exact same verifier now rejects it (a fresh
 	// DPoP proof each call — proofs are single-use).

@@ -105,7 +105,9 @@ type AuthorizationCodeAlreadyRedeemedError struct {
 	// IssuedAccessTokenKey is the revocation-lookup key of the access
 	// token issued on the original (first) redemption (a JWT's jti
 	// claim, or an opaque token's own hash — see
-	// server.AccessTokenIssuer.IssueAccessToken) — "" if
+	// server.AccessTokenIssuer.IssueAccessToken), as the server recorded
+	// it; the server revokes it both namespaced by its issuer and as is
+	// (see server.RevocationSink) — "" if
 	// RecordIssuedAccessToken was never called for this code (e.g. no
 	// revocation support wired in).
 	IssuedAccessTokenKey string

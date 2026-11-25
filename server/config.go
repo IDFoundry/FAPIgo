@@ -871,10 +871,10 @@ type AutomaticRegistrationConfig struct {
 	// federation.AutomaticRegistrationConfig.OnResolutionFailure: it
 	// runs on a goroutine of the library's own, not the request's, and
 	// can run after the request that triggered the resolution has
-	// returned. Log err, never return it to the client, and don't block,
-	// panic, or resolve the same client_id from it. A panic is recovered,
-	// and the requests waiting on that resolution get server_error.
-	// Optional.
+	// returned. Log err, never return it to the client, and don't block
+	// or panic in it; resolving the same client_id from it gets this
+	// failure at once. A panic is recovered, and the requests waiting on
+	// that resolution get server_error. Optional.
 	OnResolutionFailure func(ctx context.Context, clientID fapi.ClientID, err error)
 }
 

@@ -14,6 +14,10 @@ func CachedChainPosition(r *AutomaticClientRepository, id fapi.ClientID) (superi
 	return slot.entry.superior, slot.entry.branch, true
 }
 
+// MaxFailedResolutions is maxFailedResolutions, for tests in package
+// federation_test.
+const MaxFailedResolutions = maxFailedResolutions
+
 // MaxEntityIDBytes is maxEntityIDBytes, for tests in package
 // federation_test.
 const MaxEntityIDBytes = maxEntityIDBytes

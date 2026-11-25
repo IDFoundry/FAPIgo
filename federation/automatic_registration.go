@@ -259,13 +259,18 @@ type AutomaticRegistrationConfig struct {
 	// that started the resolution has returned, while another still
 	// waits. ctx keeps that first request's values but not its
 	// cancellation, and is cancelled once no request waits on the
-	// resolution any more. So it must not block, must not panic, and
-	// must not call ResolveClient for the same client_id, which could
-	// wait on the very resolution calling it. The failure is remembered,
-	// as FailureCacheAge sets out, before it is called, so a request
-	// arriving while it runs is answered from that memory instead of
-	// joining the resolution. A panic in it is recovered rather than
-	// ending the process: every request waiting on the resolution gets
+	// resolution any more. So it must not block and must not panic. The
+	// failure is remembered, as FailureCacheAge sets out, before it is
+	// called, and a request for that client_id arriving while it runs
+	// gets that failure at once instead of joining the resolution, even
+	// once FailureCacheAge has passed or when the failure couldn't be
+	// remembered. That includes a ResolveClient (or
+	// AutomaticClientKeySource lookup) for the same client_id made from
+	// the hook itself, which so never waits on the very resolution
+	// calling it; resolving another client_id from it needs a place
+	// under MaxConcurrentResolutions of its own while this resolution
+	// still holds one. A panic in it is recovered rather than ending
+	// the process: every request waiting on the resolution gets
 	// an error wrapping storage.ErrStoreUnavailable (the server answers
 	// 500 server_error), and the failure it was called for is remembered
 	// as if it had returned. A failure is remembered for FailureCacheAge,
@@ -486,7 +491,10 @@ type AutomaticClientRepository struct {
 // inflightResolution is one in-progress resolution that concurrent
 // callers for the same client_id wait on; done is closed once entry and
 // err are set. waiters counts the callers waiting on it, and cancel
-// stops it once the last of them has gone. Both are guarded by
+// stops it once the last of them has gone. failure, once set, is the
+// failure the resolution has ended in, while OnResolutionFailure is
+// called with it: a caller for its client_id gets that at once instead
+// of waiting (see resolveUncached). waiters and failure are guarded by
 // AutomaticClientRepository.mu.
 type inflightResolution struct {
 	done    chan struct{}
@@ -494,6 +502,7 @@ type inflightResolution struct {
 	err     error
 	waiters int
 	cancel  context.CancelFunc
+	failure error
 }
 
 // NewAutomaticClientRepository validates cfg and returns an
@@ -693,6 +702,10 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 		return cachedClient{}, err
 	}
 	call, ok := a.inflight[id]
+	if ok && call.failure != nil {
+		a.mu.Unlock()
+		return cachedClient{}, call.failure
+	}
 	if !ok {
 		if a.running >= a.maxConcurrentResolutions() {
 			a.mu.Unlock()
@@ -793,7 +806,7 @@ func (a *AutomaticClientRepository) startResolution(ctx context.Context, id fapi
 func (a *AutomaticClientRepository) runResolution(ctx context.Context, id fapi.ClientID, call *inflightResolution) {
 	entry, err := cachedClient{}, errResolutionUnfinished
 	defer func() { a.finishResolution(id, call, entry, err, recover()) }()
-	entry, err = a.resolveUncached(ctx, id)
+	entry, err = a.resolveUncached(ctx, id, call)
 }
 
 // finishResolution records call's outcome for every caller waiting on
@@ -872,8 +885,8 @@ func (a *AutomaticClientRepository) leaveResolution(id fapi.ClientID, call *infl
 // resolveUncached resolves id's Trust Chain and builds its registration,
 // caching a success and reporting a failure to
 // AutomaticRegistrationConfig.OnResolutionFailure. resolve runs at most
-// one at a time per client_id.
-func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi.ClientID) (cachedClient, error) {
+// one at a time per client_id, as call.
+func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi.ClientID, call *inflightResolution) (cachedClient, error) {
 	if err := ValidEntityID(string(id)); err != nil {
 		// Not a federation client_id at all — an ordinary unknown
 		// client, so nothing for OnResolutionFailure to report.
@@ -891,8 +904,14 @@ func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi
 			return cachedClient{}, err
 		}
 		// Remembered before the hook runs, so a hook that panics (see
-		// runResolution) still leaves the failure remembered.
+		// runResolution) still leaves the failure remembered. And
+		// published on call, so a request for id while the hook runs,
+		// the hook's own included, gets it at once rather than waiting
+		// on call, which the hook would keep from finishing: memory
+		// alone doesn't do that when it is full or the hook outlasts
+		// FailureCacheAge.
 		a.rememberFailure(id, err, a.clock.Now())
+		a.publishFailure(call, err)
 		if a.cfg.OnResolutionFailure != nil {
 			a.cfg.OnResolutionFailure(ctx, id, err)
 		}
@@ -918,6 +937,15 @@ func (a *AutomaticClientRepository) rememberRegistration(id fapi.ClientID, entry
 	defer a.mu.Unlock()
 	a.cacheRegistration(id, entry, now)
 	delete(a.failures, id)
+}
+
+// publishFailure records err, bounded as rememberFailure bounds it, as
+// the failure call has ended in, for the callers resolve answers from
+// it while OnResolutionFailure runs.
+func (a *AutomaticClientRepository) publishFailure(call *inflightResolution, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	call.failure = newRememberedFailure(err)
 }
 
 // rememberFailure records err as id's registration failure until

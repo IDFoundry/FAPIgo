@@ -63,8 +63,19 @@ func formatDependencies(f fmt.State, verb rune, signer crypto.Signer, alg fapi.S
 	redact.Format(f, verb, sh, "federation.issueDependenciesShadow", typeName)
 }
 
-func formatJWKSDependencies(f fmt.State, verb rune, signer crypto.Signer, alg fapi.SignatureAlgorithm, kid string, jwks json.RawMessage, clock Clock, typeName string) {
-	sh := jwksIssueDependenciesShadow{Signer: signerMask(signer), Algorithm: alg, KeyID: kid, JWKS: jwks, Clock: clock}
+// jwksDependencyFields are the fields HistoricalKeysIssueDependencies
+// and SelfIssueDependencies share, for formatJWKSDependencies.
+type jwksDependencyFields struct {
+	signer crypto.Signer
+	alg    fapi.SignatureAlgorithm
+	kid    string
+	jwks   json.RawMessage
+	clock  Clock
+}
+
+func formatJWKSDependencies(f fmt.State, verb rune, fields jwksDependencyFields, typeName string) {
+	signer := fields.signer
+	sh := jwksIssueDependenciesShadow{Signer: signerMask(signer), Algorithm: fields.alg, KeyID: fields.kid, JWKS: fields.jwks, Clock: fields.clock}
 	redact.Format(f, verb, sh, "federation.jwksIssueDependenciesShadow", typeName)
 }
 
@@ -80,7 +91,7 @@ func dependenciesLogValue(signer crypto.Signer, alg fapi.SignatureAlgorithm, kid
 // Format implements fmt.Formatter: d prints its fields, with only
 // [REDACTED] for Signer, under every verb and flag.
 func (d HistoricalKeysIssueDependencies) Format(f fmt.State, verb rune) {
-	formatJWKSDependencies(f, verb, d.Signer, d.Algorithm, d.KeyID, d.JWKS, d.Clock, "federation.HistoricalKeysIssueDependencies")
+	formatJWKSDependencies(f, verb, jwksDependencyFields{signer: d.Signer, alg: d.Algorithm, kid: d.KeyID, jwks: d.JWKS, clock: d.Clock}, "federation.HistoricalKeysIssueDependencies")
 }
 
 // LogValue implements slog.LogValuer: d's fields, with only
@@ -128,7 +139,7 @@ func (ResolveIssueDependencies) MarshalJSON() ([]byte, error) {
 // Format implements fmt.Formatter: d prints its fields, with only
 // [REDACTED] for Signer, under every verb and flag.
 func (d SelfIssueDependencies) Format(f fmt.State, verb rune) {
-	formatJWKSDependencies(f, verb, d.Signer, d.Algorithm, d.KeyID, d.JWKS, d.Clock, "federation.SelfIssueDependencies")
+	formatJWKSDependencies(f, verb, jwksDependencyFields{signer: d.Signer, alg: d.Algorithm, kid: d.KeyID, jwks: d.JWKS, clock: d.Clock}, "federation.SelfIssueDependencies")
 }
 
 // LogValue implements slog.LogValuer: d's fields, with only

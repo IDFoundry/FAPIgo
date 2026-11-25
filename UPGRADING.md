@@ -18,6 +18,38 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.85.1
+
+### A Trust Chain that expires while it resolves is refused (federation)
+
+**Affects:** a server using automatic registration
+(`Config.AutomaticRegistration`), or code calling
+`federation.Resolver.Resolve`, whose Relying Parties' Trust Chains can
+expire while they are being resolved: a chain with little lifetime
+left, fetched over slow federation endpoints.
+
+**Why:** `Resolve` verified every statement at the time it started,
+so a resolution whose fetches outlasted the chain's earliest `exp`
+returned a chain that had already expired, and automatic registration
+handed the requests waiting on it a client registered from that chain.
+`Resolve` now checks the chain's expiry (`ResolvedEntity.ExpiresAt`,
+with `Limits.MaxClockSkew`'s tolerance) again when it finishes, and
+automatic registration checks it once more after building the
+registration (which can fetch the RP's `jwks_uri`).
+
+**What fails:** such a resolution returns an error ("the trust chain
+for ... expired at ..., before its resolution finished"); for automatic
+registration the client gets `invalid_client`, the failure is reported
+to `OnResolutionFailure` and remembered for `FailureCacheAge`, as any
+other registration failure. A resolution started after the chain
+expired was already refused, so the only new refusals are of chains
+that expire mid-resolution.
+
+**What to change:** nothing in code. If it shows up in
+`OnResolutionFailure`, the federation's statements are issued with too
+little lifetime for how long its endpoints take to answer: ask the
+superior or RP to issue them for longer.
+
 ## v0.85.0
 
 ### Codes, refresh tokens and `auth_req_id`s are stored under digests covering the issuer (server, storage)

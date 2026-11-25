@@ -962,8 +962,16 @@ func (a *AutomaticClientRepository) register(ctx context.Context, id fapi.Client
 		return cachedClient{}, fmt.Errorf("federation: %q: %w", id, err)
 	}
 
+	// Building the registration can fetch (its jwks_uri), so the chain
+	// can expire after Resolve has checked it: a registration whose
+	// chain has expired by now is never handed out, not even to the
+	// requests waiting on this resolution.
+	now := a.clock.Now()
+	if err := a.resolver.checkChainUnexpired(string(id), resolved.ExpiresAt, now); err != nil {
+		return cachedClient{}, err
+	}
 	expiresAt := resolved.ExpiresAt
-	if maxAge := a.clock.Now().Add(a.cfg.MaxCacheAge); maxAge.Before(expiresAt) {
+	if maxAge := now.Add(a.cfg.MaxCacheAge); maxAge.Before(expiresAt) {
 		expiresAt = maxAge
 	}
 	superior, branch := chainPosition(resolved.Chain)

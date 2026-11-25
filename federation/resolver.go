@@ -436,7 +436,38 @@ func newChainWalkState(subjectID string, leafStmt intfed.Statement, leafToken st
 // (see Dependencies.HTTP), and a caller that resolves an Entity
 // Identifier an unauthenticated party names (as automatic registration
 // does with a client_id) lets that party send them.
+//
+// Every statement is verified at the time Resolve started, and a Trust
+// Chain that has expired by the time it finishes (Dependencies.Clock
+// past ResolvedEntity.ExpiresAt by more than Limits.MaxClockSkew, as a
+// slow fetch can make it) is refused, as starting the resolution then
+// would have refused it.
 func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntity, error) {
+	resolved, err := r.resolveFrom(ctx, subjectID)
+	if err != nil {
+		return ResolvedEntity{}, err
+	}
+	if err := r.checkChainUnexpired(subjectID, resolved.ExpiresAt, r.deps.Clock.Now()); err != nil {
+		return ResolvedEntity{}, err
+	}
+	return resolved, nil
+}
+
+// checkChainUnexpired refuses subjectID's Trust Chain, expiring at
+// expiresAt, if it has expired at now: by more than
+// Limits.MaxClockSkew, the tolerance each of its statements' exp was
+// checked with.
+func (r *Resolver) checkChainUnexpired(subjectID string, expiresAt, now time.Time) error {
+	if now.After(expiresAt.Add(r.cfg.Limits.MaxClockSkew)) {
+		return fmt.Errorf("federation: the trust chain for %q expired at %s, before its resolution finished at %s",
+			subjectID, expiresAt.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
+// resolveFrom is Resolve, verifying every statement at the time it
+// starts, without checking the chain at the time it finishes.
+func (r *Resolver) resolveFrom(ctx context.Context, subjectID string) (ResolvedEntity, error) {
 	if subjectID == "" {
 		return ResolvedEntity{}, fmt.Errorf("federation: subject entity ID is empty")
 	}

@@ -131,7 +131,7 @@ func (s *BackchannelAuthenticationStore) LookupBackchannelAuthentication(ctx con
 		handleHash[:]).Scan(&key, &clientID, &stored, &bound.deliveryMode, &bound.pollInterval, &bound.expires)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return storage.LookedUpBackchannelAuthentication{}, fmt.Errorf("sqlstore: look up backchannel authentication: %w", notFound("handle"))
+		return storage.LookedUpBackchannelAuthentication{}, unknownBackchannelHandle("look up backchannel authentication")
 	case err != nil:
 		return storage.LookedUpBackchannelAuthentication{}, unavailable("look up backchannel authentication", err)
 	}
@@ -194,6 +194,14 @@ func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(ctx con
 	return out, nil
 }
 
+// unknownBackchannelHandle is op's error for a handle the store holds no
+// request under: ErrNotFound, also wrapping
+// storage.ErrBackchannelAuthenticationNotFound so the server can tell a
+// request that is gone from any other refusal.
+func unknownBackchannelHandle(op string) error {
+	return fmt.Errorf("sqlstore: %s: %w (%w)", op, notFound("handle"), storage.ErrBackchannelAuthenticationNotFound)
+}
+
 // whyUndecided is DecideBackchannelAuthentication's error for a handle
 // its UPDATE didn't decide: unknown, or already decided.
 func (s *BackchannelAuthenticationStore) whyUndecided(ctx context.Context, handleHash [32]byte) error {
@@ -202,7 +210,7 @@ func (s *BackchannelAuthenticationStore) whyUndecided(ctx context.Context, handl
 		return unavailable("decide backchannel authentication", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("sqlstore: decide backchannel authentication: %w", notFound("handle"))
+		return unknownBackchannelHandle("decide backchannel authentication")
 	}
 	return errBackchannelDecided
 }

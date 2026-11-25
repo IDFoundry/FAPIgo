@@ -58,7 +58,6 @@ type keyHolder struct {
 
 // The known leaks the skipped cases record.
 const (
-	leaksThroughFmt  = "fmt's %v and %+v print the key: the deriver holds it in a struct value behind its ops interface, which fmt prints field by field"
 	leaksEd25519     = "fmt's %v prints an ed25519.PrivateKey held behind crypto.Signer: it is a byte slice, which fmt prints at any depth"
 	leaksSignerJSON  = "encoding/json, encoding/xml and slog's JSON handler encode an *ecdsa.PrivateKey held in the exported Signer field, D included"
 	leaksECDHBadVerb = "fmt's %s and %q print the *ecdh.PrivateKey's bytes: a verb a pointer field doesn't take makes fmt print what it points to"
@@ -66,12 +65,12 @@ const (
 
 // keyHolders are the key-material matrix's cases, by name.
 var keyHolders = map[string]keyHolder{
-	"pairwise.NewHMAC": {covers: []string{"pairwise.memoryHMACOps.key"}, knownLeak: leaksThroughFmt,
+	"pairwise.NewHMAC": {
 		build: func(t *testing.T) (any, []string) {
 			key := randomBytes(t, 32)
 			return must(pairwise.NewHMAC(key))(t), []string{string(key)}
 		}},
-	"pairwise.NewReversible": {covers: []string{"pairwise.memoryReversibleOps.macKey", "pairwise.memoryReversibleOps.block"}, knownLeak: leaksThroughFmt,
+	"pairwise.NewReversible": {covers: []string{"pairwise.memoryReversibleOps.block"},
 		build: func(t *testing.T) (any, []string) {
 			macKey, encKey := randomBytes(t, 32), randomBytes(t, 32)
 			return must(pairwise.NewReversible(macKey, encKey))(t), []string{string(macKey), string(encKey)}
@@ -82,7 +81,7 @@ var keyHolders = map[string]keyHolder{
 		build: func(t *testing.T) (any, []string) { return signerKeyManager(t, fapi.PS256, rsaKey(t)) }},
 	"keys.NewKeyManagerFromSigners EdDSA": {covers: []string{"keys.signerBackend.signer"}, knownLeak: leaksEd25519,
 		build: func(t *testing.T) (any, []string) { return signerKeyManager(t, fapi.EdDSA, ed25519Key(t)) }},
-	"keys.SignerSpec ES256 and PS256": {covers: []string{"keys.SignerSpec.Signer"}, knownLeak: leaksSignerJSON,
+	"keys.SignerSpec ES256 and PS256": {covers: []string{"keys.SignerSpec.Signer"},
 		build: func(t *testing.T) (any, []string) {
 			ec, rsa := ecdsaKey(t), rsaKey(t)
 			return []keys.SignerSpec{

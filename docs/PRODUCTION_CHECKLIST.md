@@ -89,7 +89,9 @@ are things no constructor can check.
   [Step 5](../GETTING_STARTED.md#5-the-one-piece-thats-genuinely-yours-the-login-flow)
 - [ ] *(yours)* **Bind the interaction to the browser** with
   `server/interactioncookie` (its keys shared by every instance) or the
-  equivalent, and protect the consent form against CSRF.
+  equivalent: a cookie only your server could have set, sealed, MACed or
+  naming a server-side session. Never the raw handle in a plain cookie.
+  Protect the consent form against CSRF.
   [Step 5](../GETTING_STARTED.md#5-the-one-piece-thats-genuinely-yours-the-login-flow)
 - [ ] *(yours)* **Wrap `/authorize` and every login, consent and error
   page in `server.AuthorizationPageHeaders`** (anti-framing,

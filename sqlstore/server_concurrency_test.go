@@ -135,16 +135,27 @@ func (r *serverRace) wantRefused(what string, issued server.TokenResult) {
 
 // isRevokedWhileIssued reports whether err is a token request refused
 // because its grant was revoked while its refresh token was being
-// stored (the server's confirmation that the grant isn't revoked):
-// today a server_error whose cause is the invalid_grant the
-// confirmation found. See TestServerCodeReuseRacingIssuanceIsInvalidGrant.
+// stored. Today that is a server_error, in one of two forms, depending
+// on which of the server's two checks after storing the token saw the
+// revocation:
+//   - the check that the grant isn't revoked: its cause is the
+//     invalid_grant that check found;
+//   - the check that the grant registry still lists the grant: its
+//     cause is the server's (unexported) "revoked while its refresh
+//     token was being issued" error, matched here by its text.
+//
+// See TestServerCodeReuseRacingIssuanceIsInvalidGrant.
 func isRevokedWhileIssued(err error) bool {
 	var outer *server.Error
 	if !errors.As(err, &outer) || outer.Code() != server.ErrorServerError {
 		return false
 	}
+	cause := errors.Unwrap(outer)
 	var inner *server.Error
-	return errors.As(errors.Unwrap(outer), &inner) && inner.Code() == server.ErrorInvalidGrant
+	if errors.As(cause, &inner) && inner.Code() == server.ErrorInvalidGrant {
+		return true
+	}
+	return cause != nil && cause.Error() == "the grant was revoked while its refresh token was being issued"
 }
 
 // Concurrent exchanges of one authorization code: at most one issues

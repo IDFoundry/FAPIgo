@@ -118,6 +118,15 @@ type Cookie struct {
 // it, so one Cookie opens a cookie another sealed under the same name
 // and key. New refuses an all-zero or single-repeated-byte key and
 // the same key twice, which are never random.
+//
+// Each Set seals with keys[0], one AES-256-GCM encryption under a
+// random 96-bit nonce, and NIST SP 800-38D (§8.3) allows at most 2^32
+// of those under one key: past that, a repeated nonce becomes too
+// likely, and two cookies sealed under one nonce let whoever holds
+// them forge others under that key. Put a new key first well before
+// keys[0] has sealed that many (say, at a quarter of the budget: about
+// a billion cookies, some twelve days at 1,000 a second), keeping the
+// old one until the cookies it sealed expire.
 func New(keys [][]byte, opts Options) (*Cookie, error) {
 	name := opts.Name
 	if name == "" {

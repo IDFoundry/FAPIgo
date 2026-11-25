@@ -5,6 +5,13 @@
 // value, and the cookie's name and the format bound in as additional
 // data, so a value sealed for one cookie doesn't open as another. The
 // cookie is HttpOnly, Secure and SameSite=Lax.
+//
+// Each value is sealed under a random 96-bit nonce, which bounds how
+// many values one key may seal: NIST SP 800-38D (§8.3) allows at most
+// 2^32 encryptions with random nonces under one key, past which a
+// repeated nonce, and with it forgery of values under that key, becomes
+// too likely. Every Set is one encryption. The exported constructors
+// tell callers to rotate the first key well before then.
 package sealedcookie
 
 import (

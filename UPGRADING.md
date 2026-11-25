@@ -102,6 +102,22 @@ Relying Party publish `scope` and `subject_type` itself. For a
 Relying Party's users to keep their public `sub` values, the superior's
 `subject_type` `one_of` must include `public`.
 
+### Encoding a `keys.SignerSpec` fails (keys)
+
+**Affects:** code that encodes a `keys.SignerSpec`, or a struct holding
+one, with `encoding/json` or another encoder that uses `MarshalText` or
+`MarshalJSON`.
+
+**Why:** a `SignerSpec`'s `Signer` is often the private key itself, and
+an encoder wrote it out: `encoding/json` encoded an ECDSA key's private
+scalar, into a config dump or a debug response, say.
+
+**What fails:** encoding returns an error wrapping
+`keys.ErrSignerSpecSerialization`.
+
+**What to change:** encode the public keys instead (`keys.PublicJWKS`),
+or the fields you need without `Signer`.
+
 ## v0.83.0
 
 ### A client with `Algorithms.UserInfo` accepts only signed UserInfo (client)

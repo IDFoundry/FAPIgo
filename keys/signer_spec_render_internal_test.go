@@ -5,6 +5,8 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -49,4 +51,25 @@ func TestSignerSpecPrintsNoKey(t *testing.T) {
 // TestSignerSpecShadowMatches keeps SignerSpec's shadow in step with it.
 func TestSignerSpecShadowMatches(t *testing.T) {
 	rendertest.CheckShadow(t, reflect.TypeFor[SignerSpec](), reflect.TypeFor[signerSpecShadow]())
+}
+
+// TestSignerSpecRefusesEncoding: encoding/json, a TextMarshaler-aware
+// encoder, and either of them given a pointer, all fail with
+// ErrSignerSpecSerialization rather than writing the Signer, which may
+// be the private key itself.
+func TestSignerSpecRefusesEncoding(t *testing.T) {
+	spec := SignerSpec{Purpose: AccessTokenSigning, Algorithm: fapi.ES256, KeyID: "k1"}
+	for name, v := range map[string]any{
+		"value":       spec,
+		"pointer":     &spec,
+		"in a struct": struct{ Spec SignerSpec }{spec},
+		"in a slice":  []SignerSpec{spec},
+	} {
+		if out, err := json.Marshal(v); !errors.Is(err, ErrSignerSpecSerialization) {
+			t.Errorf("json.Marshal(%s) = %s, %v; want ErrSignerSpecSerialization", name, out, err)
+		}
+	}
+	if out, err := spec.MarshalText(); !errors.Is(err, ErrSignerSpecSerialization) || out != nil {
+		t.Errorf("MarshalText = %q, %v; want ErrSignerSpecSerialization", out, err)
+	}
 }

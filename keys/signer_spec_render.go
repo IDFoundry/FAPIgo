@@ -1,6 +1,7 @@
 package keys
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -31,10 +32,9 @@ func (s SignerSpec) shadow() signerSpecShadow {
 // and previous public keys, and [REDACTED] for its Signer, under every
 // verb and flag. Signer is often the private key itself: an
 // ed25519.PrivateKey, say, which fmt would otherwise print byte by
-// byte. fmt's
-// reflection fallback, for a SignerSpec in an unexported field, and
-// encoders such as encoding/json still see Signer as the exported field
-// it is.
+// byte. fmt's reflection fallback, for a SignerSpec in an unexported
+// field, still sees Signer as the exported field it is. Encoders are
+// refused outright: see MarshalText.
 func (s SignerSpec) Format(f fmt.State, verb rune) {
 	redact.Format(f, verb, s.shadow(), "keys.signerSpecShadow", "keys.SignerSpec")
 }
@@ -48,4 +48,25 @@ func (s SignerSpec) LogValue() slog.Value {
 		slog.String("Signer", string(sh.Signer)), slog.String("KeyID", sh.KeyID),
 		slog.Any("Previous", sh.Previous),
 	)
+}
+
+// ErrSignerSpecSerialization is returned by SignerSpec's MarshalText
+// and MarshalJSON, so a SignerSpec, whose Signer is often the private
+// key itself, is never serialized (into a JSON response, a config dump,
+// a log line) by an encoder that doesn't know what it holds. Publish
+// the public keys with PublicJWKS instead.
+var ErrSignerSpecSerialization = errors.New("keys: a SignerSpec cannot be marshaled, since its Signer may be the private key")
+
+// MarshalText implements encoding.TextMarshaler by refusing: see
+// ErrSignerSpecSerialization.
+func (SignerSpec) MarshalText() ([]byte, error) {
+	return nil, ErrSignerSpecSerialization
+}
+
+// MarshalJSON implements json.Marshaler by refusing: see
+// ErrSignerSpecSerialization. It's declared as well as MarshalText so
+// that encoding/json refuses a SignerSpec, rather than a pointer to one
+// only, whichever it's given.
+func (SignerSpec) MarshalJSON() ([]byte, error) {
+	return nil, ErrSignerSpecSerialization
 }

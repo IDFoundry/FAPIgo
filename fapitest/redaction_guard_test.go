@@ -19,8 +19,12 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/internal/redact"
 	"github.com/idfoundry/fapigo/internal/rendertest"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -53,6 +57,8 @@ import (
 // starts printing shows up in review as a change to it. A value held in
 // a fapi.Secret or a handle's holder must print in no class at all,
 // except a handle's or a request_uri's wire value through its String.
+// The types holding key material are exempt here, with keyMaterial as the
+// reason: key_rendering_guard_test.go renders them, with real keys.
 
 var updateGolden = flag.Bool("update", false, "rewrite testdata/redaction.golden from the renderings")
 
@@ -60,7 +66,7 @@ const guardGolden = "testdata/redaction.golden"
 
 // guardedPackages are the directories, from this one, whose exported
 // types the guard covers.
-var guardedPackages = []string{"..", "../client", "../client/sessioncookie", "../server", "../server/interactioncookie", "../resource", "../storage", "../storage/memstore", "../extension", "."}
+var guardedPackages = []string{"..", "../backchannelhttp", "../client", "../client/sessioncookie", "../extension", "../fapihttp", "../federation", "../keys", "../keys/ephemeral", "../pairwise", "../resource", "../server", "../server/interactioncookie", "../serverresource", "../storage", "../storage/memstore", "."}
 
 // guardedTypes are the exported struct types whose renderings the guard
 // checks.
@@ -98,6 +104,42 @@ var guardedTypes = map[string]reflect.Type{
 	"extension.RARDetail":                                   reflect.TypeFor[extension.RARDetail[string]](),
 	"extension.RARValues":                                   reflect.TypeFor[extension.RARValues](),
 	"extension.Values":                                      reflect.TypeFor[extension.Values](),
+	"fapihttp.FetchRequest":                                 reflect.TypeFor[fapihttp.FetchRequest](),
+	"fapihttp.FetchResponse":                                reflect.TypeFor[fapihttp.FetchResponse](),
+	"fapihttp.PostRequest":                                  reflect.TypeFor[fapihttp.PostRequest](),
+	"federation.DelegationParams":                           reflect.TypeFor[federation.DelegationParams](),
+	"federation.Error":                                      reflect.TypeFor[federation.Error](),
+	"federation.OpenIDRelyingPartyMetadata":                 reflect.TypeFor[federation.OpenIDRelyingPartyMetadata](),
+	"federation.ResolveRequest":                             reflect.TypeFor[federation.ResolveRequest](),
+	"federation.ResolvedEntity":                             reflect.TypeFor[federation.ResolvedEntity](),
+	"federation.StatusResponseParams":                       reflect.TypeFor[federation.StatusResponseParams](),
+	"federation.SubordinateListingFilters":                  reflect.TypeFor[federation.SubordinateListingFilters](),
+	"federation.SubordinateStatementParams":                 reflect.TypeFor[federation.SubordinateStatementParams](),
+	"federation.TrustMarkParams":                            reflect.TypeFor[federation.TrustMarkParams](),
+	"federation.VerifiedTrustMark":                          reflect.TypeFor[federation.VerifiedTrustMark](),
+	"keys.AttesterKeyRequest":                               reflect.TypeFor[keys.AttesterKeyRequest](),
+	"keys.ClientEncryptionKey":                              reflect.TypeFor[keys.ClientEncryptionKey](),
+	"keys.ClientEncryptionKeyRequest":                       reflect.TypeFor[keys.ClientEncryptionKeyRequest](),
+	"keys.ClientEncryptionKeySet":                           reflect.TypeFor[keys.ClientEncryptionKeySet](),
+	"keys.ClientKeyRequest":                                 reflect.TypeFor[keys.ClientKeyRequest](),
+	"keys.EncryptionKeyUse":                                 reflect.TypeFor[keys.EncryptionKeyUse](),
+	"keys.IssuerKey":                                        reflect.TypeFor[keys.IssuerKey](),
+	"keys.IssuerKeyRequest":                                 reflect.TypeFor[keys.IssuerKeyRequest](),
+	"keys.IssuerKeySet":                                     reflect.TypeFor[keys.IssuerKeySet](),
+	"keys.KeyCustody":                                       reflect.TypeFor[keys.KeyCustody](),
+	"keys.KeySourceCapabilities":                            reflect.TypeFor[keys.KeySourceCapabilities](),
+	"keys.PublicJWK":                                        reflect.TypeFor[keys.PublicJWK](),
+	"keys.PublicKeyInfo":                                    reflect.TypeFor[keys.PublicKeyInfo](),
+	"keys.PublicKeySet":                                     reflect.TypeFor[keys.PublicKeySet](),
+	"keys.Signature":                                        reflect.TypeFor[keys.Signature](),
+	"keys.SigningKeySet":                                    reflect.TypeFor[keys.SigningKeySet](),
+	"keys.SigningKeyUse":                                    reflect.TypeFor[keys.SigningKeyUse](),
+	"keys.SigningRequest":                                   reflect.TypeFor[keys.SigningRequest](),
+	"keys.UnwrapRequest":                                    reflect.TypeFor[keys.UnwrapRequest](),
+	"keys.VerificationKey":                                  reflect.TypeFor[keys.VerificationKey](),
+	"keys.VerificationKeySet":                               reflect.TypeFor[keys.VerificationKeySet](),
+	"pairwise.Input":                                        reflect.TypeFor[pairwise.Input](),
+	"pairwise.Prefix":                                       reflect.TypeFor[pairwise.Prefix](),
 	"resource.AccessTokenAssurance":                         reflect.TypeFor[resource.AccessTokenAssurance](),
 	"resource.AuthorizationContext":                         reflect.TypeFor[resource.AuthorizationContext](),
 	"resource.Error":                                        reflect.TypeFor[resource.Error](),
@@ -204,6 +246,7 @@ var guardedTypes = map[string]reflect.Type{
 const (
 	configuration = "configuration: set once at startup, from the deployment's own values, never a request's"
 	engine        = "an engine: it holds keys behind interfaces, dependencies and stores' records, never a value a flow hands to its caller"
+	keyMaterial   = "holds key material: TestKeyHoldersDontPrintTheirKeys renders it (see key_rendering_guard_test.go)"
 )
 
 // exemptTypes are the exported struct types the guard doesn't fill.
@@ -235,6 +278,21 @@ var exemptTypes = map[string]string{
 	"memstore.GrantRegistry": engine, "memstore.GrantStore": engine, "memstore.NonceStore": engine,
 	"memstore.PairwiseSubjectStore": engine, "memstore.ReplayStore": engine, "memstore.RevocationStore": engine,
 	"memstore.SessionStore": engine, "memstore.TransactionStore": engine,
+	"backchannelhttp.Config": configuration, "fapihttp.Config": configuration, "fapihttp.Hardening": configuration,
+	"fapihttp.TransportConfig": configuration, "federation.AutomaticRegistrationConfig": configuration, "federation.Config": configuration,
+	"federation.Dependencies": configuration, "federation.Limits": configuration, "federation.TrustAnchor": configuration,
+	"federation.HistoricalKeysIssueConfig": configuration, "federation.ResolveIssueConfig": configuration, "federation.SelfIssueConfig": configuration,
+	"federation.SubordinateIssueConfig": configuration, "federation.TrustMarkIssueConfig": configuration, "keys.ClientKeyMaterial": configuration,
+	"ephemeral.ClientKeySpec": configuration, "serverresource.Options": configuration,
+	"federation.HistoricalKeysIssueDependencies": keyMaterial, "federation.ResolveIssueDependencies": keyMaterial, "federation.SelfIssueDependencies": keyMaterial,
+	"federation.SubordinateIssueDependencies": keyMaterial, "federation.TrustMarkIssueDependencies": keyMaterial, "keys.SignerSpec": keyMaterial,
+	"pairwise.HMACDeriver": keyMaterial, "pairwise.ReversibleDeriver": keyMaterial, "ephemeral.KeyManager": keyMaterial,
+	"backchannelhttp.Notifier": engine, "fapihttp.Client": engine, "federation.AutomaticClientKeySource": engine,
+	"federation.AutomaticClientRepository": engine, "federation.HistoricalKeysIssuer": engine, "federation.ResolveIssuer": engine,
+	"federation.Resolver": engine, "federation.SelfIssuer": engine, "federation.SubordinateIssuer": engine,
+	"federation.SystemClock": engine, "federation.TrustMarkIssuer": engine, "keys.ClientJWKSSource": engine,
+	"keys.JWKSIssuerKeySource": engine, "keys.LocalIssuerKeys": engine, "keys.StaticClientKeys": engine,
+	"ephemeral.ClientKeySource": engine, "pairwise.MappingDeriver": engine,
 }
 
 // TestRedactionGuardCoversEveryExportedType parses the guarded packages

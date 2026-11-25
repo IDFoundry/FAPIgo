@@ -18,7 +18,7 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
-## v0.83.1
+## v0.84.0
 
 ### A JWT access token's `client_sub` claim no longer sets `ClientSubject` (resource)
 

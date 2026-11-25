@@ -649,51 +649,76 @@ func (listFailsAfterRecord) ListGrants(context.Context, storage.GrantListing) ([
 	return nil, errors.New("registry down")
 }
 
+// tombstoneKinds are the two GrantStore behaviours a revocation of a
+// refresh token not stored yet meets (fakeGrantStore.noTombstones): one
+// that keeps the revocation, so the token is refused once stored, as
+// storage.GrantStore requires, and one that forgets it.
+var tombstoneKinds = map[string]bool{"tombstones": false, "no tombstones": true}
+
 // TestGrantRevokedWhileIssuedIssuesNoToken: a grant whose registry entry
 // is gone by the time its refresh token is stored, revoked in between,
 // gets no refresh token: the token is withdrawn rather than issued
-// unlisted, where RevokeSubjectGrants couldn't find it.
+// unlisted, where RevokeSubjectGrants couldn't find it — with a
+// GrantStore that keeps revocations of tokens not yet stored and one
+// that doesn't.
 func TestGrantRevokedWhileIssuedIssuesNoToken(t *testing.T) {
-	for name, registry := range map[string]storage.GrantRegistry{
-		"entry gone":         racingRegistry{memstore.NewGrantRegistry()},
-		"registry can't say": listFailsAfterRecord{memstore.NewGrantRegistry()},
-	} {
-		t.Run(name, func(t *testing.T) {
-			h, owner := registryHarness(t, registry)
-			attested, binding := embedderTokenRequest(t, owner)
-			before := len(h.grants.refreshTokens)
-			if _, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
-				GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
-				Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"},
-			}); err == nil {
-				t.Fatal("IssueRefreshToken = nil error, want the issuance refused")
-			}
-			h.grants.mu.Lock()
-			defer h.grants.mu.Unlock()
-			for _, tok := range h.grants.refreshTokens[before:] {
-				if !h.grants.refreshRevoked[tok.TokenHash] {
-					t.Error("the refresh token created for the revoked grant is still live")
+	for kind, noTombstones := range tombstoneKinds {
+		for name, registry := range map[string]func() storage.GrantRegistry{
+			"entry gone":         func() storage.GrantRegistry { return racingRegistry{memstore.NewGrantRegistry()} },
+			"registry can't say": func() storage.GrantRegistry { return listFailsAfterRecord{memstore.NewGrantRegistry()} },
+		} {
+			t.Run(kind+"/"+name, func(t *testing.T) {
+				h, owner := registryHarness(t, registry())
+				h.grants.noTombstones = noTombstones
+				attested, binding := embedderTokenRequest(t, owner)
+				before := len(h.grants.refreshTokens)
+				if _, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
+					GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+					Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"},
+				}); err == nil {
+					t.Fatal("IssueRefreshToken = nil error, want the issuance refused")
 				}
-			}
-			if len(h.grants.refreshTokens) == before {
-				t.Error("no refresh token was created, so the race wasn't exercised")
-			}
-		})
+				checkNoLiveRefreshTokenSince(t, h, before)
+			})
+		}
+	}
+}
+
+// checkNoLiveRefreshTokenSince checks h's GrantStore redeems none of
+// the refresh tokens created after the first before, and that there is
+// one.
+func checkNoLiveRefreshTokenSince(t *testing.T, h harness, before int) {
+	t.Helper()
+	h.grants.mu.Lock()
+	created := slices.Clone(h.grants.refreshTokens[before:])
+	h.grants.mu.Unlock()
+	for _, tok := range created {
+		if _, err := h.grants.RedeemRefreshToken(context.Background(), storage.RefreshTokenRedemption{TokenHash: tok.TokenHash}); err == nil {
+			t.Error("the refresh token created for the revoked grant is still live")
+		}
+	}
+	if len(created) == 0 {
+		t.Error("no refresh token was created, so the race wasn't exercised")
 	}
 }
 
 // TestGrantRevokedWhileIssuedWithdrawalFails: a refresh token that can't
 // be withdrawn still isn't issued: both failures are reported.
 func TestGrantRevokedWhileIssuedWithdrawalFails(t *testing.T) {
-	h, owner := registryHarness(t, racingRegistry{memstore.NewGrantRegistry()})
-	h.grants.failRevokeRefresh = errors.New("grants down")
-	attested, binding := embedderTokenRequest(t, owner)
-	_, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
-		GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
-		Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "grants down") {
-		t.Fatalf("IssueRefreshToken = %v, want the withdrawal failure reported", err)
+	for kind, noTombstones := range tombstoneKinds {
+		t.Run(kind, func(t *testing.T) {
+			h, owner := registryHarness(t, racingRegistry{memstore.NewGrantRegistry()})
+			h.grants.noTombstones = noTombstones
+			h.grants.failRevokeRefresh = errors.New("grants down")
+			attested, binding := embedderTokenRequest(t, owner)
+			_, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
+				GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+				Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"},
+			})
+			if err == nil || !strings.Contains(err.Error(), "grants down") {
+				t.Fatalf("IssueRefreshToken = %v, want the withdrawal failure reported", err)
+			}
+		})
 	}
 }
 

@@ -77,7 +77,7 @@ func (s *BackchannelAuthenticationStore) LookupBackchannelAuthentication(_ conte
 	defer s.mu.Unlock()
 	rec, ok := s.byHandleHash[handleHash]
 	if !ok {
-		return storage.LookedUpBackchannelAuthentication{}, fmt.Errorf("memstore: no such backchannel authentication handle")
+		return storage.LookedUpBackchannelAuthentication{}, fmt.Errorf("memstore: look up backchannel authentication: %w", storage.ErrBackchannelAuthenticationNotFound)
 	}
 	return storage.LookedUpBackchannelAuthentication{
 		ClientID: rec.clientID,
@@ -92,7 +92,7 @@ func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(_ conte
 	defer s.mu.Unlock()
 	rec, ok := s.byHandleHash[decision.HandleHash]
 	if !ok {
-		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("memstore: no such backchannel authentication handle")
+		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("memstore: decide backchannel authentication: %w", storage.ErrBackchannelAuthenticationNotFound)
 	}
 	if rec.status != storage.BackchannelAuthenticationPending {
 		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("memstore: decide backchannel authentication: %w", storage.ErrBackchannelAuthenticationAlreadyDecided)

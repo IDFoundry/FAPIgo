@@ -4513,5 +4513,53 @@
     ],
     "run": "^TestListBackchannelInteractionsListsWhatItCanRead$",
     "why": "ListBackchannelInteractions returns the requests it could read alongside an unreadable entry's error"
+  },
+  {
+    "id": "server-code-exchange-precheck-skipped",
+    "file": "server/token.go",
+    "old": "if preErr := s.checkCodeExchangeRequest(ctx, client, presented.redirectURI, requestedResources); preErr != nil {",
+    "new": "if preErr := s.checkCodeExchangeRequest(ctx, client, presented.redirectURI, requestedResources); preErr != nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCodeExchangeRefusedBeforeRedemptionKeepsTheCode$",
+    "why": "a code exchange from a client whose redirect_uri is no longer registered is refused before the code is redeemed"
+  },
+  {
+    "id": "server-code-exchange-resource-precheck-skipped",
+    "file": "server/token.go",
+    "old": "\tif len(requestedResources) > 0 {\n\t\tif _, err := s.checkRequestedResources(ctx, client, requestedResources); err != nil {",
+    "new": "\tif len(requestedResources) > 0 && false {\n\t\tif _, err := s.checkRequestedResources(ctx, client, requestedResources); err != nil {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestCodeExchangeRefusedResourceKeepsTheCode$",
+    "why": "a code exchange naming a resource the client may not request is refused before the code is redeemed"
+  },
+  {
+    "id": "server-code-exchange-resources-not-narrowed",
+    "file": "server/token.go",
+    "old": "resources, err := narrowResources(grant.Resources, requested)",
+    "new": "resources, err := narrowResources(requested, requested)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestResourceIndicatorsCodeExchangeAudience$",
+    "why": "a code exchange can't widen the resources the grant holds"
+  },
+  {
+    "id": "server-stored-claims-under-managed-names-kept",
+    "file": "server/records.go",
+    "old": "withoutServerTokenClaims(g.TokenClaims))",
+    "new": "g.TokenClaims)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestAccessTokenClaimsManagedTakePrecedence|TestAccessTokenClaimsWithoutManagedValues)$",
+    "why": "a stored extension claim under a server-managed name never reaches the access token"
   }
 ]

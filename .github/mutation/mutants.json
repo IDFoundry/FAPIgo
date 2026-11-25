@@ -1179,8 +1179,8 @@
   {
     "id": "srv-code-reuse-audited",
     "file": "server/token.go",
-    "old": "s.audit(ctx, AuditEventRevokeReusedAuthorizationCode, presentedBy, outcome, description)",
-    "new": "if false {\n\t\ts.audit(ctx, AuditEventRevokeReusedAuthorizationCode, presentedBy, outcome, description)\n\t}",
+    "old": "return false, s.auditRequired(ctx, AuditEventRevokeReusedAuthorizationCode, presentedBy, outcome, description)",
+    "new": "if false {\n\t\treturn false, s.auditRequired(ctx, AuditEventRevokeReusedAuthorizationCode, presentedBy, outcome, description)\n\t}\n\treturn false, nil",
     "module": "root",
     "packages": [
       "./server"
@@ -4694,5 +4694,65 @@
     ],
     "run": "^TestSignerSpecRefusesEncoding$",
     "why": "encoding/json refuses a SignerSpec rather than writing its Signer"
+  },
+  {
+    "id": "server-audit-fail-closed-fails-the-request",
+    "file": "server/audit.go",
+    "old": "if err == nil || !s.auditFailsClosed {",
+    "new": "if err == nil || !s.auditFailsClosed || true {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestFailClosedAuditFailsIssuance|TestBestEffortAuditKeepsIssuing|TestFailClosedAuditOnCodeReuse|TestFailClosedAuditLeavesOtherEventsBestEffort)$",
+    "why": "a FailClosedAuditSink that can't record a listed event fails the operation with server_error"
+  },
+  {
+    "id": "server-audit-best-effort-unless-declared",
+    "file": "server/audit.go",
+    "old": "if err == nil || !s.auditFailsClosed {",
+    "new": "if err == nil || false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestFailClosedAuditFailsIssuance|TestBestEffortAuditKeepsIssuing|TestFailClosedAuditOnCodeReuse|TestFailClosedAuditLeavesOtherEventsBestEffort)$",
+    "why": "a sink not declaring FailClosedAuditSink keeps auditing best-effort"
+  },
+  {
+    "id": "server-audit-fail-closed-honours-declared-false",
+    "file": "server/audit.go",
+    "old": "return ok && failClosed.AuditFailsClosed()",
+    "new": "return ok || failClosed != nil",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestFailClosedAuditFailsIssuance|TestBestEffortAuditKeepsIssuing|TestFailClosedAuditOnCodeReuse|TestFailClosedAuditLeavesOtherEventsBestEffort)$",
+    "why": "a sink whose AuditFailsClosed returns false stays best-effort"
+  },
+  {
+    "id": "server-audit-fail-closed-code-reuse",
+    "file": "server/token.go",
+    "old": "\tif auditErr != nil {\n\t\treturn s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, clientID, auditErr)",
+    "new": "\tif auditErr != nil && false {\n\t\treturn s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, clientID, auditErr)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestFailClosedAuditFailsIssuance|TestBestEffortAuditKeepsIssuing|TestFailClosedAuditOnCodeReuse|TestFailClosedAuditLeavesOtherEventsBestEffort)$",
+    "why": "an unrecorded revoking code reuse answers server_error under a FailClosedAuditSink"
+  },
+  {
+    "id": "server-audit-fail-closed-revocation",
+    "file": "server/token_revocation.go",
+    "old": "if auditErr := s.auditRequired(ctx, AuditEventRevokeToken, client.ID(), AuditOutcomeSuccess, description); auditErr != nil {",
+    "new": "if auditErr := s.auditRequired(ctx, AuditEventRevokeToken, client.ID(), AuditOutcomeSuccess, description); auditErr != nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestFailClosedAuditFailsIssuance|TestBestEffortAuditKeepsIssuing|TestFailClosedAuditOnCodeReuse|TestFailClosedAuditLeavesOtherEventsBestEffort)$",
+    "why": "an unrecorded revocation endpoint answer fails closed"
   }
 ]

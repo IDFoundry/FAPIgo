@@ -212,6 +212,13 @@ type fakeGrantStore struct {
 	// failRevokeRefresh, if set, is what RevokeRefreshToken returns.
 	failRevokeRefresh error
 
+	// noTombstones makes RevokeRefreshToken of a hash no token is
+	// stored under record nothing, so a token stored under it later is
+	// live, as a store that revokes by deleting the token's row does.
+	// Unset, the revocation is kept (a tombstone), as storage.GrantStore
+	// requires.
+	noTombstones bool
+
 	// omitReuseClientID leaves AuthorizationCodeAlreadyRedeemedError's
 	// ClientID empty, as a store that doesn't set it would.
 	omitReuseClientID bool
@@ -296,6 +303,9 @@ func (f *fakeGrantStore) RevokeRefreshToken(_ context.Context, tokenHash [32]byt
 	defer f.mu.Unlock()
 	if f.failRevokeRefresh != nil {
 		return f.failRevokeRefresh
+	}
+	if _, stored := f.refreshByHash[tokenHash]; f.noTombstones && !stored {
+		return nil
 	}
 	if f.refreshRevoked == nil {
 		f.refreshRevoked = make(map[[32]byte]bool)

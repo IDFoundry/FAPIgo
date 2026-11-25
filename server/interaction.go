@@ -47,6 +47,15 @@ const interactionHandleSize = 32
 // server/interactioncookie does this, carrying the InteractionRequest
 // in the same encrypted cookie.
 //
+// Seal or MAC that cookie, or keep the handle in a server-side session
+// the cookie only names. A raw handle in a plain cookie binds the
+// interaction to the browser only while the handle stays secret: anyone
+// who learns it (from a log line, say) can set it in a browser of their
+// own, approve the user's pending interaction as themselves, and hand
+// the resulting redirect to the user, whose client then signs the user
+// in to their account. With a cookie only the server could have set, a
+// leaked handle alone completes nothing.
+//
 // String is the handle's wire value, so fmt.Sprint, %s and %v, and the
 // templates print it, for a cookie or a form: never log an
 // InteractionHandle on its own with fmt. log/slog logs one given as an

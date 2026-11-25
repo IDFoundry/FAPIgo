@@ -1151,7 +1151,12 @@ signed-in victim's browser approves it, sending that client a code for
 the victim's account. Set the handle (`a.Handle.String()`) in an
 HttpOnly, Secure, SameSite cookie when the browser reaches `/authorize`,
 read it back with `server.ParseInteractionHandle` when the form is
-submitted, and protect that form with your usual CSRF defence. Tie the
+submitted, and protect that form with your usual CSRF defence. Seal or
+MAC that cookie, or keep the handle in your server-side session and
+put only the session's ID in the cookie: a raw handle in a plain cookie
+lets anyone who learns it (from a log line, say) set it in their own
+browser, approve the user's pending interaction as themselves, and send
+the user's client a code for their account. Tie the
 form to the handle it was rendered for, too, as the package's tag does:
 a second authorization in the same browser replaces the cookie, and the
 first page's form mustn't complete the second. See

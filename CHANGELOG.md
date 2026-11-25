@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.85.0](https://github.com/IDFoundry/FAPIgo/compare/v0.84.0...v0.85.0) (2026-11-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **federation:** encoding any of the five federation issuer dependency structs with encoding/json, encoding/xml or another encoder that uses encoding.TextMarshaler now fails with ErrIssueDependenciesSerialization instead of writing the signer's private key. Encode the entity's public JWKS, or the fields you need, instead.
+* **server:** every refresh token issued before the upgrade is unknown afterwards and refused, so clients must re-authorize to get a new one. Authorization codes and CIBA requests in flight at deploy fail once. No code changes are needed; plan the deploy around the forced re-authorization. UPGRADING.md has the details.
+
+### Bug Fixes
+
+* **federation:** bound an omitted array parameter by one_of ([4684e02](https://github.com/IDFoundry/FAPIgo/commit/4684e02a3af2afcaf51bfd8384fb4c1a5bb189c9))
+* **federation:** refuse to encode or print issuers' signing keys ([05e78f1](https://github.com/IDFoundry/FAPIgo/commit/05e78f18e2dbe802d63e2e057a3a2b70789f28f1))
+* **federation:** stop the issuers printing their signing keys ([a00e676](https://github.com/IDFoundry/FAPIgo/commit/a00e676f1bfea40b3db50364a89389b1015c8d69))
+* **keys:** stop the ephemeral KeyManager printing its keys ([2e3fe60](https://github.com/IDFoundry/FAPIgo/commit/2e3fe60ab5696f0789487a622578ce1be28c67be))
+* **keys:** stop the signer KeyManager and in-memory backends printing keys ([45cb775](https://github.com/IDFoundry/FAPIgo/commit/45cb775609b14fda0a44a56bd906af7cc73bc019))
+* **resource:** check an access token's issuer-namespaced revocation key ([1261ece](https://github.com/IDFoundry/FAPIgo/commit/1261ece98ca44c9c5f2ec564e7cce3ffbaf7df69))
+* **server:** answer invalid_grant for a grant revoked during issuance ([c05bc82](https://github.com/IDFoundry/FAPIgo/commit/c05bc82f82747280ec098d5d4419d5d004315290))
+* **server:** bind code, refresh token and auth_req_id digests to the issuer ([fd3f1e9](https://github.com/IDFoundry/FAPIgo/commit/fd3f1e9fd12ed7190aa9c85c075fb67d025a3cd9))
+* **server:** revoke a reused code's access token under an issuer key ([02913ba](https://github.com/IDFoundry/FAPIgo/commit/02913ba9360a441ebfd38bd6bc2f2688906e443d))
+
 ## [0.84.0](https://github.com/IDFoundry/FAPIgo/compare/v0.83.0...v0.84.0) (2026-11-25)
 
 

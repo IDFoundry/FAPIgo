@@ -4489,5 +4489,29 @@
     ],
     "run": "^TestVerifyIgnoresClientSubInJWTAccessTokens$",
     "why": "JWTAccessTokens marks its tokens self-contained, so Verify ignores their client_sub"
+  },
+  {
+    "id": "server-ciba-public-resolver-must-match-id-token-hint",
+    "file": "server/requested_subject.go",
+    "old": "if subjects.resolverMust == \"\" && hinted {",
+    "new": "if subjects.resolverMust == \"\" && hinted && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelSubjectsMustAgreeWithTheIDTokenHint$",
+    "why": "a public client's id_token_hint sub is what BackchannelSubjects must resolve to"
+  },
+  {
+    "id": "server-ciba-inbox-listing-keeps-readable-requests",
+    "file": "server/backchannel_inbox.go",
+    "old": "return pending, unreadable",
+    "new": "if unreadable != nil {\n\t\tpending = nil\n\t}\n\treturn pending, unreadable",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestListBackchannelInteractionsListsWhatItCanRead$",
+    "why": "ListBackchannelInteractions returns the requests it could read alongside an unreadable entry's error"
   }
 ]

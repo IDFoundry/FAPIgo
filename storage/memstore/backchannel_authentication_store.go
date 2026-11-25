@@ -95,7 +95,7 @@ func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(_ conte
 		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("memstore: no such backchannel authentication handle")
 	}
 	if rec.status != storage.BackchannelAuthenticationPending {
-		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("memstore: backchannel authentication request already decided")
+		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("memstore: decide backchannel authentication: %w", storage.ErrBackchannelAuthenticationAlreadyDecided)
 	}
 	rec.status = decision.Status
 	rec.grant = cloneRawMessage(decision.Grant)

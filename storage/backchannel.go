@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -210,6 +211,27 @@ func (e *BackchannelAuthenticationSlowDownError) Error() string {
 	return "storage: polled again before the minimum interval elapsed"
 }
 
+// ErrBackchannelAuthenticationAlreadyDecided is the error
+// BackchannelAuthenticationStore.DecideBackchannelAuthentication wraps
+// (fmt.Errorf("...: %w", storage.ErrBackchannelAuthenticationAlreadyDecided))
+// when the request already has a decision recorded, and for nothing
+// else: not for an unknown handle, and never for an outage. The server
+// tells the two apart with errors.Is: when
+// server.Server.DenyBackchannelInteractions finds a listed request
+// already decided this way, it takes the request out of its user's
+// inbox (an entry left behind by a removal that failed) and passes over
+// it; any other refusal it reports, and the request stays listed, so a
+// store outage reported as a plain error can't empty an inbox of
+// requests still awaiting a decision.
+//
+// Wrapping it is optional. A store that doesn't keeps working: a
+// second decision is still refused, but DenyBackchannelInteractions
+// reports such a stale entry as a failure, and it stays listed until
+// its request expires. TestBackchannelAuthenticationStoreContract
+// checks a store that wraps it wraps it only for an already-decided
+// request.
+var ErrBackchannelAuthenticationAlreadyDecided = errors.New("storage: backchannel authentication request already decided")
+
 // BackchannelAuthenticationStore persists CIBA backchannel
 // authentication requests: creation, the out-of-band decision, and
 // client polling for that decision.
@@ -237,7 +259,9 @@ type BackchannelAuthenticationStore interface {
 	// returning DecidedBackchannelAuthentication (see its own doc
 	// comment). A second call for the same HandleHash must fail —
 	// exactly one decision may ever be recorded, the same way
-	// CompleteAuthorization's interaction handle is single-use. For a
+	// CompleteAuthorization's interaction handle is single-use — and
+	// should wrap ErrBackchannelAuthenticationAlreadyDecided (optional;
+	// see its doc comment). For a
 	// request whose DeliveryMode is "ping", recording the decision also
 	// exempts the client's next PollBackchannelAuthentication from the
 	// PollInterval check: the ping notification is its signal to fetch

@@ -118,6 +118,35 @@ scalar, into a config dump or a debug response, say.
 **What to change:** encode the public keys instead (`keys.PublicJWKS`),
 or the fields you need without `Signer`.
 
+### A store of your own should report an already-decided CIBA request (server, storage)
+
+**Affects:** a deployment with `Dependencies.BackchannelInbox` set that
+calls `Server.DenyBackchannelInteractions`, with a
+`storage.BackchannelAuthenticationStore` of its own. `memstore` and
+`sqlstore` (from the release that wraps it) need nothing.
+
+**Why:** `DenyBackchannelInteractions` took any request whose decision
+the store refused, other than for an outage it recognised
+(`storage.ErrStoreUnavailable` or a context error), for one already
+decided, and took it out of the user's inbox. A store that reports an
+outage with a plain error therefore emptied the inbox of requests still
+awaiting a decision, so the bulk denial looked finished when it wasn't.
+A store now says a request was already decided by wrapping the new
+`storage.ErrBackchannelAuthenticationAlreadyDecided`, and only then is
+the entry removed.
+
+**What fails:** with a store that doesn't wrap it, an inbox entry left
+behind for a request already decided (its removal failed) is no longer
+cleared: `DenyBackchannelInteractions` reports it in its error each
+time, and `ListBackchannelInteractions` lists it, until the request
+expires. Approving or denying it is still refused as before.
+
+**What to change:** in `DecideBackchannelAuthentication`, wrap the
+sentinel for a request that already has a decision, and for nothing
+else: `fmt.Errorf("...: %w", storage.ErrBackchannelAuthenticationAlreadyDecided)`.
+`storage.TestBackchannelAuthenticationStoreContract` checks it once you
+do.
+
 ## v0.83.0
 
 ### A client with `Algorithms.UserInfo` accepts only signed UserInfo (client)

@@ -234,7 +234,14 @@ context that isn't tied to an interactive request's deadline, such as
 store that honours it, a context that ends early leaves the remaining
 requests pending. To empty an inbox for good, have
 `BackchannelSubjects` stop resolving the user's hints first, then call
-it again until `ListBackchannelInteractions` lists nothing.
+it again until `ListBackchannelInteractions` lists nothing. A request
+already decided (one left listed because its removal from the inbox
+failed) or expired is passed over and its entry removed; any other
+refusal is reported in the error and the request stays listed. A
+store says a request was already decided by wrapping
+`storage.ErrBackchannelAuthenticationAlreadyDecided`, as `memstore`
+does, and `sqlstore` from the release that wraps it: with a store that
+doesn't, such an entry is reported each time until it expires.
 
 **How much an inbox holds.** Any registered CIBA client can name a user
 whose hint it knows, so the inbox is capped. A user may have at most

@@ -577,6 +577,59 @@ func TestDenyBackchannelInteractionsClearsStaleEntries(t *testing.T) {
 	}
 }
 
+// refusingDecideStore refuses every decision with decideErr, recording
+// none.
+type refusingDecideStore struct {
+	storage.BackchannelAuthenticationStore
+	decideErr error
+}
+
+func (s refusingDecideStore) DecideBackchannelAuthentication(context.Context, storage.DecideBackchannelAuthentication) (storage.DecidedBackchannelAuthentication, error) {
+	return storage.DecidedBackchannelAuthentication{}, s.decideErr
+}
+
+// refusingDecideHarness is an inbox harness whose backchannel store
+// refuses every decision with decideErr, holding one request filed for
+// user-1.
+func refusingDecideHarness(t *testing.T, decideErr error) harness {
+	t.Helper()
+	store := refusingDecideStore{memstore.NewBackchannelAuthenticationStore(), decideErr}
+	h := newHarnessWithBackchannelOptions(t, store, nil, func(d *server.Dependencies) {
+		d.BackchannelSubjects = hintSubjects{known: map[string]bool{"user-1": true}}
+		d.BackchannelInbox = memstore.NewBackchannelInbox()
+	})
+	beginFiled(t, h, "user-1")
+	return h
+}
+
+// TestDenyBackchannelInteractionsKeepsARequestThePlainErrorRefused: a
+// decision the store refuses with a plain error, as a store reporting an
+// outage without storage.ErrStoreUnavailable would, is a failure, and the
+// request stays listed rather than being taken for a decided one.
+func TestDenyBackchannelInteractionsKeepsARequestThePlainErrorRefused(t *testing.T) {
+	h := refusingDecideHarness(t, errors.New("db: connection reset"))
+	if n, err := h.server.DenyBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1"), "closed"); err == nil || n != 0 {
+		t.Fatalf("DenyBackchannelInteractions(decision refused with a plain error) = %d, %v, want 0 and an error", n, err)
+	}
+	if left := inboxOf(t, h, "user-1"); len(left) != 1 {
+		t.Errorf("inbox after the refused denial = %d requests, want the request still listed", len(left))
+	}
+}
+
+// TestDenyBackchannelInteractionsClearsWhatTheStoreSaysWasDecided: a
+// decision the store refuses as already decided
+// (storage.ErrBackchannelAuthenticationAlreadyDecided) is passed over,
+// and its stale entry removed.
+func TestDenyBackchannelInteractionsClearsWhatTheStoreSaysWasDecided(t *testing.T) {
+	h := refusingDecideHarness(t, fmt.Errorf("db: %w", storage.ErrBackchannelAuthenticationAlreadyDecided))
+	if n, err := h.server.DenyBackchannelInteractions(context.Background(), mustSubjectID(t, "user-1"), "closed"); err != nil || n != 0 {
+		t.Fatalf("DenyBackchannelInteractions(request already decided) = %d, %v, want 0, nil", n, err)
+	}
+	if left := inboxOf(t, h, "user-1"); len(left) != 0 {
+		t.Errorf("inbox after the denial = %d requests, want the stale entry cleared", len(left))
+	}
+}
+
 // TestBackchannelInboxSkipsAnEntryFiledUnderSomeoneElse: an entry whose
 // request is bound to another user than the one it's filed under, as an
 // entry a database writer moved would be, isn't listed for them.

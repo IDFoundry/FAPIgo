@@ -249,6 +249,14 @@ type Limits struct {
 	// must be at most an hour: signing in and consenting take minutes,
 	// and a pushed request's interaction shouldn't stay completable for
 	// days.
+	//
+	// It runs from BeginAuthorization, not from the pushed request, and
+	// isn't cut short by PushedRequestLifetime: the request_uri's
+	// lifetime bounds how long an interaction can be begun for it, and
+	// a user who reaches the authorization endpoint just before it ends
+	// still gets the whole InteractionLifetime to sign in. So a pushed
+	// request can be completed up to PushedRequestLifetime plus
+	// InteractionLifetime after it was pushed.
 	InteractionLifetime time.Duration
 
 	// AuthorizationCodeLifetime bounds how long an authorization code

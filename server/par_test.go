@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -1045,12 +1046,28 @@ func standardAuthParams(t *testing.T) map[string]json.RawMessage {
 	}
 }
 
+// withClientID is params with testClientID's client_id added when it
+// names none, as every client's request object does (RFC 9101 §5); a
+// test of one without it signs its own.
+func withClientID(t *testing.T, params map[string]json.RawMessage) map[string]json.RawMessage {
+	t.Helper()
+	if _, ok := params["client_id"]; ok {
+		return params
+	}
+	out := maps.Clone(params)
+	if out == nil {
+		out = map[string]json.RawMessage{}
+	}
+	out["client_id"] = jsonRaw(t, testClientID.String())
+	return out
+}
+
 func (h harness) requestObject(t *testing.T, params map[string]json.RawMessage) string {
 	t.Helper()
 	obj, err := requestobject.Create(requestobject.CreateParams{
 		Signer: h.key, Algorithm: fapi.ES256,
 		ClientID: testClientID.String(), Audience: testIssuer,
-		Now: h.now, Lifetime: 30 * time.Second, Parameters: params,
+		Now: h.now, Lifetime: 30 * time.Second, Parameters: withClientID(t, params),
 	})
 	if err != nil {
 		t.Fatalf("requestobject.Create: %v", err)
@@ -1224,6 +1241,51 @@ func TestPushAuthorizationRequestRejectsRequestUriAlongsideRequest(t *testing.T)
 // unregistered parameter from inside the request object, so it must be
 // reported as ErrorInvalidRequestObject (JAR-6.2), not the generic
 // ErrorInvalidRequest a plain-form violation gets.
+// TestPushAuthorizationRequestRefusesRequestObjectMembers: RFC 9101 §4
+// forbids "request" inside a request object, as it does "request_uri",
+// and a request object must name its client_id (RFC 9101 §5); each is
+// refused with invalid_request_object rather than the nested object
+// being dropped as an unrecognized parameter, or the client being
+// taken from iss alone.
+func TestPushAuthorizationRequestRefusesRequestObjectMembers(t *testing.T) {
+	for name, tc := range map[string]struct {
+		mutate func(params map[string]json.RawMessage, h harness)
+		want   string
+	}{
+		"nested request": {func(params map[string]json.RawMessage, h harness) {
+			params["request"] = jsonRaw(t, h.requestObject(t, standardAuthParams(t)))
+		}, "must not contain request"},
+		"no client_id": {func(params map[string]json.RawMessage, _ harness) {
+			delete(params, "client_id")
+		}, "must contain client_id"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
+			params := standardAuthParams(t)
+			tc.mutate(params, h)
+			// Signed directly: the harness adds a missing client_id.
+			obj, err := requestobject.Create(requestobject.CreateParams{
+				Signer: h.key, Algorithm: fapi.ES256,
+				ClientID: testClientID.String(), Audience: testIssuer,
+				Now: h.now, Lifetime: 30 * time.Second, Parameters: params,
+			})
+			if err != nil {
+				t.Fatalf("requestobject.Create: %v", err)
+			}
+			_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+				HTTP: server.FormRequest{Parameters: []server.FormParameter{
+					formParam("client_assertion", h.clientAssertion(t)),
+					formParam("client_assertion_type", clientassertion.AssertionType),
+					formParam("request", obj),
+				}},
+			})
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidRequestObject || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("PushAuthorizationRequest = %v, want invalid_request_object %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestPushAuthorizationRequestRejectsRequestUriInsideRequestObject(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
 	params := standardAuthParams(t)

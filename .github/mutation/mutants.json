@@ -4405,5 +4405,41 @@
     ],
     "run": "^TestInMemoryDPoPNonceCacheIsBounded$",
     "why": "the in-memory DPoP nonce cache holds at most maxCachedDPoPNonceScopes scopes"
+  },
+  {
+    "id": "server-request-object-refuses-nested-request",
+    "file": "server/par.go",
+    "old": "if _, hasRequest := verified.Parameters[\"request\"]; hasRequest {",
+    "new": "if _, hasRequest := verified.Parameters[\"request\"]; hasRequest && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestPushAuthorizationRequestRefusesRequestObjectMembers$",
+    "why": "a request object nesting another request object is refused (RFC 9101 §4)"
+  },
+  {
+    "id": "server-request-object-requires-client-id",
+    "file": "server/par.go",
+    "old": "if _, hasClientID := verified.Parameters[\"client_id\"]; !hasClientID {",
+    "new": "if _, hasClientID := verified.Parameters[\"client_id\"]; !hasClientID && client.AutomaticFederationRegistration() {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestPushAuthorizationRequestRefusesRequestObjectMembers$",
+    "why": "a request object without client_id is refused from every client, not only an automatically registered one"
+  },
+  {
+    "id": "resource-refuses-nil-embedded-unrevocable",
+    "file": "resource/verifier.go",
+    "old": "if embedsNilUnrevocable(deps.Revocation) {",
+    "new": "if embedsNilUnrevocable(deps.Revocation) && false {",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestNewVerifierRefusesANilEmbeddedUnrevocable$",
+    "why": "NewVerifier refuses a nil embedded *NoRevocationUntilExpiry instead of panicking"
   }
 ]

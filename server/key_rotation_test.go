@@ -55,7 +55,7 @@ func signedRequestObject(t *testing.T, h harness, kid string) string {
 	obj, err := requestobject.Create(requestobject.CreateParams{
 		Signer: h.key, Algorithm: fapi.ES256, KeyID: kid,
 		ClientID: testClientID.String(), Audience: testIssuer,
-		Now: h.now, Lifetime: 30 * time.Second, Parameters: standardAuthParams(t),
+		Now: h.now, Lifetime: 30 * time.Second, Parameters: withClientID(t, standardAuthParams(t)),
 	})
 	if err != nil {
 		t.Fatalf("requestobject.Create: %v", err)

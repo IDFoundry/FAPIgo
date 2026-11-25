@@ -56,6 +56,25 @@ reserved claim, instead of the server refusing it.
 **What to change:** rename the parameter. To name the end user, use
 `login_hint`, or a `sub` value in the `claims` parameter.
 
+### A request object must name its `client_id`, and may not nest `request` (server)
+
+**Affects:** a client whose signed request objects at PAR leave out
+`client_id`, or carry a `request` member.
+
+**Why:** RFC 9101 §5 has the request's `client_id` match the request
+object's own, and the OIDF conformance suite's clients, like FAPIgo's,
+always send one. Without it the request object names its client only
+by `iss`, a claim the same key signs for every kind of JWT the client
+issues. RFC 9101 §4 forbids `request` inside a request object, as it
+does `request_uri`. A nested one was dropped as an unrecognized
+parameter, and the outer request accepted.
+
+**What fails:** nothing at startup. The pushed authorization request
+is refused with 400 `invalid_request_object`.
+
+**What to change:** include `client_id` in the request object, and
+don't nest one request object in another.
+
 ## sqlstore v0.11.1
 
 ### `ClientCacheTTL` is at most a minute (sqlstore)

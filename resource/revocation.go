@@ -102,6 +102,29 @@ func unrevocableLifetime(revocation RevocationChecker) (time.Duration, bool) {
 	return 0, false
 }
 
+// embedsNilUnrevocable reports whether revocation is a struct embedding
+// a nil *NoRevocationUntilExpiry, at any depth: its promoted methods,
+// unrevocableLifetime and (unless the struct overrides it) IsRevoked,
+// dereference the nil pointer. Calling the promoted method is the only
+// way to tell, so NewVerifier refuses such a value with an error rather
+// than panicking itself or panicking at the first Verify.
+func embedsNilUnrevocable(revocation RevocationChecker) (embedsNil bool) {
+	r, ok := revocation.(interface{ unrevocableLifetime() time.Duration })
+	if !ok {
+		return false
+	}
+	if p, isPointer := revocation.(*NoRevocationUntilExpiry); isPointer && p == nil {
+		return false // unrevocableLifetime treats it as no declaration
+	}
+	defer func() {
+		if recover() != nil {
+			embedsNil = true
+		}
+	}()
+	r.unrevocableLifetime()
+	return false
+}
+
 // unrevocableLifetime is promoted to a struct embedding
 // NoRevocationUntilExpiry, so its MaxTokenLifetime still bounds every
 // token Verify accepts, whatever the struct's own IsRevoked does: the

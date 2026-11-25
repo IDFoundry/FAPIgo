@@ -4561,5 +4561,138 @@
     ],
     "run": "^(TestAccessTokenClaimsManagedTakePrecedence|TestAccessTokenClaimsWithoutManagedValues)$",
     "why": "a stored extension claim under a server-managed name never reaches the access token"
+  },
+  {
+    "id": "federation-absent-scope-held-to-policy",
+    "file": "federation/automatic_registration.go",
+    "old": "(resolved == nil || slices.Contains(listed, s)) && permitted.allows(s)",
+    "new": "(resolved == nil || slices.Contains(listed, s)) && (permitted.allows(s) || true)",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestAutomaticRegistrationNarrowsGrantsByResolvedMetadata$",
+    "why": "an RP leaving scope out gets only the AllowedScopes the metadata policy permits"
+  },
+  {
+    "id": "federation-default-subject-type-held-to-policy",
+    "file": "federation/automatic_registration.go",
+    "old": "if permitted.allows(t.String()) {",
+    "new": "if permitted.allows(t.String()) || true {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestAutomaticRegistrationSubjectTypeDefaultHeldToPolicy$",
+    "why": "an RP naming no subject_type gets a default the metadata policy permits"
+  },
+  {
+    "id": "federation-scope-one-of-bounds-absent-scope",
+    "file": "internal/federation/policy_space_delimited.go",
+    "old": "\traw, ok := split[opOneOf]\n\tif !ok {",
+    "new": "\traw, ok := split[opOneOf]\n\tif !ok || true {",
+    "module": "root",
+    "packages": [
+      "./internal/federation",
+      "./federation"
+    ],
+    "run": "^(TestPermittedSpaceDelimitedStrings|TestAutomaticRegistrationNarrowsGrantsByResolvedMetadata)$",
+    "why": "a one_of on scope bounds the scopes an RP leaving scope out gets"
+  },
+  {
+    "id": "federation-null-metadata-parameter-quoted",
+    "file": "internal/federation/claims_validation.go",
+    "old": "\"%w: metadata.%q.%q is null",
+    "new": "\"%w: metadata.%s.%s is null",
+    "module": "root",
+    "packages": [
+      "./internal/federation"
+    ],
+    "run": "^TestPolicyErrorsQuoteFetchedNames$",
+    "why": "fetched metadata names are quoted in errors, so they can't forge a log line"
+  },
+  {
+    "id": "federation-non-object-metadata-quoted",
+    "file": "internal/federation/policy.go",
+    "old": "policyError(\"metadata.%q is not a JSON object",
+    "new": "policyError(\"metadata.%s is not a JSON object",
+    "module": "root",
+    "packages": [
+      "./internal/federation"
+    ],
+    "run": "^TestPolicyErrorsQuoteFetchedNames$",
+    "why": "fetched entity type names are quoted in errors, so they can't forge a log line"
+  },
+  {
+    "id": "federation-requested-trust-anchors-quoted",
+    "file": "federation/resolve_issue.go",
+    "old": "requested trust anchors %q\"",
+    "new": "requested trust anchors %v\"",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestResolveIssuerResponseRejectsWrongTrustAnchor$",
+    "why": "the trust anchors a resolve request names are quoted in errors"
+  },
+  {
+    "id": "federation-rp-auth-methods-quoted",
+    "file": "federation/automatic_registration.go",
+    "old": "_supported %q is supported and permitted by allowed",
+    "new": "_supported %v is supported and permitted by allowed",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestAutomaticRegistrationFailureQuotesRPChoices$",
+    "why": "an RP's token_endpoint_auth_methods_supported is quoted in the failure OnResolutionFailure sees"
+  },
+  {
+    "id": "sqlstore-unknown-client-id-not-in-error",
+    "file": "sqlstore/client.go",
+    "old": "\tcase errors.Is(err, sql.ErrNoRows):\n\t\treturn nil, fmt.Errorf(\"sqlstore: %s: %w\", op, notFound(\"client\"))",
+    "new": "\tcase errors.Is(err, sql.ErrNoRows):\n\t\treturn nil, fmt.Errorf(\"sqlstore: %s %q: %w\", op, id, notFound(\"client\"))",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestClientRepositoryPutAndDelete$",
+    "why": "an unknown client_id, chosen by the request, isn't repeated into the error"
+  },
+  {
+    "id": "pairwise-deriver-ops-redacted",
+    "file": "pairwise/render.go",
+    "old": "\treturn redact.Redacted",
+    "new": "\treturn redact.Hidden(fmt.Sprint(ops))",
+    "module": "root",
+    "packages": [
+      "./pairwise"
+    ],
+    "run": "^TestDeriversPrintNoKey$",
+    "why": "a deriver prints [REDACTED] for its key operations"
+  },
+  {
+    "id": "keys-signer-spec-signer-redacted",
+    "file": "keys/signer_spec_render.go",
+    "old": "signer = redact.Redacted",
+    "new": "signer = redact.Hidden(fmt.Sprint(s.Signer))",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestSignerSpecPrintsNoKey$",
+    "why": "a SignerSpec prints [REDACTED] for its Signer, an ed25519 private key included"
+  },
+  {
+    "id": "keys-signer-spec-refuses-json",
+    "file": "keys/signer_spec_render.go",
+    "old": "func (SignerSpec) MarshalJSON() ([]byte, error) {\n\treturn nil, ErrSignerSpecSerialization\n}",
+    "new": "func (SignerSpec) MarshalJSON() ([]byte, error) {\n\treturn []byte(\"{}\"), nil\n}",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestSignerSpecRefusesEncoding$",
+    "why": "encoding/json refuses a SignerSpec rather than writing its Signer"
   }
 ]

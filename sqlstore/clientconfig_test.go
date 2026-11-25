@@ -215,7 +215,19 @@ func TestClientRepositoryPutAndDelete(t *testing.T) {
 		if _, err := repo.ResolveClient(ctx, "c"); !errors.Is(err, sqlstore.ErrNotFound) {
 			t.Fatalf("ResolveClient after Delete = %v, want ErrNotFound", err)
 		}
+		checkUnknownClientNotNamed(t, repo)
 	})
+}
+
+// checkUnknownClientNotNamed checks that repo answers an unknown
+// client_id, which is whatever a request sent, with an error that
+// doesn't repeat it into logs.
+func checkUnknownClientNotNamed(t *testing.T, repo *sqlstore.ClientRepository) {
+	t.Helper()
+	unknown := fapi.ClientID("unknown\nlevel=INFO msg=ok")
+	if _, err := repo.ResolveClient(context.Background(), unknown); !errors.Is(err, sqlstore.ErrNotFound) || strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("ResolveClient(unknown) = %v, want ErrNotFound not naming the id", err)
+	}
 }
 
 // The package documentation's example document is a valid client.

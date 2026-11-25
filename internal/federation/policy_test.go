@@ -589,7 +589,7 @@ func TestApplyPolicyOnlyToPresentEntityTypes(t *testing.T) {
 func TestApplyPolicyRefusesNonObjectMetadata(t *testing.T) {
 	metadata := map[string]json.RawMessage{"openid_relying_party": json.RawMessage(`["not", "an", "object"]`)}
 	_, err := ApplyPolicy(nil, nil, metadata)
-	if err == nil || !strings.Contains(err.Error(), "metadata.openid_relying_party is not a JSON object") {
+	if err == nil || !strings.Contains(err.Error(), `metadata."openid_relying_party" is not a JSON object`) {
 		t.Fatalf("ApplyPolicy(non-object metadata) = %v, want a refusal naming the entity type", err)
 	}
 }
@@ -609,5 +609,35 @@ func TestApplyPolicyTreatsNullAsAbsent(t *testing.T) {
 	}
 	if string(resolved["openid_relying_party"]) != `{}` {
 		t.Errorf("resolved = %s, want the null parameters left out", resolved["openid_relying_party"])
+	}
+}
+
+// TestPolicyErrorsQuoteFetchedNames: entity type and parameter names
+// come from fetched statements, so errors quote them, and a name with a
+// newline can't forge a line in a log the error is written to.
+func TestPolicyErrorsQuoteFetchedNames(t *testing.T) {
+	const forged = "x\nlevel=INFO msg=ok"
+	checks := map[string]func() error{
+		"non-object metadata": func() error {
+			_, err := ApplyPolicy(nil, nil, map[string]json.RawMessage{forged: json.RawMessage(`[]`)})
+			return err
+		},
+		"invalid policy": func() error {
+			return ValidatePolicy(MetadataPolicy{forged: {forged: {"one_of": json.RawMessage(`["a"]`), "add": json.RawMessage(`["a"]`)}}}, nil)
+		},
+		"parameter refused by policy": func() error {
+			_, err := ApplyPolicy(MetadataPolicy{"openid_relying_party": {forged: {"essential": json.RawMessage(`true`)}}}, nil,
+				map[string]json.RawMessage{"openid_relying_party": json.RawMessage(`{}`)})
+			return err
+		},
+		"null metadata parameter": func() error {
+			_, err := parseMetadataClaim(json.RawMessage(`{"x\nlevel=INFO":{"y\nmsg=ok":null}}`))
+			return err
+		},
+	}
+	for name, check := range checks {
+		if err := check(); err == nil || strings.Contains(err.Error(), "\n") {
+			t.Errorf("%s: error = %q, want one quoting the fetched name", name, err)
+		}
 	}
 }

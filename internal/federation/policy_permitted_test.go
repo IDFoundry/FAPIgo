@@ -78,3 +78,47 @@ func TestPermittedArrayStrings(t *testing.T) {
 		t.Error(`PermittedArrayStrings({"subset_of":"a"}) = nil error, want an error`)
 	}
 }
+
+// TestPermittedSpaceDelimitedStrings checks the values a scope policy
+// lets scope hold: subset_of and value as for an array parameter, with
+// value and one_of options given as space-delimited strings, and one_of
+// bounding it to the values its options list between them.
+func TestPermittedSpaceDelimitedStrings(t *testing.T) {
+	for _, tc := range []struct {
+		ops             string
+		want            []string
+		wantConstrained bool
+	}{
+		{`{}`, nil, false},
+		{`{"add":["a"]}`, nil, false},
+		{`{"default":"a b"}`, nil, false},
+		{`{"value":null}`, nil, false},
+		{`{"subset_of":["a","b"]}`, []string{"a", "b"}, true},
+		{`{"value":"a b"}`, []string{"a", "b"}, true},
+		{`{"value":["a","b"]}`, []string{"a", "b"}, true},
+		{`{"value":"a c","subset_of":["a","b"]}`, []string{"a"}, true},
+		{`{"one_of":["a","a b"]}`, []string{"a", "a", "b"}, true},
+		{`{"one_of":[["a"],"c"]}`, []string{"a", "c"}, true},
+		{`{"one_of":[]}`, []string{}, true},
+		{`{"one_of":[1,"a"]}`, []string{"a"}, true},
+		{`{"one_of":["a c"],"subset_of":["a","b"]}`, []string{"a"}, true},
+	} {
+		var ops PolicyOperators
+		if err := json.Unmarshal([]byte(tc.ops), &ops); err != nil {
+			t.Fatal(err)
+		}
+		got, constrained, err := PermittedSpaceDelimitedStrings(ops)
+		if err != nil || constrained != tc.wantConstrained || !slices.Equal(got, tc.want) || (constrained && got == nil) {
+			t.Errorf("PermittedSpaceDelimitedStrings(%s) = %#v, %v, %v; want %v, %v", tc.ops, got, constrained, err, tc.want, tc.wantConstrained)
+		}
+	}
+	for _, ops := range []string{`{"subset_of":"a"}`, `{"one_of":"a"}`} {
+		var parsed PolicyOperators
+		if err := json.Unmarshal([]byte(ops), &parsed); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := PermittedSpaceDelimitedStrings(parsed); err == nil {
+			t.Errorf("PermittedSpaceDelimitedStrings(%s) = nil error, want an error", ops)
+		}
+	}
+}

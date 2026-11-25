@@ -87,7 +87,7 @@ func MergePolicy(current MetadataPolicy, currentCrit []string, next MetadataPoli
 			}
 			mergedOps, err := mergeOperators(parameterOperators(claim, currentOps), parameterOperators(claim, nextOps), crit)
 			if err != nil {
-				return nil, fmt.Errorf("federation: metadata_policy: %s.%s: %w", entityType, claim, err)
+				return nil, fmt.Errorf("federation: metadata_policy: %q.%q: %w", entityType, claim, err)
 			}
 			currentParams[claim] = mergedOps
 		}
@@ -500,7 +500,7 @@ func validatePolicy(policy MetadataPolicy, crit critSet) error {
 	for entityType, params := range policy {
 		for claim, ops := range params {
 			if err := validateCombination(parameterOperators(claim, ops), crit); err != nil {
-				return fmt.Errorf("federation: metadata_policy: %s.%s: %w", entityType, claim, err)
+				return fmt.Errorf("federation: metadata_policy: %q.%q: %w", entityType, claim, err)
 			}
 		}
 	}
@@ -554,15 +554,15 @@ func ApplyPolicy(policy MetadataPolicy, critNames []string, metadata map[string]
 	for entityType, raw := range metadata {
 		var current map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &current); err != nil {
-			return nil, policyError("metadata.%s is not a JSON object: %v", entityType, err)
+			return nil, policyError("metadata.%q is not a JSON object: %v", entityType, err)
 		}
 		result, err := applyEntityTypePolicy(policy[entityType], crit, current)
 		if err != nil {
-			return nil, fmt.Errorf("federation: metadata.%s: %w", entityType, err)
+			return nil, fmt.Errorf("federation: metadata.%q: %w", entityType, err)
 		}
 		encoded, err := json.Marshal(result)
 		if err != nil {
-			return nil, policyError("marshal resolved metadata.%s: %v", entityType, err)
+			return nil, policyError("marshal resolved metadata.%q: %v", entityType, err)
 		}
 		resolved[entityType] = encoded
 	}
@@ -589,7 +589,7 @@ func applyEntityTypePolicy(params map[string]PolicyOperators, crit critSet, curr
 		}
 		value, present, err := applyParameterPolicy(claim, params[claim], crit, value, present)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", claim, err)
+			return nil, fmt.Errorf("%q: %w", claim, err)
 		}
 		if present {
 			resolved[claim] = value

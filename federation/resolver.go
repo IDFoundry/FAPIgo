@@ -911,10 +911,10 @@ func applySuperiorMetadata(subject, superior map[string]json.RawMessage) (map[st
 		}
 		var params, overrides map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &params); err != nil {
-			return nil, fmt.Errorf("the subject's %s metadata is not a JSON object: %w", entityType, err)
+			return nil, fmt.Errorf("the subject's %q metadata is not a JSON object: %w", entityType, err)
 		}
 		if err := json.Unmarshal(override, &overrides); err != nil {
-			return nil, fmt.Errorf("the superior's %s metadata is not a JSON object: %w", entityType, err)
+			return nil, fmt.Errorf("the superior's %q metadata is not a JSON object: %w", entityType, err)
 		}
 		if params == nil {
 			params = make(map[string]json.RawMessage, len(overrides))

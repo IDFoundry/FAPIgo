@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.11.1...sqlstore/v0.12.0) (2026-11-25)
+
+
+### Features
+
+* **sqlstore:** report an already-decided CIBA request ([d7835ab](https://github.com/IDFoundry/FAPIgo/commit/d7835ab26aed0002895e74b4ec1b377c7cae98e6))
+
+
+### Bug Fixes
+
+* **sqlstore:** leave an unknown client_id out of the not-found error ([a969d9a](https://github.com/IDFoundry/FAPIgo/commit/a969d9aeebbe01cabe7e50089aebc284e29d7d40))
+
 ## [0.11.1](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.11.0...sqlstore/v0.11.1) (2026-11-24)
 
 

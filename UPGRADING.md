@@ -41,8 +41,6 @@ plain JSON response with `ErrorInvalidResponse`. `client.New` refuses
 default. If your server signs some UserInfo responses and not others,
 set `AllowUnsignedUserInfo: true`.
 
-## v0.82.5
-
 ### A mutual-TLS client must present a certificate in production (client, *production only*)
 
 **Affects:** a client under `AssuranceProduction` that does mutual TLS

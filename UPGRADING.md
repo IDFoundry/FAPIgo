@@ -55,6 +55,29 @@ federation relied on Relying Parties that leave the parameter out getting
 every type, list those types in the Trust Anchor's or Intermediate's
 `one_of`, or have the Relying Parties publish the types they use.
 
+### A grant revoked while its refresh token is issued is `invalid_grant`, not `server_error` (server)
+
+**Affects:** servers issuing refresh tokens (`offline_access`, CIBA,
+`IssueRefreshToken`), and clients or monitoring that count their
+token errors. No code changes.
+
+**Why:** when the grant was revoked while its refresh token was being
+stored, most often a reused authorization code racing the exchange
+that redeemed it, the server withdrew the token and answered
+`server_error` (HTTP 500) "failed to issue refresh token": nothing was
+issued, but the client saw a store outage for what is a refused grant.
+
+**What fails:** nothing is refused that wasn't before. That token
+request now answers `invalid_grant` (HTTP 400) "the grant has been
+revoked", from the authorization code exchange, the CIBA token
+request and `IssueRefreshToken` alike, and its audit event records
+`invalid_grant`. A genuine store failure there, including a failure to
+withdraw the token, still answers `server_error`.
+
+**What to change:** nothing, unless an alert or client keys on the
+500: expect a 400 `invalid_grant` instead, and the client starts a new
+authorization as for any other refused grant.
+
 ## v0.85.0
 
 ### Codes, refresh tokens and `auth_req_id`s are stored under digests covering the issuer (server, storage)

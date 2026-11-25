@@ -366,7 +366,7 @@ func (s *Server) issueBackchannelOptionalTokens(ctx context.Context, client stor
 	if containsScope(grant.Scope, "offline_access") {
 		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, binding)
 		if err != nil {
-			return newError(ErrorServerError, 500, "failed to issue refresh token", err)
+			return refreshTokenIssueFailure(err)
 		}
 		result.RefreshToken = fapi.NewSecret(refreshToken)
 		result.HasRefreshToken = true

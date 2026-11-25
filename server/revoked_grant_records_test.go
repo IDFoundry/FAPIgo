@@ -151,12 +151,12 @@ func exchangeRevokedMeanwhile(t *testing.T, h harness, grants *revokingGrantStor
 // between a code exchange's check of the grant and the storage of its
 // refresh token revokes the grant's refresh tokens before this one
 // exists, so misses it. The exchange checks the grant again once the
-// token is stored, and fails with server_error, withdrawing the token and
+// token is stored, and fails with invalid_grant, withdrawing the token and
 // deleting its registry entry, rather than issuing one only the grant's
 // revocation record refuses, whether or not the GrantStore revokes a
 // grant's refresh tokens itself. A withdrawal that fails is reported with
-// it, and the token still isn't issued; it keeps its entry, by which
-// RevokeSubjectGrants revokes it.
+// it, as server_error, and the token still isn't issued; it keeps its
+// entry, by which RevokeSubjectGrants revokes it.
 func TestRefreshTokenIsntIssuedForAGrantRevokedMeanwhile(t *testing.T) {
 	for _, kind := range grantStoreKinds {
 		t.Run(kind.name, func(t *testing.T) { testRevokedMeanwhile(t, kind) })
@@ -165,15 +165,15 @@ func TestRefreshTokenIsntIssuedForAGrantRevokedMeanwhile(t *testing.T) {
 }
 
 // testRevokedMeanwhile runs exchangeRevokedMeanwhile over a GrantStore of
-// kind, and checks the exchange fails with server_error, withdrawing the
+// kind, and checks the exchange fails with invalid_grant, withdrawing the
 // one refresh token it stored and deleting that token's entry alone, and
 // lists nothing.
 func testRevokedMeanwhile(t *testing.T, kind grantStoreKind) {
 	grants := &revokingGrantStore{GrantStore: memstore.NewGrantStore()}
 	c, deleted := newRecordedLifetimeChanges(t, kind.of(grants))
 	h := c.at(0, 24*time.Hour)
-	if err := exchangeRevokedMeanwhile(t, h, grants); serverErrorCode(t, err) != server.ErrorServerError {
-		t.Fatalf("ExchangeAuthorizationCode, its grant revoked mid-exchange = %v, want server_error", err)
+	if err := exchangeRevokedMeanwhile(t, h, grants); serverErrorCode(t, err) != server.ErrorInvalidGrant {
+		t.Fatalf("ExchangeAuthorizationCode, its grant revoked mid-exchange = %v, want invalid_grant", err)
 	}
 	if len(grants.created) != 1 || redeemable(grants, grants.created[0]) {
 		t.Fatalf("%d refresh tokens created, the first still redeemable; want the one created withdrawn", len(grants.created))

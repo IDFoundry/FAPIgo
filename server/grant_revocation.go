@@ -198,7 +198,10 @@ func (s *Server) revokeGrantRefreshTokens(ctx context.Context, revocationKey str
 // refreshTokenHash has been created, that grant, the grant it's issued
 // from, still isn't revoked, and withdraws the token if it is, or if
 // that can't be checked (withdrawRefreshToken), so the token isn't
-// issued. The token request checked the grant before, but it may have
+// issued: a revocation found is errGrantRevokedWhileIssued, which the
+// token request answers invalid_grant (refreshTokenIssueFailure), a
+// failure to check the revocation the server_error it is. The token
+// request checked the grant before, but it may have
 // been revoked since: RevokeGrant, or a reuse of the authorization code,
 // records the grant as revoked, then revokes the grant's refresh tokens
 // in a GrantStore that can find them (storage.GrantRefreshTokenRevoker),
@@ -210,10 +213,15 @@ func (s *Server) revokeGrantRefreshTokens(ctx context.Context, revocationKey str
 // revocation store only for a grant with a GrantID or code grant ID, as
 // checkGrantNotRevoked does.
 func (s *Server) confirmGrantNotRevoked(ctx context.Context, grant grantRecord, refreshTokenHash [32]byte) error {
-	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
-		return s.withdrawRefreshToken(ctx, refreshTokenHash, fmt.Errorf("confirm the grant isn't revoked: %w", revErr))
+	revErr := s.checkGrantNotRevoked(ctx, grant)
+	if revErr == nil {
+		return nil
 	}
-	return nil
+	cause := fmt.Errorf("confirm the grant isn't revoked: %w", revErr)
+	if revErr.Code() == ErrorInvalidGrant {
+		cause = fmt.Errorf("%w: %w", errGrantRevokedWhileIssued, cause)
+	}
+	return s.withdrawRefreshToken(ctx, refreshTokenHash, cause)
 }
 
 // refreshTokenGrantKeys are the storage.NewRefreshToken.GrantKeys of a

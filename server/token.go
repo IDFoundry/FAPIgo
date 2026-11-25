@@ -754,7 +754,7 @@ func (s *Server) issueCodeExchangeTokens(ctx context.Context, client storage.Reg
 	}
 	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, binding)
 	if err != nil {
-		return newError(ErrorServerError, 500, "failed to issue refresh token", err)
+		return refreshTokenIssueFailure(err)
 	}
 	accessToken, accessKey, issueErr := s.issueAccessToken(ctx, params)
 	if issueErr != nil {
@@ -795,7 +795,7 @@ func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.R
 	}
 	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, binding)
 	if err != nil {
-		return newError(ErrorServerError, 500, "failed to issue refresh token", err)
+		return refreshTokenIssueFailure(err)
 	}
 	// Recomputed rather than threaded through issueRefreshToken's
 	// return: the caller already gets the raw value back, and this

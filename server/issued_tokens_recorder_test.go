@@ -235,7 +235,7 @@ func TestCodeReuseBeforeTheRecordStillEndsTheTokens(t *testing.T) {
 
 // testReuseMidExchange reuses a code mid-exchange, between its
 // redemption and RecordIssuedTokens, and checks the exchange fails with
-// server_error, recording nothing, and withdraws the refresh token it
+// invalid_grant, recording nothing, and withdraws the refresh token it
 // stored.
 func testReuseMidExchange(t *testing.T) {
 	h, store := newRecordingHarness(t)
@@ -248,8 +248,8 @@ func testReuseMidExchange(t *testing.T) {
 	if reuseErr == nil {
 		t.Fatal("ExchangeAuthorizationCode reusing the code mid-exchange = nil error, want error")
 	}
-	if err == nil || serverErrorCode(t, err) != server.ErrorServerError {
-		t.Fatalf("ExchangeAuthorizationCode with its code reused mid-exchange = %v, want server_error, issuing nothing", err)
+	if err == nil || serverErrorCode(t, err) != server.ErrorInvalidGrant {
+		t.Fatalf("ExchangeAuthorizationCode with its code reused mid-exchange = %v, want invalid_grant, issuing nothing", err)
 	}
 	if got := store.loggedCalls(); !slices.Equal(got, []string{"CreateRefreshToken"}) {
 		t.Fatalf("grant store calls = %v, want the refresh token stored, and nothing recorded", got)

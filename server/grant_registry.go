@@ -115,8 +115,30 @@ func (s *Server) recordGrant(ctx context.Context, clientID fapi.ClientID, grant 
 }
 
 // errGrantRevokedWhileIssued is issueRefreshToken's failure when the
-// grant was revoked while its refresh token was being issued.
+// grant was revoked while its refresh token was being issued: either
+// check after storing the token, confirmGrantRecorded's or
+// confirmGrantNotRevoked's, found the revocation, and the token was
+// withdrawn. refreshTokenIssueFailure answers it invalid_grant.
 var errGrantRevokedWhileIssued = errors.New("the grant was revoked while its refresh token was being issued")
+
+// errRefreshTokenNotWithdrawn marks withdrawRefreshToken's failure to
+// revoke the token it withdraws: a store failure, which may leave a live
+// token behind, whatever the cause it's joined to.
+var errRefreshTokenNotWithdrawn = errors.New("withdraw the refresh token")
+
+// refreshTokenIssueFailure is the token request's answer when
+// issueRefreshToken fails with err: invalid_grant (RFC 6749 §5.2) when
+// the grant was revoked while the token was being issued, the token
+// withdrawn, as a reused authorization code's racing exchange is; and
+// server_error for any other failure, a store's included, and for a
+// revocation found when the token couldn't then be withdrawn, which is
+// a store failure too.
+func refreshTokenIssueFailure(err error) *Error {
+	if errors.Is(err, errGrantRevokedWhileIssued) && !errors.Is(err, errRefreshTokenNotWithdrawn) {
+		return newError(ErrorInvalidGrant, 400, "the grant has been revoked", err)
+	}
+	return newError(ErrorServerError, 500, "failed to issue refresh token", err)
+}
 
 // confirmGrantRecorded checks, after the refresh token stored under
 // refreshTokenHash was created, that its grant is still in
@@ -161,7 +183,7 @@ func (s *Server) confirmGrantRecorded(ctx context.Context, subject string, refre
 // RevokeListedGrant or RevokeSubjectGrants to revoke the token by.
 func (s *Server) withdrawRefreshToken(ctx context.Context, refreshTokenHash [32]byte, cause error) error {
 	if err := s.deps.Grants.RevokeRefreshToken(ctx, refreshTokenHash); err != nil {
-		return errors.Join(cause, fmt.Errorf("withdraw the refresh token: %w", err))
+		return errors.Join(cause, fmt.Errorf("%w: %w", errRefreshTokenNotWithdrawn, err))
 	}
 	_ = s.forgetRevokedRefreshToken(ctx, refreshTokenHash)
 	return cause

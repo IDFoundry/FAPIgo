@@ -20,25 +20,35 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.87.0
 
-### A JWT or UserInfo response may not repeat a claim (all packages)
+### A JWT or UserInfo response may not repeat a claim with differing values (all packages)
 
 **Affects:** a deployment whose peer repeats a member name, in any
-object at any depth, of a JWT's claims set, or writes two names that
-differ only in case there: an authorization server's ID tokens, JARM
-responses, UserInfo responses or JWT access tokens; a client's request
-objects, signed CIBA requests, client assertions, DPoP proofs or
-attestation PoPs; or a federation entity's Trust Marks, Trust Mark
-Delegations, Trust Mark Status, Resolve or Historical Keys responses.
-v0.81.0 did this for JOSE headers, client attestations, metadata and
-Entity Statements; these claims sets kept encoding/json's last copy of
-a repeated claim.
+object at any depth, of a JWT's claims set, with copies whose values
+differ, or writes two names that differ only in case there: an
+authorization server's ID tokens, JARM responses, UserInfo responses or
+JWT access tokens; a client's request objects, signed CIBA requests,
+client assertions, DPoP proofs or attestation PoPs; or a federation
+entity's Trust Marks, Trust Mark Delegations, Trust Mark Status,
+Resolve or Historical Keys responses. A member repeated with identical
+copies (the same JSON text, ignoring whitespace), such as a JARM
+response carrying `iss` both as its JWT claim and as the RFC 9207
+response parameter, is still accepted. v0.81.0 refused any repeat in
+JOSE headers, client attestations, metadata and Entity Statements, and
+still does; these claims sets kept encoding/json's last copy of a
+repeated claim.
 
 **Why:** RFC 7519 §4 requires a JWT's claim names to be unique, and
 lets a recipient reject a repeat or keep the last copy. Keeping the
-last copy left a JWT with two readings: another reader of the same
-token (a gateway in front of a resource server, a log processor, a
-second verifier) that keeps the first copy would see a different
-`sub`, `aud` or `scope` than FAPIgo acted on.
+last copy left a JWT with differing copies two readings: another reader
+of the same token (a gateway in front of a resource server, a log
+processor, a second verifier) that keeps the first copy would see a
+different `sub`, `aud` or `scope` than FAPIgo acted on. Identical
+copies read the same to every reader, so they are accepted. Two names
+differing only in case are refused whatever their values, since
+encoding/json reads them as one member where another reader reads two.
+Copies are compared as text: values another reader might take as equal
+but written differently (`"a"` and `"\u0061"`, `1` and `1.0`) are
+refused.
 
 **What fails:** nothing at startup. The server answers such a request
 object with `invalid_request_object`, a signed CIBA request with
@@ -48,10 +58,12 @@ resource server answers such a JWT access token with `invalid_token`,
 and a DPoP proof with `invalid_dpop_proof`. The client refuses such an
 ID token, JARM response or UserInfo response, signed, encrypted or
 plain JSON, with `invalid_response`. A federation JWT that repeats a
-claim fails to parse, with the error its parser gives any malformed one.
+claim with differing values fails to parse, with the error its parser
+gives any malformed one.
 
 **What to change:** nothing in your code. A peer producing such JWTs
-must write each claim once, spelled one way.
+must write each claim once, spelled one way, or repeat it only with an
+identical value.
 
 ## v0.86.0
 

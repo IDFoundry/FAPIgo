@@ -11,6 +11,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"maps"
 	"path/filepath"
 	"reflect"
@@ -23,6 +24,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/client/sessioncookie"
 	"github.com/idfoundry/fapigo/fapitest"
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/internal/rendertest"
@@ -30,15 +32,18 @@ import (
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/server/interactioncookie"
 )
 
 // This file is the rendering matrix for key material, beside the
 // redaction guard's for the values a flow hands its caller: every
 // struct field of the guarded packages, exported or not, that holds a
 // private key, a crypto.Signer, a cipher, or bytes named as a key or
-// secret is reached by one of keyHolders' cases, which builds a value
-// holding real key material the way a deployment does and renders it
-// through rendertest's whole matrix. A new such field fails
+// secret, or whose type holds such a field at any depth (a deps pointer
+// to a Dependencies struct with a Signer in it, a map of structs with a
+// cipher in each), is reached by one of keyHolders' cases, which builds
+// a value holding real key material the way a deployment does and
+// renders it through rendertest's whole matrix. A new such field fails
 // TestKeyHolderMatrixCoversEveryKeyField until a case covers it, or
 // notKeyMaterial says why it isn't one.
 //
@@ -80,12 +85,18 @@ var keyHolders = map[string]keyHolder{
 			macKey, encKey := randomBytes(t, 32), randomBytes(t, 32)
 			return must(pairwise.NewReversible(macKey, encKey))(t), []string{string(macKey), string(encKey)}
 		}},
-	"keys.NewKeyManagerFromSigners ES256": {covers: []string{"keys.signerBackend.signer"},
+	"keys.NewKeyManagerFromSigners ES256": {covers: []string{"keys.signerBackend.signer", "keys.signerKeyManager.backends"},
 		build: func(t *testing.T) (any, []string) { return signerKeyManager(t, fapi.ES256, ecdsaKey(t)) }},
-	"keys.NewKeyManagerFromSigners PS256": {covers: []string{"keys.signerBackend.signer"},
+	"keys.NewKeyManagerFromSigners PS256": {covers: []string{"keys.signerBackend.signer", "keys.signerKeyManager.backends"},
 		build: func(t *testing.T) (any, []string) { return signerKeyManager(t, fapi.PS256, rsaKey(t)) }},
-	"keys.NewKeyManagerFromSigners EdDSA": {covers: []string{"keys.signerBackend.signer"},
+	"keys.NewKeyManagerFromSigners EdDSA": {covers: []string{"keys.signerBackend.signer", "keys.signerKeyManager.backends"},
 		build: func(t *testing.T) (any, []string) { return signerKeyManager(t, fapi.EdDSA, ed25519Key(t)) }},
+	"keys.NewKeyManagerFromSigners with DeclareCustody": {covers: []string{"keys.custodyKeyManager.signerKeyManager"},
+		build: func(t *testing.T) (any, []string) {
+			key := ecdsaKey(t)
+			custody := keys.DeclareCustody(keys.KeyCustody{Durable: true})
+			return must(keys.NewKeyManagerFromSigners([]keys.SignerSpec{{Purpose: keys.JARMSigning, Algorithm: fapi.ES256, Signer: key}}, custody))(t), keySecrets(key)
+		}},
 	"keys.SignerSpec ES256 and PS256": {covers: []string{"keys.SignerSpec.Signer"},
 		build: func(t *testing.T) (any, []string) {
 			ec, rsa := ecdsaKey(t), rsaKey(t)
@@ -123,6 +134,14 @@ var keyHolders = map[string]keyHolder{
 			}, keySecrets(key)
 		}},
 	"federation issuers": {
+		covers: []string{
+			"federation.HistoricalKeysIssuer.deps", "federation.ResolveIssuer.deps", "federation.SelfIssuer.deps",
+			"federation.SubordinateIssuer.deps", "federation.TrustMarkIssuer.deps",
+			// The shadows the issuers' Format methods print in their place.
+			"federation.historicalKeysIssuerShadow.Dependencies", "federation.resolveIssuerShadow.Dependencies",
+			"federation.selfIssuerShadow.Dependencies", "federation.subordinateIssuerShadow.Dependencies",
+			"federation.trustMarkIssuerShadow.Dependencies",
+		},
 		build: func(t *testing.T) (any, []string) {
 			key := ed25519Key(t)
 			return federationIssuers(t, key), keySecrets(key)
@@ -137,20 +156,20 @@ var keyHolders = map[string]keyHolder{
 			key := must(ecdh.P256().GenerateKey(rand.Reader))(t)
 			return must(keys.NewInMemoryECDH(key, "k"))(t), keySecrets(key)
 		}},
-	"ephemeral.NewKeyManager ES256 and PS256": {covers: []string{"ephemeral.signingKey.signer"},
+	"ephemeral.NewKeyManager ES256 and PS256": {covers: []string{"ephemeral.signingKey.signer", "ephemeral.KeyManager.keys"},
 		build: func(t *testing.T) (any, []string) {
 			return ephemeralKeyManager(t, map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.JARMSigning: fapi.ES256, keys.IDTokenSigning: fapi.PS256}, nil)
 		}},
-	"ephemeral.NewKeyManager EdDSA": {covers: []string{"ephemeral.signingKey.signer"},
+	"ephemeral.NewKeyManager EdDSA": {covers: []string{"ephemeral.signingKey.signer", "ephemeral.KeyManager.keys"},
 		build: func(t *testing.T) (any, []string) {
 			return ephemeralKeyManager(t, map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.JARMSigning: fapi.EdDSA}, nil)
 		}},
-	"ephemeral.NewKeyManagerWithDecryption": {covers: []string{"ephemeral.decryptionKeys.keys"},
+	"ephemeral.NewKeyManagerWithDecryption": {covers: []string{"ephemeral.decryptionKeys.keys", "ephemeral.KeyManager.decryption", "ephemeral.KeyManager.keys"},
 		build: func(t *testing.T) (any, []string) {
 			return ephemeralKeyManager(t, map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.JARMSigning: fapi.ES256},
 				map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{keys.IDTokenDecryption: fapi.RSAOAEP256, keys.UserInfoDecryption: fapi.ECDHESA256KW})
 		}},
-	"client sealers": {covers: []string{"client.sealKey.aead"},
+	"client sealers": {covers: []string{"client.sealKey.aead", "client.sealKeyring.keys", "client.TokenSetSealer.keys", "client.BackchannelSessionSealer.keys"},
 		build: func(t *testing.T) (any, []string) {
 			key := randomBytes(t, 32)
 			c := fapitest.New(t, fapitest.Config{Profile: server.ProfileFAPISecurity}).Client
@@ -158,6 +177,14 @@ var keyHolders = map[string]keyHolder{
 				Tokens  *client.TokenSetSealer
 				Session *client.BackchannelSessionSealer
 			}{must(client.NewTokenSetSealer(c, [][]byte{key}))(t), must(client.NewBackchannelSessionSealer(c, [][]byte{key}))(t)}, []string{string(key)}
+		}},
+	"cookie jars": {covers: []string{"interactioncookie.Cookie.jar", "sessioncookie.Cookie.jar"},
+		build: func(t *testing.T) (any, []string) {
+			key := randomBytes(t, 32)
+			return struct {
+				Interaction *interactioncookie.Cookie
+				Session     *sessioncookie.Cookie
+			}{must(interactioncookie.New([][]byte{key}, interactioncookie.Options{}))(t), must(sessioncookie.New([][]byte{key}, sessioncookie.Options{}))(t)}, []string{string(key)}
 		}},
 }
 
@@ -197,10 +224,16 @@ var keyMaterialTypes = map[string]bool{
 var keyMaterialName = regexp.MustCompile(`(?i)key|secret|seed|priv`)
 
 // TestKeyHolderMatrixCoversEveryKeyField parses the guarded packages and
-// fails for a struct field holding key material (see keyMaterialTypes
-// and keyMaterialName; a map or slice of them too) that no keyHolders
-// case covers and notKeyMaterial doesn't excuse, and for a table entry
-// naming no such field.
+// fails for a struct field holding key material that no keyHolders case
+// covers and notKeyMaterial doesn't excuse, and for a table entry naming
+// no such field. A field holds key material directly (see
+// keyMaterialTypes and keyMaterialName; a map, slice or array of them
+// too), or transitively: its type, through pointers, slices, arrays,
+// maps' values, channels, generic types' arguments, inline structs and
+// the named types this module declares (in the guarded packages or
+// internal/), reaches a field holding it directly. A case covering a
+// transitive holder renders the value that holds it, so its renderings
+// check the nested key too.
 func TestKeyHolderMatrixCoversEveryKeyField(t *testing.T) {
 	covered := map[string]bool{}
 	for _, tc := range keyHolders {
@@ -208,13 +241,12 @@ func TestKeyHolderMatrixCoversEveryKeyField(t *testing.T) {
 			covered[field] = true
 		}
 	}
+	ix := newTypeIndex(t)
 	found := map[string]bool{}
-	for _, dir := range guardedPackages {
-		for _, field := range keyMaterialFields(t, dir) {
-			found[field] = true
-			if _, excused := notKeyMaterial[field]; !covered[field] && !excused {
-				t.Errorf("%s holds key material, and no keyHolders case covers it: add one, or say in notKeyMaterial why it isn't key material", field)
-			}
+	for _, field := range ix.keyMaterialFields() {
+		found[field.name] = true
+		if _, excused := notKeyMaterial[field.name]; !covered[field.name] && !excused {
+			t.Errorf("%s holds key material%s, and no keyHolders case covers it: add one, or say in notKeyMaterial why it isn't key material", field.name, field.via)
 		}
 	}
 	for _, field := range append(slices.Collect(maps.Keys(covered)), slices.Collect(maps.Keys(notKeyMaterial))...) {
@@ -224,49 +256,334 @@ func TestKeyHolderMatrixCoversEveryKeyField(t *testing.T) {
 	}
 }
 
-// keyMaterialFields is the key-material fields of the struct types
-// declared in dir's non-test files, as package.Type.field.
-func keyMaterialFields(t *testing.T, dir string) []string {
+// TestKeyMaterialIndexFollowsNestedTypes checks the guard's transitive
+// detection on a package of its own: through pointers, maps, slices,
+// generic arguments, inline structs and another module package's type,
+// across a cycle, and not into a type holding no key material.
+func TestKeyMaterialIndexFollowsNestedTypes(t *testing.T) {
+	const other = modulePath + "/internal/other"
+	files := map[string][]*ast.File{
+		modulePath + "/guarded": {parseSource(t, `package guarded
+import (
+	"crypto"
+	"sync/atomic"
+	o "github.com/idfoundry/fapigo/internal/other"
+)
+type W struct{ x *X }
+type X struct {
+	y *Y
+	k crypto.Signer
+}
+type Y struct{ x *X }
+type Z struct{ y map[string][]Y }
+type G struct{ p atomic.Pointer[X] }
+type I struct{ s struct{ secretKey []byte } }
+type O struct{ j *o.Jar }
+type named []*X
+type N struct{ n named }
+type P struct {
+	n    int
+	self *P
+	jwks []byte
+}
+`)},
+		other: {parseSource(t, `package other
+import "crypto/cipher"
+type Jar struct{ keys []key }
+type key struct{ aead cipher.AEAD }
+`)},
+	}
+	var got []string
+	for _, field := range indexTypes(files, []string{modulePath + "/guarded"}).keyMaterialFields() {
+		got = append(got, field.name)
+	}
+	want := []string{"guarded.W.x", "guarded.X.y", "guarded.X.k", "guarded.Y.x", "guarded.Z.y", "guarded.G.p", "guarded.I.s", "guarded.O.j", "guarded.N.n"}
+	if !slices.Equal(got, want) {
+		t.Errorf("key-material fields\n got %v\nwant %v", got, want)
+	}
+}
+
+// parseSource parses src, a Go file.
+func parseSource(t *testing.T, src string) *ast.File {
 	t.Helper()
-	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	file, err := parser.ParseFile(token.NewFileSet(), "src.go", src, parser.SkipObjectResolution)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []string
+	return file
+}
+
+// modulePath is the import path of the module the guarded packages are in.
+const modulePath = "github.com/idfoundry/fapigo"
+
+// typeDecl is a named type declared in this module.
+type typeDecl struct {
+	// name is the type as package.Type, package being its package's name.
+	name string
+	// expr is the type's definition.
+	expr ast.Expr
+	// file resolves the names expr uses.
+	file *fileScope
+}
+
+// fileScope resolves the type names a file's declarations use.
+type fileScope struct {
+	// path is the file's package's import path.
+	path string
+	// imports maps a name the file imports a package as to its path.
+	imports map[string]string
+}
+
+// keyField is a field holding key material.
+type keyField struct {
+	// name is the field as package.Type.field.
+	name string
+	// via, for a transitive holder, says through which type it does.
+	via string
+}
+
+// typeIndex is the named types this module declares, by import path and
+// name, and which of them reach key material.
+type typeIndex struct {
+	decls map[string]*typeDecl
+	// guarded are the guarded packages' types, the ones whose fields
+	// the guard reports, in declaration order.
+	guarded []string
+	// reaches memoizes typeReaches's final results; visiting holds the
+	// types it is inside, so a cycle ends.
+	reaches  map[string]bool
+	visiting map[string]bool
+}
+
+// newTypeIndex parses the guarded packages and internal/'s.
+func newTypeIndex(t *testing.T) *typeIndex {
+	t.Helper()
+	dirs := slices.Clone(guardedPackages)
+	err := filepath.WalkDir("../internal", func(path string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() && d.Name() != "testdata" {
+			dirs = append(dirs, path)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed := map[string][]*ast.File{}
+	var guarded []string
+	for _, dir := range dirs {
+		path := importPath(t, dir)
+		parsed[path] = parseDir(t, dir)
+		if slices.Contains(guardedPackages, dir) {
+			guarded = append(guarded, path)
+		}
+	}
+	return indexTypes(parsed, guarded)
+}
+
+// indexTypes indexes the type declarations of files, by import path,
+// reporting the fields of guarded's.
+func indexTypes(files map[string][]*ast.File, guarded []string) *typeIndex {
+	ix := &typeIndex{decls: map[string]*typeDecl{}, reaches: map[string]bool{}, visiting: map[string]bool{}}
+	names := map[string]string{}
+	for path, pkg := range files {
+		if len(pkg) > 0 {
+			names[path] = pkg[0].Name.Name
+		}
+	}
+	// Sorted paths, and each package's file order, keep the guard's
+	// reports in a stable order.
+	for _, path := range slices.Sorted(maps.Keys(files)) {
+		for _, file := range files[path] {
+			ix.add(file, &fileScope{path: path, imports: fileImports(file, names)}, slices.Contains(guarded, path))
+		}
+	}
+	return ix
+}
+
+// add indexes file's type declarations, recording them as guarded if
+// guarded is set.
+func (ix *typeIndex) add(file *ast.File, scope *fileScope, guarded bool) {
+	for _, spec := range typeSpecs(file) {
+		key := scope.path + "." + spec.Name.Name
+		ix.decls[key] = &typeDecl{name: file.Name.Name + "." + spec.Name.Name, expr: spec.Type, file: scope}
+		if guarded {
+			ix.guarded = append(ix.guarded, key)
+		}
+	}
+}
+
+// importPath is dir's import path.
+func importPath(t *testing.T, dir string) string {
+	t.Helper()
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel == "." {
+		return modulePath
+	}
+	return modulePath + "/" + filepath.ToSlash(rel)
+}
+
+// parseDir parses dir's non-test files.
+func parseDir(t *testing.T, dir string) []*ast.File {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []*ast.File
 	fset := token.NewFileSet()
-	for _, path := range files {
+	for _, path := range paths {
 		if strings.HasSuffix(path, "_test.go") {
 			continue
 		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, spec := range typeSpecs(file) {
-			if st, ok := spec.Type.(*ast.StructType); ok {
-				out = append(out, structKeyFields(file.Name.Name+"."+spec.Name.Name, st)...)
-			}
+		files = append(files, file)
+	}
+	return files
+}
+
+// fileImports maps the names file imports this module's packages as to
+// their import paths; names holds each package's name.
+func fileImports(file *ast.File, names map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, imp := range file.Imports {
+		path := strings.Trim(imp.Path.Value, `"`)
+		name, ok := names[path]
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		if ok || imp.Name != nil {
+			out[name] = path
 		}
 	}
 	return out
 }
 
-// structKeyFields is st's key-material fields, prefixed with typeName.
-func structKeyFields(typeName string, st *ast.StructType) []string {
-	var out []string
-	for _, field := range st.Fields.List {
-		typ := typeString(field.Type)
-		for _, name := range field.Names {
-			if holdsKeyMaterial(typ, name.Name) {
-				out = append(out, typeName+"."+name.Name)
-			}
+// keyMaterialFields is the fields of the guarded packages' struct types
+// holding key material, directly or transitively.
+func (ix *typeIndex) keyMaterialFields() []keyField {
+	var out []keyField
+	for _, key := range ix.guarded {
+		decl := ix.decls[key]
+		st, ok := decl.expr.(*ast.StructType)
+		if !ok {
+			continue
+		}
+		for _, field := range st.Fields.List {
+			out = append(out, ix.fieldKeys(decl, field)...)
 		}
 	}
 	return out
+}
+
+// fieldKeys is field of decl's struct, once per name, if it holds key
+// material.
+func (ix *typeIndex) fieldKeys(decl *typeDecl, field *ast.Field) []keyField {
+	names := fieldNames(field)
+	var out []keyField
+	for _, name := range names {
+		if holdsKeyMaterial(typeString(field.Type), name) {
+			out = append(out, keyField{name: decl.name + "." + name})
+		} else if ix.exprReaches(decl.file, field.Type) {
+			out = append(out, keyField{name: decl.name + "." + name, via: " through its type, " + typeString(field.Type)})
+		}
+	}
+	return out
+}
+
+// fieldNames is field's names, or an embedded field's type name.
+func fieldNames(field *ast.Field) []string {
+	if len(field.Names) == 0 {
+		typ := strings.TrimPrefix(typeString(field.Type), "*")
+		return []string{typ[strings.LastIndex(typ, ".")+1:]}
+	}
+	names := make([]string, len(field.Names))
+	for i, name := range field.Names {
+		names[i] = name.Name
+	}
+	return names
+}
+
+// exprReaches reports whether a value of type e, resolved in scope,
+// holds key material in a field, at any depth.
+func (ix *typeIndex) exprReaches(scope *fileScope, e ast.Expr) bool {
+	switch t := e.(type) {
+	case *ast.StarExpr:
+		return ix.exprReaches(scope, t.X)
+	case *ast.ArrayType:
+		return ix.exprReaches(scope, t.Elt)
+	case *ast.MapType:
+		return ix.exprReaches(scope, t.Value)
+	case *ast.ChanType:
+		return ix.exprReaches(scope, t.Value)
+	case *ast.IndexExpr:
+		return ix.exprReaches(scope, t.X) || ix.exprReaches(scope, t.Index)
+	case *ast.IndexListExpr:
+		return ix.exprReaches(scope, t.X) || slices.ContainsFunc(t.Indices, func(e ast.Expr) bool { return ix.exprReaches(scope, e) })
+	case *ast.StructType:
+		return ix.structReaches(scope, t)
+	case *ast.Ident:
+		return ix.typeReaches(scope.path + "." + t.Name)
+	case *ast.SelectorExpr:
+		pkg, ok := t.X.(*ast.Ident)
+		return ok && scope.imports[pkg.Name] != "" && ix.typeReaches(scope.imports[pkg.Name]+"."+t.Sel.Name)
+	}
+	return false
+}
+
+// structReaches reports whether one of st's fields holds key material,
+// directly or transitively.
+func (ix *typeIndex) structReaches(scope *fileScope, st *ast.StructType) bool {
+	for _, field := range st.Fields.List {
+		for _, name := range fieldNames(field) {
+			if holdsKeyMaterial(typeString(field.Type), name) {
+				return true
+			}
+		}
+		if ix.exprReaches(scope, field.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+// typeReaches reports whether the named type key, a module type's
+// import path and name, holds key material: false for a type the module
+// doesn't declare, or one already being resolved.
+func (ix *typeIndex) typeReaches(key string) bool {
+	if reaches, done := ix.reaches[key]; done {
+		return reaches
+	}
+	decl := ix.decls[key]
+	if decl == nil || ix.visiting[key] {
+		return false
+	}
+	ix.visiting[key] = true
+	reaches := ix.exprReaches(decl.file, decl.expr)
+	delete(ix.visiting, key)
+	// A false found inside another type's resolution may be a cycle cut
+	// short, so only an outermost one is final.
+	if reaches || len(ix.visiting) == 0 {
+		ix.reaches[key] = reaches
+	}
+	return reaches
 }
 
 // holdsKeyMaterial reports whether a field of type typ named name holds
-// key material.
+// key material directly.
 func holdsKeyMaterial(typ, name string) bool {
 	for {
 		if keyMaterialTypes[typ] {

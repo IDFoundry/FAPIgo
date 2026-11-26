@@ -5814,5 +5814,114 @@
     ],
     "run": "^TestBackchannelDecisionsAndExpiry$",
     "why": "sqlstore wraps ErrBackchannelAuthenticationNotFound for an unknown CIBA handle"
+  },
+  {
+    "id": "token-claims-refuse-duplicate-members",
+    "file": "internal/token/claims_object.go",
+    "old": "if err := strictjson.CheckDuplicateMembers(payload); err != nil {",
+    "new": "if err := strictjson.CheckDuplicateMembers(payload); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/token",
+      "./resource"
+    ],
+    "run": "^(TestParseClaimsRefuseDuplicateMembers|TestVerifyRefusesJWTAccessTokenRepeatingAClaim)$",
+    "why": "ID token and JWT access token claims sets that repeat a member are refused, not read last-wins"
+  },
+  {
+    "id": "jarm-claims-refuse-duplicate-members",
+    "file": "internal/jarm/claims_object.go",
+    "old": "if err := strictjson.CheckDuplicateMembers(payload); err != nil {",
+    "new": "if err := strictjson.CheckDuplicateMembers(payload); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/jarm"
+    ],
+    "run": "^TestParseClaimsRefusesDuplicateMembers$",
+    "why": "a JARM claims set that repeats a member is refused"
+  },
+  {
+    "id": "requestobject-claims-refuse-duplicate-members",
+    "file": "internal/requestobject/claims_object.go",
+    "old": "if err := strictjson.CheckDuplicateMembers(payload); err != nil {",
+    "new": "if err := strictjson.CheckDuplicateMembers(payload); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/requestobject"
+    ],
+    "run": "^TestParseClaimsRefusesDuplicateMembers$",
+    "why": "a request object claims set that repeats a member is refused"
+  },
+  {
+    "id": "clientassertion-claims-refuse-duplicate-members",
+    "file": "internal/clientassertion/claims.go",
+    "old": "if err := strictjson.CheckDuplicateMembers(payload); err != nil {",
+    "new": "if err := strictjson.CheckDuplicateMembers(payload); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/clientassertion"
+    ],
+    "run": "^TestParseClaimsRefusesDuplicateMembers$",
+    "why": "a client assertion claims set that repeats a member is refused"
+  },
+  {
+    "id": "dpop-claims-refuse-duplicate-members",
+    "file": "internal/dpop/proof.go",
+    "old": "strictjson.UnmarshalNoRepeats(payload, &c)",
+    "new": "strictjson.Unmarshal(payload, &c)",
+    "module": "root",
+    "packages": [
+      "./internal/dpop"
+    ],
+    "run": "^TestParseClaimsRefusesDuplicateMembers$",
+    "why": "a DPoP proof claims set that repeats a member is refused"
+  },
+  {
+    "id": "clientattestation-pop-refuse-duplicate-members",
+    "file": "internal/clientattestation/claims.go",
+    "old": "var c popClaims\n\tif err := unmarshalUniqueMembers(payload, &c)",
+    "new": "var c popClaims\n\tif err := strictjson.Unmarshal(payload, &c)",
+    "module": "root",
+    "packages": [
+      "./internal/clientattestation"
+    ],
+    "run": "^TestParsePoPClaimsRefusesDuplicateMembers$",
+    "why": "an attestation PoP claims set that repeats a member is refused"
+  },
+  {
+    "id": "federation-jwt-claims-refuse-duplicate-members",
+    "file": "internal/federation/claims_validation.go",
+    "old": "\tif err := refuseDuplicateMembers(payload); err != nil {\n\t\treturn nil, err",
+    "new": "\tif err := refuseDuplicateMembers(payload); err != nil && false {\n\t\treturn nil, err",
+    "module": "root",
+    "packages": [
+      "./internal/federation"
+    ],
+    "run": "^TestParseFederationJWTClaimsRefuseDuplicateMembers$",
+    "why": "Trust Marks, delegations, status, resolve and historical keys claims sets that repeat a member are refused"
+  },
+  {
+    "id": "client-userinfo-refuse-duplicate-members",
+    "file": "client/userinfo.go",
+    "old": "if err := strictjson.CheckDuplicateMembers(body); err != nil {",
+    "new": "if err := strictjson.CheckDuplicateMembers(body); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestDecodeUserInfoJSONRefusesDuplicateMembers$",
+    "why": "a UserInfo response that repeats a member is refused"
+  },
+  {
+    "id": "resource-subject-kind-grant-type-marks-client",
+    "file": "resource/verify.go",
+    "old": "raw, ok := claims[token.GrantTypeClaim]\n\tif !ok {",
+    "new": "raw, ok := claims[token.GrantTypeClaim]\n\tif !ok || true {",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^(TestVerifySubjectKindOfThirdPartyJWTAccessTokens|TestVerifySubjectKind)$",
+    "why": "a token carrying grant_type client_credentials reads as SubjectClient"
   }
 ]

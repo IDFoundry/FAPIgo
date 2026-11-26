@@ -150,7 +150,13 @@ type AccessTokenResolver interface {
 // this package.
 type JWTAccessTokens struct {
 	// IssuerKeys resolves the authorization server's access-token
-	// verification keys. Required.
+	// verification keys. Required. NewJWTAccessTokens and NewVerifier
+	// refuse a source bound to an issuer other than Issuer
+	// (keys.IssuerBound: a keys.LocalIssuerKeys, or a
+	// keys.JWKSIssuerKeySource built with keys.WithIssuer), since it
+	// would refuse every lookup. A source shared between verifiers of
+	// different issuers must be bound: an unbound one serves its keys
+	// for any issuer.
 	IssuerKeys keys.IssuerKeySource
 
 	// Issuer is the authorization server's issuer identifier; a token's
@@ -260,6 +266,22 @@ func (j JWTAccessTokens) validate() error {
 		return errors.New("max key candidates must be positive")
 	case j.MaxTokenBytes < 0:
 		return errors.New("max token bytes must not be negative")
+	}
+	return j.checkIssuerKeysBinding()
+}
+
+// checkIssuerKeysBinding refuses an IssuerKeys bound (see
+// keys.IssuerBound) to an issuer other than Issuer: it would refuse
+// every lookup ResolveAccessToken makes, so no token could ever verify.
+// Issuers are compared exactly, as a token's "iss" is. An unbound
+// source, or one not implementing keys.IssuerBound, passes.
+func (j JWTAccessTokens) checkIssuerKeysBinding() error {
+	bound, ok := j.IssuerKeys.(keys.IssuerBound)
+	if !ok {
+		return nil
+	}
+	if iss := bound.BoundIssuer(); iss != "" && iss != j.Issuer.String() {
+		return fmt.Errorf("issuer keys is bound to issuer %q, not the configured issuer %q", iss, j.Issuer.String())
 	}
 	return nil
 }

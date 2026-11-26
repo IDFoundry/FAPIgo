@@ -10,15 +10,20 @@ import (
 // claim names to be unique. encoding/json keeps the last copy of a
 // repeated one, where a first-wins reader of the same token (a gateway,
 // a log processor) keeps the first, so the two would disagree on who
-// the token is for. A JWT access token that repeats a member, at any
-// depth, is refused.
+// the token is for. An ID token or JWT access token that repeats a
+// member, at any depth, is refused.
 func TestParseClaimsRefuseDuplicateMembers(t *testing.T) {
+	const idToken = `"iss":"https://as.example.com","aud":"client-1","exp":2,"iat":1`
 	const accessToken = `"iss":"https://as.example.com","aud":"https://rs.example.com","exp":2,"iat":1,"jti":"j","client_id":"c"`
 	for name, tc := range map[string]struct {
 		parse   func([]byte) error
 		payload string
 		wantErr bool
 	}{
+		"ID token":                       {parseID, `{` + idToken + `,"sub":"alice"}`, false},
+		"ID token, sub twice":            {parseID, `{"sub":"mallory",` + idToken + `,"sub":"alice"}`, true},
+		"ID token, nested repeat":        {parseID, `{` + idToken + `,"sub":"alice","address":{"country":"A","country":"B"}}`, true},
+		"ID token, case variant":         {parseID, `{` + idToken + `,"sub":"alice","SUB":"mallory"}`, true},
 		"access token":                   {parseAT, `{` + accessToken + `,"sub":"alice"}`, false},
 		"access token, sub twice":        {parseAT, `{"sub":"mallory",` + accessToken + `,"sub":"alice"}`, true},
 		"access token, scope twice":      {parseAT, `{` + accessToken + `,"sub":"alice","scope":"admin","scope":"read"}`, true},
@@ -31,6 +36,7 @@ func TestParseClaimsRefuseDuplicateMembers(t *testing.T) {
 	}
 }
 
+func parseID(p []byte) error { _, err := parseIDTokenClaims(p); return err }
 func parseAT(p []byte) error { _, err := parseAccessTokenClaims(p); return err }
 
 // checkDuplicateRefusal checks err is nil, or, when wantErr, that it is

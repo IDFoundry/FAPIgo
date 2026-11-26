@@ -38,10 +38,12 @@ type IDTokenClaims struct {
 	Parameters map[string]json.RawMessage
 }
 
+// parseIDTokenClaims parses an ID token's claims set, refusing one
+// decodeClaimsObject refuses, such as one that repeats a claim.
 func parseIDTokenClaims(payload []byte) (IDTokenClaims, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		return IDTokenClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	raw, err := decodeClaimsObject(payload)
+	if err != nil {
+		return IDTokenClaims{}, err
 	}
 
 	iss, _, err := popString(raw, "iss", true)

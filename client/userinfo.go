@@ -151,10 +151,19 @@ func (c *Client) decodeUserInfoResponse(ctx context.Context, contentType string,
 // since two different sub values would then compare equal in
 // checkUserInfoSubject's exact match against the ID token's sub. A
 // signed response's payload already passed the same check in
-// jose.ParseCompact; a plain-JSON one gets it here.
+// jose.ParseCompact; a plain-JSON one gets it here. It refuses, too, a
+// body, plain JSON or a signed response's payload, that repeats a member
+// name at any depth, or holds two that differ only in case
+// (strictjson.CheckDuplicateMembers): encoding/json keeps the last copy,
+// where another reader of the same response may keep the first, and so
+// see a different sub. RFC 7519 §4 requires a JWT's claim names to be
+// unique.
 func decodeUserInfoJSON(body []byte) (map[string]json.RawMessage, *Error) {
 	if !strictjson.DecodesLosslessly(body) {
 		return nil, newError(ErrorInvalidResponse, "malformed UserInfo response: not valid UTF-8, or an unpaired surrogate escape", nil)
+	}
+	if err := strictjson.CheckDuplicateMembers(body); err != nil {
+		return nil, newError(ErrorInvalidResponse, "malformed UserInfo response", err)
 	}
 	var claims map[string]json.RawMessage
 	if err := json.Unmarshal(body, &claims); err != nil {

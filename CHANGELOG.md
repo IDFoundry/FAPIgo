@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.87.0](https://github.com/IDFoundry/FAPIgo/compare/v0.86.0...v0.87.0) (2026-11-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **federation:** a Trust Mark, Trust Mark Delegation or Status response, Resolve response or Historical Keys response that repeats a member name, or holds two names that differ only in case, is now refused, where its last copy was used before.
+* **server:** a request object, signed CIBA request, client assertion, DPoP proof or attestation PoP that repeats a member name, or holds two names that differ only in case, is now refused, where its last copy was used before.
+* **client:** an ID token, JARM response or UserInfo response that repeats a member name, or holds two names that differ only in case, is now refused with invalid_response, where its last copy was used before.
+* **resource:** a JWT access token whose claims set repeats a member name, or holds two names that differ only in case, is now refused with invalid_token, where its last copy of the claim was used before.
+
+### Features
+
+* **fapitest:** add Harness.EmbedderUI, a model login and consent UI ([c198a54](https://github.com/IDFoundry/FAPIgo/commit/c198a546dca5ca7263176e52791dfc7e541dc0fd))
+
+
+### Bug Fixes
+
+* accept a repeated claim whose copies are identical ([bfa1d06](https://github.com/IDFoundry/FAPIgo/commit/bfa1d06696f7a3d6978a7a99352b1b086c3ed23b))
+* **client:** refuse an ID token, JARM or UserInfo response that repeats a claim ([aa90a33](https://github.com/IDFoundry/FAPIgo/commit/aa90a333ce3aa7a7f1e147f4d437130aff805dd3))
+* **federation:** refuse a Trust Mark or federation response that repeats a claim ([ef44204](https://github.com/IDFoundry/FAPIgo/commit/ef44204b225a655e0c2a1cc9bb8f4e4636bb52d8))
+* **resource:** refuse a JWT access token that repeats a claim ([9d0eaf1](https://github.com/IDFoundry/FAPIgo/commit/9d0eaf1293e08373e5b9107bd3dc4445bb756fa4))
+* **server:** refuse a request object, assertion or proof that repeats a claim ([b91e3ce](https://github.com/IDFoundry/FAPIgo/commit/b91e3ce3ae6c863475c3864438d6dfeefb05c98e))
+
 ## [0.86.0](https://github.com/IDFoundry/FAPIgo/compare/v0.85.0...v0.86.0) (2026-11-26)
 
 

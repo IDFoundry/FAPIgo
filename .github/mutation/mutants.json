@@ -5802,5 +5802,17 @@
     ],
     "run": "^TestLocalIssuerKeysBoundIssuer$",
     "why": "LocalIssuerKeys reports its own issuer as its binding"
+  },
+  {
+    "id": "sqlstore-ciba-unknown-handle-wraps-notfound",
+    "file": "sqlstore/backchannel.go",
+    "old": "return fmt.Errorf(\"sqlstore: %s: %w (%w)\", op, notFound(\"handle\"), storage.ErrBackchannelAuthenticationNotFound)",
+    "new": "return fmt.Errorf(\"sqlstore: %s: %w (%v)\", op, notFound(\"handle\"), storage.ErrBackchannelAuthenticationNotFound)",
+    "module": "sqlstore",
+    "packages": [
+      "."
+    ],
+    "run": "^TestBackchannelDecisionsAndExpiry$",
+    "why": "sqlstore wraps ErrBackchannelAuthenticationNotFound for an unknown CIBA handle"
   }
 ]

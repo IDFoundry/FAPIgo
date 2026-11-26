@@ -844,9 +844,9 @@ dependencies = [
 
 [[package]]
 name = "huskarl-reqwest"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e15c727814d9e2694581812bdbe3edc7633c5c652f6f11f1cff2681917f53bd0"
+checksum = "ec6ca917132f913f3de980621cda836b760f908b6db3fc6cf4cb03465a60386b"
 dependencies = [
  "bon",
  "bytes",

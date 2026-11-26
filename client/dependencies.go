@@ -47,6 +47,14 @@ type Dependencies struct {
 	// keys.IssuerKeySet). Required, except that a Config.OAuthOnly client
 	// verifying neither JARM nor signed UserInfo leaves it nil — see
 	// Config.OAuthOnly.
+	//
+	// New refuses a source bound to an issuer other than Config.Issuer
+	// (keys.IssuerBound: a keys.LocalIssuerKeys, or a
+	// keys.JWKSIssuerKeySource built with keys.WithIssuer), since it
+	// would refuse every lookup this client makes. A source shared
+	// between clients of different issuers must be bound: an unbound one
+	// serves its keys for any issuer, so each client would accept
+	// another issuer's signatures as its own issuer's.
 	IssuerKeys keys.IssuerKeySource
 
 	// HTTP performs this client's PAR, token-endpoint and other POST

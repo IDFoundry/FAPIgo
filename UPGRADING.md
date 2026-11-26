@@ -18,6 +18,41 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.87.0
+
+### A JWT or UserInfo response may not repeat a claim (all packages)
+
+**Affects:** a deployment whose peer repeats a member name, in any
+object at any depth, of a JWT's claims set, or writes two names that
+differ only in case there: an authorization server's ID tokens, JARM
+responses, UserInfo responses or JWT access tokens; a client's request
+objects, signed CIBA requests, client assertions, DPoP proofs or
+attestation PoPs; or a federation entity's Trust Marks, Trust Mark
+Delegations, Trust Mark Status, Resolve or Historical Keys responses.
+v0.81.0 did this for JOSE headers, client attestations, metadata and
+Entity Statements; these claims sets kept encoding/json's last copy of
+a repeated claim.
+
+**Why:** RFC 7519 §4 requires a JWT's claim names to be unique, and
+lets a recipient reject a repeat or keep the last copy. Keeping the
+last copy left a JWT with two readings: another reader of the same
+token (a gateway in front of a resource server, a log processor, a
+second verifier) that keeps the first copy would see a different
+`sub`, `aud` or `scope` than FAPIgo acted on.
+
+**What fails:** nothing at startup. The server answers such a request
+object with `invalid_request_object`, a signed CIBA request with
+`invalid_request`, a client assertion or attestation PoP with
+`invalid_client`, and a DPoP proof with `invalid_dpop_proof`; a
+resource server answers such a JWT access token with `invalid_token`,
+and a DPoP proof with `invalid_dpop_proof`. The client refuses such an
+ID token, JARM response or UserInfo response, signed, encrypted or
+plain JSON, with `invalid_response`. A federation JWT that repeats a
+claim fails to parse, with the error its parser gives any malformed one.
+
+**What to change:** nothing in your code. A peer producing such JWTs
+must write each claim once, spelled one way.
+
 ## v0.86.0
 
 ### A Trust Chain that expires while it resolves is refused (federation)

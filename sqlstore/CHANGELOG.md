@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.12.0...sqlstore/v0.13.0) (2026-11-26)
+
+
+### Features
+
+* **sqlstore:** report an unknown CIBA handle as not found to the server ([570c54f](https://github.com/IDFoundry/FAPIgo/commit/570c54fea6db6c9df0dc6dd8bd6e238b1885a26f))
+
 ## [0.12.0](https://github.com/IDFoundry/FAPIgo/compare/sqlstore/v0.11.1...sqlstore/v0.12.0) (2026-11-25)
 
 

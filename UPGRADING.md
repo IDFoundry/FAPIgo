@@ -18,39 +18,6 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
-## v0.87.0
-
-### An issuer key source bound to another issuer is refused at construction (client, resource)
-
-**Affects:** a client whose `Dependencies.IssuerKeys`, or a resource
-server whose `JWTAccessTokens.IssuerKeys`, is a `keys.LocalIssuerKeys`
-or a `keys.JWKSIssuerKeySource` built with `keys.WithIssuer` for an
-issuer other than the configured one (`client.Config.Issuer`,
-`JWTAccessTokens.Issuer`), compared exactly, so a trailing slash or a
-different scheme or host counts as different. A source built by
-`DiscoveredMetadata.IssuerKeySource` is bound to the discovered issuer
-and so matches a client built from the same metadata.
-
-**Why:** a bound source refuses every lookup for any issuer but its
-own, so such a client or verifier could never verify anything its
-issuer signs: every JARM response, ID token, signed UserInfo response
-or JWT access token failed. The new optional `keys.IssuerBound`
-interface lets a source report its binding, and construction now
-checks it.
-
-**What fails:** `client.New` (and `client.NewFromDiscovery`),
-`resource.NewJWTAccessTokens` and `resource.NewVerifier` return an
-error naming both issuers ("issuer keys is bound to issuer ..., not
-..."). A deployment that hit this was already failing every
-verification; it now fails at startup instead.
-
-**What to change:** build the key source for the issuer the client or
-verifier is configured for. An unbound source, or one of your own that
-doesn't implement `keys.IssuerBound`, is accepted as before; if one
-source is shared between clients or verifiers of different issuers,
-bind it (`keys.WithIssuer`), or build one per issuer, so none of them
-can be handed another issuer's keys.
-
 ## v0.86.0
 
 ### A Trust Chain that expires while it resolves is refused (federation)
@@ -119,6 +86,37 @@ already decided):
 `fmt.Errorf("...: %w", storage.ErrBackchannelAuthenticationNotFound)`.
 `storage.TestBackchannelAuthenticationStoreContract` checks it once you
 do.
+
+### An issuer key source bound to another issuer is refused at construction (client, resource)
+
+**Affects:** a client whose `Dependencies.IssuerKeys`, or a resource
+server whose `JWTAccessTokens.IssuerKeys`, is a `keys.LocalIssuerKeys`
+or a `keys.JWKSIssuerKeySource` built with `keys.WithIssuer` for an
+issuer other than the configured one (`client.Config.Issuer`,
+`JWTAccessTokens.Issuer`), compared exactly, so a trailing slash or a
+different scheme or host counts as different. A source built by
+`DiscoveredMetadata.IssuerKeySource` is bound to the discovered issuer
+and so matches a client built from the same metadata.
+
+**Why:** a bound source refuses every lookup for any issuer but its
+own, so such a client or verifier could never verify anything its
+issuer signs: every JARM response, ID token, signed UserInfo response
+or JWT access token failed. The new optional `keys.IssuerBound`
+interface lets a source report its binding, and construction now
+checks it.
+
+**What fails:** `client.New` (and `client.NewFromDiscovery`),
+`resource.NewJWTAccessTokens` and `resource.NewVerifier` return an
+error naming both issuers ("issuer keys is bound to issuer ..., not
+..."). A deployment that hit this was already failing every
+verification; it now fails at startup instead.
+
+**What to change:** build the key source for the issuer the client or
+verifier is configured for. An unbound source, or one of your own that
+doesn't implement `keys.IssuerBound`, is accepted as before; if one
+source is shared between clients or verifiers of different issuers,
+bind it (`keys.WithIssuer`), or build one per issuer, so none of them
+can be handed another issuer's keys.
 
 ## v0.85.0
 

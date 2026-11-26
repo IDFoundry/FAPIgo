@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"net/url"
 	"testing"
@@ -55,6 +56,21 @@ func TestVerifySubjectKindOfThirdPartyJWTAccessTokens(t *testing.T) {
 					authz.InternalSubject, authz.ClientSubject, authz.ClientID, tc.sub, tc.sub, tc.clientID)
 			}
 		})
+	}
+}
+
+// TestVerifyRefusesJWTAccessTokenRepeatingAClaim: RFC 7519 §4 requires
+// unique claim names. A token that names its subject twice is refused
+// with invalid_token, rather than read as its last sub, which a
+// first-wins reader of the same token (a gateway in front of this
+// resource server) would read as the first.
+func TestVerifyRefusesJWTAccessTokenRepeatingAClaim(t *testing.T) {
+	_, err := verifyThirdPartyJWT(t, "client-1", func(c thirdPartyToken) string {
+		return `{"sub":"alice",` + thirdPartyClaims("admin", "client-1", c)[1:] + `}`
+	})
+	var rerr *resource.Error
+	if !errors.As(err, &rerr) || rerr.Code() != resource.ErrorInvalidToken {
+		t.Fatalf("Verify = %v, want invalid_token", err)
 	}
 }
 

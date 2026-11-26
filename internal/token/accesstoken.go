@@ -53,10 +53,13 @@ type rawConfirmation struct {
 	X5TS256 string `json:"x5t#S256,omitempty"`
 }
 
+// parseAccessTokenClaims parses a JWT access token's claims set,
+// refusing one decodeClaimsObject refuses, such as one that repeats a
+// claim.
 func parseAccessTokenClaims(payload []byte) (AccessTokenClaims, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		return AccessTokenClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	raw, err := decodeClaimsObject(payload)
+	if err != nil {
+		return AccessTokenClaims{}, err
 	}
 
 	iss, _, err := popString(raw, "iss", true)

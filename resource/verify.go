@@ -139,6 +139,19 @@ type AuthorizationContext struct {
 	// credentials grant carries a "grant_type" claim saying so
 	// (SubjectClient); any other is SubjectEndUser. Zero only in an
 	// AuthorizationContext built by hand.
+	//
+	// The claim is a FAPIgo authorization server's own (server sets it,
+	// and an AccessTokenIssuer of its must keep it): a token from any
+	// other authorization server, or one a custom AccessTokenResolver
+	// resolves without it, reads as SubjectEndUser even when it came
+	// from the client credentials grant, whose sub RFC 9068 §2.2 makes
+	// the client's own client_id. Nothing else in such a token says it
+	// is the client's own, and Verify doesn't guess from sub equaling
+	// client_id, which a user's token can also have. With such an
+	// authorization server, SubjectKind tells a client from a user only
+	// as far as it keeps client_ids and user identifiers apart (RFC
+	// 9068 §5); where it doesn't, refuse a token whose InternalSubject
+	// equals its ClientID yourself, or have it set this claim.
 	SubjectKind SubjectKind
 
 	// ClientSubject is the sub the client was given for the end user:
@@ -234,6 +247,12 @@ func (a AuthorizationContext) CodeGrantID() string {
 // SubjectKind, and when InternalSubject is "" (a pairwise sub under
 // PairwiseClientSubjectsOnly, which the verifier doesn't map back;
 // authorize by ClientSubject with ClientID there).
+//
+// It tells a client credentials token apart only when the token says
+// what it is, as a FAPIgo authorization server's do (see SubjectKind):
+// a client credentials token from another authorization server reads
+// as an end user's, its sub the client's client_id, so ok is true for
+// it.
 func (a AuthorizationContext) EndUser() (internalSubject string, ok bool) {
 	if a.SubjectKind != SubjectEndUser || a.InternalSubject == "" {
 		return "", false

@@ -2,13 +2,11 @@ package fapitest
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -32,100 +30,51 @@ import (
 // hands the resulting redirect to the user, whose client then signs the
 // user in to the attacker's account. With server/interactioncookie the
 // handle is only ever read back from a cookie the server sealed, so the
-// leaked handle alone completes nothing.
+// leaked handle alone completes nothing. The embedder is EmbedderUI,
+// with UnsafeRawHandleCookie for the plain cookie.
 
 const (
-	leakVictimSession   = "victim-session"
-	leakAttackerSession = "attacker-session"
 	leakVictimSubject   = "victim-user"
 	leakAttackerSubject = "attacker-user"
-	leakLoginCookie     = "login"
 )
 
-// leakBridge is how an embedder carries the interaction from its
-// authorization endpoint to the consent form's submission.
-type leakBridge interface {
-	// keep stores a in the browser's cookies on w and returns the tag
-	// the consent form sends back ("" if none).
-	keep(w http.ResponseWriter, a server.InteractionRequired, now time.Time) string
-	// recover reads the interaction back from r and the form's tag.
-	recover(r *http.Request, now time.Time, tag string) (server.InteractionHandle, server.InteractionRequest, bool)
-}
-
-// plainCookieBridge keeps the raw handle, and the encoded request, in
-// plain cookies.
-type plainCookieBridge struct{}
-
-func (plainCookieBridge) keep(w http.ResponseWriter, a server.InteractionRequired, _ time.Time) string {
-	in, _ := a.Interaction.MarshalText()
-	http.SetCookie(w, &http.Cookie{Name: "interaction-handle", Value: a.Handle.String(), HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-	http.SetCookie(w, &http.Cookie{Name: "interaction-request", Value: base64.RawURLEncoding.EncodeToString(in), HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-	return ""
-}
-
-func (plainCookieBridge) recover(r *http.Request, _ time.Time, _ string) (server.InteractionHandle, server.InteractionRequest, bool) {
-	hc, err1 := r.Cookie("interaction-handle")
-	rc, err2 := r.Cookie("interaction-request")
-	if err1 != nil || err2 != nil {
-		return server.InteractionHandle{}, server.InteractionRequest{}, false
-	}
-	handle, err := server.ParseInteractionHandle(hc.Value)
-	if err != nil {
-		return server.InteractionHandle{}, server.InteractionRequest{}, false
-	}
-	text, err := base64.RawURLEncoding.DecodeString(rc.Value)
-	if err != nil {
-		return server.InteractionHandle{}, server.InteractionRequest{}, false
-	}
-	in, err := server.ParseInteractionRequest(string(text))
-	return handle, in, err == nil
-}
-
-// sealedCookieBridge is server/interactioncookie.
-type sealedCookieBridge struct{ cookie *interactioncookie.Cookie }
-
-func (b sealedCookieBridge) keep(w http.ResponseWriter, a server.InteractionRequired, now time.Time) string {
-	tag, err := b.cookie.Set(w, a, now)
-	if err != nil {
-		panic(err)
-	}
-	return tag
-}
-
-func (b sealedCookieBridge) recover(r *http.Request, now time.Time, tag string) (server.InteractionHandle, server.InteractionRequest, bool) {
-	handle, in, err := b.cookie.Read(r, now, tag)
-	return handle, in, err == nil
-}
-
-// leakEmbedder is the embedding authorization server's login UI.
+// leakEmbedder is the embedding authorization server's login UI, with
+// the handle of the last interaction begun, as a log line would leak
+// it.
 type leakEmbedder struct {
 	t      *testing.T
 	h      *Harness
-	bridge leakBridge
-	// leaked is the handle of the last interaction begun, as a log line
-	// would leak it.
+	ui     *EmbedderUI
 	leaked string
+}
+
+// newLeakEmbedder is an EmbedderUI at a new harness's server, with the
+// raw handle in a plain cookie if unsafe is set.
+func newLeakEmbedder(t *testing.T, unsafe bool) *leakEmbedder {
+	t.Helper()
+	e := &leakEmbedder{t: t, h: New(t, Config{Profile: server.ProfileFAPISecurity})}
+	e.ui = e.h.EmbedderUI(EmbedderUIOptions{
+		UnsafeRawHandleCookie: unsafe,
+		OnInteraction:         func(a server.InteractionRequired) { e.leaked = a.Handle.String() },
+	})
+	return e
+}
+
+// signIn is the session cookie e's sign-in gives subject.
+func (e *leakEmbedder) signIn(subject string) *http.Cookie {
+	e.t.Helper()
+	return sessionCookie(e.t, e.ui, subject)
 }
 
 // authorize is the browser reaching the authorization endpoint at
 // authorizeURL: the cookies it is given and the consent form's tag.
 func (e *leakEmbedder) authorize(authorizeURL url.URL) ([]*http.Cookie, string) {
 	e.t.Helper()
-	q := authorizeURL.Query()
-	action, err := e.h.authServer.srv.BeginAuthorization(context.Background(), server.BeginAuthorizationRequest{
-		RequestURI: q.Get("request_uri"), ClientID: clientIDFromQuery(q),
-	})
-	if err != nil {
-		e.t.Fatalf("BeginAuthorization: %v", err)
+	w := serveUI(e.ui, httptest.NewRequest(http.MethodGet, EmbedderUIAuthorizePath+"?"+authorizeURL.RawQuery, nil))
+	if w.Code != http.StatusOK {
+		e.t.Fatalf("authorize: status %d: %s", w.Code, w.Body)
 	}
-	a, ok := action.(server.InteractionRequired)
-	if !ok {
-		e.t.Fatalf("BeginAuthorization = %T, want server.InteractionRequired", action)
-	}
-	e.leaked = a.Handle.String()
-	w := httptest.NewRecorder()
-	tag := e.bridge.keep(w, a, e.h.Clock.Now())
-	return w.Result().Cookies(), tag
+	return w.Result().Cookies(), consentTag(e.t, w.Body.String())
 }
 
 // decide is a browser carrying cookies submitting the consent form
@@ -133,57 +82,24 @@ func (e *leakEmbedder) authorize(authorizeURL url.URL) ([]*http.Cookie, string) 
 // redirect's query, or "" when the embedder refuses the submission.
 func (e *leakEmbedder) decide(cookies []*http.Cookie, tag string) string {
 	e.t.Helper()
-	r := httptest.NewRequest(http.MethodPost, "/authorize", strings.NewReader(url.Values{interactioncookie.FormField: {tag}}.Encode()))
-	for _, c := range cookies {
-		r.AddCookie(&http.Cookie{Name: c.Name, Value: c.Value})
-	}
-	login, err := r.Cookie(leakLoginCookie)
-	if err != nil {
+	w := serveUI(e.ui, consentRequest(tag, cookies...))
+	switch w.Code {
+	case http.StatusSeeOther:
+		u, err := url.Parse(w.Header().Get("Location"))
+		if err != nil {
+			e.t.Fatalf("consent redirect: %v", err)
+		}
+		return u.RawQuery
+	case http.StatusForbidden:
 		e.t.Fatal("the browser has no login session")
+	case http.StatusInternalServerError:
+		e.t.Fatalf("consent: %s", w.Body)
 	}
-	subject := map[string]string{leakVictimSession: leakVictimSubject, leakAttackerSession: leakAttackerSubject}[login.Value]
-	handle, in, ok := e.bridge.recover(r, e.h.Clock.Now(), tag)
-	if !ok {
-		return ""
-	}
-	result, err := e.h.authServer.srv.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
-		Handle: handle, Result: server.Authorize(leakSubject(e.t, subject), leakAuthContext(e.t, e.h.Clock.Now()), server.GrantedAuthorization{Scope: in.Scope}),
-	})
-	if err != nil {
-		e.t.Fatalf("CompleteAuthorization: %v", err)
-	}
-	redirect, ok := result.(server.AuthorizationRedirect)
-	if !ok {
-		return ""
-	}
-	u := redirect.Destination().URL()
-	return u.RawQuery
+	return ""
 }
 
-func leakSubject(t *testing.T, value string) server.AuthenticatedSubject {
-	t.Helper()
-	id, err := server.NewSubjectID(value)
-	if err != nil {
-		t.Fatalf("NewSubjectID: %v", err)
-	}
-	subject, err := server.NewAuthenticatedSubject(id)
-	if err != nil {
-		t.Fatalf("NewAuthenticatedSubject: %v", err)
-	}
-	return subject
-}
-
-func leakAuthContext(t *testing.T, now time.Time) server.AuthenticationContext {
-	t.Helper()
-	authCtx, err := server.NewAuthenticationContext(now, "", nil)
-	if err != nil {
-		t.Fatalf("NewAuthenticationContext: %v", err)
-	}
-	return authCtx
-}
-
-func withLogin(session string, cookies ...*http.Cookie) []*http.Cookie {
-	return append([]*http.Cookie{{Name: leakLoginCookie, Value: session}}, cookies...)
+func withLogin(session *http.Cookie, cookies ...*http.Cookie) []*http.Cookie {
+	return append([]*http.Cookie{session}, cookies...)
 }
 
 // beginVictim starts the victim's sign-in at h's client and has the
@@ -196,7 +112,7 @@ func beginVictim(t *testing.T, e *leakEmbedder) (client.AuthorizationSession, []
 		t.Fatalf("BeginAuthorization (client): %v", err)
 	}
 	cookies, tag := e.authorize(session.URL().URL())
-	return session, withLogin(leakVictimSession, cookies...), tag
+	return session, withLogin(e.signIn(leakVictimSubject), cookies...), tag
 }
 
 // TestLeakedHandleInPlainCookieCompletesVictimsInteraction: with the
@@ -206,17 +122,17 @@ func beginVictim(t *testing.T, e *leakEmbedder) (client.AuthorizationSession, []
 // to the victim's browser, signs the victim's client in to the
 // attacker's account.
 func TestLeakedHandleInPlainCookieCompletesVictimsInteraction(t *testing.T) {
-	e := &leakEmbedder{t: t, h: New(t, Config{Profile: server.ProfileFAPISecurity}), bridge: plainCookieBridge{}}
+	e := newLeakEmbedder(t, true)
 	session, victimCookies, tag := beginVictim(t, e)
 
 	var requestCookie *http.Cookie
 	for _, c := range victimCookies {
-		if c.Name == "interaction-request" {
+		if c.Name == rawRequestCookie {
 			requestCookie = c
 		}
 	}
-	attackerCookies := withLogin(leakAttackerSession,
-		&http.Cookie{Name: "interaction-handle", Value: e.leaked}, requestCookie)
+	attackerCookies := withLogin(e.signIn(leakAttackerSubject),
+		&http.Cookie{Name: rawHandleCookie, Value: e.leaked}, requestCookie)
 	callback := e.decide(attackerCookies, tag)
 	if callback == "" {
 		t.Fatal("the attacker's submission with the leaked handle was refused")
@@ -259,13 +175,8 @@ func forgedSealedCookie(t *testing.T, sealed *http.Cookie, handle, tag string, n
 // — completes nothing, even with the victim's form tag, which isn't
 // secret; the victim's own submission then completes as the victim.
 func TestLeakedHandleIsUselessWithInteractionCookie(t *testing.T) {
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	cookie, err := interactioncookie.New([][]byte{key}, interactioncookie.Options{})
-	if err != nil {
-		t.Fatalf("interactioncookie.New: %v", err)
-	}
-	e := &leakEmbedder{t: t, h: New(t, Config{Profile: server.ProfileFAPISecurity}), bridge: sealedCookieBridge{cookie}}
+	e := newLeakEmbedder(t, false)
+	attacker := e.signIn(leakAttackerSubject)
 	session, victimCookies, tag := beginVictim(t, e)
 
 	var sealed *http.Cookie
@@ -278,7 +189,7 @@ func TestLeakedHandleIsUselessWithInteractionCookie(t *testing.T) {
 		"raw handle":   {Name: interactioncookie.DefaultName, Value: e.leaked},
 		"forged value": forgedSealedCookie(t, sealed, e.leaked, tag, e.h.Clock.Now()),
 	} {
-		if callback := e.decide(withLogin(leakAttackerSession, forged), tag); callback != "" {
+		if callback := e.decide(withLogin(attacker, forged), tag); callback != "" {
 			t.Errorf("%s: the attacker completed the victim's interaction: %s", name, callback)
 		}
 	}

@@ -84,3 +84,28 @@ type IssuerKeySet struct {
 type IssuerKeySource interface {
 	ResolveIssuerKeys(ctx context.Context, req IssuerKeyRequest) (IssuerKeySet, error)
 }
+
+// IssuerBound is the optional interface an IssuerKeySource implements
+// when it serves one issuer's keys only. BoundIssuer returns that
+// issuer identifier, or "" when the source isn't bound to one and serves
+// any issuer that asks.
+//
+// It lets a verifier refuse a misconfiguration up front:
+// client.New and resource.NewVerifier (and resource.NewJWTAccessTokens)
+// refuse a source whose BoundIssuer is set and isn't, exactly, the
+// issuer they are configured for, since such a source refuses every one
+// of that issuer's lookups and so could never verify anything it signed.
+// A source that doesn't implement IssuerBound, or returns "", is
+// accepted as before, and is then trusted to serve the right issuer's
+// keys: a source shared between verifiers of different issuers must be
+// bound, or it hands one issuer's keys to a check of another's.
+// LocalIssuerKeys is always bound; JWKSIssuerKeySource is bound when
+// built WithIssuer.
+//
+// Like KeySourceAssurance, a declaration describes the declaring type's
+// own behaviour, and a type embedding a bound source inherits it. A
+// wrapper that changes which issuers it answers for must override
+// BoundIssuer to match.
+type IssuerBound interface {
+	BoundIssuer() string
+}

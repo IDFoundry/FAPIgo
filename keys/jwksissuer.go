@@ -78,7 +78,10 @@ func WithRefreshBackoff(d time.Duration) JWKSOption {
 // mistake between clients (or verifiers) of different issuers can't
 // hand one issuer's keys to a check of another's. Without it the source
 // can't tell, and serves whatever its JWKS URI holds for any issuer.
-// DiscoveredMetadata.IssuerKeySource in package client sets it.
+// DiscoveredMetadata.IssuerKeySource in package client sets it. A bound
+// source reports its issuer through IssuerBound, so client.New and
+// resource.NewVerifier refuse one bound to an issuer other than their
+// own at construction, rather than failing every verification.
 func WithIssuer(issuer fapi.URL) JWKSOption {
 	return func(s *JWKSIssuerKeySource) { s.issuer = issuer.String() }
 }
@@ -122,6 +125,12 @@ func NewJWKSIssuerKeySource(fetcher *fapihttp.Client, jwksURI fapi.URL, cacheTTL
 // declared hardened and AssuranceProduction refuses the source.
 func (s *JWKSIssuerKeySource) Capabilities() KeySourceCapabilities {
 	return KeySourceCapabilities{LiveFetchHardened: s.fetcher.HardenedForProduction()}
+}
+
+// BoundIssuer implements IssuerBound: the issuer WithIssuer bound the
+// source to, or "" when it was built without WithIssuer.
+func (s *JWKSIssuerKeySource) BoundIssuer() string {
+	return s.issuer
 }
 
 // ResolveIssuerKeys returns every cached key matching req.Algorithm

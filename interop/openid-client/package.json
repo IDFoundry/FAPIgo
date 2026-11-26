@@ -11,7 +11,7 @@
     "test": "node --test-reporter=spec run.mjs"
   },
   "dependencies": {
-    "openid-client": "6.9.0",
+    "openid-client": "6.9.1",
     "undici": "8.12.4"
   }
 }

@@ -18,7 +18,7 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
-## v0.85.1
+## v0.86.0
 
 ### A Trust Chain that expires while it resolves is refused (federation)
 

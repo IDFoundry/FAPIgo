@@ -68,7 +68,8 @@ type Claims struct {
 }
 
 // parseClaims parses a request object's claims set, refusing one
-// decodeClaimsObject refuses, such as one that repeats a claim.
+// decodeClaimsObject refuses, such as one that repeats a claim with
+// differing values.
 func parseClaims(payload []byte) (Claims, error) {
 	raw, err := decodeClaimsObject(payload)
 	if err != nil {

@@ -146,10 +146,7 @@ func isHTTPSURL(s string) bool {
 // silently, and reads names that differ only in case as one, while
 // another implementation may keep the first, or read two, so two
 // validators could derive different claims — a different metadata
-// policy, say — from one signed statement. Every federation JWT's
-// claims parser runs it: Entity Statements', and Trust Marks', Trust
-// Mark Delegations', Trust Mark Status, Resolve and Historical Keys
-// responses'. §6.1.2 forbids "Duplicate
+// policy, say — from one signed statement. §6.1.2 forbids "Duplicate
 // JSON object member names ... at any of the three levels of the
 // metadata_policy Claim data structure"; RFC 7519 §4 lets a JWT parser
 // reject duplicate claim names, which this applies at every level.
@@ -160,11 +157,21 @@ func refuseDuplicateMembers(payload []byte) error {
 	return nil
 }
 
-// decodeClaimsObject decodes payload, a federation JWT's claims set, as
-// a JSON object, after refuseDuplicateMembers.
+// decodeClaimsObject decodes payload, the claims set of a federation
+// JWT other than an Entity Statement (a Trust Mark, Trust Mark
+// Delegation, Trust Mark Status, Resolve or Historical Keys response),
+// as a JSON object. It refuses one that repeats a member name, at any
+// depth, with copies that differ, or holds two names that differ only
+// in case (strictjson.CheckConflictingMembers): RFC 7519 §4 requires
+// unique claim names, and encoding/json keeps the last copy of a
+// repeated one, where another reader of the same JWT may keep the
+// first, and so see a different status or subject. A repeat whose
+// copies are identical is accepted: every reader takes the same value
+// from it. An Entity Statement's claims go through
+// refuseDuplicateMembers instead, which refuses any repeat.
 func decodeClaimsObject(payload []byte) (map[string]json.RawMessage, error) {
-	if err := refuseDuplicateMembers(payload); err != nil {
-		return nil, err
+	if err := strictjson.CheckConflictingMembers(payload); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &raw); err != nil {

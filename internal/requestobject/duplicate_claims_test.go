@@ -10,10 +10,18 @@ import (
 // claim names to be unique. encoding/json keeps the last copy of a
 // repeated one, where a first-wins reader of the same JWT keeps the
 // first, so the two would act on different claims. A claims set that
-// repeats a member, at any depth, is refused.
+// repeats a member with differing copies, at any depth, is refused; one
+// whose copies are identical, which every reader reads alike, is
+// accepted.
 func TestParseClaimsRefusesDuplicateMembers(t *testing.T) {
-	if _, err := parseClaims([]byte(`{"iss":"client-123","aud":"https://as.example","exp":4102444800,"scope":"openid"}`)); err != nil {
-		t.Fatalf("parseClaims(valid) = %v, want nil", err)
+	for _, payload := range []string{
+		`{"iss":"client-123","aud":"https://as.example","exp":4102444800,"scope":"openid"}`,
+		`{"iss":"client-123","aud":"https://as.example","exp":4102444800,"scope":"openid","scope":"openid"}`,
+		`{"iss":"client-123","aud":"https://as.example","exp":4102444800,"claims":{"id_token":{"acr":{"value":"a"},"acr":{"value":"a"}}}}`,
+	} {
+		if _, err := parseClaims([]byte(payload)); err != nil {
+			t.Fatalf("parseClaims(%s) = %v, want nil", payload, err)
+		}
 	}
 	for _, payload := range []string{
 		`{"iss":"client-123","aud":"https://as.example","exp":4102444800,"scope":"openid","scope":"openid payments"}`,

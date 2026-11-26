@@ -10,10 +10,18 @@ import (
 // JWT, whose claim names RFC 7519 §4 requires to be unique, like the
 // attestation's own (TestParseAttestationClaimsRefusesDuplicateMembers).
 // encoding/json keeps the last copy of a repeated one where another
-// reader keeps the first, so a PoP that repeats a member is refused.
+// reader keeps the first, so a PoP that repeats a member with differing
+// copies is refused. One whose copies are identical, which every reader
+// reads alike, is accepted (unlike an attestation, whose cnf decodes
+// into a struct, and which refuses any repeat).
 func TestParsePoPClaimsRefusesDuplicateMembers(t *testing.T) {
-	if _, err := parsePoPClaims([]byte(`{"iss":"c","aud":"a","jti":"j","iat":1}`)); err != nil {
-		t.Fatalf("parsePoPClaims(valid) = %v, want nil", err)
+	for _, payload := range []string{
+		`{"iss":"c","aud":"a","jti":"j","iat":1}`,
+		`{"iss":"c","aud":"a","jti":"j","iat":1,"jti":"j"}`,
+	} {
+		if _, err := parsePoPClaims([]byte(payload)); err != nil {
+			t.Fatalf("parsePoPClaims(%s) = %v, want nil", payload, err)
+		}
 	}
 	for _, payload := range []string{
 		`{"iss":"c","aud":"https://other.example","jti":"j","iat":1,"aud":"a"}`,

@@ -55,7 +55,7 @@ type rawConfirmation struct {
 
 // parseAccessTokenClaims parses a JWT access token's claims set,
 // refusing one decodeClaimsObject refuses, such as one that repeats a
-// claim.
+// claim with differing values.
 func parseAccessTokenClaims(payload []byte) (AccessTokenClaims, error) {
 	raw, err := decodeClaimsObject(payload)
 	if err != nil {

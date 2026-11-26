@@ -191,6 +191,8 @@ jobs:
             name: FuzzCheckDuplicateMembersThenDecode
           - pkg: ./internal/strictjson
             name: FuzzScanMembersMatchesWalker
+          - pkg: ./internal/strictjson
+            name: FuzzCheckConflictingMembersOneReading
           - pkg: ./extension
             name: FuzzExtensionValueReadersAgree
           - pkg: ./internal/sealedcookie

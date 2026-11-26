@@ -21,16 +21,20 @@
 // keeps the last copy, or merges the copies of one that decodes into a
 // struct or a map, and the case check sees only the last copy, while a
 // first-wins reader of the same bytes keeps the first. The JWS and JWE
-// header parsers, every JWT claims set's parser (ID tokens, JWT access
-// tokens, request objects, JARM responses, client assertions, DPoP
-// proofs, client attestations and their PoPs, Entity Statements and the
-// other federation JWTs), the UserInfo response decoder, the metadata
-// parser and the token, PAR and CIBA response decoders run
+// header parsers, a client attestation's claims, Entity Statements, the
+// metadata parser and the token, PAR and CIBA response decoders run
 // CheckDuplicateMembers first (directly, or through
 // UnmarshalNoRepeats), which refuses a repeated name, or two names
-// FoldKey maps together, at any depth. RFC 7515 §4 and RFC 7519 §4 let
-// a recipient keep the lexically last copy instead; refusing leaves no
-// reading for two implementations to disagree on.
+// FoldKey maps together, at any depth. The other JWT claims sets' parsers
+// (ID tokens, JWT access tokens, request objects, JARM responses,
+// client assertions, DPoP proofs, attestation PoPs and the federation
+// JWTs other than Entity Statements) and the UserInfo response decoder
+// run CheckConflictingMembers (directly, or through
+// UnmarshalNoConflicts), which refuses the same, except that it accepts
+// a repeated name whose copies are the same JSON text: every reader
+// takes that one value. RFC 7515 §4 and RFC 7519 §4 let a recipient keep
+// the lexically last copy instead; refusing leaves no reading for two
+// implementations to disagree on.
 package strictjson
 
 import (

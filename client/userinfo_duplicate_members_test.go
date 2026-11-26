@@ -13,10 +13,17 @@ import (
 // copy, where another reader of the same response (a gateway, a log
 // processor) may keep the first, so the two would see different users.
 // RFC 7519 §4 requires unique claim names in a JWT, and RFC 8259 §4 has
-// a JSON object's names unique.
+// a JSON object's names unique. A member repeated with identical copies
+// reads alike to every reader, so it is accepted.
 func TestDecodeUserInfoJSONRefusesDuplicateMembers(t *testing.T) {
-	if _, err := decodeUserInfoJSON([]byte(`{"sub":"alice","email":"a@example.com"}`)); err != nil {
-		t.Fatalf("decodeUserInfoJSON(valid) = %v, want nil", err)
+	for _, body := range []string{
+		`{"sub":"alice","email":"a@example.com"}`,
+		`{"sub":"alice","email":"a@example.com","sub":"alice"}`,
+		`{"sub":"alice","address":{"country":"A","country":"A"}}`,
+	} {
+		if _, err := decodeUserInfoJSON([]byte(body)); err != nil {
+			t.Fatalf("decodeUserInfoJSON(%s) = %v, want nil", body, err)
+		}
 	}
 	for _, body := range []string{
 		`{"sub":"mallory","sub":"alice"}`,

@@ -10,10 +10,17 @@ import (
 // claim names to be unique. encoding/json keeps the last copy of a
 // repeated one, where a first-wins reader of the same JWT keeps the
 // first, so the two would act on different claims. A claims set that
-// repeats a member, at any depth, is refused.
+// repeats a member with differing copies, at any depth, is refused; one
+// whose copies are identical, which every reader reads alike, is
+// accepted.
 func TestParseClaimsRefusesDuplicateMembers(t *testing.T) {
-	if _, err := parseClaims([]byte(`{"iss":"c","sub":"c","aud":"https://as.example.com","exp":2,"iat":1,"jti":"j"}`)); err != nil {
-		t.Fatalf("parseClaims(valid) = %v, want nil", err)
+	for _, payload := range []string{
+		`{"iss":"c","sub":"c","aud":"https://as.example.com","exp":2,"iat":1,"jti":"j"}`,
+		`{"iss":"c","sub":"c","aud":"https://as.example.com","exp":2,"iat":1,"jti":"j","aud":"https://as.example.com"}`,
+	} {
+		if _, err := parseClaims([]byte(payload)); err != nil {
+			t.Fatalf("parseClaims(%s) = %v, want nil", payload, err)
+		}
 	}
 	for _, payload := range []string{
 		`{"iss":"c","sub":"c","aud":"https://other.example","exp":2,"iat":1,"jti":"j","aud":"https://as.example.com"}`,

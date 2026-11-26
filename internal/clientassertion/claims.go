@@ -55,8 +55,10 @@ func parseClaims(payload []byte) (claims, error) {
 	var c claims
 	// RFC 7519 §4 requires unique claim names: encoding/json keeps the
 	// last copy of a repeated one, where another reader of the same
-	// assertion may keep the first.
-	if err := strictjson.CheckDuplicateMembers(payload); err != nil {
+	// assertion may keep the first. A repeat with identical copies reads
+	// the same either way, so only differing copies (and case variants)
+	// are refused.
+	if err := strictjson.CheckConflictingMembers(payload); err != nil {
 		return claims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	if err := strictjson.CheckFieldCase(payload, &c); err != nil {

@@ -209,8 +209,9 @@ func (r HistoricalKeysResponse) Verify(pub crypto.PublicKey, policy HistoricalKe
 // stays raw until decodeKeyRevocation reads it: encoding/json would
 // merge the copies of a repeated "revoked" into one struct, taking
 // revoked_at from one and reason from another. parseHistoricalKeysClaims
-// refuses a repeated member anywhere in the claims set before any of
-// them is decoded, so neither a merge nor a last copy is ever read.
+// refuses a repeated member whose copies differ, anywhere in the claims
+// set, before any of them is decoded, so a merge or a last copy is only
+// ever of identical copies, and reads as each of them does.
 type rawHistoricalKey struct {
 	IAT     *numericdate.Value `json:"iat"`
 	EXP     *numericdate.Value `json:"exp"`

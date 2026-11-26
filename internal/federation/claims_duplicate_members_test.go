@@ -13,6 +13,9 @@ import (
 // requires unique claim names, and encoding/json keeps the last copy of
 // a repeated one where another reader of the same JWT may keep the
 // first, so the two would see, say, different statuses or subjects.
+// These refuse a repeat whose copies differ, and accept one whose copies
+// are identical, which every reader reads alike; an Entity Statement
+// refuses either.
 func TestParseFederationJWTClaimsRefuseDuplicateMembers(t *testing.T) {
 	const tm = `"iss":"https://ta.example","sub":"https://rp.example","trust_mark_type":"https://ta.example/tm","iat":1`
 	const status = `"iss":"https://ta.example","trust_mark":"x.y.z","iat":1`
@@ -25,15 +28,20 @@ func TestParseFederationJWTClaimsRefuseDuplicateMembers(t *testing.T) {
 	}{
 		"trust mark":             {parseTM, `{` + tm + `}`, false},
 		"trust mark, sub twice":  {parseTM, `{"sub":"https://other.example",` + tm + `}`, true},
+		"trust mark, same sub":   {parseTM, `{"sub":"https://rp.example",` + tm + `}`, false},
 		"delegation":             {parseTMD, `{` + tm + `}`, false},
 		"delegation, sub twice":  {parseTMD, `{"sub":"https://other.example",` + tm + `}`, true},
 		"status":                 {parseTMS, `{` + status + `,"status":"active"}`, false},
 		"status twice":           {parseTMS, `{"status":"revoked",` + status + `,"status":"active"}`, true},
+		"status twice, same":     {parseTMS, `{"status":"active",` + status + `,"status":"active"}`, false},
 		"resolve":                {parseRR, `{"sub":"https://rp.example",` + resolve + `}`, false},
 		"resolve, sub twice":     {parseRR, `{"sub":"https://other.example",` + resolve + `,"sub":"https://rp.example"}`, true},
 		"resolve, nested repeat": {parseRR, `{"sub":"https://rp.example",` + resolve + `,"x":{"a":1,"a":2}}`, true},
 		"historical keys":        {parseHK, `{` + historical + `}`, false},
-		"historical keys twice":  {parseHK, `{` + historical + `,"keys":[]}`, true},
+		"historical keys twice":  {parseHK, `{` + historical + `,"keys":[{}]}`, true},
+		"historical keys, same":  {parseHK, `{` + historical + `,"keys":[]}`, false},
+		"delegation, same sub":   {parseTMD, `{"sub":"https://rp.example",` + tm + `}`, false},
+		"resolve, same nested":   {parseRR, `{"sub":"https://rp.example",` + resolve + `,"x":{"a":1,"a":1}}`, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := tc.parse([]byte(tc.payload))

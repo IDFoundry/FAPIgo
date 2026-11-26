@@ -39,7 +39,8 @@ type IDTokenClaims struct {
 }
 
 // parseIDTokenClaims parses an ID token's claims set, refusing one
-// decodeClaimsObject refuses, such as one that repeats a claim.
+// decodeClaimsObject refuses, such as one that repeats a claim with
+// differing values.
 func parseIDTokenClaims(payload []byte) (IDTokenClaims, error) {
 	raw, err := decodeClaimsObject(payload)
 	if err != nil {

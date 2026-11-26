@@ -3,7 +3,7 @@ module github.com/idfoundry/fapigo/examples/linked-accounts
 go 1.26.11
 
 require (
-	github.com/idfoundry/fapigo v0.84.0
+	github.com/idfoundry/fapigo v0.86.0
 	github.com/idfoundry/fapigo/examples/internal/demokit v0.0.0-00010101000000-000000000000
 	github.com/idfoundry/fapigo/sqlstore v0.0.0-00010101000000-000000000000
 	modernc.org/sqlite v1.62.0

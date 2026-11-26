@@ -75,7 +75,8 @@ func TestBackchannelPollInterval(t *testing.T) {
 	})
 }
 
-// A decision for an unknown handle is ErrNotFound; for a decided one,
+// A decision for an unknown handle is ErrNotFound, and
+// storage.ErrBackchannelAuthenticationNotFound; for a decided one,
 // storage.ErrBackchannelAuthenticationAlreadyDecided. Lookup keeps answering after the decision, and an approval
 // polled once is spent even after the request expires.
 func TestBackchannelDecisionsAndExpiry(t *testing.T) {
@@ -84,13 +85,16 @@ func TestBackchannelDecisionsAndExpiry(t *testing.T) {
 		b := freshDB(t, dialect).Backchannel()
 		r := cibaRequest("r", "poll")
 		must(t, b.CreateBackchannelAuthentication(ctx, r))
-		if _, err := b.DecideBackchannelAuthentication(ctx, storage.DecideBackchannelAuthentication{HandleHash: sha256.Sum256([]byte("unknown")), Status: storage.BackchannelAuthenticationDenied}); !errors.Is(err, sqlstore.ErrNotFound) {
-			t.Fatalf("DecideBackchannelAuthentication(unknown) = %v, want ErrNotFound", err)
+		if _, err := b.DecideBackchannelAuthentication(ctx, storage.DecideBackchannelAuthentication{HandleHash: sha256.Sum256([]byte("unknown")), Status: storage.BackchannelAuthenticationDenied}); !errors.Is(err, sqlstore.ErrNotFound) || !errors.Is(err, storage.ErrBackchannelAuthenticationNotFound) {
+			t.Fatalf("DecideBackchannelAuthentication(unknown) = %v, want ErrNotFound and ErrBackchannelAuthenticationNotFound", err)
+		}
+		if _, err := b.LookupBackchannelAuthentication(ctx, sha256.Sum256([]byte("unknown"))); !errors.Is(err, sqlstore.ErrNotFound) || !errors.Is(err, storage.ErrBackchannelAuthenticationNotFound) {
+			t.Fatalf("LookupBackchannelAuthentication(unknown) = %v, want ErrNotFound and ErrBackchannelAuthenticationNotFound", err)
 		}
 		approve := storage.DecideBackchannelAuthentication{HandleHash: r.HandleHash, Status: storage.BackchannelAuthenticationApproved, Grant: secretGrant}
 		_, err := b.DecideBackchannelAuthentication(ctx, approve)
 		must(t, err)
-		if _, err := b.DecideBackchannelAuthentication(ctx, approve); !errors.Is(err, storage.ErrBackchannelAuthenticationAlreadyDecided) || errors.Is(err, sqlstore.ErrNotFound) || errors.Is(err, storage.ErrStoreUnavailable) {
+		if _, err := b.DecideBackchannelAuthentication(ctx, approve); !errors.Is(err, storage.ErrBackchannelAuthenticationAlreadyDecided) || errors.Is(err, sqlstore.ErrNotFound) || errors.Is(err, storage.ErrBackchannelAuthenticationNotFound) || errors.Is(err, storage.ErrStoreUnavailable) {
 			t.Fatalf("second DecideBackchannelAuthentication = %v, want ErrBackchannelAuthenticationAlreadyDecided, not ErrNotFound", err)
 		}
 		if got, err := b.LookupBackchannelAuthentication(ctx, r.HandleHash); err != nil || got.ClientID != "c" || string(got.Request) != string(secretGrant) {

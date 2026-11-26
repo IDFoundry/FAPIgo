@@ -178,6 +178,12 @@ var keyHolders = map[string]keyHolder{
 				Session *client.BackchannelSessionSealer
 			}{must(client.NewTokenSetSealer(c, [][]byte{key}))(t), must(client.NewBackchannelSessionSealer(c, [][]byte{key}))(t)}, []string{string(key)}
 		}},
+	"fapitest.Harness.EmbedderUI": {covers: []string{"fapitest.EmbedderUI.sealed"},
+		build: func(t *testing.T) (any, []string) {
+			key := randomBytes(t, 32)
+			h := fapitest.New(t, fapitest.Config{Profile: server.ProfileFAPISecurity})
+			return fapitest.EmbedderUIWithKey(h, fapitest.EmbedderUIOptions{}, key), []string{string(key)}
+		}},
 	"cookie jars": {covers: []string{"interactioncookie.Cookie.jar", "sessioncookie.Cookie.jar"},
 		build: func(t *testing.T) (any, []string) {
 			key := randomBytes(t, 32)

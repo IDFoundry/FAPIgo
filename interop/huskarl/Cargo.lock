@@ -114,6 +114,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
 dependencies = [
  "hybrid-array",
+ "zeroize",
 ]
 
 [[package]]
@@ -413,6 +414,7 @@ dependencies = [
  "const-oid",
  "crypto-common",
  "ctutils",
+ "zeroize",
 ]
 
 [[package]]
@@ -752,9 +754,9 @@ dependencies = [
 
 [[package]]
 name = "huskarl-core"
-version = "0.10.10"
+version = "0.10.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea5030b4da9bb7b04139b10d5571a6d04c6cc183440f09abd599e3805a18b2a6"
+checksum = "d813b281d25020dc232a6b965322da44b6bcc0a6fe3bbdec0953033596972afe"
 dependencies = [
  "arc-swap",
  "base64",
@@ -785,9 +787,9 @@ dependencies = [
 
 [[package]]
 name = "huskarl-crypto-native"
-version = "0.11.3"
+version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9d37604212fc6d69b7ff3c58c49e23e00ec6c761d58e2d3fa11a4d576b5dcae"
+checksum = "23e2f6c92c0f8a2c681be9622622ace65ef92054311bcaa5bde72150bcc3ab18"
 dependencies = [
  "aead",
  "aes-gcm",
@@ -1568,14 +1570,16 @@ dependencies = [
 
 [[package]]
 name = "rsa"
-version = "0.10.0-rc.19"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33405e321e16ef941ca66e254f6904c3aafd3c7ff001fb88bf11c73eb75c2b85"
+checksum = "23e77fd77e0dea28b3011fd62d15445b7de7959333b0276d930e03be0f755699"
 dependencies = [
  "const-oid",
  "crypto-bigint",
+ "crypto-common",
  "crypto-primes",
  "digest",
+ "hmac",
  "pkcs1",
  "pkcs8",
  "rand_core",

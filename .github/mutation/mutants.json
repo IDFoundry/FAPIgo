@@ -5730,5 +5730,77 @@
     ],
     "run": "^TestBackchannelAuthenticationStoreRefusesDecisionOnUnknownHandle$",
     "why": "memstore wraps ErrBackchannelAuthenticationNotFound for a decision on an unknown handle"
+  },
+  {
+    "id": "client-issuer-keys-binding-mismatch",
+    "file": "client/client.go",
+    "old": "iss != \"\" && iss != cfg.Issuer.String()",
+    "new": "iss != \"\" && iss != cfg.Issuer.String() && false",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^(TestNewRefusesIssuerKeysBoundToAnotherIssuer|TestNewAcceptsMatchingOrUnboundIssuerKeys)$",
+    "why": "client.New refuses issuer keys bound to an issuer other than Config.Issuer"
+  },
+  {
+    "id": "client-issuer-keys-binding-unbound",
+    "file": "client/client.go",
+    "old": "iss != \"\" && iss != cfg.Issuer.String()",
+    "new": "iss != cfg.Issuer.String()",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^(TestNewRefusesIssuerKeysBoundToAnotherIssuer|TestNewAcceptsMatchingOrUnboundIssuerKeys)$",
+    "why": "client.New accepts an unbound issuer key source"
+  },
+  {
+    "id": "resource-issuer-keys-binding-mismatch",
+    "file": "resource/accesstoken.go",
+    "old": "iss != \"\" && iss != j.Issuer.String()",
+    "new": "iss != \"\" && iss != j.Issuer.String() && false",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^(TestJWTAccessTokensRefuseIssuerKeysBoundToAnotherIssuer|TestJWTAccessTokensAcceptMatchingOrUnboundIssuerKeys)$",
+    "why": "JWTAccessTokens validation refuses issuer keys bound to an issuer other than Issuer"
+  },
+  {
+    "id": "resource-issuer-keys-binding-unbound",
+    "file": "resource/accesstoken.go",
+    "old": "iss != \"\" && iss != j.Issuer.String()",
+    "new": "iss != j.Issuer.String()",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^(TestJWTAccessTokensRefuseIssuerKeysBoundToAnotherIssuer|TestJWTAccessTokensAcceptMatchingOrUnboundIssuerKeys)$",
+    "why": "JWTAccessTokens validation accepts an unbound issuer key source"
+  },
+  {
+    "id": "keys-jwks-bound-issuer",
+    "file": "keys/jwksissuer.go",
+    "old": "return s.issuer\n",
+    "new": "return \"\"\n",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestJWKSIssuerKeySourceBoundIssuer$",
+    "why": "JWKSIssuerKeySource reports the issuer WithIssuer bound it to"
+  },
+  {
+    "id": "keys-local-bound-issuer",
+    "file": "keys/localissuer.go",
+    "old": "return l.issuer\n",
+    "new": "return \"\"\n",
+    "module": "root",
+    "packages": [
+      "./keys"
+    ],
+    "run": "^TestLocalIssuerKeysBoundIssuer$",
+    "why": "LocalIssuerKeys reports its own issuer as its binding"
   }
 ]

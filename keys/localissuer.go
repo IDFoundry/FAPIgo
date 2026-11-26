@@ -75,6 +75,12 @@ func (l *LocalIssuerKeys) Capabilities() KeySourceCapabilities {
 	return KeySourceCapabilities{LiveFetchHardened: true}
 }
 
+// BoundIssuer implements IssuerBound: a LocalIssuerKeys answers for
+// the issuer it was built for only.
+func (l *LocalIssuerKeys) BoundIssuer() string {
+	return l.issuer
+}
+
 // signingPurposeFor maps what a verifier checks to the purpose the
 // issuer signed it under.
 func signingPurposeFor(p IssuerVerificationPurpose) (SigningPurpose, error) {

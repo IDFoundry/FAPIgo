@@ -12,6 +12,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/depcheck"
 	"github.com/idfoundry/fapigo/internal/nofollow"
 	"github.com/idfoundry/fapigo/internal/querystring"
+	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -715,6 +716,22 @@ func keysNeeded(cfg Config) bool {
 func validateIssuerKeysDependency(cfg Config, deps Dependencies) error {
 	if deps.IssuerKeys == nil && issuerKeysNeeded(cfg) {
 		return fmt.Errorf("client: dependencies: issuer keys is required (it may be left nil only when oauth_only is set and neither a JARM response nor a signed UserInfo response is verified)")
+	}
+	return checkIssuerKeysBinding(cfg, deps.IssuerKeys)
+}
+
+// checkIssuerKeysBinding refuses an issuer key source bound (see
+// keys.IssuerBound) to an issuer other than cfg.Issuer: it would refuse
+// every lookup this client makes, so nothing the issuer signs could
+// ever verify. Issuers are compared exactly, as a response's "iss" is.
+// An unbound source, or one not implementing keys.IssuerBound, passes.
+func checkIssuerKeysBinding(cfg Config, src keys.IssuerKeySource) error {
+	bound, ok := src.(keys.IssuerBound)
+	if !ok {
+		return nil
+	}
+	if iss := bound.BoundIssuer(); iss != "" && iss != cfg.Issuer.String() {
+		return fmt.Errorf("client: dependencies: issuer keys is bound to issuer %q, not this client's issuer %q", iss, cfg.Issuer.String())
 	}
 	return nil
 }

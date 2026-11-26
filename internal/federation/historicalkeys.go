@@ -208,8 +208,10 @@ func (r HistoricalKeysResponse) Verify(pub crypto.PublicKey, policy HistoricalKe
 // detection and shape validation rather than duplicating it. "revoked"
 // stays raw until decodeKeyRevocation reads it: encoding/json would
 // merge the copies of a repeated "revoked" into one struct, taking
-// revoked_at from one and reason from another, where a json.RawMessage
-// keeps the last copy, as it does for every other member here.
+// revoked_at from one and reason from another. parseHistoricalKeysClaims
+// refuses a repeated member whose copies differ, anywhere in the claims
+// set, before any of them is decoded, so a merge or a last copy is only
+// ever of identical copies, and reads as each of them does.
 type rawHistoricalKey struct {
 	IAT     *numericdate.Value `json:"iat"`
 	EXP     *numericdate.Value `json:"exp"`
@@ -238,9 +240,9 @@ func decodeKeyRevocation(raw json.RawMessage) (*rawKeyRevocation, bool) {
 }
 
 func parseHistoricalKeysClaims(payload []byte) (HistoricalKeysClaims, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		return HistoricalKeysClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	raw, err := decodeClaimsObject(payload)
+	if err != nil {
+		return HistoricalKeysClaims{}, err
 	}
 
 	iss, err := popRequiredString(raw, "iss")

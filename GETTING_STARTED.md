@@ -1800,7 +1800,14 @@ Authorize anything that belongs to a user by `EndUser`, never by
 client's own `client_id` (`SubjectKind` is `SubjectClient`), and a client
 can be registered with a `client_id` equal to a user's identifier
 (automatically, through OpenID Federation, for one). `EndUser` reports
-`ok` false for it:
+`ok` false for it. It can only because FAPIgo's authorization server
+marks a client credentials token with a `grant_type` claim: a token from
+another authorization server carries no such mark (RFC 9068 makes its
+`sub` the `client_id`, and leaves keeping client IDs and user
+identifiers apart to the authorization server, §5), so it reads as
+`SubjectEndUser`, and `EndUser` reports `ok` true for it. Behind such a
+server, refuse a token whose `InternalSubject` equals its `ClientID`
+yourself, unless the server guarantees no client ID names a user:
 
 ```go
 user, ok := authCtx.EndUser()

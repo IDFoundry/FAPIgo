@@ -47,6 +47,14 @@ type AccessTokenParams struct {
 	// Always the issuing client's own storage.RegisteredClient.SenderConstrain().
 	SenderConstrain storage.SenderConstrain
 
+	// Claims are the token's other claims, which an issuer must carry
+	// into the token (JWTAccessTokens signs them in, OpaqueAccessTokens
+	// keeps them in the token's record). Among them is "grant_type" on
+	// a client credentials token, which is how
+	// resource.AuthorizationContext.SubjectKind tells the client's own
+	// token from an end user's: an issuer dropping it has a resource
+	// server read a client credentials token, whose subject is the
+	// client_id, as a user's.
 	Claims map[string]json.RawMessage
 
 	// Issuer is the token's "iss": JWTAccessTokens signs it into the

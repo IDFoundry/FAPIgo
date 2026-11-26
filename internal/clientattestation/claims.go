@@ -111,7 +111,12 @@ func (a *popAudience) UnmarshalJSON(data []byte) error {
 
 func parsePoPClaims(payload []byte) (popClaims, error) {
 	var c popClaims
-	if err := strictjson.Unmarshal(payload, &c); err != nil {
+	// UnmarshalNoConflicts: encoding/json keeps the last copy of a
+	// repeated aud or jti, where another reader of the same PoP may keep
+	// the first (RFC 7519 §4 requires unique claim names). A repeat with
+	// identical copies reads the same either way, so only differing
+	// copies (and case variants) are refused.
+	if err := strictjson.UnmarshalNoConflicts(payload, &c); err != nil {
 		return popClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	if c.Audience == "" || c.JTI == "" || c.IssuedAt == 0 {

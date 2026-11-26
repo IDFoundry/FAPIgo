@@ -5814,5 +5814,186 @@
     ],
     "run": "^TestBackchannelDecisionsAndExpiry$",
     "why": "sqlstore wraps ErrBackchannelAuthenticationNotFound for an unknown CIBA handle"
+  },
+  {
+    "id": "token-claims-refuse-duplicate-members",
+    "file": "internal/token/claims_object.go",
+    "old": "if err := strictjson.CheckConflictingMembers(payload); err != nil {",
+    "new": "if err := strictjson.CheckConflictingMembers(payload); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/token",
+      "./resource"
+    ],
+    "run": "^(TestParseClaimsRefuseDuplicateMembers|TestVerifyRefusesJWTAccessTokenRepeatingAClaim)$",
+    "why": "ID token and JWT access token claims sets that repeat a member with differing copies are refused, not read last-wins"
+  },
+  {
+    "id": "jarm-claims-refuse-duplicate-members",
+    "file": "internal/jarm/claims_object.go",
+    "old": "if err := strictjson.CheckConflictingMembers(payload); err != nil {",
+    "new": "if err := strictjson.CheckConflictingMembers(payload); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/jarm"
+    ],
+    "run": "^TestParseClaimsRefusesDuplicateMembers$",
+    "why": "a JARM claims set that repeats a member with differing copies is refused"
+  },
+  {
+    "id": "requestobject-claims-refuse-duplicate-members",
+    "file": "internal/requestobject/claims_object.go",
+    "old": "if err := strictjson.CheckConflictingMembers(payload); err != nil {",
+    "new": "if err := strictjson.CheckConflictingMembers(payload); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/requestobject"
+    ],
+    "run": "^TestParseClaimsRefusesDuplicateMembers$",
+    "why": "a request object claims set that repeats a member with differing copies is refused"
+  },
+  {
+    "id": "clientassertion-claims-refuse-duplicate-members",
+    "file": "internal/clientassertion/claims.go",
+    "old": "if err := strictjson.CheckConflictingMembers(payload); err != nil {",
+    "new": "if err := strictjson.CheckConflictingMembers(payload); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/clientassertion"
+    ],
+    "run": "^TestParseClaimsRefusesDuplicateMembers$",
+    "why": "a client assertion claims set that repeats a member with differing copies is refused"
+  },
+  {
+    "id": "dpop-claims-refuse-duplicate-members",
+    "file": "internal/dpop/proof.go",
+    "old": "strictjson.UnmarshalNoConflicts(payload, &c)",
+    "new": "strictjson.Unmarshal(payload, &c)",
+    "module": "root",
+    "packages": [
+      "./internal/dpop"
+    ],
+    "run": "^TestParseClaimsRefusesDuplicateMembers$",
+    "why": "a DPoP proof claims set that repeats a member with differing copies is refused"
+  },
+  {
+    "id": "clientattestation-pop-refuse-duplicate-members",
+    "file": "internal/clientattestation/claims.go",
+    "old": "if err := strictjson.UnmarshalNoConflicts(payload, &c)",
+    "new": "if err := strictjson.Unmarshal(payload, &c)",
+    "module": "root",
+    "packages": [
+      "./internal/clientattestation"
+    ],
+    "run": "^TestParsePoPClaimsRefusesDuplicateMembers$",
+    "why": "an attestation PoP claims set that repeats a member with differing copies is refused"
+  },
+  {
+    "id": "federation-jwt-claims-refuse-duplicate-members",
+    "file": "internal/federation/claims_validation.go",
+    "old": "if err := strictjson.CheckConflictingMembers(payload); err != nil {",
+    "new": "if err := strictjson.CheckConflictingMembers(payload); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/federation"
+    ],
+    "run": "^TestParseFederationJWTClaimsRefuseDuplicateMembers$",
+    "why": "Trust Marks, delegations, status, resolve and historical keys claims sets that repeat a member with differing copies are refused"
+  },
+  {
+    "id": "client-userinfo-refuse-duplicate-members",
+    "file": "client/userinfo.go",
+    "old": "if err := strictjson.CheckConflictingMembers(body); err != nil {",
+    "new": "if err := strictjson.CheckConflictingMembers(body); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestDecodeUserInfoJSONRefusesDuplicateMembers$",
+    "why": "a UserInfo response that repeats a member with differing copies is refused"
+  },
+  {
+    "id": "resource-subject-kind-grant-type-marks-client",
+    "file": "resource/verify.go",
+    "old": "raw, ok := claims[token.GrantTypeClaim]\n\tif !ok {",
+    "new": "raw, ok := claims[token.GrantTypeClaim]\n\tif !ok || true {",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^(TestVerifySubjectKindOfThirdPartyJWTAccessTokens|TestVerifySubjectKind)$",
+    "why": "a token carrying grant_type client_credentials reads as SubjectClient"
+  },
+  {
+    "id": "strictjson-conflict-identical-copies-accepted",
+    "file": "internal/strictjson/members_conflict.go",
+    "old": "if !bytes.Equal(first.compact, c) {",
+    "new": "if !bytes.Equal(first.compact, c) || true {",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^(TestCheckConflictingMembersAcceptsIdenticalRepeats|TestCheckConflictingMembersRefusesConflicts|TestCheckConflictingMembersBoundsNesting|TestCheckConflictingMembersNamesTheMembers|TestUnmarshalNoConflicts|TestCheckConflictingMembersAcceptsNoDifferential|TestCheckDuplicateMembersClosesFirstWinsDifferential)$",
+    "why": "CheckConflictingMembers accepts a repeated member whose copies are identical"
+  },
+  {
+    "id": "strictjson-conflict-differing-copies-refused",
+    "file": "internal/strictjson/members_conflict.go",
+    "old": "if !bytes.Equal(first.compact, c) {",
+    "new": "if !bytes.Equal(first.compact, c) && false {",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^(TestCheckConflictingMembersAcceptsIdenticalRepeats|TestCheckConflictingMembersRefusesConflicts|TestCheckConflictingMembersBoundsNesting|TestCheckConflictingMembersNamesTheMembers|TestUnmarshalNoConflicts|TestCheckConflictingMembersAcceptsNoDifferential|TestCheckDuplicateMembersClosesFirstWinsDifferential)$",
+    "why": "CheckConflictingMembers refuses a repeated member whose copies differ"
+  },
+  {
+    "id": "strictjson-conflict-case-variant-refused",
+    "file": "internal/strictjson/members_conflict.go",
+    "old": "if first != nil && first.name != name {",
+    "new": "if first != nil && first.name != name && false {",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^(TestCheckConflictingMembersAcceptsIdenticalRepeats|TestCheckConflictingMembersRefusesConflicts|TestCheckConflictingMembersBoundsNesting|TestCheckConflictingMembersNamesTheMembers|TestUnmarshalNoConflicts|TestCheckConflictingMembersAcceptsNoDifferential|TestCheckDuplicateMembersClosesFirstWinsDifferential)$",
+    "why": "CheckConflictingMembers refuses two names that differ only in case, even with identical values"
+  },
+  {
+    "id": "strictjson-conflict-nested-objects-checked",
+    "file": "internal/strictjson/members_conflict.go",
+    "old": "\tif delim == '{' {\n\t\treturn w.object(depth)",
+    "new": "\tif delim == '{' && depth == 0 {\n\t\treturn w.object(depth)",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^(TestCheckConflictingMembersAcceptsIdenticalRepeats|TestCheckConflictingMembersRefusesConflicts|TestCheckConflictingMembersBoundsNesting|TestCheckConflictingMembersNamesTheMembers|TestUnmarshalNoConflicts|TestCheckConflictingMembersAcceptsNoDifferential|TestCheckDuplicateMembersClosesFirstWinsDifferential)$",
+    "why": "CheckConflictingMembers checks the members of nested objects, including inside identical copies"
+  },
+  {
+    "id": "strictjson-conflict-compares-compacted-copies",
+    "file": "internal/strictjson/members_conflict.go",
+    "old": "if err := json.Compact(&buf, bytes.TrimLeft(span, \" \\t\\r\\n:\")); err != nil {",
+    "new": "if _, err := buf.Write(bytes.TrimLeft(span, \" \\t\\r\\n:\")); err != nil {",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^(TestCheckConflictingMembersAcceptsIdenticalRepeats|TestCheckConflictingMembersRefusesConflicts|TestCheckConflictingMembersBoundsNesting|TestCheckConflictingMembersNamesTheMembers|TestUnmarshalNoConflicts|TestCheckConflictingMembersAcceptsNoDifferential|TestCheckDuplicateMembersClosesFirstWinsDifferential)$",
+    "why": "CheckConflictingMembers compares copies after json.Compact, so whitespace alone is no difference"
+  },
+  {
+    "id": "jarm-claims-accept-identical-repeat",
+    "file": "internal/jarm/claims_object.go",
+    "old": "strictjson.CheckConflictingMembers(payload)",
+    "new": "strictjson.CheckDuplicateMembers(payload)",
+    "module": "root",
+    "packages": [
+      "./internal/jarm"
+    ],
+    "run": "^TestParseClaimsRefusesDuplicateMembers$",
+    "why": "a JARM response repeating iss with an identical value (claim and RFC 9207 parameter) is accepted"
   }
 ]

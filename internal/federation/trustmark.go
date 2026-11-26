@@ -178,9 +178,9 @@ func (tm TrustMark) Verify(pub crypto.PublicKey, policy TrustMarkVerifyPolicy) (
 }
 
 func parseTrustMarkClaims(payload []byte) (TrustMarkClaims, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		return TrustMarkClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	raw, err := decodeClaimsObject(payload)
+	if err != nil {
+		return TrustMarkClaims{}, err
 	}
 
 	iss, err := popRequiredString(raw, "iss")
@@ -494,9 +494,9 @@ func (d TrustMarkDelegation) Verify(pub crypto.PublicKey, policy TrustMarkDelega
 }
 
 func parseTrustMarkDelegationClaims(payload []byte) (TrustMarkDelegationClaims, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		return TrustMarkDelegationClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	raw, err := decodeClaimsObject(payload)
+	if err != nil {
+		return TrustMarkDelegationClaims{}, err
 	}
 
 	iss, err := popRequiredString(raw, "iss")

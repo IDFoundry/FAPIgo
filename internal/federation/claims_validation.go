@@ -156,3 +156,26 @@ func refuseDuplicateMembers(payload []byte) error {
 	}
 	return nil
 }
+
+// decodeClaimsObject decodes payload, the claims set of a federation
+// JWT other than an Entity Statement (a Trust Mark, Trust Mark
+// Delegation, Trust Mark Status, Resolve or Historical Keys response),
+// as a JSON object. It refuses one that repeats a member name, at any
+// depth, with copies that differ, or holds two names that differ only
+// in case (strictjson.CheckConflictingMembers): RFC 7519 §4 requires
+// unique claim names, and encoding/json keeps the last copy of a
+// repeated one, where another reader of the same JWT may keep the
+// first, and so see a different status or subject. A repeat whose
+// copies are identical is accepted: every reader takes the same value
+// from it. An Entity Statement's claims go through
+// refuseDuplicateMembers instead, which refuses any repeat.
+func decodeClaimsObject(payload []byte) (map[string]json.RawMessage, error) {
+	if err := strictjson.CheckConflictingMembers(payload); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	}
+	return raw, nil
+}

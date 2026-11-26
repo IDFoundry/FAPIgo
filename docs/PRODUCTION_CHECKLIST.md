@@ -161,7 +161,11 @@ are things no constructor can check.
 - [ ] *(yours)* **Authorize anything a user owns by
   `AuthorizationContext.EndUser()`**, never by `InternalSubject` alone (a
   client credentials token's subject is a client), and use
-  `ClientSubject` for anything returned to a client. [Pairwise subjects at a resource server](../GETTING_STARTED.md#pairwise-subjects-at-a-resource-server)
+  `ClientSubject` for anything returned to a client. `EndUser` tells a
+  client's token apart only for FAPIgo's authorization server, which
+  marks one with `grant_type`; behind another, check that it keeps
+  client IDs and user identifiers apart (RFC 9068 §5), or refuse a
+  token whose `InternalSubject` equals its `ClientID`. [Pairwise subjects at a resource server](../GETTING_STARTED.md#pairwise-subjects-at-a-resource-server)
 - [ ] *(yours)* **`PeerCertificate` behind a proxy:** the same rule as
   the authorization server's, with `fapihttp.ForwardedClientCertificate`.
   [Verify a request](../GETTING_STARTED.md#verify-a-request)

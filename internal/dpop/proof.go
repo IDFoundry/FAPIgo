@@ -31,7 +31,12 @@ type claims struct {
 
 func parseClaims(payload []byte) (claims, error) {
 	var c claims
-	if err := strictjson.Unmarshal(payload, &c); err != nil {
+	// UnmarshalNoConflicts: RFC 7519 §4 requires unique claim names, and
+	// encoding/json keeps the last copy of a repeated one, where another
+	// reader of the same proof may keep the first. A repeat with
+	// identical copies reads the same either way, so only differing
+	// copies (and case variants) are refused.
+	if err := strictjson.UnmarshalNoConflicts(payload, &c); err != nil {
 		return claims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	if c.JTI == "" || c.HTM == "" || c.HTU == "" {

@@ -67,10 +67,13 @@ type Claims struct {
 	Parameters map[string]json.RawMessage
 }
 
+// parseClaims parses a request object's claims set, refusing one
+// decodeClaimsObject refuses, such as one that repeats a claim with
+// differing values.
 func parseClaims(payload []byte) (Claims, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		return Claims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	raw, err := decodeClaimsObject(payload)
+	if err != nil {
+		return Claims{}, err
 	}
 
 	iss, _, err := popString(raw, "iss", true)

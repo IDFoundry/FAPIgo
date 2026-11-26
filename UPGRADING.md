@@ -18,7 +18,7 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
-## v0.86.1
+## v0.87.0
 
 ### An issuer key source bound to another issuer is refused at construction (client, resource)
 

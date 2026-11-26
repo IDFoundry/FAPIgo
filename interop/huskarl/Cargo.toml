@@ -10,7 +10,7 @@ publish = false
 # Every direct dependency is pinned to an exact version, and Cargo.lock pins
 # the whole tree; the runner builds with `cargo build --locked`.
 [dependencies]
-bytes = "=1.12.1"
+bytes = "=1.12.2"
 http = "=1.5.0"
 huskarl = "=0.11.10"
 huskarl-crypto-native = "=0.11.3"

@@ -241,13 +241,26 @@ func TestBackchannelAuthenticationStoreReportsAnAlreadyDecidedRequest(t *testing
 }
 
 // TestBackchannelAuthenticationStoreRefusesDecisionOnUnknownHandle: a
-// decision for a handle no request was created with is refused.
+// decision for a handle no request was created with is refused, wrapping
+// storage.ErrBackchannelAuthenticationNotFound, so the contract's
+// subtest for it runs rather than skips here.
 func TestBackchannelAuthenticationStoreRefusesDecisionOnUnknownHandle(t *testing.T) {
 	store := NewBackchannelAuthenticationStore()
 	if _, err := store.DecideBackchannelAuthentication(context.Background(), storage.DecideBackchannelAuthentication{
 		HandleHash: sha256.Sum256([]byte("no such handle")), Status: storage.BackchannelAuthenticationApproved,
-	}); err == nil {
-		t.Fatal("decision on an unknown handle = nil error, want refused")
+	}); !errors.Is(err, storage.ErrBackchannelAuthenticationNotFound) {
+		t.Fatalf("decision on an unknown handle = %v, want it refused wrapping ErrBackchannelAuthenticationNotFound", err)
+	}
+}
+
+// TestBackchannelAuthenticationStoreReportsAnUnknownHandle pins that
+// memstore wraps storage.ErrBackchannelAuthenticationNotFound for a
+// lookup of a handle no request was created with, so the contract's
+// subtest for it runs rather than skips here.
+func TestBackchannelAuthenticationStoreReportsAnUnknownHandle(t *testing.T) {
+	store := NewBackchannelAuthenticationStore()
+	if _, err := store.LookupBackchannelAuthentication(context.Background(), sha256.Sum256([]byte("no such handle"))); !errors.Is(err, storage.ErrBackchannelAuthenticationNotFound) {
+		t.Fatalf("lookup of an unknown handle = %v, want it to wrap ErrBackchannelAuthenticationNotFound", err)
 	}
 }
 

@@ -207,10 +207,16 @@ server. A request leaves the inbox once decided, or when it expires.
 Each request listed costs store reads, so pass the listing your
 request's context: once it ends, the listing reads no more and fails
 with the context's error, rather than returning part of the inbox. An
-entry it can't read, one whose record won't decode or whose request a
-store couldn't answer for, doesn't hide the rest: it returns what it
-could read with an error for each entry it couldn't, so treat any error
-as a possibly incomplete list.
+entry whose request is gone is left out: the backchannel store says so
+by wrapping `storage.ErrBackchannelAuthenticationNotFound`, as `memstore`
+does, and `sqlstore` from the release that wraps it, or its client is
+no longer registered. An entry it can't read, one whose record won't
+decode or whose request a store couldn't answer for or refused any
+other way, doesn't hide the rest: it returns what it could read with an
+error for each entry it couldn't, so treat any error as a possibly
+incomplete list. With a store that doesn't wrap the sentinel, an entry
+left behind for a request the store no longer holds is reported this
+way until it expires.
 
 The resolver also binds the request to that user: an `Authorize` for
 anyone else is a failed authentication (`access_denied`). That matters
@@ -236,9 +242,10 @@ requests pending. To empty an inbox for good, have
 `BackchannelSubjects` stop resolving the user's hints first, then call
 it again until `ListBackchannelInteractions` lists nothing. A request
 already decided (one left listed because its removal from the inbox
-failed) or expired is passed over and its entry removed; any other
-refusal is reported in the error and the request stays listed. A
-store says a request was already decided by wrapping
+failed), expired, or gone from the store since it was listed is passed
+over and its entry removed; any other refusal, or an entry the listing
+couldn't read, is reported in the error and stays listed. A store says
+a request was already decided by wrapping
 `storage.ErrBackchannelAuthenticationAlreadyDecided`, as `memstore`
 does, and `sqlstore` from the release that wraps it: with a store that
 doesn't, such an entry is reported each time until it expires.

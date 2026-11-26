@@ -5658,5 +5658,77 @@
     ],
     "run": "^(TestReentrantResolutionFailureHookReturns|TestReentrantResolutionFailureHookReturnsWhenMemoryFull)$",
     "why": "the failure is published on the in-flight resolution before OnResolutionFailure runs"
+  },
+  {
+    "id": "server-ciba-inbox-skips-only-notfound",
+    "file": "server/backchannel_inbox.go",
+    "old": "return errors.Is(serverErr, storage.ErrBackchannelAuthenticationNotFound)",
+    "new": "return serverErr != nil",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestListBackchannelInteractionsReportsARefusedLookup$",
+    "why": "the CIBA inbox listing reports a lookup refused other than as not found, rather than skipping it"
+  },
+  {
+    "id": "server-ciba-inbox-skips-notfound",
+    "file": "server/backchannel_inbox.go",
+    "old": "return errors.Is(serverErr, storage.ErrBackchannelAuthenticationNotFound)",
+    "new": "return serverErr == nil",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestListBackchannelInteractionsSkipsAGoneRequest$",
+    "why": "the CIBA inbox listing leaves out an entry whose request the store says is gone"
+  },
+  {
+    "id": "server-ciba-inbox-skips-deregistered-client",
+    "file": "server/backchannel_inbox.go",
+    "old": "\tcase ErrorUnauthorizedClient:\n\t\treturn true",
+    "new": "\tcase ErrorUnauthorizedClient:\n\t\treturn false",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBackchannelInboxSkipsADeregisteredClient$",
+    "why": "the CIBA inbox listing leaves out a request whose client is no longer registered"
+  },
+  {
+    "id": "server-ciba-deny-clears-notfound",
+    "file": "server/backchannel_inbox.go",
+    "old": "errors.Is(failure, storage.ErrBackchannelAuthenticationNotFound)",
+    "new": "failure == nil",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestStaleBackchannelEntry|TestDenyBackchannelInteractionsClearsAGoneRequest)$",
+    "why": "DenyBackchannelInteractions passes over and clears a request the store says is gone"
+  },
+  {
+    "id": "memstore-ciba-lookup-wraps-notfound",
+    "file": "storage/memstore/backchannel_authentication_store.go",
+    "old": "fmt.Errorf(\"memstore: look up backchannel authentication: %w\", storage.ErrBackchannelAuthenticationNotFound)",
+    "new": "fmt.Errorf(\"memstore: look up backchannel authentication: %v\", storage.ErrBackchannelAuthenticationNotFound)",
+    "module": "root",
+    "packages": [
+      "./storage/memstore"
+    ],
+    "run": "^TestBackchannelAuthenticationStoreReportsAnUnknownHandle$",
+    "why": "memstore wraps ErrBackchannelAuthenticationNotFound for a lookup of an unknown handle"
+  },
+  {
+    "id": "memstore-ciba-decide-wraps-notfound",
+    "file": "storage/memstore/backchannel_authentication_store.go",
+    "old": "fmt.Errorf(\"memstore: decide backchannel authentication: %w\", storage.ErrBackchannelAuthenticationNotFound)",
+    "new": "fmt.Errorf(\"memstore: decide backchannel authentication: %v\", storage.ErrBackchannelAuthenticationNotFound)",
+    "module": "root",
+    "packages": [
+      "./storage/memstore"
+    ],
+    "run": "^TestBackchannelAuthenticationStoreRefusesDecisionOnUnknownHandle$",
+    "why": "memstore wraps ErrBackchannelAuthenticationNotFound for a decision on an unknown handle"
   }
 ]

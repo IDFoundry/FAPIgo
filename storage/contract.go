@@ -1303,7 +1303,9 @@ func testAccessTokenStoreLookupExpiredTokenStillReturnsIt(t *testing.T, factory 
 // behavior against the guarantees BackchannelAuthenticationStore's
 // documentation promises: DecideBackchannelAuthentication is single-use,
 // and wraps ErrBackchannelAuthenticationAlreadyDecided for a second
-// decision only, if it wraps it at all;
+// decision only, if it wraps it at all; an unknown handle wraps
+// ErrBackchannelAuthenticationNotFound, if the store wraps it at all,
+// and an outage or a decided request doesn't;
 // PollBackchannelAuthentication is reusable for Pending/Denied/AuthenticationFailed
 // but single-use for the first Approved observation (mirroring
 // RedeemRefreshToken's and RedeemAuthorizationCode's contracts
@@ -1318,6 +1320,9 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() Bac
 		testBackchannelAuthenticationStoreLookupReturnsClientIDAndRequestWithoutConsuming(t, factory)
 	})
 	t.Run("LookupUnknownHandleFails", func(t *testing.T) { testBackchannelAuthenticationStoreLookupUnknownHandleFails(t, factory) })
+	t.Run("LookupUnknownHandleWrapsErrBackchannelAuthenticationNotFound", func(t *testing.T) {
+		testBackchannelAuthenticationStoreLookupUnknownHandleWrapsNotFound(t, factory)
+	})
 	t.Run("DecideThenPollReturnsApprovedFieldsRoundTripped", func(t *testing.T) {
 		testBackchannelAuthenticationStoreDecideThenPollReturnsApprovedFieldsRoundTripped(t, factory)
 	})
@@ -1335,6 +1340,12 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() Bac
 	})
 	t.Run("DecideUnknownHandleIsNotAlreadyDecided", func(t *testing.T) {
 		testBackchannelAuthenticationStoreDecideUnknownHandleIsNotAlreadyDecided(t, factory)
+	})
+	t.Run("DecideUnknownHandleWrapsErrBackchannelAuthenticationNotFound", func(t *testing.T) {
+		testBackchannelAuthenticationStoreDecideUnknownHandleWrapsNotFound(t, factory)
+	})
+	t.Run("DecideAgainIsNotNotFound", func(t *testing.T) {
+		testBackchannelAuthenticationStoreDecideAgainIsNotNotFound(t, factory)
 	})
 	t.Run("ConcurrentDecideBackchannelAuthenticationHasExactlyOneWinner", func(t *testing.T) {
 		testBackchannelAuthenticationStoreConcurrentDecideBackchannelAuthenticationHasExactlyOneWinner(t, factory)
@@ -1412,6 +1423,24 @@ func testBackchannelAuthenticationStoreLookupUnknownHandleFails(t *testing.T, fa
 	ctx := context.Background()
 	if _, err := store.LookupBackchannelAuthentication(ctx, sha256.Sum256([]byte("no-such-handle"))); err == nil {
 		t.Fatal("LookupBackchannelAuthentication for unknown handle = nil error, want error")
+	}
+}
+
+// testBackchannelAuthenticationStoreLookupUnknownHandleWrapsNotFound: a
+// store that reports an unknown handle with
+// ErrBackchannelAuthenticationNotFound (optional) reports it that way,
+// not as an outage. A store that doesn't wrap it skips this subtest: the
+// lookup still fails (LookupUnknownHandleFails), and the server then
+// reports an inbox entry whose request is gone rather than leaving it
+// out.
+func testBackchannelAuthenticationStoreLookupUnknownHandleWrapsNotFound(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	_, err := store.LookupBackchannelAuthentication(context.Background(), sha256.Sum256([]byte("handle-never-stored")))
+	if !errors.Is(err, ErrBackchannelAuthenticationNotFound) {
+		t.Skip("the store doesn't wrap ErrBackchannelAuthenticationNotFound")
+	}
+	if errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("LookupBackchannelAuthentication(unknown handle) = %v, which also wraps ErrStoreUnavailable; an unknown request isn't an outage", err)
 	}
 }
 
@@ -1590,6 +1619,48 @@ func testBackchannelAuthenticationStoreDecideUnknownHandleIsNotAlreadyDecided(t 
 		t.Fatal("DecideBackchannelAuthentication(unknown handle) = nil error, want error")
 	case errors.Is(err, ErrBackchannelAuthenticationAlreadyDecided):
 		t.Fatalf("DecideBackchannelAuthentication(unknown handle) = %v, which wraps ErrBackchannelAuthenticationAlreadyDecided; an unknown request isn't a decided one", err)
+	}
+}
+
+// testBackchannelAuthenticationStoreDecideUnknownHandleWrapsNotFound: a
+// store that reports deciding an unknown handle with
+// ErrBackchannelAuthenticationNotFound (optional) reports it that way,
+// not as an outage or an already-decided request. A store that doesn't
+// wrap it skips this subtest.
+func testBackchannelAuthenticationStoreDecideUnknownHandleWrapsNotFound(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	_, err := store.DecideBackchannelAuthentication(context.Background(), DecideBackchannelAuthentication{
+		HandleHash: sha256.Sum256([]byte("handle-never-stored")), Status: BackchannelAuthenticationDenied,
+	})
+	if !errors.Is(err, ErrBackchannelAuthenticationNotFound) {
+		t.Skip("the store doesn't wrap ErrBackchannelAuthenticationNotFound")
+	}
+	if errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("DecideBackchannelAuthentication(unknown handle) = %v, which also wraps ErrStoreUnavailable; an unknown request isn't an outage", err)
+	}
+}
+
+// testBackchannelAuthenticationStoreDecideAgainIsNotNotFound: deciding a
+// request already decided fails without wrapping
+// ErrBackchannelAuthenticationNotFound: the request is still stored, and
+// the server would otherwise take it for one gone.
+func testBackchannelAuthenticationStoreDecideAgainIsNotNotFound(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-decided-found", "handle-decided-found")
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	decision := DecideBackchannelAuthentication{HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied}
+	if _, err := store.DecideBackchannelAuthentication(ctx, decision); err != nil {
+		t.Fatalf("first DecideBackchannelAuthentication: %v", err)
+	}
+	_, err := store.DecideBackchannelAuthentication(ctx, decision)
+	switch {
+	case err == nil:
+		t.Fatal("second DecideBackchannelAuthentication = nil error, want error")
+	case errors.Is(err, ErrBackchannelAuthenticationNotFound):
+		t.Fatalf("second DecideBackchannelAuthentication = %v, which wraps ErrBackchannelAuthenticationNotFound; a decided request is still stored", err)
 	}
 }
 

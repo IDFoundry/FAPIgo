@@ -262,7 +262,7 @@ var exemptTypes = map[string]string{
 	"client.BackchannelSessionSealer": engine, "client.Client": engine, "client.DiscoveredMetadata": engine,
 	"client.InMemoryDPoPNonceCache": engine, "client.SystemClock": engine, "client.TokenSetSealer": engine,
 	"sessioncookie.Cookie": engine, "extension.RARRegistry": engine, "extension.Registry": engine,
-	"fapitest.AutoApprove": engine, "fapitest.Harness": engine, "resource.JWTAccessTokens": engine,
+	"fapitest.AutoApprove": engine, "fapitest.Harness": engine, "fapitest.EmbedderUI": keyMaterial, "fapitest.EmbedderUIOptions": configuration, "resource.JWTAccessTokens": engine,
 	"resource.NoDPoPNonces": engine, "resource.NoRevocation": engine, "resource.NoRevocationUntilExpiry": engine,
 	"resource.OpaqueAccessTokens": engine, "resource.SystemClock": engine, "resource.Verifier": engine,
 	"server.AllowRequestedAuthorizationDetails": engine, "server.AnyAttesterLeaf": engine, "server.AttesterAnchor": engine,

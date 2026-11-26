@@ -13,4 +13,15 @@
 // wire encoding and HTTP semantics; doing so would defeat its own purpose.
 // This package is test-only and must not be imported by client, server,
 // resource or internal/.
+//
+// The harness's own authorization endpoint approves every interaction
+// at once (AutoApprove). For a test of what an embedding application's
+// login and consent UI does with the interaction, Harness.EmbedderUI
+// serves a model one in front of the same server: a sign-in that sets
+// the UI's own session cookie, an authorization endpoint keeping the
+// interaction in a cookie server/interactioncookie seals, and a consent
+// submission completing it for the signed-in subject. It uses only the
+// server's and server/interactioncookie's public API, so an embedder's
+// own UI can follow it; EmbedderUIOptions.UnsafeRawHandleCookie keeps
+// the raw handle in a plain cookie instead, for negative tests only.
 package fapitest

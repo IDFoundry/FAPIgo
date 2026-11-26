@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.86.0](https://github.com/IDFoundry/FAPIgo/compare/v0.85.0...v0.86.0) (2026-11-26)
+
+
+### Features
+
+* **client:** refuse issuer keys bound to another issuer at New ([0447317](https://github.com/IDFoundry/FAPIgo/commit/0447317743bb62c3fe752cfb4f0103a456c64eaf))
+* **keys:** let an issuer key source report the issuer it is bound to ([deb1ddf](https://github.com/IDFoundry/FAPIgo/commit/deb1ddfe4961a201c30ef060a314a60c377c923e))
+* **resource:** refuse issuer keys bound to another issuer ([9297f57](https://github.com/IDFoundry/FAPIgo/commit/9297f57b8ba54dfcb3dafa90c71f75e4a98a991c))
+* **storage:** add ErrBackchannelAuthenticationNotFound ([06b1b8d](https://github.com/IDFoundry/FAPIgo/commit/06b1b8d7713e693bc32ceb60c690bae562515c44))
+* **storage:** report an unknown CIBA handle as not found in memstore ([2569544](https://github.com/IDFoundry/FAPIgo/commit/25695442ae1ff0a72ff12dac97edd7e0ce50bedb))
+
+
+### Bug Fixes
+
+* **federation:** answer a resolution-failure hook resolving its own client_id ([4958778](https://github.com/IDFoundry/FAPIgo/commit/49587781b5c42c74fe95d83e6bc904486123c553))
+* **federation:** refuse a trust chain that expires while it resolves ([4cb3e70](https://github.com/IDFoundry/FAPIgo/commit/4cb3e70ec069c675ef12a857c117359fbe3ab64a))
+* **server:** report CIBA inbox entries whose lookup the store refused ([5881256](https://github.com/IDFoundry/FAPIgo/commit/5881256f21271fd59a745ed84d14f04dcc8617b1))
+
 ## [0.85.0](https://github.com/IDFoundry/FAPIgo/compare/v0.84.0...v0.85.0) (2026-11-25)
 
 

@@ -2,7 +2,6 @@ package federation
 
 import (
 	"crypto"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -176,9 +175,9 @@ func (r TrustMarkStatusResponse) Verify(pub crypto.PublicKey, policy TrustMarkSt
 }
 
 func parseTrustMarkStatusResponseClaims(payload []byte) (TrustMarkStatusResponseClaims, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		return TrustMarkStatusResponseClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	raw, err := decodeClaimsObject(payload)
+	if err != nil {
+		return TrustMarkStatusResponseClaims{}, err
 	}
 
 	iss, err := popRequiredString(raw, "iss")

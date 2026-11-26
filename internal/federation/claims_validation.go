@@ -146,7 +146,10 @@ func isHTTPSURL(s string) bool {
 // silently, and reads names that differ only in case as one, while
 // another implementation may keep the first, or read two, so two
 // validators could derive different claims — a different metadata
-// policy, say — from one signed statement. §6.1.2 forbids "Duplicate
+// policy, say — from one signed statement. Every federation JWT's
+// claims parser runs it: Entity Statements', and Trust Marks', Trust
+// Mark Delegations', Trust Mark Status, Resolve and Historical Keys
+// responses'. §6.1.2 forbids "Duplicate
 // JSON object member names ... at any of the three levels of the
 // metadata_policy Claim data structure"; RFC 7519 §4 lets a JWT parser
 // reject duplicate claim names, which this applies at every level.
@@ -155,4 +158,17 @@ func refuseDuplicateMembers(payload []byte) error {
 		return fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	return nil
+}
+
+// decodeClaimsObject decodes payload, a federation JWT's claims set, as
+// a JSON object, after refuseDuplicateMembers.
+func decodeClaimsObject(payload []byte) (map[string]json.RawMessage, error) {
+	if err := refuseDuplicateMembers(payload); err != nil {
+		return nil, err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	}
+	return raw, nil
 }

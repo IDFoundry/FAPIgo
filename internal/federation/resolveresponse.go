@@ -170,9 +170,9 @@ func (r ResolveResponse) Verify(pub crypto.PublicKey, policy ResolveResponseVeri
 }
 
 func parseResolveResponseClaims(payload []byte) (ResolveResponseClaims, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		return ResolveResponseClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	raw, err := decodeClaimsObject(payload)
+	if err != nil {
+		return ResolveResponseClaims{}, err
 	}
 
 	iss, err := popRequiredString(raw, "iss")
@@ -214,22 +214,31 @@ func parseResolveResponseClaims(payload []byte) (ResolveResponseClaims, error) {
 		Metadata: metadata, TrustChain: trustChain,
 	}
 	if trustMarksRaw, ok := raw["trust_marks"]; ok {
-		var trustMarks []struct {
-			TrustMarkType string `json:"trust_mark_type"`
-			TrustMark     string `json:"trust_mark"`
-		}
-		if err := json.Unmarshal(trustMarksRaw, &trustMarks); err != nil {
-			return ResolveResponseClaims{}, fmt.Errorf("%w: trust_marks: %v", ErrMalformedClaims, err)
-		}
-		c.TrustMarks = make([]RawTrustMark, len(trustMarks))
-		for i, tm := range trustMarks {
-			if tm.TrustMarkType == "" || tm.TrustMark == "" {
-				return ResolveResponseClaims{}, fmt.Errorf("%w: trust_marks[%d]: trust_mark_type and trust_mark are both required", ErrMalformedClaims, i)
-			}
-			c.TrustMarks[i] = RawTrustMark{TrustMarkType: tm.TrustMarkType, TrustMark: tm.TrustMark}
+		if c.TrustMarks, err = parseResolveTrustMarks(trustMarksRaw); err != nil {
+			return ResolveResponseClaims{}, err
 		}
 	}
 	return c, nil
+}
+
+// parseResolveTrustMarks parses a Resolve Response's "trust_marks": an
+// array of objects, each with a trust_mark_type and a trust_mark.
+func parseResolveTrustMarks(raw json.RawMessage) ([]RawTrustMark, error) {
+	var trustMarks []struct {
+		TrustMarkType string `json:"trust_mark_type"`
+		TrustMark     string `json:"trust_mark"`
+	}
+	if err := json.Unmarshal(raw, &trustMarks); err != nil {
+		return nil, fmt.Errorf("%w: trust_marks: %v", ErrMalformedClaims, err)
+	}
+	out := make([]RawTrustMark, len(trustMarks))
+	for i, tm := range trustMarks {
+		if tm.TrustMarkType == "" || tm.TrustMark == "" {
+			return nil, fmt.Errorf("%w: trust_marks[%d]: trust_mark_type and trust_mark are both required", ErrMalformedClaims, i)
+		}
+		out[i] = RawTrustMark{TrustMarkType: tm.TrustMarkType, TrustMark: tm.TrustMark}
+	}
+	return out, nil
 }
 
 // CreateResolveResponseParams describes one Resolve Response to create

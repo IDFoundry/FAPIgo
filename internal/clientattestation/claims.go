@@ -52,9 +52,11 @@ func parseAttestationClaims(payload []byte) (attestationClaims, error) {
 
 // unmarshalUniqueMembers is strictjson.Unmarshal for a claims set that
 // repeats no member name at any depth (RFC 7519 §4 requires unique
-// claim names): encoding/json would merge two copies of cnf into one,
-// and check the case of only the last, where VerifiedAttestation.Claims,
-// like another implementation, keeps only the last copy.
+// claim names), an attestation's or a PoP's: encoding/json would merge
+// two copies of cnf into one, and check the case of only the last, where
+// VerifiedAttestation.Claims, like another implementation, keeps only
+// the last copy; and it keeps the last copy of a PoP's aud or jti, where
+// another reader of the same PoP may keep the first.
 func unmarshalUniqueMembers(payload []byte, v any) error {
 	if err := strictjson.CheckDuplicateMembers(payload); err != nil {
 		return err
@@ -111,7 +113,7 @@ func (a *popAudience) UnmarshalJSON(data []byte) error {
 
 func parsePoPClaims(payload []byte) (popClaims, error) {
 	var c popClaims
-	if err := strictjson.Unmarshal(payload, &c); err != nil {
+	if err := unmarshalUniqueMembers(payload, &c); err != nil {
 		return popClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	if c.Audience == "" || c.JTI == "" || c.IssuedAt == 0 {

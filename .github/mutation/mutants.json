@@ -5995,5 +5995,53 @@
     ],
     "run": "^TestParseClaimsRefusesDuplicateMembers$",
     "why": "a JARM response repeating iss with an identical value (claim and RFC 9207 parameter) is accepted"
+  },
+  {
+    "id": "fapitest-embedderui-session-lookup",
+    "file": "fapitest/embedderui.go",
+    "old": "\treturn subject, ok\n}",
+    "new": "\treturn subject, ok || true\n}",
+    "module": "root",
+    "packages": [
+      "./fapitest"
+    ],
+    "run": "^TestEmbedderUIRefusesConsentWithoutASession$",
+    "why": "EmbedderUI's consent accepts a session cookie it never issued"
+  },
+  {
+    "id": "fapitest-embedderui-consent-needs-session",
+    "file": "fapitest/embedderui.go",
+    "old": "\tif !ok {\n\t\thttp.Error(w, \"not signed in\"",
+    "new": "\tif !ok && false {\n\t\thttp.Error(w, \"not signed in\"",
+    "module": "root",
+    "packages": [
+      "./fapitest"
+    ],
+    "run": "^TestEmbedderUIRefusesConsentWithoutASession$",
+    "why": "EmbedderUI's consent completes an interaction for a browser that isn't signed in"
+  },
+  {
+    "id": "fapitest-embedderui-keep-sealed",
+    "file": "fapitest/embedderui.go",
+    "old": "\tif !u.opts.UnsafeRawHandleCookie {\n\t\treturn u.sealed.Set(w, a, now)",
+    "new": "\tif !u.opts.UnsafeRawHandleCookie && false {\n\t\treturn u.sealed.Set(w, a, now)",
+    "module": "root",
+    "packages": [
+      "./fapitest"
+    ],
+    "run": "^TestEmbedderUISealsTheHandleUnlessToldNotTo$",
+    "why": "EmbedderUI keeps the raw handle in a plain cookie without UnsafeRawHandleCookie"
+  },
+  {
+    "id": "fapitest-embedderui-recover-sealed",
+    "file": "fapitest/embedderui.go",
+    "old": "\tif !u.opts.UnsafeRawHandleCookie {\n\t\thandle, in, err := u.sealed.Read(r, now, tag)",
+    "new": "\tif !u.opts.UnsafeRawHandleCookie && false {\n\t\thandle, in, err := u.sealed.Read(r, now, tag)",
+    "module": "root",
+    "packages": [
+      "./fapitest"
+    ],
+    "run": "^TestEmbedderUISealsTheHandleUnlessToldNotTo$",
+    "why": "EmbedderUI without UnsafeRawHandleCookie completes an interaction from the raw handle in a plain cookie"
   }
 ]

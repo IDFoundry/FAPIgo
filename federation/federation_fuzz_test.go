@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/url"
@@ -326,11 +327,20 @@ func countNew(overrides, params map[string]json.RawMessage) int {
 
 func jsonValuesEqual(t *testing.T, a, b json.RawMessage) bool {
 	t.Helper()
-	var av, bv any
-	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
-		return false
-	}
-	return reflect.DeepEqual(av, bv)
+	av, aok := decodeExactJSON(a)
+	bv, bok := decodeExactJSON(b)
+	return aok && bok && reflect.DeepEqual(av, bv)
+}
+
+// decodeExactJSON is raw decoded with its numbers kept as their text
+// (json.Number), so a number outside float64's range, which encoding/json
+// can't decode into a float64, still compares equal to the same number:
+// applySuperiorMetadata carries a value through as written.
+func decodeExactJSON(raw json.RawMessage) (any, bool) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	return v, dec.Decode(&v) == nil
 }
 
 // FuzzValidEntityID checks ValidEntityID against OpenID Federation 1.0

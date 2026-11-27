@@ -70,8 +70,7 @@ func CheckConflictingObject(members map[string]json.RawMessage) (string, error) 
 			return name, fmt.Errorf("strictjson: member %q is not valid JSON", name)
 		}
 		// Inside "[...]" the value nests as deeply as inside the object.
-		nested := make([]byte, 0, len(value)+2)
-		nested = append(append(append(nested, '['), value...), ']')
+		nested := slices.Concat([]byte("["), value, []byte("]"))
 		if err := CheckConflictingMembers(nested); err != nil {
 			return name, err
 		}

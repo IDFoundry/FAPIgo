@@ -6419,8 +6419,8 @@
   {
     "id": "strictjson-conflicting-object-checks-value-unnested",
     "file": "internal/strictjson/members_conflict.go",
-    "old": "nested = append(append(append(nested, '['), value...), ']')",
-    "new": "nested = append(nested, value...)",
+    "old": "nested := slices.Concat([]byte(\"[\"), value, []byte(\"]\"))",
+    "new": "nested := slices.Concat(value)",
     "module": "root",
     "packages": [
       "./internal/strictjson"

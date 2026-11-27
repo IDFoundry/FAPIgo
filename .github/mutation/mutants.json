@@ -6391,5 +6391,186 @@
     ],
     "run": "^TestExchangeBackchannelAuthenticationDPoPProofAtMTLSAlias$",
     "why": "a CIBA token request checks a DPoP proof against the URL its request's route names"
+  },
+  {
+    "id": "strictjson-conflicting-object-skips-case-variant-names",
+    "file": "internal/strictjson/members_conflict.go",
+    "old": "if first, ok := seen[key]; ok {",
+    "new": "if first, ok := seen[key]; ok && false {",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^TestCheckConflictingObject$",
+    "why": "CheckConflictingObject refuses two member names that differ only in case"
+  },
+  {
+    "id": "strictjson-conflicting-object-skips-values",
+    "file": "internal/strictjson/members_conflict.go",
+    "old": "if err := CheckConflictingMembers(nested); err != nil {",
+    "new": "if err := CheckConflictingMembers(nested); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^TestCheckConflictingObject$",
+    "why": "CheckConflictingObject refuses a member value repeating a member with differing copies"
+  },
+  {
+    "id": "strictjson-conflicting-object-checks-value-unnested",
+    "file": "internal/strictjson/members_conflict.go",
+    "old": "nested = append(append(append(nested, '['), value...), ']')",
+    "new": "nested = append(nested, value...)",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^TestCheckConflictingObject$",
+    "why": "CheckConflictingObject checks a value's nesting as it is inside the object, one level deeper"
+  },
+  {
+    "id": "strictjson-conflicting-object-skips-json-validity",
+    "file": "internal/strictjson/members_conflict.go",
+    "old": "\t\tif !json.Valid(value) {\n\t\t\treturn name,",
+    "new": "\t\tif false && !json.Valid(value) {\n\t\t\treturn name,",
+    "module": "root",
+    "packages": [
+      "./internal/strictjson"
+    ],
+    "run": "^TestCheckConflictingObject$",
+    "why": "CheckConflictingObject refuses a member value that isn't one JSON value"
+  },
+  {
+    "id": "server-granted-id-token-claims-skip-conflict-check",
+    "file": "server/granted_id_token_claims.go",
+    "old": "if name, err := strictjson.CheckConflictingObject(claims); err != nil {",
+    "new": "if name, err := strictjson.CheckConflictingObject(claims); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestCompleteAuthorizationRejectsInvalidGrantedIDTokenClaims|TestCompleteBackchannelAuthenticationRejectsInvalidGrantedIDTokenClaims)$",
+    "why": "CompleteAuthorization/CompleteBackchannelAuthentication refuse IDTokenClaims repeating a member with differing copies or as a case variant"
+  },
+  {
+    "id": "token-issue-skips-parameter-conflict-check",
+    "file": "internal/token/issue.go",
+    "old": "if name, err := strictjson.CheckConflictingObject(parameters); err != nil {",
+    "new": "if name, err := strictjson.CheckConflictingObject(parameters); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/token",
+      "./server"
+    ],
+    "run": "^(TestIssueRefusesParametersItsParsersRefuse|TestExchangeAuthorizationCodeRefusesConflictingIdentityClaims)$",
+    "why": "ID tokens and JWT access tokens are never signed with parameters their parsers refuse as repeating a member"
+  },
+  {
+    "id": "requestobject-create-skips-conflict-check",
+    "file": "internal/requestobject/create.go",
+    "old": "if name, err := strictjson.CheckConflictingObject(claims); err != nil {",
+    "new": "if name, err := strictjson.CheckConflictingObject(claims); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./internal/requestobject"
+    ],
+    "run": "^TestCreateRefusesParametersParseRefuses$",
+    "why": "a request object is never signed with parameters Parse refuses as repeating a member"
+  },
+  {
+    "id": "server-sign-userinfo-skips-conflict-check",
+    "file": "server/userinfo.go",
+    "old": "if name, err := strictjson.CheckConflictingObject(claims); err != nil {",
+    "new": "if name, err := strictjson.CheckConflictingObject(claims); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestSignUserInfoResponseRefusesConflictingMembers$",
+    "why": "SignUserInfoResponse refuses claims repeating a member with differing copies or as a case variant"
+  },
+  {
+    "id": "server-claims-parameter-skips-conflict-check",
+    "file": "server/claims_parameter.go",
+    "old": "if err := strictjson.CheckConflictingMembers(object); err != nil {",
+    "new": "if err := strictjson.CheckConflictingMembers(object); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestValidateClaimsParameter|TestMalformedClaimsParameterIsRefused)$",
+    "why": "a plain claims parameter repeating a member with differing copies or as a case variant is invalid_request"
+  },
+  {
+    "id": "serverresource-userinfo-claims-skip-conflict-check",
+    "file": "serverresource/userinfo.go",
+    "old": "if name, err := strictjson.CheckConflictingObject(claims); err != nil {",
+    "new": "if name, err := strictjson.CheckConflictingObject(claims); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./serverresource"
+    ],
+    "run": "^TestUserInfoClaimsRefusesConflictingMembers$",
+    "why": "UserInfoClaims refuses source claims repeating a member with differing copies or as a case variant"
+  },
+  {
+    "id": "federation-resolve-response-skips-conflict-check",
+    "file": "federation/resolve_issue.go",
+    "old": "if entityType, err := strictjson.CheckConflictingObject(metadata); err != nil {",
+    "new": "if entityType, err := strictjson.CheckConflictingObject(metadata); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./federation"
+    ],
+    "run": "^TestResolveIssuerResponseRefusesConflictingMetadata$",
+    "why": "ResolveIssuer.Response refuses metadata repeating a member with differing copies or as a case variant"
+  },
+  {
+    "id": "client-authorization-details-skip-repeat-check",
+    "file": "client/begin_authorization.go",
+    "old": "if json.Valid(detail) && strictjson.CheckDuplicateMembers(detail) != nil {",
+    "new": "if json.Valid(detail) && strictjson.CheckDuplicateMembers(detail) != nil && false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestAuthorizationDetailsRefusedWithRepeatedMembers$",
+    "why": "the client refuses AuthorizationDetails entries repeating a member name"
+  },
+  {
+    "id": "client-begin-authorization-skips-details-check",
+    "file": "client/begin_authorization.go",
+    "old": "if detailsErr := checkAuthorizationDetails(req.AuthorizationDetails); detailsErr != nil {",
+    "new": "if detailsErr := checkAuthorizationDetails(req.AuthorizationDetails); detailsErr != nil && false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestAuthorizationDetailsRefusedWithRepeatedMembers$",
+    "why": "BeginAuthorization refuses AuthorizationDetails entries repeating a member name"
+  },
+  {
+    "id": "client-backchannel-skips-details-check",
+    "file": "client/backchannel.go",
+    "old": "if detailsErr := checkAuthorizationDetails(req.AuthorizationDetails); detailsErr != nil {",
+    "new": "if detailsErr := checkAuthorizationDetails(req.AuthorizationDetails); detailsErr != nil && false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestAuthorizationDetailsRefusedWithRepeatedMembers$",
+    "why": "BeginBackchannelAuthentication refuses AuthorizationDetails entries repeating a member name"
+  },
+  {
+    "id": "client-client-credentials-skips-details-check",
+    "file": "client/client_credentials.go",
+    "old": "if err := checkAuthorizationDetails(req.AuthorizationDetails); err != nil {",
+    "new": "if err := checkAuthorizationDetails(req.AuthorizationDetails); err != nil && false {",
+    "module": "root",
+    "packages": [
+      "./client"
+    ],
+    "run": "^TestAuthorizationDetailsRefusedWithRepeatedMembers$",
+    "why": "RequestClientCredentialsToken refuses AuthorizationDetails entries repeating a member name"
   }
 ]

@@ -20,20 +20,64 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.88.0
 
-### Bind DPoP proofs to the receiving endpoint
+### A DPoP proof is accepted only for the URL that received it (server)
 
-Authorization servers advertising a distinct mTLS alias must identify which
-route received each DPoP request at PAR, the token endpoint (including custom
-grants), and the backchannel authentication endpoint. Set
-`FormRequest.EndpointRoute` to `server.PrimaryEndpoint` or
-`server.MTLSEndpointAlias` from the listener or trusted proxy route. For
-`TokenEndpointRequestFromHTTP`, call `SetEndpointRoute` before dispatch.
-A server with one endpoint URL can continue to omit the field.
+**Affects:** an authorization server with `Config.MTLSEndpoints` set
+whose clients send DPoP proofs to an mTLS alias: typically a client
+that authenticates with its certificate (`tls_client_auth`,
+`self_signed_tls_client_auth`) but binds its tokens with DPoP, at PAR,
+the token endpoint (extension grants included, through
+`VerifyTokenRequestBinding` and `VerifyTokenRequestDPoP`) or the
+backchannel authentication endpoint. A server without aliases, or whose
+alias traffic is all mTLS-bound, is unaffected.
 
-Resource servers with multiple configured origins covering the same path
-must set `VerifyRequest.URL` to the actual public request URL for DPoP,
-preserving the escaped path. Use trusted routing information for the
-origin. An ambiguous target fails closed before replay or nonce processing.
+**Why:** RFC 9449 §4.3 binds a proof to the URL of the request it is
+sent with. The server accepted a proof naming either an endpoint's
+`Config.Endpoints` URL or its alias, wherever it arrived, so where the
+two routes keep separate replay records one unused captured proof could
+be used once at each.
+
+**What fails:** each proof is now checked against one URL, chosen by the
+request's new `FormRequest.EndpointRoute`: the alias for
+`server.MTLSEndpointAlias`, the `Config.Endpoints` URL for
+`server.PrimaryEndpoint` or no route at all. A request received at the
+alias without a route, carrying a proof for the alias, is refused with
+400 `invalid_dpop_proof` ("DPoP proof verification failed"); the
+error's cause, in your logs but not the response, names the route
+setters. A request on the alias route at an endpoint with no alias of
+its own, on a server advertising others, gets the same 400. The alias
+route on a server with no `MTLSEndpoints` at all, or a route value the
+package doesn't define, is a deployment mistake: 500 `server_error`,
+whose cause names the setters.
+
+**What to change:** wrap the handler of the listener serving the aliases
+in `server.WithEndpointRoute(server.MTLSEndpointAlias, mux)`. The
+`*FromHTTP` request constructors read the mark, so no handler changes.
+Behind a front end that routes both URLs to one listener, set
+`FormRequest.EndpointRoute`, or call
+`TokenEndpointRequest.SetEndpointRoute`, from its trusted routing,
+never from the `Host` header. The primary listener needs nothing.
+
+### A DPoP request needs its origin when several ResourceURLs cover its path (resource)
+
+**Affects:** a resource server whose `Config.ResourceURLs` (or
+`serverresource.Options.ResourceURLs`) cover the same path at more than
+one origin, such as an API also served at an mTLS alias host, serving
+DPoP-bound tokens with requests built by `VerifyRequestFromHTTP`.
+
+**Why:** a proof naming any covering origin was accepted, with the same
+consequence as at the authorization server.
+
+**What fails:** such a DPoP request is refused with 500 `server_error`
+("ambiguous DPoP request target"), whose cause names the request path
+and the fix. mTLS-bound requests, and paths only one origin covers, are
+unaffected.
+
+**What to change:** wrap each listener's handler in
+`resource.WithResourceOrigin(origin, mux)` with the origin it serves,
+or set `VerifyRequest.URL` from a trusted proxy route, keeping the
+escaped path the client sent. Never build either from the `Host`
+header. An origin none of `ResourceURLs` is at is refused as a 500.
 
 ## v0.87.0
 

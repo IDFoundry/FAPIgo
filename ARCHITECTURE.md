@@ -1324,7 +1324,11 @@ confirmed live via the token endpoint's `dpop: htu does not match
 request URI` rejection. Fixed by `verifyDPoPAtEitherEndpoint`, which
 retries once against the alias on a pure `htu` mismatch — safe since
 `internal/dpop.Verify` checks `htu` strictly before consuming replay
-state. Full breakdown, including a genuine suite-config quirk this
+state. (Since v0.88.0 the proof is checked against one URL only, the one
+the request's `server.EndpointRoute` names: accepting either let one
+unused proof be spent once at each where the two routes keep separate
+replay records. `cmd/conformance-as` marks its alias listener with
+`server.WithEndpointRoute`.) Full breakdown, including a genuine suite-config quirk this
 surfaced (unrelated to either fix) and the one apparent failure traced
 to a suite-side timing artifact rather than this server, in
 `conformance/server/oidf-config/README.md`'s own client-authentication

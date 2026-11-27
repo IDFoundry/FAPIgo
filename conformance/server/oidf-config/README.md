@@ -336,7 +336,10 @@ run:
   token endpoint rejected the suite's very first token request with
   `invalid_request: DPoP proof verification failed` /
   `dpop: htu does not match request URI`. Fixed by
-  `verifyDPoPAtEitherEndpoint` (`server/token.go`), which retries once
+  `verifyDPoPAtEitherEndpoint` (`server/token.go`; since v0.88.0
+  replaced by a check against the one URL the request's
+  `server.EndpointRoute` names, which `cmd/conformance-as`'s alias
+  listener sets with `server.WithEndpointRoute`), which retries once
   against the mTLS-alias URL on a pure `htu` mismatch — safe because
   `internal/dpop.Verify`'s own `htu` check runs strictly before its
   replay check, so a mismatched first attempt never touches replay

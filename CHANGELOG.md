@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.88.1](https://github.com/IDFoundry/FAPIgo/compare/v0.88.0...v0.88.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **client:** refuse authorization details whose JSON members repeat ([853c1cb](https://github.com/IDFoundry/FAPIgo/commit/853c1cbe06eaedc0a70c245218d21464a0156985))
+* **federation:** refuse resolved metadata whose JSON members conflict ([6cc90a3](https://github.com/IDFoundry/FAPIgo/commit/6cc90a3e4d14db7fa02f0781b77c49bf4c8dea5d))
+* **server:** refuse embedder claims whose JSON members conflict ([0efb519](https://github.com/IDFoundry/FAPIgo/commit/0efb519c6ef8e14936bbed1d025db6a59c9fdde7))
+* **serverresource:** refuse UserInfo claims whose JSON members conflict ([580a2be](https://github.com/IDFoundry/FAPIgo/commit/580a2be13b5c175ca56ee06c84a58ddd6384e902))
+
 ## [0.88.0](https://github.com/IDFoundry/FAPIgo/compare/v0.87.0...v0.88.0) (2026-11-27)
 
 

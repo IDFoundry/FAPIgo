@@ -6367,5 +6367,29 @@
     ],
     "run": "^(TestAmbiguousDPoPTargetNamesTheFix|TestVerifyDPoPTargetWithOverlappingOrigins)$",
     "why": "an ambiguous DPoP target is a 500 naming WithResourceOrigin and VerifyRequest.URL"
+  },
+  {
+    "id": "server-client-credentials-passes-route",
+    "file": "server/client_credentials.go",
+    "old": "dpopProof, req.PeerCertificate, req.HTTP.EndpointRoute)",
+    "new": "dpopProof, req.PeerCertificate, 0*req.HTTP.EndpointRoute)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRequestClientCredentialsTokenDPoPProofAtMTLSAlias$",
+    "why": "a client_credentials request checks a DPoP proof against the URL its request's route names"
+  },
+  {
+    "id": "server-ciba-token-passes-route",
+    "file": "server/backchannel_token.go",
+    "old": "dpopProof, req.PeerCertificate, req.HTTP.EndpointRoute)",
+    "new": "dpopProof, req.PeerCertificate, 0*req.HTTP.EndpointRoute)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestExchangeBackchannelAuthenticationDPoPProofAtMTLSAlias$",
+    "why": "a CIBA token request checks a DPoP proof against the URL its request's route names"
   }
 ]

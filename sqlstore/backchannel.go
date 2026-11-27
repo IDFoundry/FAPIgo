@@ -76,6 +76,14 @@ var (
 // errors.
 const opCreateBackchannel = "create backchannel authentication"
 
+// opLookUpBackchannel and opDecideBackchannel name
+// LookupBackchannelAuthentication and DecideBackchannelAuthentication
+// in their errors.
+const (
+	opLookUpBackchannel = "look up backchannel authentication"
+	opDecideBackchannel = "decide backchannel authentication"
+)
+
 // CreateBackchannelAuthentication implements
 // storage.BackchannelAuthenticationStore, storing the request pending,
 // for Sweep to delete BackchannelExpiredRetention after it expires.
@@ -131,9 +139,9 @@ func (s *BackchannelAuthenticationStore) LookupBackchannelAuthentication(ctx con
 		handleHash[:]).Scan(&key, &clientID, &stored, &bound.deliveryMode, &bound.pollInterval, &bound.expires)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return storage.LookedUpBackchannelAuthentication{}, unknownBackchannelHandle("look up backchannel authentication")
+		return storage.LookedUpBackchannelAuthentication{}, unknownBackchannelHandle(opLookUpBackchannel)
 	case err != nil:
-		return storage.LookedUpBackchannelAuthentication{}, unavailable("look up backchannel authentication", err)
+		return storage.LookedUpBackchannelAuthentication{}, unavailable(opLookUpBackchannel, err)
 	}
 	record, err := s.openRecord(bound.ref(recordColumn, string(key), clientID), stored)
 	if err != nil {
@@ -189,7 +197,7 @@ func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(ctx con
 	case errors.Is(err, sql.ErrNoRows):
 		return storage.DecidedBackchannelAuthentication{}, s.whyUndecided(ctx, decision.HandleHash)
 	case err != nil:
-		return storage.DecidedBackchannelAuthentication{}, unavailable("decide backchannel authentication", err)
+		return storage.DecidedBackchannelAuthentication{}, unavailable(opDecideBackchannel, err)
 	}
 	return out, nil
 }
@@ -207,10 +215,10 @@ func unknownBackchannelHandle(op string) error {
 func (s *BackchannelAuthenticationStore) whyUndecided(ctx context.Context, handleHash [32]byte) error {
 	var n int
 	if err := s.d.queryRow(ctx, "SELECT COUNT(*) FROM {backchannel_authentications} WHERE handle_hash = ?", handleHash[:]).Scan(&n); err != nil {
-		return unavailable("decide backchannel authentication", err)
+		return unavailable(opDecideBackchannel, err)
 	}
 	if n == 0 {
-		return unknownBackchannelHandle("decide backchannel authentication")
+		return unknownBackchannelHandle(opDecideBackchannel)
 	}
 	return errBackchannelDecided
 }

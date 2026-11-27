@@ -18,6 +18,61 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.88.1
+
+### JSON you supply may not repeat a member with differing values (server, serverresource, federation, client)
+
+**Affects:** an application whose own JSON values go into a token,
+response or request this module signs or sends, when one of them
+repeats a member name with differing copies, or as a case variant
+(`{"sub":"a","sub":"b"}`, `{"kid":"a","KID":"a"}`), at any depth, or
+when two of its claim names differ only in case (`roles` and `Roles`).
+JSON that never repeats a name is unaffected, and so, except in
+`authorization_details`, is a repeat whose copies are identical.
+
+**Why:** since v0.87.0 this module's own readers refuse an ID token, JWT
+access token, UserInfo response, request object or Resolve Response
+carrying such a repeat, and other readers take different values from it
+(one keeps the first copy, another the last, a case-insensitive one
+merges the variants). A value carrying one could only ever produce a
+token or document this module's own peers refuse and others read
+inconsistently, so each is now refused where it is handed over.
+
+**What fails:**
+
+- `server.Server.CompleteAuthorization` and
+  `CompleteBackchannelAuthentication` refuse such a value, or such a pair
+  of names, in `GrantedAuthorization.IDTokenClaims` with
+  `invalid_request`, as they refuse invalid JSON there.
+- A value an `IdentityClaimsSource` returns for an ID token fails the
+  token request (authorization code, refresh or CIBA) with
+  `server_error`, as an identity claim over the ID token claims budget
+  does. So does a grant stored before this release whose
+  `IDTokenClaims` carry one, or, with `JWTAccessTokens`, whose
+  requested UserInfo claim values do.
+- `server.Server.SignUserInfoResponse` refuses such a claim with
+  `server_error`, and `serverresource.UserInfoClaims` returns an error
+  for one its claims source returns (a claim named `Sub` included,
+  beside the `sub` it sets).
+- A plain (form) `claims` parameter at PAR or the backchannel
+  authentication endpoint carrying such a repeat is `invalid_request`,
+  as a request object carrying it already was.
+- `federation.ResolveIssuer.Response` refuses `ResolvedEntity.Metadata`
+  carrying one. A `Resolver`'s own resolution never produces it.
+- `client.Client.BeginAuthorization`, `BeginBackchannelAuthentication`
+  and `RequestClientCredentialsToken` refuse an `AuthorizationDetails`
+  entry that repeats a member name at all, identical copies included,
+  with `invalid_request`: a FAPIgo authorization server refuses any
+  repeat in `authorization_details`, and this client refuses one in a
+  token response. An `extension.Values` entry that would put such a
+  repeat in a request object (one named `Scope`, say, beside `scope`)
+  fails the request as an internal error instead of being signed.
+
+**What to change:** build these values with `json.Marshal` from Go
+values, or `extension.RARSet` for authorization details, which never
+repeat a name, rather than by hand, and remove the repeat from any you
+store.
+
 ## v0.88.0
 
 ### A DPoP proof is accepted only for the URL that received it (server)

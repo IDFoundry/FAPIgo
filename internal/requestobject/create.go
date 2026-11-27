@@ -57,43 +57,17 @@ type CreateParams struct {
 	// each already encoded as JSON. Parameters must not use the
 	// JWT-standard claim names iss, aud, exp, nbf, iat or jti, which
 	// Create sets itself, or sub, which Verify refuses in a request
-	// object.
+	// object. A value repeating a member with differing copies, or as a
+	// case variant, and a name that is a case variant of another
+	// parameter or of one of those claims, are refused, as Verify would
+	// refuse the object.
 	Parameters map[string]json.RawMessage
 }
 
 // Create builds and signs a request object for p.
 func Create(p CreateParams) (string, error) {
-	if p.Signer == nil {
-		return "", fmt.Errorf("requestobject: signer is nil")
-	}
-	if !p.Algorithm.IsValid() {
-		return "", fmt.Errorf("requestobject: invalid algorithm %v", p.Algorithm)
-	}
-	if p.ClientID == "" {
-		return "", fmt.Errorf("requestobject: client ID is empty")
-	}
-	if p.Audience == "" {
-		return "", fmt.Errorf("requestobject: audience is empty")
-	}
-	if p.Now.IsZero() {
-		return "", fmt.Errorf("requestobject: now is zero")
-	}
-	if p.Lifetime <= 0 {
-		return "", fmt.Errorf("requestobject: lifetime must be positive")
-	}
-	// "sub" is refused as Verify refuses it: it's the claim a client
-	// assertion authenticates by (RFC 7523 §3), and a request object
-	// carrying it could be presented as one (see ErrUnexpectedSubject).
-	for _, reserved := range []string{"iss", "aud", "exp", "nbf", "iat", "jti", "sub"} {
-		if _, ok := p.Parameters[reserved]; ok {
-			return "", fmt.Errorf("requestobject: parameters must not set reserved claim %q", reserved)
-		}
-	}
-	if clientIDRaw, ok := p.Parameters["client_id"]; ok {
-		var clientID string
-		if err := json.Unmarshal(clientIDRaw, &clientID); err != nil || clientID != p.ClientID {
-			return "", fmt.Errorf("requestobject: parameters[\"client_id\"] must equal ClientID")
-		}
+	if err := validateCreateParams(p); err != nil {
+		return "", err
 	}
 
 	jti, err := randomJTI(p.Random)
@@ -101,24 +75,9 @@ func Create(p CreateParams) (string, error) {
 		return "", fmt.Errorf("requestobject: generate jti: %w", err)
 	}
 
-	claims := make(map[string]json.RawMessage, len(p.Parameters)+6)
-	for k, v := range p.Parameters {
-		claims[k] = v
-	}
-	standard := map[string]any{
-		"iss": p.ClientID,
-		"aud": p.Audience,
-		"exp": p.Now.Add(p.Lifetime).Unix(),
-		"nbf": p.Now.Unix(),
-		"iat": p.Now.Unix(),
-		"jti": jti,
-	}
-	for k, v := range standard {
-		encoded, err := json.Marshal(v)
-		if err != nil {
-			return "", fmt.Errorf("requestobject: marshal %q: %w", k, err)
-		}
-		claims[k] = encoded
+	claims, err := createClaims(p, jti)
+	if err != nil {
+		return "", err
 	}
 
 	// Without HTML escaping: json.Marshal would escape <, > and & in
@@ -135,6 +94,78 @@ func Create(p CreateParams) (string, error) {
 		return "", fmt.Errorf("requestobject: %w", err)
 	}
 	return token, nil
+}
+
+// validateCreateParams checks p's required fields and the claims its
+// Parameters must not set, split out of Create to keep its cognitive
+// complexity manageable.
+func validateCreateParams(p CreateParams) error {
+	if p.Signer == nil {
+		return fmt.Errorf("requestobject: signer is nil")
+	}
+	if !p.Algorithm.IsValid() {
+		return fmt.Errorf("requestobject: invalid algorithm %v", p.Algorithm)
+	}
+	if p.ClientID == "" {
+		return fmt.Errorf("requestobject: client ID is empty")
+	}
+	if p.Audience == "" {
+		return fmt.Errorf("requestobject: audience is empty")
+	}
+	if p.Now.IsZero() {
+		return fmt.Errorf("requestobject: now is zero")
+	}
+	if p.Lifetime <= 0 {
+		return fmt.Errorf("requestobject: lifetime must be positive")
+	}
+	// "sub" is refused as Verify refuses it: it's the claim a client
+	// assertion authenticates by (RFC 7523 §3), and a request object
+	// carrying it could be presented as one (see ErrUnexpectedSubject).
+	for _, reserved := range []string{"iss", "aud", "exp", "nbf", "iat", "jti", "sub"} {
+		if _, ok := p.Parameters[reserved]; ok {
+			return fmt.Errorf("requestobject: parameters must not set reserved claim %q", reserved)
+		}
+	}
+	if clientIDRaw, ok := p.Parameters["client_id"]; ok {
+		var clientID string
+		if err := json.Unmarshal(clientIDRaw, &clientID); err != nil || clientID != p.ClientID {
+			return fmt.Errorf("requestobject: parameters[\"client_id\"] must equal ClientID")
+		}
+	}
+	return nil
+}
+
+// createClaims is the request object's claims set: p.Parameters and
+// the claims Create sets, refused if Verify would refuse it.
+func createClaims(p CreateParams, jti string) (map[string]json.RawMessage, error) {
+	claims := make(map[string]json.RawMessage, len(p.Parameters)+6)
+	for k, v := range p.Parameters {
+		claims[k] = v
+	}
+	standard := map[string]any{
+		"iss": p.ClientID,
+		"aud": p.Audience,
+		"exp": p.Now.Add(p.Lifetime).Unix(),
+		"nbf": p.Now.Unix(),
+		"iat": p.Now.Unix(),
+		"jti": jti,
+	}
+	for k, v := range standard {
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("requestobject: marshal %q: %w", k, err)
+		}
+		claims[k] = encoded
+	}
+	// Verify refuses a request object repeating a member with differing
+	// copies, or as a case variant, at any depth: readers keeping the
+	// first copy and the last would take different requests from it.
+	// So is a parameter spelled as a case variant of another, or of a
+	// claim set here ("ISS", say).
+	if name, err := strictjson.CheckConflictingObject(claims); err != nil {
+		return nil, fmt.Errorf("requestobject: parameter %q would not parse: %w", name, err)
+	}
+	return claims, nil
 }
 
 func randomJTI(r io.Reader) (string, error) {

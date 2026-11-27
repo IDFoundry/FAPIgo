@@ -116,7 +116,11 @@ type BeginAuthorizationRequest struct {
 	// under every profile (RFC 9396 §2's own form-encoding: a plain
 	// "authorization_details" parameter's value is itself JSON array
 	// text, not a bare string), so it works under the baseline profile
-	// too, not just ProfileFAPISecurityWithMessageSigning.
+	// too, not just ProfileFAPISecurityWithMessageSigning. An entry that
+	// repeats a member name, or holds two that differ only in case, at
+	// any depth, is refused as invalid_request: authorization servers
+	// would read it differently from one another, and a FAPIgo server
+	// refuses it.
 	AuthorizationDetails []json.RawMessage
 
 	// Claims requests specific identity claims with the OIDC "claims"
@@ -787,6 +791,24 @@ func maxAgeSeconds(maxAge time.Duration) (int64, *Error) {
 	return seconds, nil
 }
 
+// checkAuthorizationDetails refuses an AuthorizationDetails entry that
+// repeats a member name, or holds two that differ only in case, at any
+// depth (strictjson.CheckDuplicateMembers), as invalid_request. An
+// authorization server reading it with encoding/json keeps the last
+// copy, another the first, so the two would grant different
+// authorizations. A FAPIgo server refuses any such repeat in
+// authorization_details, identical copies included, and so does this
+// client in the authorization_details of a token response. An entry
+// that isn't JSON at all is left to encoding the request to report.
+func checkAuthorizationDetails(details []json.RawMessage) *Error {
+	for i, detail := range details {
+		if json.Valid(detail) && strictjson.CheckDuplicateMembers(detail) != nil {
+			return newError(ErrorInvalidRequest, fmt.Sprintf("AuthorizationDetails[%d] repeats a member name, or holds two that differ only in case", i), nil)
+		}
+	}
+	return nil
+}
+
 // checkBeginRequest checks what BeginAuthorization can before it does
 // anything, and returns the redirect URI this authorization goes out
 // with: Config.RedirectURI, or that with req.RedirectPort.
@@ -805,6 +827,9 @@ func (c *Client) checkBeginRequest(req BeginAuthorizationRequest) (string, *Erro
 	}
 	if resourceErr := checkResources(req.Resource); resourceErr != nil {
 		return "", resourceErr
+	}
+	if detailsErr := checkAuthorizationDetails(req.AuthorizationDetails); detailsErr != nil {
+		return "", detailsErr
 	}
 	if _, ok := extension.Snapshot(req.Extensions)[resourceParameter]; ok && len(req.Resource) > 0 {
 		return "", newError(ErrorInvalidRequest, `"resource" is set both as Resource and as an Extensions value: set it only as Resource`, nil)

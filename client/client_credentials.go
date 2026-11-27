@@ -31,7 +31,9 @@ type ClientCredentialsTokenRequest struct {
 	// field of the same name for how to build one. Always sent as native
 	// JSON array text (RFC 9396 §2), the same as a plain-parameter
 	// authorization request: this grant has no signed-request-object
-	// concept for Config.Profile to matter to.
+	// concept for Config.Profile to matter to. An entry that repeats a
+	// member name, or holds two that differ only in case, is refused as
+	// invalid_request, as BeginAuthorizationRequest's is.
 	AuthorizationDetails []json.RawMessage
 
 	// Resource, when not empty, names the resource servers the access
@@ -186,6 +188,9 @@ func checkClientCredentialsTokenRequest(req ClientCredentialsTokenRequest) *Erro
 		return newError(ErrorInvalidRequest, "scope is required", nil)
 	}
 	if err := checkScopeTokens(req.Scope); err != nil {
+		return err
+	}
+	if err := checkAuthorizationDetails(req.AuthorizationDetails); err != nil {
 		return err
 	}
 	return checkResources(req.Resource)

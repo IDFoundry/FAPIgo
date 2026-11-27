@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.88.0](https://github.com/IDFoundry/FAPIgo/compare/v0.87.0...v0.88.0) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* a DPoP proof is accepted only for the one endpoint URL that received it. A server with a distinct mTLS alias must set FormRequest.EndpointRoute on DPoP requests, and a resource server whose configured origins overlap must set VerifyRequest.URL. See UPGRADING.md for the migration.
+
+### Features
+
+* **resource:** add WithResourceOrigin to mark a listener's origin ([c6bd0c5](https://github.com/IDFoundry/FAPIgo/commit/c6bd0c5bde57b14dbfdf6b2ee3456ff6a83cf105))
+* **server:** add WithEndpointRoute to mark a listener's requests ([68fbe71](https://github.com/IDFoundry/FAPIgo/commit/68fbe71f32babb8c5252a537b23a27c429039639))
+
+
+### Bug Fixes
+
+* bind DPoP proofs to the receiving endpoint ([248c787](https://github.com/IDFoundry/FAPIgo/commit/248c78778aa76c65c500f386a63e72f661a66968))
+* **server:** check an unrouted DPoP proof against the primary endpoint ([188aafa](https://github.com/IDFoundry/FAPIgo/commit/188aafa913c24aa42dc1dd1a2b2d13d98d5e3580))
+
 ## [0.87.0](https://github.com/IDFoundry/FAPIgo/compare/v0.86.0...v0.87.0) (2026-11-26)
 
 

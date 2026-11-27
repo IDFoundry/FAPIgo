@@ -553,6 +553,14 @@ func TestClosedDatabase(t *testing.T) {
 	if _, err := d.Sweep(ctx, time.Now()); !errors.Is(err, storage.ErrStoreUnavailable) {
 		t.Errorf("Sweep on a closed database = %v, want ErrStoreUnavailable", err)
 	}
+	handle := sha256.Sum256([]byte("handle-on-a-closed-database"))
+	if _, err := d.Backchannel().LookupBackchannelAuthentication(ctx, handle); !errors.Is(err, storage.ErrStoreUnavailable) || errors.Is(err, storage.ErrBackchannelAuthenticationNotFound) {
+		t.Errorf("LookupBackchannelAuthentication on a closed database = %v, want ErrStoreUnavailable, not not-found", err)
+	}
+	decision := storage.DecideBackchannelAuthentication{HandleHash: handle, Status: storage.BackchannelAuthenticationDenied}
+	if _, err := d.Backchannel().DecideBackchannelAuthentication(ctx, decision); !errors.Is(err, storage.ErrStoreUnavailable) || errors.Is(err, storage.ErrBackchannelAuthenticationNotFound) {
+		t.Errorf("DecideBackchannelAuthentication on a closed database = %v, want ErrStoreUnavailable, not not-found", err)
+	}
 }
 
 // getOrCreateErr is GetOrCreate's error.

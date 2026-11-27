@@ -185,3 +185,32 @@ func TestUserInfoClaimsHonoursRequestedValues(t *testing.T) {
 		t.Error("UserInfoClaims(malformed requested claim values) = nil error")
 	}
 }
+
+// fixedSource returns claims, whatever it's asked for.
+type fixedSource map[string]json.RawMessage
+
+func (s fixedSource) ResolveIdentityClaims(context.Context, string, []string) (map[string]json.RawMessage, error) {
+	return s, nil
+}
+
+// TestUserInfoClaimsRefusesConflictingMembers: a relying party, this
+// module's client included, refuses a UserInfo response repeating a
+// member with differing copies, or as a case variant, at any depth, so
+// a claim the source returns that would make one is an error, rather
+// than a response its readers take different claims from. An
+// identical repeat is returned.
+func TestUserInfoClaimsRefusesConflictingMembers(t *testing.T) {
+	authz := authzFor([]string{"openid"}, `["address","Sub"]`)
+	if _, err := serverresource.UserInfoClaims(context.Background(), authz, fixedSource{"address": json.RawMessage(`{"country":"A","country":"A"}`)}); err != nil {
+		t.Fatalf("UserInfoClaims with an identical repeat: %v", err)
+	}
+	for name, source := range map[string]fixedSource{
+		"differing repeat": {"address": json.RawMessage(`{"country":"A","country":"B"}`)},
+		"nested variant":   {"address": json.RawMessage(`{"lines":[{"n":1,"N":1}]}`)},
+		"variant of sub":   {"Sub": json.RawMessage(`"someone-else"`)},
+	} {
+		if claims, err := serverresource.UserInfoClaims(context.Background(), authz, source); err == nil {
+			t.Errorf("%s: UserInfoClaims = %s, want an error", name, claims)
+		}
+	}
+}

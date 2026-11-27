@@ -12,6 +12,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/claimnames"
 	"github.com/idfoundry/fapigo/internal/claimvalues"
 	"github.com/idfoundry/fapigo/internal/resourceerr"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -45,6 +46,9 @@ import (
 //   - a client credentials token (resource.SubjectClient) is refused as
 //     a 403 insufficient_scope: it names no end user.
 //
+// A claim whose value repeats a member name with differing copies, or
+// as a case variant, at any depth, or whose name differs only in case
+// from another's, is an error: relying parties refuse such a response.
 // A requested-claims entry the token carries malformed is an error, not
 // an empty request. An error from source is returned wrapped. Sign the
 // result with SignUserInfoResponse when the client registered for
@@ -80,6 +84,13 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 	}
 	// A string always encodes.
 	claims["sub"], _ = json.Marshal(clientSubjectOf(authz))
+	// A relying party, this module's client included, refuses a UserInfo
+	// response repeating a member with differing copies, or as a case
+	// variant, at any depth, and readers keeping the first copy and the
+	// last would take different claims from it.
+	if name, err := strictjson.CheckConflictingObject(claims); err != nil {
+		return nil, fmt.Errorf("serverresource: UserInfo claim %q from the claims source conflicts with another member of the same name: %w", name, err)
+	}
 	return claims, nil
 }
 

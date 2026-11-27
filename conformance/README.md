@@ -50,6 +50,14 @@ Reflects the latest scheduled/manually-triggered run of
 [`scripts/run-all.sh`](scripts/run-all.sh) in CI (see
 [`../.github/workflows/conformance.yml`](../.github/workflows/conformance.yml))
 — not a per-commit guarantee, since this doesn't run on every push/PR.
+CI runs a pinned OIDF suite release, named in
+[`scripts/suite-version.env`](scripts/suite-version.env), with that
+release's images
+([`scripts/suite-pinned.override.yml`](scripts/suite-pinned.override.yml));
+the workflow's `newer-suite` job fails when a newer release is out,
+and moving the pin is described in
+[`server/scripts/README.md`](server/scripts/README.md#manual-test-run-end-to-end)'s
+step 1.
 
 Conformance testing is tracked separately per role: passing the
 authorization-server suite says nothing about client conformance, even

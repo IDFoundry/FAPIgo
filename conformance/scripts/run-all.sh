@@ -153,7 +153,9 @@
 #   - The OIDF conformance suite itself running locally
 #     (https://localhost.emobix.co.uk:8443 by default).
 #   - CONFORMANCE_SUITE_CHECKOUT set to that suite's own git checkout
-#     (this script runs its scripts/run-test-plan.py from there).
+#     (this script runs its scripts/run-test-plan.py from there),
+#     ideally of the release CI pins in suite-version.env; the script
+#     warns when it isn't.
 #   - conformance/server/oidf-config/{baseline,pairwise,message-signing,ciba-mtls,client-auth-mtls}-plan.json
 #     already filled in (gitignored — carries private keys; run
 #     `go run ./conformance/server/scripts/setup-config` to generate
@@ -195,6 +197,16 @@ CONFORMANCE_SERVER="${CONFORMANCE_SERVER:-https://localhost.emobix.co.uk:8443/}"
 if [[ ! -f "$CONFORMANCE_SUITE_CHECKOUT/scripts/run-test-plan.py" ]]; then
 	echo "error: $CONFORMANCE_SUITE_CHECKOUT/scripts/run-test-plan.py not found — is CONFORMANCE_SUITE_CHECKOUT correct?" >&2
 	exit 1
+fi
+
+# The suite release CI runs (see suite-version.env). A checkout at any
+# other commit still runs, with a warning: its results can differ from
+# CI's for reasons that have nothing to do with this repo.
+# shellcheck source=suite-version.env
+. "$SCRIPT_DIR/suite-version.env"
+suite_head="$(git -C "$CONFORMANCE_SUITE_CHECKOUT" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [[ "$suite_head" != "$SUITE_COMMIT" ]]; then
+	echo "warning: $CONFORMANCE_SUITE_CHECKOUT is at $suite_head, not the pinned suite release $SUITE_TAG ($SUITE_COMMIT) — see conformance/scripts/suite-version.env" >&2
 fi
 
 WORKDIR="${WORKDIR:-$(mktemp -d)}"

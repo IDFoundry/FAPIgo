@@ -176,6 +176,12 @@ func invalidGrantedIDTokenClaims() map[string]map[string]json.RawMessage {
 		// newHarness sets Limits.MaxIDTokenClaimsBytes to 4096.
 		"over size budget": {"sub_attributes": json.RawMessage(`"` + strings.Repeat("x", 4096) + `"`)},
 		"invalid JSON":     {"sub_type": json.RawMessage(`user`)},
+		// Relying parties refuse an ID token repeating a member with
+		// differing copies, or as a case variant, at any depth.
+		"repeated member":         {"act": json.RawMessage(`{"sub":"delegate-1","sub":"delegate-2"}`)},
+		"repeated empty member":   {"x": json.RawMessage(`{"":0,"":1}`)},
+		"nested case variant":     {"sub_attributes": json.RawMessage(`[{"tier":"gold","Tier":"gold"}]`)},
+		"case-variant claim name": {"roles": json.RawMessage(`["admin"]`), "Roles": json.RawMessage(`["admin"]`)},
 	}
 }
 
@@ -275,5 +281,31 @@ func TestExchangeAuthorizationCodeRejectsIDTokenClaimsOverBudget(t *testing.T) {
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorServerError {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorServerError)
+	}
+}
+
+// TestExchangeAuthorizationCodeRefusesConflictingIdentityClaims: an
+// identity claim is only resolved at the token endpoint, so one whose
+// value repeats a member with differing copies, or as a case variant,
+// fails there, as server_error, rather than issuing an ID token relying
+// parties, this module's client included, refuse.
+func TestExchangeAuthorizationCodeRefusesConflictingIdentityClaims(t *testing.T) {
+	for name, value := range map[string]json.RawMessage{
+		"differing repeat": json.RawMessage(`{"country":"A","country":"B"}`),
+		"case variant":     json.RawMessage(`{"country":"A","Country":"A"}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			identityClaims := fakeIdentityClaims{subject: "user-1", claims: map[string]json.RawMessage{"address": value}}
+			h := newHarnessWithIdentityClaims(t, identityClaims)
+			code := completeAuthorizationWithClaims(t, h, `{"id_token":{"address":null}}`)
+
+			result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+				HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+				DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+			})
+			if code := serverErrorCode(t, err); code != server.ErrorServerError {
+				t.Fatalf("error code = %q, want %q (result %+v)", code, server.ErrorServerError, result)
+			}
+		})
 	}
 }

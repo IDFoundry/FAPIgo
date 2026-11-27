@@ -84,7 +84,10 @@ type BeginBackchannelAuthenticationRequest struct {
 	// with extension.RARSet, mirroring
 	// BeginAuthorizationRequest.AuthorizationDetails. Unlike PAR, CIBA
 	// always signs a request object, so this is embedded as native JSON
-	// unconditionally, with no plain-parameter path to consider.
+	// unconditionally, with no plain-parameter path to consider. An
+	// entry that repeats a member name, or holds two that differ only in
+	// case, is refused as invalid_request, as BeginAuthorizationRequest's
+	// is.
 	AuthorizationDetails []json.RawMessage
 
 	// Resource, when not empty, names the resource servers the access
@@ -303,6 +306,9 @@ func (c *Client) checkBackchannelAuthenticationRequest(req BeginBackchannelAuthe
 	}
 	if resourceErr := checkResources(req.Resource); resourceErr != nil {
 		return resourceErr
+	}
+	if detailsErr := checkAuthorizationDetails(req.AuthorizationDetails); detailsErr != nil {
+		return detailsErr
 	}
 	return nil
 }

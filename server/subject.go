@@ -198,7 +198,12 @@ type GrantedAuthorization struct {
 	// _claim_sources, sub_jwk and events, which change how a relying
 	// party processes the token; and code, state and error, which would
 	// make it look like a JARM response — a name that isn't valid UTF-8,
-	// a value that isn't valid JSON, and claims whose total size exceeds
+	// a value that isn't valid JSON, a value that repeats a member name
+	// with differing copies, or as a case variant, at any depth, two
+	// names that differ only in case (relying parties, this module's
+	// client included, refuse an ID token carrying either, which readers
+	// keeping the first copy and the last would read differently), and
+	// claims whose total size exceeds
 	// Limits.MaxIDTokenClaimsBytes, a budget identity and extension
 	// claims share at issuance. Authorization attributes (RFC 9068
 	// roles, groups, entitlements) and delegation claims (RFC 8693 act,

@@ -43,6 +43,12 @@ type IdentityClaimsSource interface {
 	// server, and serverresource.UserInfoClaims, drop it otherwise, so a
 	// source returns the claim's real value and needn't look at the
 	// request.
+	//
+	// A value must not repeat a member name with differing copies, or as
+	// a case variant, at any depth: relying parties, this module's
+	// client included, refuse an ID token or UserInfo response carrying
+	// one, so the token request it would go into fails as server_error,
+	// and serverresource.UserInfoClaims returns an error.
 	ResolveIdentityClaims(ctx context.Context, subject string, names []string) (map[string]json.RawMessage, error)
 }
 

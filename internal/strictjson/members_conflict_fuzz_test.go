@@ -102,3 +102,29 @@ func readFirstWinsObject(dec *json.Decoder) (any, bool) {
 	_, err := dec.Token()
 	return out, err == nil
 }
+
+// FuzzCheckConflictingObject: an object whose members
+// CheckConflictingObject accepts encodes, with json.Marshal or
+// MarshalUnescaped, to one CheckConflictingMembers accepts — what an
+// issuer checks with it, a reader accepts.
+func FuzzCheckConflictingObject(f *testing.F) {
+	f.Add("a", []byte(`{"b":1,"b":1}`), "A", []byte(`1`))
+	f.Add("0", []byte(`{"":0,"":1}`), "x", []byte(`"<"`))
+	f.Add("a\xff", []byte(`1`), "a\xfe", []byte(`2`))
+	f.Add("x", []byte(`{"a":"<","a":"<"}`), "y", []byte(`[]`))
+	f.Fuzz(func(t *testing.T, name1 string, value1 []byte, name2 string, value2 []byte) {
+		members := map[string]json.RawMessage{name1: value1, name2: value2}
+		if _, err := CheckConflictingObject(members); err != nil {
+			return
+		}
+		for _, marshal := range []func(any) ([]byte, error){json.Marshal, MarshalUnescaped} {
+			encoded, err := marshal(members)
+			if err != nil {
+				t.Fatalf("%q: accepted, but doesn't encode: %v", members, err)
+			}
+			if err := CheckConflictingMembers(encoded); err != nil {
+				t.Fatalf("%q: accepted, but its encoding %s is refused: %v", members, encoded, err)
+			}
+		}
+	})
+}

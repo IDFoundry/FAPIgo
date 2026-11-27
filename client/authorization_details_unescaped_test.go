@@ -80,3 +80,56 @@ func TestAuthorizationDetailsSentWithoutHTMLEscaping(t *testing.T) {
 		}
 	})
 }
+
+// TestAuthorizationDetailsRefusedWithRepeatedMembers covers every
+// request that carries authorization_details: an entry repeating a
+// member, or holding two that differ only in case, at any depth, is
+// invalid_request before anything is sent — authorization servers would
+// read it differently, and a FAPIgo server refuses it, identical copies
+// included — while the same detail without the repeat is sent.
+func TestAuthorizationDetailsRefusedWithRepeatedMembers(t *testing.T) {
+	plain := []json.RawMessage{json.RawMessage(`{"type":"payment_initiation","instructedAmount":{"amount":"1"}}`)}
+	for name, details := range map[string][]json.RawMessage{
+		"differing repeat": {json.RawMessage(`{"type":"payment_initiation","instructedAmount":{"amount":"1","amount":"1000"}}`)},
+		"identical repeat": {json.RawMessage(`{"type":"payment_initiation","type":"payment_initiation"}`)},
+		"case variant":     {plain[0], json.RawMessage(`{"type":"a","actions":[{"x":1,"X":1}]}`)},
+	} {
+		for request, send := range authorizationDetailsRequests(t) {
+			if err := send(plain); err != nil {
+				t.Fatalf("%s without a repeat: %v", request, err)
+			}
+			if code := clientErrorCode(t, send(details)); code != client.ErrorInvalidRequest {
+				t.Errorf("%s, %s: error code = %q, want %q", request, name, code, client.ErrorInvalidRequest)
+			}
+		}
+	}
+}
+
+// authorizationDetailsRequests sends each request that carries
+// authorization_details with the details given.
+func authorizationDetailsRequests(t *testing.T) map[string]func([]json.RawMessage) error {
+	return map[string]func([]json.RawMessage) error{
+		"PAR form": func(details []json.RawMessage) error {
+			c, _, _ := newTestClient(t, false)
+			_, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}, AuthorizationDetails: details})
+			return err
+		},
+		"PAR request object": func(details []json.RawMessage) error {
+			c, _, _ := newTestClient(t, true)
+			_, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}, AuthorizationDetails: details})
+			return err
+		},
+		"CIBA request object": func(details []json.RawMessage) error {
+			c, _, _ := newTestClientWithCIBA(t)
+			_, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
+				Scope: []string{"openid"}, LoginHint: "user@example.com", AuthorizationDetails: details,
+			})
+			return err
+		},
+		"client_credentials form": func(details []json.RawMessage) error {
+			c, _ := newTestClientForClientCredentials(t, nil)
+			_, err := c.RequestClientCredentialsToken(context.Background(), client.ClientCredentialsTokenRequest{Scope: []string{"accounts"}, AuthorizationDetails: details})
+			return err
+		},
+	}
+}

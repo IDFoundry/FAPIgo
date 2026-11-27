@@ -135,3 +135,44 @@ func TestUnmarshalNoConflicts(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckConflictingObject: CheckConflictingObject refuses, naming the
+// member at fault, the objects whose encoding CheckConflictingMembers
+// refuses — a value repeating a member with differing copies or as a
+// case variant, at any depth; two member names that differ only in
+// case; a value nesting too deep once inside the object; and a value
+// that isn't JSON — and accepts the rest, an identical repeat included.
+func TestCheckConflictingObject(t *testing.T) {
+	deep := strings.Repeat("[", MaxNestingDepth) + strings.Repeat("]", MaxNestingDepth)
+	if err := CheckConflictingMembers([]byte(deep)); err != nil {
+		t.Fatalf("CheckConflictingMembers(%d nested arrays) = %v, want nil on its own", MaxNestingDepth, err)
+	}
+	for name, tc := range map[string]struct {
+		members map[string]json.RawMessage
+		fault   string
+	}{
+		"no members":        {members: map[string]json.RawMessage{}},
+		"plain":             {members: map[string]json.RawMessage{"a": json.RawMessage(`1`), "b": json.RawMessage(`{"c":[1,{"d":2}]}`)}},
+		"identical repeat":  {members: map[string]json.RawMessage{"act": json.RawMessage(`{"sub":"a", "sub" : "a"}`)}},
+		"differing repeat":  {members: map[string]json.RawMessage{"a": json.RawMessage(`1`), "act": json.RawMessage(`{"sub":"a","sub":"b"}`)}, fault: "act"},
+		"empty-name repeat": {members: map[string]json.RawMessage{"0": json.RawMessage(`{"":0,"":1}`)}, fault: "0"},
+		"nested repeat":     {members: map[string]json.RawMessage{"x": json.RawMessage(`[{"y":{"z":1,"z":2}}]`)}, fault: "x"},
+		"case variant":      {members: map[string]json.RawMessage{"x": json.RawMessage(`{"kid":"a","KID":"a"}`)}, fault: "x"},
+		"top-level case":    {members: map[string]json.RawMessage{"roles": json.RawMessage(`1`), "Roles": json.RawMessage(`1`)}, fault: "roles"},
+		"too deep inside":   {members: map[string]json.RawMessage{"x": json.RawMessage(deep)}, fault: "x"},
+		"not JSON":          {members: map[string]json.RawMessage{"x": json.RawMessage(`1],[2`)}, fault: "x"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fault, err := CheckConflictingObject(tc.members)
+			if (err != nil) != (tc.fault != "") || fault != tc.fault {
+				t.Fatalf("CheckConflictingObject = %q, %v; want fault %q", fault, err, tc.fault)
+			}
+			if tc.fault == "" {
+				return
+			}
+			if encoded, merr := MarshalUnescaped(tc.members); merr == nil && CheckConflictingMembers(encoded) == nil {
+				t.Fatalf("CheckConflictingObject refuses %s, which CheckConflictingMembers accepts", encoded)
+			}
+		})
+	}
+}

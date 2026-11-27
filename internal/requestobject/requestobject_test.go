@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -998,5 +999,40 @@ func TestParseClaimsRejectsMalformedOptionalClaims(t *testing.T) {
 	}
 	if c.JTI != "j-1" || !c.HasSubject || c.NotBefore.Unix() != 1_800_000_000 {
 		t.Fatalf("parseClaims = JTI %q, HasSubject %v, NotBefore %v", c.JTI, c.HasSubject, c.NotBefore)
+	}
+}
+
+// TestCreateRefusesParametersParseRefuses: Create refuses Parameters
+// that Parse would refuse once signed in — a value repeating a member
+// with differing copies, or as a case variant, at any depth, and a name
+// that differs only in case from another parameter or from a claim
+// Create sets — rather than sign a request object its readers take
+// different requests from. An identical repeat is signed, and parses.
+func TestCreateRefusesParametersParseRefuses(t *testing.T) {
+	key := generateKey(t)
+	create := func(extra map[string]json.RawMessage) (string, error) {
+		params := testParameters(t)
+		maps.Copy(params, extra)
+		return Create(CreateParams{
+			Signer: key, Algorithm: fapi.ES256, ClientID: "client-123",
+			Audience: "https://as.example", Now: time.Now(), Lifetime: time.Minute, Parameters: params,
+		})
+	}
+	token, err := create(map[string]json.RawMessage{"authorization_details": json.RawMessage(`[{"type":"a","type":"a"}]`)})
+	if err != nil {
+		t.Fatalf("Create with an identical repeat: %v", err)
+	}
+	if _, err := Parse(token); err != nil {
+		t.Fatalf("Parse(Create with an identical repeat): %v", err)
+	}
+	for name, extra := range map[string]map[string]json.RawMessage{
+		"differing repeat":  {"authorization_details": json.RawMessage(`[{"type":"a","type":"b"}]`)},
+		"nested variant":    {"claims": json.RawMessage(`{"id_token":{"acr":null,"ACR":null}}`)},
+		"parameter variant": {"Scope": json.RawMessage(`"admin"`)},
+		"set-claim variant": {"ISS": json.RawMessage(`"client-456"`)},
+	} {
+		if token, err := create(extra); err == nil {
+			t.Errorf("%s: Create = %s, want refused", name, token)
+		}
 	}
 }

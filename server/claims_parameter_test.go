@@ -18,6 +18,10 @@ func TestMalformedClaimsParameterIsRefused(t *testing.T) {
 		// so it's refused rather than silently honoured or ignored.
 		"ID_TOKEN":  `{"ID_TOKEN":{"acr":{"essential":true,"values":["gold"]}}}`,
 		"Essential": `{"id_token":{"acr":{"Essential":true,"values":["gold"]}}}`,
+		// A member repeated with differing copies, or as a case variant,
+		// as a request object carrying it would be refused.
+		"repeated value":     `{"userinfo":{"email":{"value":{"a":1,"a":2}}}}`,
+		"case-variant claim": `{"userinfo":{"email":null,"Email":null}}`,
 	} {
 		t.Run("PAR "+name, func(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)

@@ -10,6 +10,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	intfed "github.com/idfoundry/fapigo/internal/federation"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // ResolveIssueConfig configures a ResolveIssuer's own Entity Identifier.
@@ -130,6 +131,12 @@ type VerifiedTrustMark struct {
 // leaving that to the caller; Response has no second resolution attempt
 // to try a different one if it isn't.
 //
+// Response refuses resolved.Metadata (as filtered to entityTypes) that
+// repeats a member name with differing copies, or as a case variant, at
+// any depth, or holds two Entity Types whose names differ only in case,
+// which no Resolver's resolution produces: a reader of the response,
+// this module's Resolver included, would refuse it.
+//
 // The response's own "exp" claim is set to the minimum of
 // resolved.ExpiresAt and every trustMarks entry's own ExpiresAt exactly
 // (§8.3.2: "MUST be the minimum of the exp value of the Trust Chain
@@ -148,6 +155,12 @@ func (i *ResolveIssuer) Response(resolved ResolvedEntity, trustAnchors, entityTy
 	metadata := resolved.Metadata
 	if len(entityTypes) > 0 {
 		metadata = filterResolvedEntityTypes(metadata, entityTypes)
+	}
+	// A Resolve Response repeating a member with differing copies, or
+	// as a case variant, at any depth is refused by its readers, this
+	// module's included: they would take different metadata from it.
+	if entityType, err := strictjson.CheckConflictingObject(metadata); err != nil {
+		return "", fmt.Errorf("federation: resolved metadata %q would not parse: %w", entityType, err)
 	}
 
 	now := i.deps.Clock.Now()

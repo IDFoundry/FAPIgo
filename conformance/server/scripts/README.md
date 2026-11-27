@@ -52,12 +52,29 @@ docker compose up -d --force-recreate <service>
 1. Run the OIDF conformance suite locally, in a directory *outside*
    this repo (its own git history/build artifacts, no path coupling
    needed — `../docker-compose.yml` only references it by Docker
-   network name):
-   `git clone https://gitlab.com/openid/conformance-suite.git`, then
-   `docker compose -f docker-compose-prebuilt.yml up` (uses prebuilt
-   images — no local Maven/Java build needed; the other
-   `docker-compose*.yml` files in that repo all expect you to build
-   `./target/fapi-test-suite.jar` yourself first). Note the Docker
+   network name). CI runs the suite release pinned in
+   [`../../scripts/suite-version.env`](../../scripts/suite-version.env)
+   with that release's images, so to match it:
+
+   ```
+   . /path/to/fapigo/conformance/scripts/suite-version.env
+   git clone --branch "$SUITE_TAG" https://gitlab.com/openid/conformance-suite.git
+   cd conformance-suite
+   docker compose -f docker-compose-prebuilt.yml \
+     -f /path/to/fapigo/conformance/scripts/suite-pinned.override.yml up
+   ```
+
+   (`docker-compose-prebuilt.yml` uses prebuilt images — no local
+   Maven/Java build needed; the other `docker-compose*.yml` files in
+   that repo all expect you to build `./target/fapi-test-suite.jar`
+   yourself first. Without the override it runs the `:latest` images,
+   built from the suite's master.) `run-all.sh` warns when
+   `CONFORMANCE_SUITE_CHECKOUT` isn't at the pinned commit. The
+   workflow's `newer-suite` job fails once a newer suite release is
+   out; moving the pin means reviewing that release's changes, then
+   updating `SUITE_TAG` and `SUITE_COMMIT` in `suite-version.env` and
+   the image digests in `suite-pinned.override.yml` together (each
+   file's header says how). Note the Docker
    network it created: `docker network ls` (usually
    `<suite-checkout-dir-name>_default`). It's reachable at
    `https://localhost.emobix.co.uk:8443`.

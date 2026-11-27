@@ -352,3 +352,34 @@ func TestResolveRequestFromHTTPRequiresFields(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveIssuerResponseRefusesConflictingMetadata: a Resolve
+// Response repeating a member with differing copies, or as a case
+// variant, at any depth is refused by its readers, so Response refuses
+// a hand-built ResolvedEntity whose Metadata would make one rather than
+// sign it. An identical repeat is signed.
+func TestResolveIssuerResponseRefusesConflictingMetadata(t *testing.T) {
+	issuer, err := federation.NewResolveIssuer(validResolveIssueConfig(), validResolveIssueDependencies(t))
+	if err != nil {
+		t.Fatalf("NewResolveIssuer: %v", err)
+	}
+	respond := func(metadata map[string]json.RawMessage) error {
+		_, err := issuer.Response(federation.ResolvedEntity{
+			EntityID: "https://op.example.org", TrustAnchor: "https://ta.example.org",
+			Metadata: metadata, ExpiresAt: time.Now().Add(time.Hour), Tokens: []string{"placeholder-chain-entry"},
+		}, []string{"https://ta.example.org"}, nil, nil)
+		return err
+	}
+	if err := respond(map[string]json.RawMessage{"openid_provider": json.RawMessage(`{"issuer":"https://op.example.org","issuer":"https://op.example.org"}`)}); err != nil {
+		t.Fatalf("Response with an identical repeat: %v", err)
+	}
+	for name, metadata := range map[string]map[string]json.RawMessage{
+		"differing repeat":    {"openid_provider": json.RawMessage(`{"issuer":"https://op.example.org","issuer":"https://evil.example"}`)},
+		"nested variant":      {"openid_provider": json.RawMessage(`{"jwks":{"keys":[{"kid":"a","KID":"b"}]}}`)},
+		"entity type variant": {"openid_provider": json.RawMessage(`{}`), "OpenID_Provider": json.RawMessage(`{}`)},
+	} {
+		if err := respond(metadata); err == nil {
+			t.Errorf("%s: Response = nil error, want error", name)
+		}
+	}
+}

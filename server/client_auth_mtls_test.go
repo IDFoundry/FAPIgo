@@ -837,7 +837,7 @@ func TestPushAuthorizationRequestRefusesAnUnroutedAliasProof(t *testing.T) {
 		DPoPProofs:      []string{dpopProofForURL(t, generateKey(t), mtlsPAR, h.now)},
 		PeerCertificate: cert,
 	})
-	if code := serverErrorCode(t, err); code != server.ErrorInvalidDPoPProof {
+	if serverErrorCode(t, err) != server.ErrorInvalidDPoPProof {
 		t.Fatalf("PushAuthorizationRequest(alias proof, no route) = %v, want invalid_dpop_proof", err)
 	}
 }
@@ -899,7 +899,7 @@ func TestRefreshAccessTokenCertClientAuthAtMTLSAlias(t *testing.T) {
 			PeerCertificate: cert,
 		})
 		if route == 0 {
-			if code := serverErrorCode(t, err); code != server.ErrorInvalidDPoPProof {
+			if serverErrorCode(t, err) != server.ErrorInvalidDPoPProof {
 				t.Errorf("RefreshAccessToken(alias proof, no route) = %v, want invalid_dpop_proof", err)
 			}
 			continue

@@ -112,7 +112,8 @@ type TokenBinding struct {
 // constraint decides the check:
 //
 //   - SenderConstrainDPoP: exactly one DPoP proof, for POST to
-//     Endpoints.Token or its MTLSEndpoints alias, within
+//     Endpoints.Token, or its MTLSEndpoints alias for a request
+//     received there (TokenEndpointRequest.SetEndpointRoute), within
 //     Limits.MaxDPoPProofAge and MaxClockSkew, not seen before — one
 //     replay record with this server's own token requests — and, when
 //     Dependencies.Nonces is set, carrying a current nonce: otherwise
@@ -177,8 +178,8 @@ type DPoPProofBinding struct {
 // authenticated client — OpenID4VCI 1.0 §6.1's pre-authorized code
 // grant without client authentication, for example, outside FAPI. It
 // is VerifyTokenRequestBinding's DPoP check without a client: exactly
-// one DPoP proof, for POST to Endpoints.Token or its MTLSEndpoints
-// alias, within Limits.MaxDPoPProofAge and MaxClockSkew, not seen
+// one DPoP proof, for POST to Endpoints.Token, or its MTLSEndpoints
+// alias for a request received there (TokenEndpointRequest.SetEndpointRoute), within Limits.MaxDPoPProofAge and MaxClockSkew, not seen
 // before — one replay record with this server's own token requests and
 // VerifyTokenRequestBinding, so a proof is accepted at only one of them
 // — and, when Dependencies.Nonces is set, carrying a current nonce:

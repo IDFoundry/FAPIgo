@@ -25,32 +25,6 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// EndpointRoute identifies the receiving route for a DPoP proof (RFC 9449 §4.3).
-type EndpointRoute uint8
-
-const (
-	// PrimaryEndpoint selects the configured endpoint in Config.Endpoints.
-	PrimaryEndpoint EndpointRoute = iota + 1
-	// MTLSEndpointAlias selects the corresponding Config.MTLSEndpoints URL.
-	MTLSEndpointAlias
-)
-
-// String is the route's name: "primary", "mtls_alias", "unset" for the
-// zero route, or EndpointRoute(n) for a value this package doesn't
-// define.
-func (r EndpointRoute) String() string {
-	switch r {
-	case 0:
-		return "unset"
-	case PrimaryEndpoint:
-		return "primary"
-	case MTLSEndpointAlias:
-		return "mtls_alias"
-	default:
-		return fmt.Sprintf("EndpointRoute(%d)", uint8(r))
-	}
-}
-
 // AuthorizationCodeExchangeRequest is the input to
 // Server.ExchangeAuthorizationCode.
 type AuthorizationCodeExchangeRequest struct {
@@ -932,7 +906,7 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string, route
 	if proof == "" {
 		return dpop.VerifiedProof{}, newError(ErrorInvalidRequest, 400, "DPoP proof is required", nil)
 	}
-	verified, err := verifyEndpointDPoP(ctx, dpop.VerifyRequest{
+	verified, err := s.verifyEndpointDPoP(ctx, dpop.VerifyRequest{
 		Proof:        proof,
 		Method:       "POST",
 		Now:          s.deps.Clock.Now(),
@@ -947,31 +921,6 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string, route
 		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {
 			return dpop.VerifiedProof{}, challenge
 		}
-	}
-	return verified, nil
-}
-
-// verifyEndpointDPoP matches htu to the one endpoint that received the request.
-func verifyEndpointDPoP(ctx context.Context, req dpop.VerifyRequest, primary, alias fapi.URL, route EndpointRoute) (dpop.VerifiedProof, *Error) {
-	target := primary.URL()
-	switch route {
-	case PrimaryEndpoint:
-	case MTLSEndpointAlias:
-		if alias.IsZero() {
-			return dpop.VerifiedProof{}, newError(ErrorServerError, 500, "cannot determine DPoP request target", errors.New("no mTLS endpoint alias configured"))
-		}
-		target = alias.URL()
-	case 0:
-		if !alias.IsZero() && alias.String() != primary.String() {
-			return dpop.VerifiedProof{}, newError(ErrorServerError, 500, "cannot determine DPoP request target", errors.New("a DPoP request to an endpoint with an alias requires FormRequest.EndpointRoute"))
-		}
-	default:
-		return dpop.VerifiedProof{}, newError(ErrorServerError, 500, "cannot determine DPoP request target", errors.New("unknown DPoP endpoint route"))
-	}
-	req.URL = &target
-	verified, err := dpop.Verify(ctx, req)
-	if err != nil {
-		return dpop.VerifiedProof{}, storeFailure(ctx, err, "failed to check DPoP proof replay", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err))
 	}
 	return verified, nil
 }

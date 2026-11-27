@@ -135,9 +135,13 @@ type FormParameter struct {
 type FormRequest struct {
 	Parameters []FormParameter
 
-	// EndpointRoute identifies the public route that received a DPoP proof.
-	// Required when this endpoint advertises a distinct mTLS alias. Set it
-	// from trusted listener or proxy routing, never from the proof or a header.
+	// EndpointRoute is the public route the request was received at,
+	// which decides the URL a DPoP proof sent with it must name: the
+	// endpoint's Config.Endpoints URL for PrimaryEndpoint or the zero
+	// route, its Config.MTLSEndpoints alias for MTLSEndpointAlias (see
+	// EndpointRoute). Set it from the listener or trusted proxy route,
+	// never from the proof or a header. Left unset at an mTLS alias, a proof
+	// naming the alias is refused as invalid_dpop_proof.
 	EndpointRoute EndpointRoute
 }
 
@@ -949,7 +953,7 @@ func (s *Server) verifyOptionalDPoPProof(ctx context.Context, proof string, endp
 	if proof == "" {
 		return "", nil
 	}
-	verified, err := verifyEndpointDPoP(ctx, dpop.VerifyRequest{
+	verified, err := s.verifyEndpointDPoP(ctx, dpop.VerifyRequest{
 		Proof:        proof,
 		Method:       "POST",
 		Now:          s.deps.Clock.Now(),

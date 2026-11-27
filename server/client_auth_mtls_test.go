@@ -826,6 +826,22 @@ func TestPushAuthorizationRequestCertClientAuthAcceptsDPoPProofAtMTLSAlias(t *te
 	}
 }
 
+// TestPushAuthorizationRequestRefusesAnUnroutedAliasProof: without a
+// route, PAR checks a proof against its primary URL only, so one naming
+// the mTLS alias is refused as invalid_dpop_proof (not a 500), as at
+// the token endpoint.
+func TestPushAuthorizationRequestRefusesAnUnroutedAliasProof(t *testing.T) {
+	h, cert, _, mtlsPAR := newHarnessWithClientAuthMTLSAndDPoP(t)
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP:            server.FormRequest{Parameters: certFormParameters(nil)},
+		DPoPProofs:      []string{dpopProofForURL(t, generateKey(t), mtlsPAR, h.now)},
+		PeerCertificate: cert,
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidDPoPProof {
+		t.Fatalf("PushAuthorizationRequest(alias proof, no route) = %v, want invalid_dpop_proof", err)
+	}
+}
+
 func TestExchangeAuthorizationCodeCertClientAuthAcceptsDPoPProofAtMTLSAlias(t *testing.T) {
 	h, cert, mtlsToken, _ := newHarnessWithClientAuthMTLSAndDPoP(t)
 	code := completeSuccessfulCertAuthorization(t, h, cert, []string{"openid", "accounts"})

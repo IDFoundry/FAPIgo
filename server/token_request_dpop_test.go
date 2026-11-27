@@ -11,7 +11,6 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/server"
-	"github.com/idfoundry/fapigo/storage"
 )
 
 // clientlessTokenRequest is a pre-authorized code token request without
@@ -172,28 +171,5 @@ func TestVerifyTokenRequestDPoPNonces(t *testing.T) {
 	}
 	if binding.NextDPoPNonce == "" {
 		t.Error("NextDPoPNonce is empty, want the nonce to use next")
-	}
-}
-
-func TestVerifyTokenRequestDPoPAtTheMTLSAlias(t *testing.T) {
-	const alias = "https://mtls.as.example/token"
-	h := newAttestationHarness(t, time.Now(), generateKey(t), server.RegisteredAttesterKeys{}, func(cfg *server.Config, _ *storage.RegisteredClientConfig) {
-		u, err := fapi.ParseEndpointURL(alias)
-		if err != nil {
-			t.Fatal(err)
-		}
-		cfg.MTLSEndpoints.Token = u
-	})
-	req := clientlessTokenRequest(t, dpopProofAt(t, generateKey(t), alias, "", h.now))
-	if _, err := h.server.VerifyTokenRequestDPoP(context.Background(), req); err == nil {
-		t.Fatal("accepted ambiguous route")
-	}
-	req.SetEndpointRoute(server.PrimaryEndpoint)
-	if _, err := h.server.VerifyTokenRequestDPoP(context.Background(), req); serverErrorCode(t, err) != server.ErrorInvalidDPoPProof {
-		t.Fatalf("alias proof at primary endpoint: %v", err)
-	}
-	req.SetEndpointRoute(server.MTLSEndpointAlias)
-	if _, err := h.server.VerifyTokenRequestDPoP(context.Background(), req); err != nil {
-		t.Fatalf("VerifyTokenRequestDPoP(proof for the mTLS alias): %v", err)
 	}
 }

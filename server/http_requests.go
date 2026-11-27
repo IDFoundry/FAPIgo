@@ -194,8 +194,10 @@ func TokenEndpointRequestFromHTTP(r *http.Request) (TokenEndpointRequest, error)
 // this package implements.
 func (t TokenEndpointRequest) GrantType() string { return t.parts.get().HTTP.Get("grant_type") }
 
-// SetEndpointRoute records which configured public route received the request.
-// Set this from trusted routing metadata when the token endpoint has an alias.
+// SetEndpointRoute sets the public route the request was received at
+// (FormRequest.EndpointRoute), which decides the URL its DPoP proof must
+// name: needed at the token endpoint's mTLS alias. Set it from the listener or
+// trusted proxy route, never from anything the client sends.
 func (t *TokenEndpointRequest) SetEndpointRoute(route EndpointRoute) {
 	parts := t.parts.get()
 	parts.HTTP.EndpointRoute = route

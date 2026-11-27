@@ -193,6 +193,8 @@ jobs:
             name: FuzzScanMembersMatchesWalker
           - pkg: ./internal/strictjson
             name: FuzzCheckConflictingMembersOneReading
+          - pkg: ./internal/strictjson
+            name: FuzzCheckConflictingObject
           - pkg: ./extension
             name: FuzzExtensionValueReadersAgree
           - pkg: ./internal/sealedcookie

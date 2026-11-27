@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/server"
 )
 
@@ -13,6 +14,10 @@ import (
 // read with that listener's endpoint route, which decides the URL its
 // DPoP proof must name.
 func TestListenerHandlerMarksTheRoute(t *testing.T) {
+	origin, err := fapi.ParseEndpointURL("https://as.example")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, route := range []server.EndpointRoute{server.PrimaryEndpoint, server.MTLSEndpointAlias} {
 		var got server.EndpointRoute
 		h := listenerHandler(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -21,7 +26,7 @@ func TestListenerHandlerMarksTheRoute(t *testing.T) {
 				t.Fatalf("PushAuthorizationRequestFromHTTP: %v", err)
 			}
 			got = req.HTTP.EndpointRoute
-		}), route, "https://as.example")
+		}), route, origin)
 		r := httptest.NewRequest(http.MethodPost, "/par", strings.NewReader("client_id=c"))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		h.ServeHTTP(httptest.NewRecorder(), r)

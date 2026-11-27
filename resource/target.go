@@ -16,6 +16,10 @@ import (
 type resourceURL struct {
 	origin url.URL
 	prefix string
+
+	// originKey is canonical.URI(&origin), which a request's
+	// requestOrigin is compared to.
+	originKey string
 }
 
 // prepareResourceURLs checks Config.ResourceURLs and prepares each for
@@ -38,9 +42,11 @@ func prepareResourceURLs(cfg Config) ([]resourceURL, error) {
 		case !canonical.HasNormalPath(&u):
 			return nil, fmt.Errorf("resource: config: resource_urls[%d] has a path with dot segments or percent-encoded unreserved characters", i)
 		}
+		origin := url.URL{Scheme: u.Scheme, Host: u.Host}
 		out = append(out, resourceURL{
-			origin: url.URL{Scheme: u.Scheme, Host: u.Host},
-			prefix: strings.TrimSuffix(canonical.URI(&u), "/"),
+			origin:    origin,
+			prefix:    strings.TrimSuffix(canonical.URI(&u), "/"),
+			originKey: canonical.URI(&origin),
 		})
 	}
 	return out, nil
@@ -59,7 +65,7 @@ func (v *Verifier) requestTarget(req VerifyRequest, dpop bool) (*url.URL, *Error
 	if req.URL != nil {
 		return v.explicitTarget(req.URL)
 	}
-	return v.pathTarget(req.requestPath, dpop)
+	return v.pathTarget(req.requestPath, req.requestOrigin, dpop)
 }
 
 // explicitTarget is target, once it is known to be an absolute http(s)
@@ -79,29 +85,71 @@ func (v *Verifier) explicitTarget(target *url.URL) (*url.URL, *Error) {
 	return nil, outsideResourceURLs(target.String())
 }
 
-// pathTarget resolves escapedPath under the configured prefixes. DPoP needs
-// one unambiguous URI. Certificate binding only requires a covered path.
-func (v *Verifier) pathTarget(escapedPath string, dpop bool) (*url.URL, *Error) {
+// pathTarget resolves escapedPath under the configured prefixes at
+// origin (WithResourceOrigin's mark), or at every configured origin for
+// none. DPoP needs one unambiguous URI; certificate binding only
+// requires a covered path.
+func (v *Verifier) pathTarget(escapedPath, origin string, dpop bool) (*url.URL, *Error) {
 	if !strings.HasPrefix(escapedPath, "/") {
 		return nil, outsideResourceURLs(escapedPath)
 	}
 	var target *url.URL
 	for _, r := range v.resourceURLs {
-		t, err := url.Parse(r.origin.String() + escapedPath)
-		if err == nil && !canonical.HasNormalPath(t) {
-			return nil, nonNormalPath(escapedPath)
+		if origin != "" && r.originKey != origin {
+			continue
 		}
-		if err == nil && t.Host == r.origin.Host && t.RawQuery == "" && t.Fragment == "" && r.covers(t) {
-			if target != nil && dpop && canonical.URI(target) != canonical.URI(t) {
-				return nil, newError(ErrorServerError, 500, "ambiguous DPoP request target", errors.New("set VerifyRequest.URL from trusted routing metadata when multiple resource origins cover the request path"))
-			}
-			target = t
+		t, covered, perr := r.pathAt(escapedPath)
+		if perr != nil {
+			return nil, perr
 		}
+		if !covered {
+			continue
+		}
+		if target != nil && dpop && canonical.URI(target) != canonical.URI(t) {
+			return nil, ambiguousTarget(escapedPath)
+		}
+		target = t
 	}
 	if target == nil {
-		return nil, outsideResourceURLs(escapedPath)
+		return nil, v.uncoveredPath(escapedPath, origin)
 	}
 	return target, nil
+}
+
+// pathAt is escapedPath at r's origin, and whether r covers it there.
+// A path not in normal form is refused whichever origin it is at.
+func (r resourceURL) pathAt(escapedPath string) (*url.URL, bool, *Error) {
+	t, err := url.Parse(r.origin.String() + escapedPath)
+	if err != nil {
+		return nil, false, nil
+	}
+	if !canonical.HasNormalPath(t) {
+		return nil, false, nonNormalPath(escapedPath)
+	}
+	return t, t.Host == r.origin.Host && t.RawQuery == "" && t.Fragment == "" && r.covers(t), nil
+}
+
+// ambiguousTarget refuses a DPoP request whose path is covered at more
+// than one configured origin, with nothing to say which it was received
+// at: the deployment's to fix, so a 500.
+func ambiguousTarget(escapedPath string) *Error {
+	return newError(ErrorServerError, 500, "ambiguous DPoP request target", fmt.Errorf("resource: several of Config.ResourceURLs' origins cover the request path %q: wrap the listener's handler in resource.WithResourceOrigin, or set VerifyRequest.URL, from the listener or a trusted proxy route (never the Host header)", escapedPath))
+}
+
+// uncoveredPath refuses a request no configured prefix at origin covers:
+// outsideResourceURLs, unless no ResourceURLs entry is at origin at all,
+// so that WithResourceOrigin marks the listener with an origin this
+// resource server doesn't serve, which is the deployment's to fix.
+func (v *Verifier) uncoveredPath(escapedPath, origin string) *Error {
+	if origin == "" {
+		return outsideResourceURLs(escapedPath)
+	}
+	for _, r := range v.resourceURLs {
+		if r.originKey == origin {
+			return outsideResourceURLs(escapedPath)
+		}
+	}
+	return newError(ErrorServerError, 500, "failed to verify request", fmt.Errorf("resource: resource.WithResourceOrigin marks the request with origin %q, which none of Config.ResourceURLs is at", origin))
 }
 
 // nonNormalPath refuses a request whose path isn't in the normal form

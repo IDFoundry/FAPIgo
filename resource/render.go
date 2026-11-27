@@ -24,13 +24,14 @@ type verifyRequestShadow struct {
 	DPoPProofs            []redact.Hidden
 	PeerCertificate       string
 	requestPath           string
+	requestOrigin         string
 	repeatedAuthorization bool
 }
 
 func (r VerifyRequest) shadow() verifyRequestShadow {
 	shadow := verifyRequestShadow{
 		Method: r.Method, Authorization: authorizationSummary(r.Authorization), DPoPProofs: redact.MaskStrings(r.DPoPProofs),
-		PeerCertificate: certificateSummary(r.PeerCertificate), requestPath: r.requestPath, repeatedAuthorization: r.repeatedAuthorization,
+		PeerCertificate: certificateSummary(r.PeerCertificate), requestPath: r.requestPath, requestOrigin: r.requestOrigin, repeatedAuthorization: r.repeatedAuthorization,
 	}
 	if r.URL != nil {
 		shadow.URL = redact.URL(*r.URL)

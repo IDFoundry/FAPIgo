@@ -36,8 +36,11 @@ type VerifyRequest struct {
 	// URL is the absolute URL the client called, which a DPoP proof's
 	// htu must name. Leave it nil with a request built by
 	// VerifyRequestFromHTTP: Verify then builds it from the request's
-	// escaped path and Config.ResourceURLs when one origin covers the path.
-	// For DPoP at overlapping origins, set URL from trusted routing. Set, it must be an absolute
+	// escaped path and Config.ResourceURLs: at the origin
+	// WithResourceOrigin marked the request with, or else at the one
+	// origin whose ResourceURLs cover the path. A DPoP request whose path
+	// several origins cover, with neither, is refused as a 500: the
+	// deployment must say which it was received at. Set, it must be an absolute
 	// http(s) URL under one of Config.ResourceURLs, or Verify refuses
 	// the request — so one built from the request's Host header, which
 	// the client controls, can name no other resource server. A path
@@ -93,6 +96,12 @@ type VerifyRequest struct {
 	// request VerifyRequestFromHTTP built this from, which Verify places
 	// under Config.ResourceURLs when URL is nil.
 	requestPath string
+
+	// requestOrigin is the canonical origin (canonical.URI of its scheme
+	// and host) WithResourceOrigin marked the request with, "" for none:
+	// Verify then places requestPath only under the ResourceURLs at that
+	// origin.
+	requestOrigin string
 
 	// repeatedAuthorization is VerifyRequestFromHTTP's mark of a request
 	// with more than one Authorization header.

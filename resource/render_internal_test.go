@@ -32,14 +32,14 @@ func TestVerifyRequestPrintsNoToken(t *testing.T) {
 	r.Header.Set("DPoP", renderProof)
 	req := VerifyRequestFromHTTP(r)
 	rendertest.Check(t, req, []string{renderAccessToken, renderProof}, exportedResidual)
-	if got := fmt.Sprintf("%+v", req); got != "{Method:GET URL: Authorization:DPoP [REDACTED] DPoPProofs:[[REDACTED]] PeerCertificate: requestPath:/accounts repeatedAuthorization:false}" {
+	if got := fmt.Sprintf("%+v", req); got != "{Method:GET URL: Authorization:DPoP [REDACTED] DPoPProofs:[[REDACTED]] PeerCertificate: requestPath:/accounts requestOrigin: repeatedAuthorization:false}" {
 		t.Errorf("%%+v = %s", got)
 	}
 
 	withURL := VerifyRequest{Method: "POST", URL: r.URL, Authorization: "Bearer " + renderAccessToken,
 		PeerCertificate: &x509.Certificate{Subject: pkix.Name{CommonName: "client-1"}}}
 	rendertest.Check(t, withURL, []string{renderAccessToken, renderQueryValue}, exportedResidual)
-	if got := fmt.Sprint(withURL); got != "{POST https://rs.example/accounts?filter=[REDACTED] Bearer [REDACTED] [] CN=client-1  false}" {
+	if got := fmt.Sprint(withURL); got != "{POST https://rs.example/accounts?filter=[REDACTED] Bearer [REDACTED] [] CN=client-1   false}" {
 		t.Errorf("%%v = %s", got)
 	}
 	if got := logged(withURL); !strings.Contains(got, `k.Authorization="Bearer [REDACTED]"`) || !strings.Contains(got, `k.PeerCertificate="CN=client-1"`) {

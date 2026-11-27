@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -118,7 +117,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              resolved.ListenAddr,
-		Handler:           listenerHandler(mux, server.PrimaryEndpoint, resolved.Issuer.String()),
+		Handler:           listenerHandler(mux, server.PrimaryEndpoint, resolved.Issuer),
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, CipherSuites: server.FAPIRWTLSCipherSuites},
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
@@ -178,7 +177,7 @@ func newMTLSServer(resolved ResolvedConfig, mux http.Handler) (*http.Server, err
 	}
 	return &http.Server{
 		Addr:    resolved.MTLSListenAddr,
-		Handler: listenerHandler(mux, server.MTLSEndpointAlias, strings.TrimSuffix(resolved.MTLSEndpoints.Token.String(), "/token")),
+		Handler: listenerHandler(mux, server.MTLSEndpointAlias, resolved.MTLSEndpoints.Token),
 		TLSConfig: &tls.Config{
 			MinVersion:   tls.VersionTLS12,
 			CipherSuites: server.FAPIRWTLSCipherSuites,

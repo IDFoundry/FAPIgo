@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net/http"
 	"net/url"
 
@@ -69,24 +68,12 @@ func newRouter(srv *server.Server, consent *consentHandler, backchannel *backcha
 	return mux
 }
 
-type listenerKey struct{}
-
-type publicListener struct {
-	base string
-}
-
 // listenerHandler marks each request with the listener that actually
-// accepted the connection: its endpoint route, for the server's *FromHTTP
-// request constructors (server.WithEndpointRoute), and its advertised URL
-// base, for resourceRequest. Both listeners use the same ServeMux.
-func listenerHandler(next http.Handler, route server.EndpointRoute, base string) http.Handler {
-	listener := publicListener{base: base}
-	return server.WithEndpointRoute(route, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), listenerKey{}, listener)))
-	}))
-}
-
-func receivingListener(r *http.Request) publicListener {
-	listener, _ := r.Context().Value(listenerKey{}).(publicListener)
-	return listener
+// accepted the connection: its endpoint route, which the server's
+// *FromHTTP request constructors take (server.WithEndpointRoute), and
+// its public origin, which resource.VerifyRequestFromHTTP takes
+// (resource.WithResourceOrigin). Both listeners use the same ServeMux,
+// and both decide which URL a DPoP proof sent there must name.
+func listenerHandler(next http.Handler, route server.EndpointRoute, origin fapi.URL) http.Handler {
+	return server.WithEndpointRoute(route, fapires.WithResourceOrigin(origin, next))
 }

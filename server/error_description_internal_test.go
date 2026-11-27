@@ -58,6 +58,8 @@ var reviewedDescriptions = map[string]bool{
 	"clientAssertionFailureDescription(err, audiences)": true,
 	// the application's own claim name, a server_error.
 	`fmt.Sprintf("userinfo claims must not set reserved claim %q", name)`: true,
+	// the application's own claim name, a server_error.
+	`fmt.Sprintf("userinfo claim %q conflicts with another member of the same name: JSON members may repeat only with identical values, and never in another case", name)`: true,
 }
 
 // TestNewErrorDescriptionsNameNoRequestInput walks every newError call

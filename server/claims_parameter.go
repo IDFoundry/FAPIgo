@@ -55,6 +55,16 @@ func validateClaimsParameter(params map[string]json.RawMessage) error {
 	if !strictjson.DecodesLosslessly(raw) || !strictjson.DecodesLosslessly(object) {
 		return errClaimsNotLossless
 	}
+	// A request object repeating a member with differing copies, or as
+	// a case variant, at any depth is refused (requestobject.Parse), and
+	// so is the same "claims" object sent as a plain parameter: the
+	// values it requests are carried into the access token
+	// (RequestedUserinfoClaimValuesKey), which resource servers, this
+	// module's included, then refuse, or read differently from one
+	// another.
+	if err := strictjson.CheckConflictingMembers(object); err != nil {
+		return errors.New("claims must not repeat a member name with differing values, or in another case")
+	}
 	// object is already unwrapped: claimsMembers(object) would unwrap a
 	// second string layer, which no reader does.
 	top, ok := objectMembers(object)

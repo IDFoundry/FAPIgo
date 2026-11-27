@@ -167,12 +167,21 @@ func IssueAccessToken(p AccessTokenParams) (token string, jti string, err error)
 // checkReservedParameters refuses parameters that use a name
 // claimnames reserves in a JWT of kind against the embedder — the
 // claims IssueIDToken/IssueAccessToken set themselves, and the ones
-// that would change how a recipient processes the token.
+// that would change how a recipient processes the token. It refuses,
+// too, parameters ParseIDToken and ParseAccessToken would refuse once
+// signed into the claims set (strictjson.CheckConflictingObject): a
+// value repeating a member with differing copies, or as a case
+// variant, at any depth, and two names that differ only in case.
+// Readers keeping the first copy and the last would take different
+// claims from such a token.
 func checkReservedParameters(kind claimnames.Kind, parameters map[string]json.RawMessage) error {
 	for name := range parameters {
 		if claimnames.Reserved(kind, claimnames.Embedder, name) {
 			return fmt.Errorf("token: parameters must not set reserved claim %q", name)
 		}
+	}
+	if name, err := strictjson.CheckConflictingObject(parameters); err != nil {
+		return fmt.Errorf("token: parameter %q would not parse: %w", name, err)
 	}
 	return nil
 }

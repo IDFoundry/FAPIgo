@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"maps"
 	"testing"
 	"time"
 
@@ -177,6 +178,39 @@ func TestSignUserInfoResponseRejectsReservedClaims(t *testing.T) {
 		claims[reserved] = v
 		if _, srvErr := h.server.SignUserInfoResponse(context.Background(), client, claims); srvErr == nil {
 			t.Fatalf("SignUserInfoResponse(claims setting %q) = nil error, want error", reserved)
+		}
+	}
+}
+
+// TestSignUserInfoResponseRefusesConflictingMembers: a relying party,
+// this module's client included, refuses a UserInfo response repeating
+// a member with differing copies, or as a case variant, at any depth,
+// so SignUserInfoResponse refuses claims that would make one — a
+// claim's value or two claim names differing only in case — rather
+// than sign a response its readers take different claims from. An
+// identical repeat is signed.
+func TestSignUserInfoResponseRefusesConflictingMembers(t *testing.T) {
+	h, client := newHarnessWithUserInfo(t, nil, nil, 0, 0, nil)
+	sign := func(extra map[string]json.RawMessage) *server.Error {
+		claims := testUserInfoClaims(t)
+		maps.Copy(claims, extra)
+		_, srvErr := h.server.SignUserInfoResponse(context.Background(), client, claims)
+		return srvErr
+	}
+	if srvErr := sign(map[string]json.RawMessage{"address": json.RawMessage(`{"country":"A","country":"A"}`)}); srvErr != nil {
+		t.Fatalf("SignUserInfoResponse with an identical repeat: %v", srvErr)
+	}
+	for name, extra := range map[string]map[string]json.RawMessage{
+		"differing repeat": {"address": json.RawMessage(`{"country":"A","country":"B"}`)},
+		"nested variant":   {"groups": json.RawMessage(`[{"id":"a","ID":"a"}]`)},
+		"name variant":     {"Email": json.RawMessage(`"other@example.com"`)},
+	} {
+		srvErr := sign(extra)
+		if srvErr == nil {
+			t.Fatalf("%s: SignUserInfoResponse = nil error, want error", name)
+		}
+		if srvErr.Code() != server.ErrorServerError {
+			t.Fatalf("%s: error code = %q, want %q", name, srvErr.Code(), server.ErrorServerError)
 		}
 	}
 }

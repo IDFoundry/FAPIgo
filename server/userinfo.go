@@ -11,6 +11,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/claimnames"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/jwe"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/storage"
@@ -47,7 +48,12 @@ import (
 // events, which change how a relying party processes the response;
 // azp, nonce, at_hash, c_hash and s_hash, which belong to an ID token;
 // and code, state and error, by whose presence a relying party tells a
-// JARM response from another JWT of the same issuer and audience.
+// JARM response from another JWT of the same issuer and audience. And
+// it fails if a claim's value repeats a member with differing copies,
+// or as a case variant, at any depth, or two claim names differ only in
+// case: relying parties, this module's client included, refuse such a
+// response, and readers keeping the first copy and the last would take
+// different claims from it.
 //
 // claims must carry "sub", a non-empty string: OIDC Core §5.3.2 says it
 // "MUST always be returned in the UserInfo Response". For a client that
@@ -72,6 +78,12 @@ func (s *Server) SignUserInfoResponse(ctx context.Context, client storage.Regist
 		if claimnames.Reserved(claimnames.UserInfo, claimnames.Embedder, name) {
 			return "", newError(ErrorServerError, 500, fmt.Sprintf("userinfo claims must not set reserved claim %q", name), nil)
 		}
+	}
+	// A relying party, this module's client included, refuses a UserInfo
+	// response repeating a member with differing copies, or as a case
+	// variant, at any depth.
+	if name, err := strictjson.CheckConflictingObject(claims); err != nil {
+		return "", newError(ErrorServerError, 500, fmt.Sprintf("userinfo claim %q conflicts with another member of the same name: JSON members may repeat only with identical values, and never in another case", name), err)
 	}
 	if subErr := s.checkUserInfoSubject(ctx, client, claims["sub"]); subErr != nil {
 		return "", subErr

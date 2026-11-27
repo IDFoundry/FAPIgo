@@ -1,9 +1,11 @@
 package token
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestParseClaimsRefuseDuplicateMembers: RFC 7519 §4 requires a JWT's
@@ -52,5 +54,43 @@ func checkDuplicateRefusal(t *testing.T, err error, wantErr bool) {
 		t.Fatalf("parse = %v, want nil", err)
 	case wantErr && (!errors.Is(err, ErrMalformedClaims) || !strings.Contains(err.Error(), "duplicate member name")):
 		t.Fatalf("parse = %v, want ErrMalformedClaims for a duplicate member", err)
+	}
+}
+
+// TestIssueRefusesParametersItsParsersRefuse: IssueIDToken and
+// IssueAccessToken refuse Parameters that ParseIDToken and
+// ParseAccessToken would refuse once signed in — a value repeating a
+// member with differing copies, or as a case variant, at any depth, and
+// two names that differ only in case — rather than sign a token its
+// readers take different claims from. An identical repeat is issued.
+func TestIssueRefusesParametersItsParsersRefuse(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	issue := map[string]func(map[string]json.RawMessage) (string, error){
+		"ID token": func(params map[string]json.RawMessage) (string, error) {
+			p := baseIDTokenParams(key, now, time.Minute)
+			p.Parameters = params
+			return IssueIDToken(p)
+		},
+		"access token": func(params map[string]json.RawMessage) (string, error) {
+			p := baseAccessTokenParams(key, now, time.Minute)
+			p.Parameters = params
+			tok, _, err := IssueAccessToken(p)
+			return tok, err
+		},
+	}
+	for kind, issue := range issue {
+		if _, err := issue(map[string]json.RawMessage{"act": json.RawMessage(`{"sub":"a","sub":"a"}`)}); err != nil {
+			t.Errorf("%s with an identical repeat: %v, want issued", kind, err)
+		}
+		for name, params := range map[string]map[string]json.RawMessage{
+			"differing repeat": {"act": json.RawMessage(`{"sub":"a","sub":"b"}`)},
+			"nested variant":   {"x": json.RawMessage(`[{"kid":"a","KID":"a"}]`)},
+			"case-variant":     {"roles": json.RawMessage(`1`), "ROLES": json.RawMessage(`1`)},
+		} {
+			if tok, err := issue(params); err == nil {
+				t.Errorf("%s, %s: issued %s, want refused", kind, name, tok)
+			}
+		}
 	}
 }

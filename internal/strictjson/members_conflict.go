@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 )
 
 // CheckConflictingMembers is CheckDuplicateMembers, except that it
@@ -42,6 +44,39 @@ func CheckConflictingMembers(data []byte) error {
 		return nil
 	}
 	return walkConflictingMembers(data)
+}
+
+// CheckConflictingObject is CheckConflictingMembers for the JSON object
+// whose members are members, each value already encoded, without
+// encoding it: an issuer building a JWT's claims set, or another
+// object, from values a caller supplied refuses what a reader running
+// CheckConflictingMembers on the result would refuse. It refuses a
+// value that isn't valid JSON, or that CheckConflictingMembers refuses
+// as a member of the object (one level deeper than on its own), and a
+// name FoldKey maps together with another's. It returns the name at
+// fault, the first in sorted order, so a caller can say which member it
+// refuses. Every member is the object's own (a Go map can't repeat a
+// name exactly), so only case variants can repeat a name at the top.
+func CheckConflictingObject(members map[string]json.RawMessage) (string, error) {
+	seen := make(map[string]string, len(members)) // by FoldKey, the name as spelled
+	for _, name := range slices.Sorted(maps.Keys(members)) {
+		key := FoldKey(name)
+		if first, ok := seen[key]; ok {
+			return name, duplicateMemberError(first, name)
+		}
+		seen[key] = name
+		value := members[name]
+		if !json.Valid(value) {
+			return name, fmt.Errorf("strictjson: member %q is not valid JSON", name)
+		}
+		// Inside "[...]" the value nests as deeply as inside the object.
+		nested := make([]byte, 0, len(value)+2)
+		nested = append(append(append(nested, '['), value...), ']')
+		if err := CheckConflictingMembers(nested); err != nil {
+			return name, err
+		}
+	}
+	return "", nil
 }
 
 // UnmarshalNoConflicts is Unmarshal, after CheckConflictingMembers: it

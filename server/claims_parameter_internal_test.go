@@ -44,6 +44,14 @@ func TestValidateClaimsParameter(t *testing.T) {
 		"sub value encoded twice":     {twice(`{"id_token":{"sub":{"value":"user-1"}}}`), false},
 		"empty object encoded twice":  {twice(`{}`), false},
 		"encoded three times":         {str(string(twice(`{}`))), false},
+		// A member repeated with differing copies, or as a case variant,
+		// at any depth, as a request object carrying it would be; an
+		// identical repeat is read alike by every reader.
+		"identical repeat":              {json.RawMessage(`{"userinfo":{"email":null,"email":null}}`), true},
+		"repeated value":                {json.RawMessage(`{"userinfo":{"x":{"value":{"a":1,"a":2}}}}`), false},
+		"repeated claim, form string":   {str(`{"id_token":{"email":null,"email":{"essential":true}}}`), false},
+		"case-variant claim":            {json.RawMessage(`{"userinfo":{"email":null,"EMAIL":null}}`), false},
+		"repeated top-level, differing": {json.RawMessage(`{"id_token":{},"id_token":{"acr":null}}`), false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := validateClaimsParameter(map[string]json.RawMessage{"claims": tc.raw})

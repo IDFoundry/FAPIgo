@@ -55,6 +55,13 @@ func validateGrantedIDTokenClaims(claims map[string]json.RawMessage, maxBytes in
 			return fmt.Errorf("ID token claim %q is not valid UTF-8, or has an unpaired surrogate escape", name)
 		}
 	}
+	// Relying parties, this module's client included, refuse an ID token
+	// that repeats a member with differing copies, or as a case variant,
+	// at any depth: readers keeping the first copy and the last would
+	// take different claims from it (RFC 7519 §4).
+	if name, err := strictjson.CheckConflictingObject(claims); err != nil {
+		return fmt.Errorf("ID token claim %q conflicts with another member of the same name: JSON members may repeat only with identical values, and never in another case", name)
+	}
 	return nil
 }
 

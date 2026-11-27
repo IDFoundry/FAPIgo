@@ -1006,7 +1006,10 @@ func withRequestedUserinfoClaims(names []string, values claimvalues.Acceptable, 
 // Limits.MaxIDTokenClaimsBytes; identity claims are only known here, so
 // this — not CompleteAuthorization — is where the whole budget is
 // checked, failing as server_error rather than issuing a token a relying
-// party would reject. nonce is grant.Nonce for the first ID token issued
+// party would reject. So, in token.IssueIDToken, is an identity claim
+// whose value repeats a member with differing copies, or as a case
+// variant, or whose name differs only in case from another claim's.
+// nonce is grant.Nonce for the first ID token issued
 // from an authorization code, "" otherwise.
 func (s *Server) issueIDTokenForGrant(ctx context.Context, client storage.RegisteredClient, grant grantRecord, nonce, accessToken string) (string, *Error) {
 	claims, err := s.withIdentityClaims(ctx, grant.Subject, grant.RequestedIDTokenClaims, grant.RequestedIDTokenClaimValues, grant.TokenClaims)

@@ -223,9 +223,13 @@ func TestWithEndpointRouteMarksFromHTTPRequests(t *testing.T) {
 	if got := token.RefreshToken().HTTP.EndpointRoute; got != alias {
 		t.Errorf("TokenEndpointRequestFromHTTP route = %v, want %v", got, alias)
 	}
+	before := token
 	token.SetEndpointRoute(server.PrimaryEndpoint)
 	if got := token.AuthorizationCodeExchange().HTTP.EndpointRoute; got != server.PrimaryEndpoint {
 		t.Errorf("route after SetEndpointRoute = %v, want %v", got, server.PrimaryEndpoint)
+	}
+	if got := before.ClientCredentials().HTTP.EndpointRoute; got != alias {
+		t.Errorf("a copy made before SetEndpointRoute has route %v, want %v", got, alias)
 	}
 	unmarked, err := server.FormRequestFromHTTP(formPost("a=b", nil))
 	if err != nil || unmarked.EndpointRoute != 0 {

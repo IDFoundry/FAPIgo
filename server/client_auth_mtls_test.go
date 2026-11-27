@@ -865,3 +865,47 @@ func TestExchangeAuthorizationCodeCertClientAuthAcceptsDPoPProofAtMTLSAlias(t *t
 		t.Fatalf("TokenType = %q, want %q", result.TokenType, "DPoP")
 	}
 }
+
+// TestRefreshAccessTokenCertClientAuthAtMTLSAlias: a refresh request
+// is checked against the URL its route names, as a code exchange is:
+// a proof for the token endpoint's alias verifies only on a request
+// received there.
+func TestRefreshAccessTokenCertClientAuthAtMTLSAlias(t *testing.T) {
+	h, cert, mtlsToken, _ := newHarnessWithClientAuthMTLSAndDPoP(t)
+	code := completeSuccessfulCertAuthorization(t, h, cert, []string{"openid", "accounts", "offline_access"})
+	dpopKey := generateKey(t)
+	tokens, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP: server.FormRequest{EndpointRoute: server.MTLSEndpointAlias, Parameters: []server.FormParameter{
+			formParam("client_id", testClientID.String()),
+			formParam("grant_type", "authorization_code"),
+			formParam("code", code),
+			formParam("redirect_uri", testRedirectURI),
+			formParam("code_verifier", testCodeVerifier),
+		}},
+		DPoPProofs:      []string{dpopProofForURL(t, dpopKey, mtlsToken, h.now)},
+		PeerCertificate: cert,
+	})
+	if err != nil || !tokens.HasRefreshToken {
+		t.Fatalf("ExchangeAuthorizationCode = %v (refresh token %v), want a refresh token", err, tokens.HasRefreshToken)
+	}
+	for _, route := range []server.EndpointRoute{0, server.MTLSEndpointAlias} {
+		_, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
+			HTTP: server.FormRequest{EndpointRoute: route, Parameters: []server.FormParameter{
+				formParam("client_id", testClientID.String()),
+				formParam("grant_type", "refresh_token"),
+				formParam("refresh_token", tokens.RefreshToken.Reveal()),
+			}},
+			DPoPProofs:      []string{dpopProofForURL(t, dpopKey, mtlsToken, h.now)},
+			PeerCertificate: cert,
+		})
+		if route == 0 {
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidDPoPProof {
+				t.Errorf("RefreshAccessToken(alias proof, no route) = %v, want invalid_dpop_proof", err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("RefreshAccessToken(alias proof, alias route): %v", err)
+		}
+	}
+}

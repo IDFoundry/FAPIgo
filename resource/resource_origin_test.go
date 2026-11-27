@@ -118,6 +118,13 @@ func TestWithResourceOriginOutsideResourceURLs(t *testing.T) {
 	wantResourceError(t, "uncovered path", err, resource.ErrorInvalidRequest, 400)
 	err = verifyAtOrigin(t, f, "", "/", "https://rs.example/")
 	wantResourceError(t, "ambiguous root", err, resource.ErrorServerError, 500)
+
+	prefixed := newFixture(t)
+	cfg := validConfig(t)
+	cfg.ResourceURLs = []fapi.URL{mustEndpointURL(t, "https://api.example/v1")}
+	prefixed.verifier = newVerifierLike(t, prefixed, cfg)
+	err = verifyAtOrigin(t, prefixed, "", "/v2/accounts", "https://api.example/v2/accounts")
+	wantResourceError(t, "uncovered path, unmarked", err, resource.ErrorInvalidRequest, 400)
 }
 
 // TestExplicitURLOverridesWithResourceOrigin: VerifyRequest.URL, set

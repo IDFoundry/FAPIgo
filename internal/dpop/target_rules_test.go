@@ -32,10 +32,10 @@ func signClaims(t *testing.T, htm, htu string, now time.Time) string {
 	return proof
 }
 
-func verifyAt(t *testing.T, proof, method string, target *url.URL, alternates []*url.URL, now time.Time) error {
+func verifyAt(t *testing.T, proof, method string, target *url.URL, now time.Time) error {
 	t.Helper()
 	_, err := Verify(context.Background(), VerifyRequest{
-		Proof: proof, Method: method, URL: target, AlternateURLs: alternates,
+		Proof: proof, Method: method, URL: target,
 		Now: now, MaxProofAge: time.Minute,
 	})
 	return err
@@ -49,11 +49,11 @@ func TestVerifyRefusesRelativeOrNonHTTPHTU(t *testing.T) {
 	now := time.Now()
 	target := mustURL(t, "https://rs.example/accounts")
 	for _, htu := range []string{"/accounts", "//rs.example/accounts", "ftp://rs.example/accounts", "FTP://RS.example/accounts", "urn:x:accounts", "https:///accounts"} {
-		if err := verifyAt(t, signClaims(t, "GET", htu, now), "GET", target, nil, now); !errors.Is(err, ErrURIMismatch) {
+		if err := verifyAt(t, signClaims(t, "GET", htu, now), "GET", target, now); !errors.Is(err, ErrURIMismatch) {
 			t.Errorf("htu %q at %s: err = %v, want ErrURIMismatch", htu, target, err)
 		}
 	}
-	if err := verifyAt(t, signClaims(t, "GET", "HTTPS://RS.example/accounts", now), "GET", target, nil, now); err != nil {
+	if err := verifyAt(t, signClaims(t, "GET", "HTTPS://RS.example/accounts", now), "GET", target, now); err != nil {
 		t.Errorf("htu differing only in ASCII case: err = %v, want nil", err)
 	}
 }
@@ -66,13 +66,10 @@ func TestVerifyRefusesRelativeOrNonHTTPTarget(t *testing.T) {
 	now := time.Now()
 	for _, target := range []string{"/accounts", "ftp://rs.example/accounts", "rs.example/accounts", "https:///accounts", "mailto:a@rs.example"} {
 		u := mustURL(t, target)
-		if err := verifyAt(t, signClaims(t, "GET", target, now), "GET", u, nil, now); err == nil || errors.Is(err, ErrURIMismatch) {
+		if err := verifyAt(t, signClaims(t, "GET", target, now), "GET", u, now); err == nil || errors.Is(err, ErrURIMismatch) {
 			t.Errorf("target %q: err = %v, want a refused target", target, err)
 		}
-		good := mustURL(t, "https://rs.example/accounts")
-		if err := verifyAt(t, signClaims(t, "GET", good.String(), now), "GET", good, []*url.URL{u}, now); err == nil || errors.Is(err, ErrURIMismatch) {
-			t.Errorf("alternate target %q: err = %v, want a refused target", target, err)
-		}
+
 	}
 }
 
@@ -93,7 +90,7 @@ func TestVerifyComparesMethodExactly(t *testing.T) {
 		{"get", "get", true},
 	}
 	for _, c := range cases {
-		err := verifyAt(t, signClaims(t, c.htm, target.String(), now), c.method, target, nil, now)
+		err := verifyAt(t, signClaims(t, c.htm, target.String(), now), c.method, target, now)
 		if c.ok != (err == nil) || (!c.ok && !errors.Is(err, ErrMethodMismatch)) {
 			t.Errorf("htm %q, method %q: err = %v, want ok=%v", c.htm, c.method, err, c.ok)
 		}
@@ -110,24 +107,10 @@ func TestCreateProofKeepsMethodAsGiven(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyAt(t, proof, "get", target, nil, now); err != nil {
+	if err := verifyAt(t, proof, "get", target, now); err != nil {
 		t.Errorf("verify at get: %v", err)
 	}
-	if err := verifyAt(t, proof, "GET", target, nil, now); !errors.Is(err, ErrMethodMismatch) {
+	if err := verifyAt(t, proof, "GET", target, now); !errors.Is(err, ErrMethodMismatch) {
 		t.Errorf("verify at GET: err = %v, want ErrMethodMismatch", err)
-	}
-}
-
-// TestVerifyAcceptsAnAlternateTarget: an htu naming any one of the
-// targets verifies; one naming none of them doesn't.
-func TestVerifyAcceptsAnAlternateTarget(t *testing.T) {
-	now := time.Now()
-	primary := mustURL(t, "https://rs.example/accounts")
-	alternates := []*url.URL{mustURL(t, "https://mtls.rs.example/accounts")}
-	if err := verifyAt(t, signClaims(t, "GET", "https://mtls.rs.example/accounts", now), "GET", primary, alternates, now); err != nil {
-		t.Errorf("htu naming the alternate: %v", err)
-	}
-	if err := verifyAt(t, signClaims(t, "GET", "https://other.example/accounts", now), "GET", primary, alternates, now); !errors.Is(err, ErrURIMismatch) {
-		t.Errorf("htu naming neither: err = %v, want ErrURIMismatch", err)
 	}
 }

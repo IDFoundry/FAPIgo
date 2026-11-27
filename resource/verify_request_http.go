@@ -23,7 +23,10 @@ import (
 // request refused, and so is a path with a dot segment ("/a/../b") or a
 // percent-encoded unreserved character ("/accounts/%31"): htu matching
 // would resolve it, while a router dispatching on the path as sent
-// wouldn't.
+// wouldn't. When several origins cover the path, a DPoP request needs
+// the one it was received at: wrap the listener's handler in
+// WithResourceOrigin, or set VerifyRequest.URL, from the listener or a
+// trusted proxy route.
 //
 // Behind a proxy that terminates TLS, r carries no client certificate:
 // set PeerCertificate afterwards from however the proxy forwards it
@@ -39,6 +42,7 @@ func VerifyRequestFromHTTP(r *http.Request) VerifyRequest {
 		PeerCertificate: PeerCertificateFromHTTP(r),
 
 		requestPath:           r.URL.EscapedPath(),
+		requestOrigin:         resourceOriginOf(r),
 		repeatedAuthorization: len(r.Header.Values("Authorization")) > 1,
 	}
 }

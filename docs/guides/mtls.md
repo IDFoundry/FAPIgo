@@ -117,6 +117,31 @@ srv, err := server.New(server.Config{
   `Client-Cert` header, `fapihttp.ForwardedClientCertificate(r,
   fapihttp.ClientCertHeader, fapihttp.RemoteAddrIn(proxyPrefix))` reads
   it, and refuses a request that didn't come from the proxy's address.
+- **The alias listener.** Serve `MTLSEndpoints` from a listener that
+  asks for a client certificate, and wrap its handler in
+  `server.WithEndpointRoute(server.MTLSEndpointAlias, mux)`. A DPoP
+  proof names the one URL its request was sent to (RFC 9449 §4.3), so
+  the server checks it against the alias only for a request marked as
+  received there, and against `Config.Endpoints` otherwise; the
+  `…FromHTTP` constructors take the mark. Unmarked, a client that
+  authenticates with its certificate but binds its tokens with DPoP
+  (`private_key_jwt` is not the only way to pair them) has its proof for
+  the alias refused as `invalid_dpop_proof`. Behind a front end that
+  routes both URLs to one listener, set `FormRequest.EndpointRoute` (or
+  `TokenEndpointRequest.SetEndpointRoute`) from its trusted routing
+  instead, never from the `Host` header:
+
+  ```go
+  primary := &http.Server{Handler: mux}
+  alias := &http.Server{
+  	Handler:   server.WithEndpointRoute(server.MTLSEndpointAlias, mux),
+  	TLSConfig: &tls.Config{ClientAuth: tls.RequestClientCert /* ... */},
+  }
+  ```
+
+  A resource server reachable at the alias host too lists both origins
+  in `ResourceURLs` and wraps each listener in
+  `resource.WithResourceOrigin(origin, mux)`; see the DPoP guide.
 - **Metadata** advertises `mtls_endpoint_aliases` once
   `MTLSEndpoints` is set, and `tls_client_certificate_bound_access_tokens`
   and the mTLS authentication methods once a client can do mutual TLS

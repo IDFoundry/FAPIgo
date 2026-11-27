@@ -67,3 +67,13 @@ func newRouter(srv *server.Server, consent *consentHandler, backchannel *backcha
 	}
 	return mux
 }
+
+// listenerHandler marks each request with the listener that actually
+// accepted the connection: its endpoint route, which the server's
+// *FromHTTP request constructors take (server.WithEndpointRoute), and
+// its public origin, which resource.VerifyRequestFromHTTP takes
+// (resource.WithResourceOrigin). Both listeners use the same ServeMux,
+// and both decide which URL a DPoP proof sent there must name.
+func listenerHandler(next http.Handler, route server.EndpointRoute, origin fapi.URL) http.Handler {
+	return server.WithEndpointRoute(route, fapires.WithResourceOrigin(origin, next))
+}

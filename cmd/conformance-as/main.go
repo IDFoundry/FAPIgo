@@ -117,7 +117,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              resolved.ListenAddr,
-		Handler:           mux,
+		Handler:           listenerHandler(mux, server.PrimaryEndpoint, resolved.Issuer),
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, CipherSuites: server.FAPIRWTLSCipherSuites},
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
@@ -177,7 +177,7 @@ func newMTLSServer(resolved ResolvedConfig, mux http.Handler) (*http.Server, err
 	}
 	return &http.Server{
 		Addr:    resolved.MTLSListenAddr,
-		Handler: mux,
+		Handler: listenerHandler(mux, server.MTLSEndpointAlias, resolved.MTLSEndpoints.Token),
 		TLSConfig: &tls.Config{
 			MinVersion:   tls.VersionTLS12,
 			CipherSuites: server.FAPIRWTLSCipherSuites,

@@ -204,8 +204,11 @@ type Endpoints struct {
 // one of these URLs actually arrived over a connection that presented
 // a certificate — every SenderConstrainMTLS check already happens
 // per-request via PeerCertificate on the relevant request struct,
-// regardless of which URL it arrived at. Zero value (every field
-// zero) omits mtls_endpoint_aliases from Metadata entirely.
+// regardless of which URL it arrived at. Which URL it arrived at
+// matters for a DPoP proof sent with it, whose htu names one of the
+// two (RFC 9449 §4.3): mark the alias listener's requests with
+// WithEndpointRoute (see EndpointRoute). Zero value (every field zero)
+// omits mtls_endpoint_aliases from Metadata entirely.
 type MTLSEndpoints struct {
 	Token                      fapi.URL
 	PushedAuthorizationRequest fapi.URL

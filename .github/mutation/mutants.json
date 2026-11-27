@@ -3794,8 +3794,8 @@
   {
     "id": "server-token-endpoint-request-set-certificate-copy",
     "file": "server/http_requests.go",
-    "old": "\tt.parts = holdParts(parts)",
-    "new": "\t**t.parts.p = parts",
+    "old": "parts by value.\n\tt.parts = holdParts(parts)",
+    "new": "parts by value.\n\t**t.parts.p = parts",
     "module": "root",
     "packages": [
       "./server"
@@ -4082,8 +4082,8 @@
   {
     "id": "resource-request-path-normal-path",
     "file": "resource/target.go",
-    "old": "if err == nil && !canonical.HasNormalPath(t) {",
-    "new": "if false && err == nil && !canonical.HasNormalPath(t) {",
+    "old": "if !canonical.HasNormalPath(t) {",
+    "new": "if false && !canonical.HasNormalPath(t) {",
     "module": "root",
     "packages": [
       "./resource"
@@ -6043,5 +6043,329 @@
     ],
     "run": "^TestEmbedderUISealsTheHandleUnlessToldNotTo$",
     "why": "EmbedderUI without UnsafeRawHandleCookie completes an interaction from the raw handle in a plain cookie"
+  },
+  {
+    "id": "server-dpop-route-unset-is-primary",
+    "file": "server/endpoint_route.go",
+    "old": "\tcase 0, PrimaryEndpoint:",
+    "new": "\tcase PrimaryEndpoint:",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestVerifyTokenRequestDPoPAtTheMTLSAlias$",
+    "why": "a DPoP request with no endpoint route is checked against the primary endpoint, not refused as a 500"
+  },
+  {
+    "id": "server-dpop-route-alias-target",
+    "file": "server/endpoint_route.go",
+    "old": "\t\t\treturn alias.URL(), nil",
+    "new": "\t\t\treturn primary.URL(), nil",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestVerifyTokenRequestDPoPAtTheMTLSAlias$",
+    "why": "a request on the mTLS alias route is checked against the alias, and only the alias"
+  },
+  {
+    "id": "server-dpop-route-alias-without-any-alias-500",
+    "file": "server/endpoint_route.go",
+    "old": "\t\tif s.cfg.MTLSEndpoints.IsZero() {",
+    "new": "\t\tif false && s.cfg.MTLSEndpoints.IsZero() {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestVerifyTokenRequestDPoPRefusesARouteWithNoTarget$",
+    "why": "the alias route on a server configuring no mTLS alias is the deployment's mistake: 500 naming the setters"
+  },
+  {
+    "id": "server-dpop-route-unadvertised-alias-400",
+    "file": "server/endpoint_route.go",
+    "old": "\t\tif s.cfg.MTLSEndpoints.IsZero() {",
+    "new": "\t\tif true || s.cfg.MTLSEndpoints.IsZero() {",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestAliasRouteAtAnEndpointWithoutAlias$",
+    "why": "the alias route at an endpoint without an alias, on a server advertising others, is the client's mistake: 400"
+  },
+  {
+    "id": "server-dpop-route-unknown-500",
+    "file": "server/endpoint_route.go",
+    "old": "\tdefault:\n\t\treturn url.URL{}, newError(ErrorServerError, 500",
+    "new": "\tdefault:\n\t\tif route > 0 {\n\t\t\treturn primary.URL(), nil\n\t\t}\n\t\treturn url.URL{}, newError(ErrorServerError, 500",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestVerifyTokenRequestDPoPRefusesARouteWithNoTarget$",
+    "why": "a route value the package doesn't define is refused as a 500, not treated as primary"
+  },
+  {
+    "id": "server-dpop-route-replay-outage-500",
+    "file": "server/endpoint_route.go",
+    "old": "storeFailure(ctx, err, \"failed to check DPoP proof replay\"",
+    "new": "storeFailure(context.Background(), errors.New(\"refused\"), \"failed to check DPoP proof replay\"",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestStoreOutageAtReplayCheck$",
+    "why": "a replay store outage during the one-target DPoP check is still a 500, not invalid_dpop_proof"
+  },
+  {
+    "id": "server-dpop-route-hint-shown",
+    "file": "server/endpoint_route.go",
+    "old": "\tif route != 0 || !errors.Is(err, dpop.ErrURIMismatch)",
+    "new": "\tif true || route != 0 || !errors.Is(err, dpop.ErrURIMismatch)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestUnroutedAliasProofNamesTheRouteSetters$",
+    "why": "an unrouted proof refused for its htu at an endpoint with an alias names the route setters in its cause"
+  },
+  {
+    "id": "server-dpop-route-hint-only-unrouted",
+    "file": "server/endpoint_route.go",
+    "old": "\tif route != 0 || !errors.Is(err, dpop.ErrURIMismatch)",
+    "new": "\tif !errors.Is(err, dpop.ErrURIMismatch)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRoutedOrAliaslessMismatchHasNoRouteHint$",
+    "why": "a routed request's refusal carries no route hint"
+  },
+  {
+    "id": "server-dpop-route-hint-only-htu",
+    "file": "server/endpoint_route.go",
+    "old": "route != 0 || !errors.Is(err, dpop.ErrURIMismatch) || alias.IsZero()",
+    "new": "route != 0 || alias.IsZero()",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRoutedOrAliaslessMismatchHasNoRouteHint$",
+    "why": "a proof refused for something other than its htu carries no route hint"
+  },
+  {
+    "id": "server-dpop-route-hint-only-with-alias",
+    "file": "server/endpoint_route.go",
+    "old": "|| alias.IsZero() || alias.String() == primary.String()",
+    "new": "|| alias.String() == primary.String()",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRoutedOrAliaslessMismatchHasNoRouteHint$",
+    "why": "an endpoint without an alias gives no route hint"
+  },
+  {
+    "id": "server-dpop-route-hint-only-distinct-alias",
+    "file": "server/endpoint_route.go",
+    "old": "|| alias.IsZero() || alias.String() == primary.String()",
+    "new": "|| alias.IsZero()",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRoutedOrAliaslessMismatchHasNoRouteHint$",
+    "why": "an alias equal to the endpoint's URL gives no route hint"
+  },
+  {
+    "id": "server-with-endpoint-route-marks",
+    "file": "server/endpoint_route.go",
+    "old": "endpointRouteKey{}, route)))",
+    "new": "endpointRouteKey{}, route-route)))",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestWithEndpointRouteMarksFromHTTPRequests|TestWithEndpointRouteVerifiesAliasProofs)$",
+    "why": "WithEndpointRoute marks each request with its route"
+  },
+  {
+    "id": "server-form-request-from-http-route",
+    "file": "server/formrequest.go",
+    "old": "EndpointRoute: endpointRouteOf(r)}",
+    "new": "EndpointRoute: 0 * endpointRouteOf(r)}",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestWithEndpointRouteMarksFromHTTPRequests|TestWithEndpointRouteVerifiesAliasProofs)$",
+    "why": "FormRequestFromHTTP, and every *FromHTTP constructor, takes the route WithEndpointRoute marked"
+  },
+  {
+    "id": "server-set-endpoint-route",
+    "file": "server/http_requests.go",
+    "old": "\tparts.HTTP.EndpointRoute = route",
+    "new": "\tparts.HTTP.EndpointRoute = route - route",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^(TestWithEndpointRouteMarksFromHTTPRequests|TestVerifyTokenRequestDPoPAtTheMTLSAlias)$",
+    "why": "SetEndpointRoute sets the request's route"
+  },
+  {
+    "id": "server-set-endpoint-route-copy",
+    "file": "server/http_requests.go",
+    "old": "SetPeerCertificate makes.\n\tt.parts = holdParts(parts)",
+    "new": "SetPeerCertificate makes.\n\t**t.parts.p = parts",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestWithEndpointRouteMarksFromHTTPRequests$",
+    "why": "SetEndpointRoute gives the request a holder of its own, so a copy made before keeps its route"
+  },
+  {
+    "id": "server-par-passes-route",
+    "file": "server/par.go",
+    "old": "s.cfg.MTLSEndpoints.PushedAuthorizationRequest, req.HTTP.EndpointRoute)",
+    "new": "s.cfg.MTLSEndpoints.PushedAuthorizationRequest, 0*req.HTTP.EndpointRoute)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestPushAuthorizationRequestCertClientAuthAcceptsDPoPProofAtMTLSAlias$",
+    "why": "PAR checks a DPoP proof against the URL its request's route names"
+  },
+  {
+    "id": "server-ciba-begin-passes-route",
+    "file": "server/backchannel_authentication.go",
+    "old": "s.cfg.MTLSEndpoints.BackchannelAuthentication, req.HTTP.EndpointRoute)",
+    "new": "s.cfg.MTLSEndpoints.BackchannelAuthentication, 0*req.HTTP.EndpointRoute)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestBeginBackchannelAuthenticationAcceptsDPoPProofForTheMTLSAlias$",
+    "why": "the backchannel authentication endpoint checks a DPoP proof against the URL its request's route names"
+  },
+  {
+    "id": "server-code-exchange-passes-route",
+    "file": "server/token.go",
+    "old": "dpopProof, req.PeerCertificate, req.HTTP.EndpointRoute)",
+    "new": "dpopProof, req.PeerCertificate, 0*req.HTTP.EndpointRoute)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestExchangeAuthorizationCodeCertClientAuthAcceptsDPoPProofAtMTLSAlias$",
+    "why": "a code exchange checks a DPoP proof against the URL its request's route names"
+  },
+  {
+    "id": "server-refresh-passes-route",
+    "file": "server/refresh.go",
+    "old": "dpopProof, req.PeerCertificate, req.HTTP.EndpointRoute)",
+    "new": "dpopProof, req.PeerCertificate, 0*req.HTTP.EndpointRoute)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestRefreshAccessTokenCertClientAuthAtMTLSAlias$",
+    "why": "a refresh checks a DPoP proof against the URL its request's route names"
+  },
+  {
+    "id": "server-extension-binding-passes-route",
+    "file": "server/extension_grants.go",
+    "old": "parts.PeerCertificate, parts.HTTP.EndpointRoute)",
+    "new": "parts.PeerCertificate, 0*parts.HTTP.EndpointRoute)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestVerifyTokenRequestBindingAtTheMTLSAlias$",
+    "why": "VerifyTokenRequestBinding checks a DPoP proof against the URL its request's route names"
+  },
+  {
+    "id": "server-clientless-dpop-passes-route",
+    "file": "server/extension_grants.go",
+    "old": "proof, req.parts.get().HTTP.EndpointRoute)",
+    "new": "proof, 0*req.parts.get().HTTP.EndpointRoute)",
+    "module": "root",
+    "packages": [
+      "./server"
+    ],
+    "run": "^TestVerifyTokenRequestDPoPAtTheMTLSAlias$",
+    "why": "VerifyTokenRequestDPoP checks a DPoP proof against the URL its request's route names"
+  },
+  {
+    "id": "resource-origin-filters-resource-urls",
+    "file": "resource/target.go",
+    "old": "if origin != \"\" && r.originKey != origin {",
+    "new": "if false && origin != \"\" && r.originKey != origin {",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestWithResourceOriginSelectsTheTarget$",
+    "why": "under WithResourceOrigin, only the ResourceURLs at the marked origin place the request"
+  },
+  {
+    "id": "resource-origin-unconfigured-500",
+    "file": "resource/target.go",
+    "old": "\t\tif r.originKey == origin {",
+    "new": "\t\tif true || r.originKey == origin {",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestWithResourceOriginOutsideResourceURLs$",
+    "why": "a mark naming an origin none of ResourceURLs is at is the deployment's mistake: 500"
+  },
+  {
+    "id": "resource-origin-unmarked-outside-400",
+    "file": "resource/target.go",
+    "old": "\tif origin == \"\" {\n\t\treturn outsideResourceURLs(escapedPath)",
+    "new": "\tif false {\n\t\treturn outsideResourceURLs(escapedPath)",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestWithResourceOriginOutsideResourceURLs$",
+    "why": "an unmarked request no prefix covers is still the client's 400"
+  },
+  {
+    "id": "resource-verify-request-from-http-origin",
+    "file": "resource/verify_request_http.go",
+    "old": "requestOrigin:         resourceOriginOf(r),",
+    "new": "requestOrigin:         resourceOriginOf(r)[:0],",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestWithResourceOriginSelectsTheTarget$",
+    "why": "VerifyRequestFromHTTP takes the origin WithResourceOrigin marked"
+  },
+  {
+    "id": "resource-with-resource-origin-ignores-path",
+    "file": "resource/resource_origin.go",
+    "old": "key := canonical.URI(&url.URL{Scheme: u.Scheme, Host: u.Host})",
+    "new": "key := canonical.URI(&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path})",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^TestWithResourceOriginSelectsTheTarget$",
+    "why": "WithResourceOrigin keys on the origin's scheme and host, ignoring its path"
+  },
+  {
+    "id": "resource-ambiguous-target-names-fix",
+    "file": "resource/target.go",
+    "old": "\t\t\treturn nil, ambiguousTarget(escapedPath)",
+    "new": "\t\t\treturn nil, outsideResourceURLs(escapedPath)",
+    "module": "root",
+    "packages": [
+      "./resource"
+    ],
+    "run": "^(TestAmbiguousDPoPTargetNamesTheFix|TestVerifyDPoPTargetWithOverlappingOrigins)$",
+    "why": "an ambiguous DPoP target is a 500 naming WithResourceOrigin and VerifyRequest.URL"
   }
 ]

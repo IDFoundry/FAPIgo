@@ -139,7 +139,7 @@ func beginOutcome(t *testing.T, h harness, assertion string) server.ErrorCode {
 func pollBackchannelWith(t *testing.T, h harness, authReqID, assertion string, b senderBinding) (server.TokenResult, error) {
 	t.Helper()
 	return h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
-		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+		HTTP: server.FormRequest{EndpointRoute: server.PrimaryEndpoint, Parameters: []server.FormParameter{
 			formParam("client_assertion", assertion),
 			formParam("client_assertion_type", clientassertion.AssertionType),
 			formParam("grant_type", server.CIBAGrantType),
@@ -155,7 +155,7 @@ func pollBackchannelWith(t *testing.T, h harness, authReqID, assertion string, b
 func refreshWithAssertion(t *testing.T, h harness, assertion, refreshToken string, b senderBinding) error {
 	t.Helper()
 	_, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP:            server.FormRequest{Parameters: refreshFormParams(assertion, refreshToken, "")},
+		HTTP:            server.FormRequest{EndpointRoute: server.PrimaryEndpoint, Parameters: refreshFormParams(assertion, refreshToken, "")},
 		DPoPProofs:      b.dpopProofs(t, h),
 		PeerCertificate: b.cert,
 	})
@@ -169,7 +169,7 @@ func codeGrantRefreshToken(t *testing.T, h harness, b senderBinding) string {
 	t.Helper()
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts", "offline_access"})
 	tokens, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:            server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		HTTP:            server.FormRequest{EndpointRoute: server.PrimaryEndpoint, Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
 		DPoPProofs:      b.dpopProofs(t, h),
 		PeerCertificate: b.cert,
 	})

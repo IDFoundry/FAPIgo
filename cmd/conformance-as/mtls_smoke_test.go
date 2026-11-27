@@ -166,10 +166,10 @@ func TestSmokeMTLSFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build server mux: %v", err)
 	}
-	primaryServer := &http.Server{Handler: mux}
+	primaryServer := &http.Server{Handler: listenerHandler(mux, server.PrimaryEndpoint, issuer)}
 	go primaryServer.Serve(primaryTLS)
 	t.Cleanup(func() { primaryServer.Close() })
-	mtlsServer := &http.Server{Handler: mux}
+	mtlsServer := &http.Server{Handler: listenerHandler(mux, server.MTLSEndpointAlias, mtlsEndpoints.Token)}
 	go mtlsServer.Serve(mtlsTLS)
 	t.Cleanup(func() { mtlsServer.Close() })
 

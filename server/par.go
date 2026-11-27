@@ -134,6 +134,16 @@ type FormParameter struct {
 // request itself, never its fields or their JSON.
 type FormRequest struct {
 	Parameters []FormParameter
+
+	// EndpointRoute is the public route the request was received at,
+	// which decides the URL a DPoP proof sent with it must name: the
+	// endpoint's Config.Endpoints URL for PrimaryEndpoint or the zero
+	// route, its Config.MTLSEndpoints alias for MTLSEndpointAlias (see
+	// EndpointRoute). Set it from the listener or trusted proxy route,
+	// never from the proof or a header; FormRequestFromHTTP takes it
+	// from WithEndpointRoute. Left unset at an mTLS alias, a proof
+	// naming the alias is refused as invalid_dpop_proof.
+	EndpointRoute EndpointRoute
 }
 
 // Get returns the first value of name in f, or "" if absent — for an
@@ -256,7 +266,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	}
 	// Before the request object, which records its jti: see
 	// verifyOptionalDPoPProof.
-	dpopThumbprint, dpopErr := s.verifyOptionalDPoPProof(ctx, dpopProof, s.cfg.Endpoints.PushedAuthorizationRequest, s.cfg.MTLSEndpoints.PushedAuthorizationRequest)
+	dpopThumbprint, dpopErr := s.verifyOptionalDPoPProof(ctx, dpopProof, s.cfg.Endpoints.PushedAuthorizationRequest, s.cfg.MTLSEndpoints.PushedAuthorizationRequest, req.HTTP.EndpointRoute)
 	if dpopErr != nil {
 		return s.parFail(ctx, client.ID(), dpopErr)
 	}
@@ -940,25 +950,20 @@ func validatePKCEParameters(params map[string]json.RawMessage) *Error {
 // issued after it would make the client's legitimate retry of the same
 // signed request fail as a replay (§8 asks the client only to retry with
 // the nonce, not to re-sign its request).
-//
-// The proof's htu is checked against either the endpoint's plain URL
-// or its mTLS alias (RFC 8705 §5) — see verifyDPoPAtEitherEndpoint's own
-// doc comment for why a DPoP-sender-constrained client may legitimately
-// call the alias here too.
-func (s *Server) verifyOptionalDPoPProof(ctx context.Context, proof string, endpoint, mtlsAlias fapi.URL) (string, *Error) {
+func (s *Server) verifyOptionalDPoPProof(ctx context.Context, proof string, endpoint, mtlsAlias fapi.URL, route EndpointRoute) (string, *Error) {
 	if proof == "" {
 		return "", nil
 	}
-	verified, err := verifyDPoPAtEitherEndpoint(ctx, dpop.VerifyRequest{
+	verified, err := s.verifyEndpointDPoP(ctx, dpop.VerifyRequest{
 		Proof:        proof,
 		Method:       "POST",
 		Now:          s.deps.Clock.Now(),
 		MaxProofAge:  s.cfg.Limits.MaxDPoPProofAge,
 		MaxClockSkew: s.cfg.Limits.MaxClockSkew,
 		Replay:       s.dpopReplayChecker(),
-	}, endpoint, mtlsAlias)
+	}, endpoint, mtlsAlias, route)
 	if err != nil {
-		return "", storeFailure(ctx, err, "failed to check DPoP proof replay", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err))
+		return "", err
 	}
 	if s.deps.Nonces != nil {
 		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {

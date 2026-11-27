@@ -45,9 +45,13 @@ Register the client with `storage.SenderConstrainDPoP` (the default).
 endpoints, and binds the access token to the key (`cnf.jkt`). The checks
 are the ones RFC 9449 §4.3 lists, plus the ones that are easy to miss:
 
-- the proof's `htu` is checked against your configured endpoint URLs
-  (`Config.Endpoints`, or their `MTLSEndpoints` aliases), never against
-  the request's `Host` header;
+- the proof's `htu` is checked against one configured endpoint URL,
+  never against the request's `Host` header: the `Config.Endpoints` URL,
+  or its `MTLSEndpoints` alias for a request received there, which the
+  alias listener says by wrapping its handler in
+  `server.WithEndpointRoute(server.MTLSEndpointAlias, mux)` (see the
+  mutual TLS guide). A proof accepted at both could be used once at
+  each;
 - `iat` must fall within `Limits.MaxDPoPProofAge`, and a proof's `jti`
   can be used once (`Dependencies.Replay`);
 - a key committed at PAR must match the key at the token endpoint.
@@ -97,7 +101,12 @@ the request describes), `ath` against the token, the key against
 `resource.Config.ResourceURLs` (or `serverresource.Options.ResourceURLs`):
 an origin, optionally with a path prefix. A request whose path no prefix
 covers is refused, and so is a proof whose `htu` is relative or names
-another scheme.
+another scheme. List every origin the API is reached at; if two of
+them cover the same path (an mTLS alias host, say), wrap each
+listener's handler in `resource.WithResourceOrigin(origin, mux)`, or set
+`VerifyRequest.URL`, so a proof is checked against the one origin that
+received it. Without either, such a DPoP request is refused with `500`
+`server_error`, since the `Host` header can't be trusted to say.
 
 Nonces work as at the authorization server ([RFC 9449] §9, answered
 `401` with a `WWW-Authenticate: DPoP error="use_dpop_nonce"` challenge):

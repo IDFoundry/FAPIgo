@@ -1326,6 +1326,21 @@ Add `POST /authorize/complete` (or wherever your login page posts) for
 `CompleteAuthorization` from step 5, and the CIBA, client credentials and
 revocation routes when you enable them.
 
+With `Config.MTLSEndpoints` set, serve the same mux on a second listener
+that asks for a client certificate, and mark it as the alias:
+
+```go
+mux := routes(srv, login)
+primary := &http.Server{Addr: ":8443", Handler: mux}
+alias := &http.Server{Addr: ":8444", Handler: server.WithEndpointRoute(server.MTLSEndpointAlias, mux)}
+```
+
+A DPoP proof names the one URL it was sent to (RFC 9449 §4.3), so the
+server checks it against the alias only for a request so marked (the
+`*FromHTTP` constructors read the mark), and against `Config.Endpoints`
+for any other. Without the mark, a proof for the alias is refused as
+`invalid_dpop_proof`. See the [mutual TLS guide](docs/guides/mtls.md).
+
 **What the HTTP layer owes FAPI 2.0.** These are yours, not the
 package's (FAPI 2.0 Security Profile §5.2):
 
@@ -1456,8 +1471,12 @@ sent to, and only you know yours: the `Host` header, and whatever path
 a front end forwards, are the client's to choose. `Verify` takes the
 request's target to be its escaped path at one of these origins, and
 refuses a request no `ResourceURLs` prefix covers. List more than one
-for an API reachable under several names (an mTLS alias host, say): a
-proof naming any of them is accepted. As with the server,
+for an API reachable under several names (an mTLS alias host, say),
+and wrap each listener's handler in `resource.WithResourceOrigin(origin,
+mux)`: when several origins cover a DPoP request's path, `Verify` needs
+the one that received it, and refuses the request with `500
+server_error` without it (or an explicit `VerifyRequest.URL` from a
+trusted proxy route). As with the server,
 `resource.AssuranceProduction` refuses `memstore`'s stores and
 `keys/ephemeral`'s key sources: it requires the issuer key source to
 declare `keys.KeySourceAssurance` (`keys.LocalIssuerKeys` does, and so

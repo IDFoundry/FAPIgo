@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -440,13 +441,11 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP, dpopNonceChallenge
 	// with a store of the resource side's own; with it off,
 	// serverresource.NewVerifier follows the server's
 	// server.NoDPoPNonces{} and declines too.
-	// Its URLs are the two protected endpoints', and the mTLS alias of
-	// UserInfo's when there is one: a DPoP proof names the URL its client
-	// called, never one taken from the request's Host header.
-	resourceOpts := serverresource.Options{ResourceURLs: []fapi.URL{userinfoURL, accountsURL}}
-	if mtlsUserinfoURL != nil {
-		resourceOpts.ResourceURLs = append(resourceOpts.ResourceURLs, *mtlsUserinfoURL)
+	resourceURLs, err := protectedResourceURLs(userinfoURL, accountsURL, mtlsUserinfoURL)
+	if err != nil {
+		return nil, err
 	}
+	resourceOpts := serverresource.Options{ResourceURLs: resourceURLs}
 	if dpopNonceChallenge {
 		resourceOpts.Nonces = memstore.NewNonceStore()
 		resourceOpts.NonceLifetime = dpopNonceLifetime
@@ -503,4 +502,22 @@ func pairwiseSubjects(enabled bool) (server.SubjectConfig, pairwise.Deriver, err
 		Enforcement: server.SubjectTypesPerClient,
 		Prefix:      prefix,
 	}, deriver, nil
+}
+
+// protectedResourceURLs are the resource verifier's URLs: the two
+// protected endpoints', and both again at the mTLS alias origin when
+// there is one (mtlsUserinfoURL non-nil), since the alias listener
+// serves the same mux. A DPoP proof names the URL its client called,
+// never one taken from the request's Host header: each listener marks
+// its origin (listenerHandler).
+func protectedResourceURLs(userinfoURL, accountsURL fapi.URL, mtlsUserinfoURL *fapi.URL) ([]fapi.URL, error) {
+	urls := []fapi.URL{userinfoURL, accountsURL}
+	if mtlsUserinfoURL == nil {
+		return urls, nil
+	}
+	aliasAccounts, err := fapi.ParseEndpointURL(strings.TrimSuffix(mtlsUserinfoURL.String(), "/userinfo") + "/accounts")
+	if err != nil {
+		return nil, err
+	}
+	return append(urls, *mtlsUserinfoURL, aliasAccounts), nil
 }

@@ -314,6 +314,7 @@ resource.ResolvedAccessToken.Thumbprint encoding,fallback,log
 resource.VerifyRequest.Authorization encoding,fallback
 resource.VerifyRequest.DPoPProofs[0] encoding,fallback
 resource.VerifyRequest.Method encoding,fallback,log
+resource.VerifyRequest.requestOrigin fallback,log
 resource.VerifyRequest.requestPath fallback,log
 server.AccessTokenParams.Audience encoding,fallback,log
 server.AccessTokenParams.Audiences[0] encoding,fallback,log

@@ -39,6 +39,9 @@ const maxFormRequestBytes = 1 << 20
 // BeginBackchannelAuthenticationRequestFromHTTP,
 // TokenRevocationRequestFromHTTP, and BeginAuthorizationRequestFromHTTP
 // for a POST).
+//
+// EndpointRoute is the route WithEndpointRoute marked r with, if any:
+// see WithEndpointRoute.
 func FormRequestFromHTTP(r *http.Request) (FormRequest, error) {
 	// RFC 9110 §8.3.1: the media type is case-insensitive, and may carry
 	// parameters ("; charset=UTF-8"); "application/x-www-form-urlencodedx"
@@ -58,7 +61,7 @@ func FormRequestFromHTTP(r *http.Request) (FormRequest, error) {
 	if err != nil {
 		return FormRequest{}, err
 	}
-	return FormRequest{Parameters: params}, nil
+	return FormRequest{Parameters: params, EndpointRoute: endpointRouteOf(r)}, nil
 }
 
 // decodeFormParameters decodes encoded — name=value pairs joined by

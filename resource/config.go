@@ -57,12 +57,12 @@ type Config struct {
 	// are the client's to choose. For a request built by
 	// VerifyRequestFromHTTP, Verify takes the target to be the request's
 	// escaped path (never its decoded one, which names another resource
-	// when a segment holds "%2F") at each origin here whose path prefix
-	// covers it, and refuses a request no prefix covers. An explicit
-	// VerifyRequest.URL must be under one of them too. Several origins
-	// serve one resource server reachable under more than one name, an
-	// mTLS alias host among them; a proof naming any of them is
-	// accepted. A URL parsed with fapi.AllowLoopbackHTTP is refused
+	// when a segment holds "%2F") at the origin WithResourceOrigin marked
+	// the request with, or else at whichever configured origin covers
+	// it. When several do, a DPoP request needs that mark, or
+	// VerifyRequest.URL, from trusted listener or proxy routing: without
+	// either it is refused as a 500. Verify checks an explicit URL
+	// against ResourceURLs too. A URL parsed with fapi.AllowLoopbackHTTP is refused
 	// under AssuranceProduction.
 	ResourceURLs []fapi.URL
 

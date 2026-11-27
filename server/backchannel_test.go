@@ -2064,7 +2064,7 @@ func TestBeginBackchannelAuthenticationAcceptsDPoPProofForTheMTLSAlias(t *testin
 		}
 		cfg.MTLSEndpoints.BackchannelAuthentication = u
 	})
-	for htu, wantOK := range map[string]bool{alias: true, testBackchannelAuthenticationEndpoint: true, "https://other.example/backchannel-authenticate": false} {
+	for htu, wantOK := range map[string]bool{alias: true, testBackchannelAuthenticationEndpoint: false, "https://other.example/backchannel-authenticate": false} {
 		target, err := url.Parse(htu)
 		if err != nil {
 			t.Fatal(err)
@@ -2074,7 +2074,7 @@ func TestBeginBackchannelAuthenticationAcceptsDPoPProofForTheMTLSAlias(t *testin
 			t.Fatal(err)
 		}
 		action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
-			HTTP:       server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, standardBackchannelParams(t)))},
+			HTTP:       server.FormRequest{EndpointRoute: server.MTLSEndpointAlias, Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, standardBackchannelParams(t)))},
 			DPoPProofs: []string{proof},
 		})
 		if err != nil {

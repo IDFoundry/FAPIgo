@@ -34,7 +34,10 @@ The suite must already be running locally (see
 [`../../server/scripts/README.md`](../../server/scripts/README.md)'s
 step 1 if you don't have it up — `docker compose -f
 docker-compose-prebuilt.yml up` from an OIDF `conformance-suite`
-checkout, reachable at `https://localhost.emobix.co.uk:8443`). No AS
+checkout, ideally of the release CI pins in
+[`../../scripts/suite-version.env`](../../scripts/suite-version.env)
+with [`suite-pinned.override.yml`](../../scripts/suite-pinned.override.yml)
+added, reachable at `https://localhost.emobix.co.uk:8443`). No AS
 container, network attachment, or generated key file is needed on this
 side — everything the driver's plan config needs (a throwaway ES256
 keypair, a unique alias, the registered `client_id`/`redirect_uri`) is

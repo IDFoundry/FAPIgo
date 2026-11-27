@@ -26,11 +26,19 @@ name: FAPI Conformance
 # Actions tab shows an accurate result — it just isn't wired into
 # anything that blocks a merge.
 #
-# Tracks the OIDF suite's latest master/prebuilt images on every run (no
-# version pin) — simplest, and consistent with how the suite is used
-# locally today. Each run records the suite commit and image digests it
-# tested in its job summary ("Record OIDF suite version" below), so a
-# new failure can be checked against the last green run's suite.
+# Runs a pinned OIDF suite release, so that only reviewed suite code
+# runs here: the suite's scripts run on the runner itself, and GitHub's
+# cache is shared by every workflow on main and restored by pull
+# requests (ci.yml restores the Go cache setup-go saves), so code this
+# job runs could poison what ci.yml restores. For the same reason the
+# job saves no cache of its own and keeps no Git credentials.
+# conformance/scripts/suite-version.env names the release (SUITE_TAG)
+# and its commit (SUITE_COMMIT); conformance/scripts/
+# suite-pinned.override.yml pins that release's images by digest. Move
+# all three together. The newer-suite job fails when a newer release is
+# out; it is a separate job so that it never holds back the matrix
+# results. Each run still records the suite commit and image digests it
+# tested in its job summary ("Record OIDF suite version" below).
 
 on:
   schedule:
@@ -41,20 +49,41 @@ permissions:
   contents: read
 
 jobs:
+  newer-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: conformance/scripts/suite-version.env
+          sparse-checkout-cone-mode: false
+
+      - name: Check for a newer suite release
+        run: |
+          . conformance/scripts/suite-version.env
+          newest=$(git ls-remote --tags --refs https://gitlab.com/openid/conformance-suite.git 'release-v*' | sed 's#.*refs/tags/##' | sort -V | tail -1)
+          if [ -z "$newest" ]; then echo "no suite release found" >&2; exit 1; fi
+          echo "OIDF conformance suite: pinned $SUITE_TAG, newest $newest" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$newest" != "$SUITE_TAG" ]; then
+            echo "::error::The OIDF conformance suite released $newest; the matrix runs $SUITE_TAG. Review the release, then move the pin in conformance/scripts/suite-version.env and suite-pinned.override.yml."
+            exit 1
+          fi
+
   conformance:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           check-latest: true
-          # No go.sum exists — this module has zero external
-          # dependencies (see go.mod) — see ci.yml's identical setting
-          # for why this is needed instead.
-          cache-dependency-path: go.mod
+          # Neither restores nor saves the Go cache: see the top of this
+          # file.
+          cache: false
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -65,8 +94,27 @@ jobs:
       # name — conformance-suite_default — matches
       # conformance/server/docker-compose.yml's own existing default for
       # SUITE_NETWORK, without needing to set it explicitly.
+      #
+      # Clones the pinned release (see the top of this file) and checks
+      # that the tag is still at the pinned commit and that the image
+      # override names the same release, so the three can't drift apart.
       - name: Clone OIDF conformance suite
-        run: git clone --depth 1 https://gitlab.com/openid/conformance-suite.git /tmp/conformance-suite
+        run: |
+          . conformance/scripts/suite-version.env
+          : "${SUITE_TAG:?not set in suite-version.env}" "${SUITE_COMMIT:?not set in suite-version.env}"
+          { echo "SUITE_TAG=$SUITE_TAG"; echo "SUITE_COMMIT=$SUITE_COMMIT"; } >> "$GITHUB_ENV"
+          git clone --depth 1 --branch "$SUITE_TAG" https://gitlab.com/openid/conformance-suite.git /tmp/conformance-suite
+          got=$(git -C /tmp/conformance-suite rev-parse HEAD)
+          if [ "$got" != "$SUITE_COMMIT" ]; then
+            echo "::error::suite tag $SUITE_TAG is at $got, not the pinned $SUITE_COMMIT"
+            exit 1
+          fi
+          for image in conformance-suite/nginx conformance-suite; do
+            if ! grep -q "registry.gitlab.com/openid/$image:$SUITE_TAG@sha256:" conformance/scripts/suite-pinned.override.yml; then
+              echo "::error::conformance/scripts/suite-pinned.override.yml doesn't pin $image to $SUITE_TAG by digest"
+              exit 1
+            fi
+          done
 
       # The suite's scripts need what its own scripts/requirements.txt
       # lists (httpx and pyparsing). That list is unpinned, so this
@@ -81,23 +129,27 @@ jobs:
 
       # Prebuilt images — no Java/Maven build needed, mirrors this
       # repo's own conformance/server/scripts/README.md "Manual test
-      # run" step 1. The override maps host.docker.internal for the
-      # suite's server container, which Linux Docker doesn't define on
-      # its own — see the override file's comment.
+      # run" step 1. suite-host-gateway.override.yml maps
+      # host.docker.internal for the suite's server container, which
+      # Linux Docker doesn't define on its own — see that file's comment;
+      # suite-pinned.override.yml runs the pinned release's images by
+      # digest instead of :latest.
       - name: Bring up OIDF conformance suite
         working-directory: /tmp/conformance-suite
-        run: docker compose -f docker-compose-prebuilt.yml -f "$GITHUB_WORKSPACE/conformance/scripts/suite-host-gateway.override.yml" up -d
+        run: >-
+          docker compose -f docker-compose-prebuilt.yml
+          -f "$GITHUB_WORKSPACE/conformance/scripts/suite-host-gateway.override.yml"
+          -f "$GITHUB_WORKSPACE/conformance/scripts/suite-pinned.override.yml"
+          up -d
 
-      # Records exactly which suite this run tested: the cloned commit
-      # and the digest of each prebuilt image, which are built from
-      # master separately and can lag the commit. Since every run tracks
-      # the suite's latest (see the top of this file), comparing this
-      # with the last green run's shows straight away whether a new
-      # failure came with a suite change. Written to the job summary and
-      # to the uploaded results; runs even if bringing the suite up
-      # failed, so an image that couldn't be pulled shows as such. Each
-      # docker call is time-limited, so a stalled daemon can't hold the
-      # job until its timeout.
+      # Records exactly which suite this run tested: the pinned release,
+      # its commit and the digest of each image the pinned override
+      # names, so a run's summary shows which suite a result came from
+      # without reading this file at that commit. Written to the job
+      # summary and to the uploaded results; runs even if bringing the
+      # suite up failed, so an image that couldn't be pulled shows as
+      # such. Each docker call is time-limited, so a stalled daemon
+      # can't hold the job until its timeout.
       - name: Record OIDF suite version
         if: always()
         working-directory: /tmp/conformance-suite
@@ -108,8 +160,9 @@ jobs:
           {
             echo "### OIDF conformance suite under test"
             echo
+            echo "- Release: \`$SUITE_TAG\`"
             echo "- Commit: \`$(git rev-parse HEAD)\` ($(git log -1 --format='%cI %s'))"
-            images=$(timeout 30 docker compose -f docker-compose-prebuilt.yml config --images || true)
+            images=$(timeout 30 docker compose -f docker-compose-prebuilt.yml -f "$GITHUB_WORKSPACE/conformance/scripts/suite-pinned.override.yml" config --images || true)
             [ -n "$images" ] || echo "- Images: couldn't be listed"
             for image in $images; do
               digest=$(timeout 30 docker image inspect --format '{{index .RepoDigests 0}}' "$image" 2>/dev/null || echo "not pulled")
@@ -156,5 +209,5 @@ jobs:
       - name: Tear down suite containers
         if: always()
         run: |
-          (cd /tmp/conformance-suite && docker compose -f docker-compose-prebuilt.yml down -v) || true
+          (cd /tmp/conformance-suite && docker compose -f docker-compose-prebuilt.yml -f "$GITHUB_WORKSPACE/conformance/scripts/suite-host-gateway.override.yml" -f "$GITHUB_WORKSPACE/conformance/scripts/suite-pinned.override.yml" down -v) || true
           (cd conformance/server && docker compose down) || true

@@ -12,14 +12,15 @@ import (
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 // The tests in this file cover token-endpoint grants whose DPoP proof
 // is checked against the URL the request's EndpointRoute names,
 // alongside the code exchange and refresh cases in
-// client_auth_mtls_test.go: the client_credentials grant. Each runs a
-// client authenticated by its certificate (so it calls the token
-// endpoint's mTLS alias) with DPoP-bound tokens.
+// client_auth_mtls_test.go: the client_credentials grant and the CIBA
+// token request. Each runs a client authenticated by its certificate
+// (so it calls the token endpoint's mTLS alias) with DPoP-bound tokens.
 
 const (
 	aliasRouteMTLSToken    = "https://mtls.as.example/token"
@@ -146,6 +147,69 @@ func TestRequestClientCredentialsTokenDPoPProofAtMTLSAlias(t *testing.T) {
 					formParam("client_id", testClientID.String()),
 					formParam("grant_type", "client_credentials"),
 					formParam("scope", "accounts"),
+				}},
+				DPoPProofs:      []string{dpopProofForURL(t, dpopKey, tc.proofURL, h.now)},
+				PeerCertificate: cert,
+			})
+			requireAliasRouteOutcome(t, h, tc, result, err, dpopKey)
+		})
+	}
+}
+
+// newHarnessWithBackchannelAtMTLSAlias is newHarnessWithBackchannel
+// with testClientID authenticated by certificate and the token
+// endpoint's mTLS alias configured.
+func newHarnessWithBackchannelAtMTLSAlias(t *testing.T) (harness, *x509.Certificate) {
+	t.Helper()
+	cert := selfSignedTestClientCert(t)
+	client := certAuthClient(t, cert, func(c *storage.RegisteredClientConfig) {
+		c.BackchannelAuthenticationRequestAlgorithm = fapi.ES256
+	})
+	h := newHarnessWithBackchannelOptions(t, memstore.NewBackchannelAuthenticationStore(),
+		func(c *server.Config) { c.MTLSEndpoints = aliasRouteMTLSEndpoints(t) },
+		func(d *server.Dependencies) {
+			d.Clients.(*fakeClientRepository).clients[testClientID] = client
+		})
+	return h, cert
+}
+
+// approvedCertAuthBackchannel begins a CIBA request for the
+// certificate-authenticated client and approves it, returning its
+// auth_req_id.
+func approvedCertAuthBackchannel(t *testing.T, h harness, cert *x509.Certificate) string {
+	t.Helper()
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_id", testClientID.String()),
+			formParam("request", h.backchannelRequestObject(t, standardBackchannelParams(t))),
+		}},
+		PeerCertificate: cert,
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	required, ok := action.(server.BackchannelInteractionRequired)
+	if !ok {
+		t.Fatalf("action = %#v, want server.BackchannelInteractionRequired", action)
+	}
+	approveBackchannel(t, h, required.Handle)
+	return required.AuthReqID.String()
+}
+
+// TestExchangeBackchannelAuthenticationDPoPProofAtMTLSAlias: a CIBA
+// token request is checked against the URL its route names, as a code
+// exchange is.
+func TestExchangeBackchannelAuthenticationDPoPProofAtMTLSAlias(t *testing.T) {
+	for name, tc := range aliasRouteCases {
+		t.Run(name, func(t *testing.T) {
+			h, cert := newHarnessWithBackchannelAtMTLSAlias(t)
+			authReqID := approvedCertAuthBackchannel(t, h, cert)
+			dpopKey := generateKey(t)
+			result, err := h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
+				HTTP: server.FormRequest{EndpointRoute: tc.route, Parameters: []server.FormParameter{
+					formParam("client_id", testClientID.String()),
+					formParam("grant_type", server.CIBAGrantType),
+					formParam("auth_req_id", authReqID),
 				}},
 				DPoPProofs:      []string{dpopProofForURL(t, dpopKey, tc.proofURL, h.now)},
 				PeerCertificate: cert,

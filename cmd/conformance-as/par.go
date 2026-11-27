@@ -13,7 +13,6 @@ func parHandler(srv *server.Server) http.HandlerFunc {
 			writeOAuthJSONError(w, err)
 			return
 		}
-		req.HTTP.EndpointRoute = receivingListener(r).route
 		result, err := srv.PushAuthorizationRequest(r.Context(), req)
 		if err != nil {
 			writeOAuthJSONError(w, err)

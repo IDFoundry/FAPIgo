@@ -140,7 +140,8 @@ type FormRequest struct {
 	// endpoint's Config.Endpoints URL for PrimaryEndpoint or the zero
 	// route, its Config.MTLSEndpoints alias for MTLSEndpointAlias (see
 	// EndpointRoute). Set it from the listener or trusted proxy route,
-	// never from the proof or a header. Left unset at an mTLS alias, a proof
+	// never from the proof or a header; FormRequestFromHTTP takes it
+	// from WithEndpointRoute. Left unset at an mTLS alias, a proof
 	// naming the alias is refused as invalid_dpop_proof.
 	EndpointRoute EndpointRoute
 }

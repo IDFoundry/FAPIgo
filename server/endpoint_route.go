@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -20,7 +21,8 @@ import (
 // Set it from the listener or trusted proxy route that received the
 // request, never from anything the client sends (the Host header, the
 // proof itself): FormRequest.EndpointRoute, or
-// TokenEndpointRequest.SetEndpointRoute. The zero route (unset) is
+// TokenEndpointRequest.SetEndpointRoute, or for every request a
+// listener receives, WithEndpointRoute. The zero route (unset) is
 // PrimaryEndpoint, so a server without mTLS aliases needs none of this.
 type EndpointRoute uint8
 
@@ -47,9 +49,46 @@ func (r EndpointRoute) String() string {
 	}
 }
 
+// endpointRouteKey is the context key WithEndpointRoute marks a
+// request's route under.
+type endpointRouteKey struct{}
+
+// WithEndpointRoute returns a handler that serves each request with
+// next, marked as received at route. FormRequestFromHTTP, and so each
+// of this package's *FromHTTP request constructors, takes
+// FormRequest.EndpointRoute from the mark, so wrapping the handler of
+// the listener serving Config.MTLSEndpoints is all a deployment with
+// mTLS aliases needs:
+//
+//	mtlsListener := &http.Server{
+//		Handler:   server.WithEndpointRoute(server.MTLSEndpointAlias, mux),
+//		TLSConfig: ..., // asks for a client certificate
+//	}
+//
+// The listener serving Config.Endpoints needs no mark, since an unset
+// route is PrimaryEndpoint, though WithEndpointRoute(PrimaryEndpoint,
+// mux) says so explicitly. A route set on a request after it is read
+// (FormRequest.EndpointRoute, TokenEndpointRequest.SetEndpointRoute)
+// takes precedence, and the innermost WithEndpointRoute wins. Mark only
+// what the listener or a trusted front end knows: one listener serving
+// both routes, told apart by the Host header the client sends, can't
+// use this.
+func WithEndpointRoute(route EndpointRoute, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), endpointRouteKey{}, route)))
+	})
+}
+
+// endpointRouteOf is the route WithEndpointRoute marked r with, or the
+// zero route.
+func endpointRouteOf(r *http.Request) EndpointRoute {
+	route, _ := r.Context().Value(endpointRouteKey{}).(EndpointRoute)
+	return route
+}
+
 // endpointRouteSetters names everything that sets a request's
 // EndpointRoute, for the errors a route this server can't serve gets.
-const endpointRouteSetters = "FormRequest.EndpointRoute or TokenEndpointRequest.SetEndpointRoute"
+const endpointRouteSetters = "server.WithEndpointRoute on the listener, FormRequest.EndpointRoute or TokenEndpointRequest.SetEndpointRoute"
 
 // verifyEndpointDPoP verifies req's proof for the one URL of an
 // endpoint that received it — primary, or alias, its mTLS alias, by

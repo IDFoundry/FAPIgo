@@ -3,6 +3,8 @@ package server_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +17,7 @@ import (
 const testTokenAlias = "https://mtls.as.example/token"
 
 // routeSetterNames are the setters a route error's cause must name.
-var routeSetterNames = []string{"FormRequest.EndpointRoute", "TokenEndpointRequest.SetEndpointRoute"}
+var routeSetterNames = []string{"server.WithEndpointRoute", "FormRequest.EndpointRoute", "TokenEndpointRequest.SetEndpointRoute"}
 
 // newRouteHarness is a harness whose Config.MTLSEndpoints is set by
 // aliases (nil for none).
@@ -175,6 +177,73 @@ func TestEndpointRouteString(t *testing.T) {
 	} {
 		if got := route.String(); got != want {
 			t.Errorf("EndpointRoute(%d).String() = %q, want %q", uint8(route), got, want)
+		}
+	}
+}
+
+// formPost is a form-encoded POST of body, as a client sends it.
+func formPost(body string, header http.Header) *http.Request {
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for name, values := range header {
+		r.Header[name] = values
+	}
+	return r
+}
+
+// routedRead serves r through WithEndpointRoute(route, ...) and returns
+// what read made of it.
+func routedRead[T any](t *testing.T, route server.EndpointRoute, r *http.Request, read func(*http.Request) (T, error)) T {
+	t.Helper()
+	var got T
+	server.WithEndpointRoute(route, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		var err error
+		if got, err = read(r); err != nil {
+			t.Fatalf("read: %v", err)
+		}
+	})).ServeHTTP(httptest.NewRecorder(), r)
+	return got
+}
+
+// TestWithEndpointRouteMarksFromHTTPRequests: every *FromHTTP request
+// read under WithEndpointRoute carries its route; one read without it
+// carries none; and a route set afterwards replaces the mark.
+func TestWithEndpointRouteMarksFromHTTPRequests(t *testing.T) {
+	const alias = server.MTLSEndpointAlias
+	if got := routedRead(t, alias, formPost("a=b", nil), server.FormRequestFromHTTP); got.EndpointRoute != alias {
+		t.Errorf("FormRequestFromHTTP route = %v, want %v", got.EndpointRoute, alias)
+	}
+	if got := routedRead(t, alias, formPost("client_id=c", nil), server.PushAuthorizationRequestFromHTTP); got.HTTP.EndpointRoute != alias {
+		t.Errorf("PushAuthorizationRequestFromHTTP route = %v, want %v", got.HTTP.EndpointRoute, alias)
+	}
+	if got := routedRead(t, alias, formPost("client_id=c", nil), server.BeginBackchannelAuthenticationRequestFromHTTP); got.HTTP.EndpointRoute != alias {
+		t.Errorf("BeginBackchannelAuthenticationRequestFromHTTP route = %v, want %v", got.HTTP.EndpointRoute, alias)
+	}
+	token := routedRead(t, alias, formPost("grant_type=refresh_token", nil), server.TokenEndpointRequestFromHTTP)
+	if got := token.RefreshToken().HTTP.EndpointRoute; got != alias {
+		t.Errorf("TokenEndpointRequestFromHTTP route = %v, want %v", got, alias)
+	}
+	token.SetEndpointRoute(server.PrimaryEndpoint)
+	if got := token.AuthorizationCodeExchange().HTTP.EndpointRoute; got != server.PrimaryEndpoint {
+		t.Errorf("route after SetEndpointRoute = %v, want %v", got, server.PrimaryEndpoint)
+	}
+	unmarked, err := server.FormRequestFromHTTP(formPost("a=b", nil))
+	if err != nil || unmarked.EndpointRoute != 0 {
+		t.Errorf("FormRequestFromHTTP without WithEndpointRoute = %v, %v, want the zero route", unmarked.EndpointRoute, err)
+	}
+}
+
+// TestWithEndpointRouteVerifiesAliasProofs: a token request read at a
+// listener marked MTLSEndpointAlias verifies a proof for the alias,
+// which the same request read unmarked doesn't.
+func TestWithEndpointRouteVerifiesAliasProofs(t *testing.T) {
+	h := newRouteHarness(t, withTokenAlias(testTokenAlias))
+	for route, ok := range map[server.EndpointRoute]bool{server.MTLSEndpointAlias: true, 0: false} {
+		r := formPost(preAuthorizedForm().Encode(), dpopHeader(dpopProofAt(t, generateKey(t), testTokenAlias, "", h.now)))
+		req := routedRead(t, route, r, server.TokenEndpointRequestFromHTTP)
+		_, err := h.server.VerifyTokenRequestDPoP(context.Background(), req)
+		if ok != (err == nil) {
+			t.Errorf("alias proof at route %v: err = %v, want ok=%v", route, err, ok)
 		}
 	}
 }

@@ -72,17 +72,18 @@ func newRouter(srv *server.Server, consent *consentHandler, backchannel *backcha
 type listenerKey struct{}
 
 type publicListener struct {
-	route server.EndpointRoute
-	base  string
+	base string
 }
 
-// listenerHandler supplies the advertised URL base of the listener that actually
-// accepted the connection. Both listeners use the same ServeMux.
+// listenerHandler marks each request with the listener that actually
+// accepted the connection: its endpoint route, for the server's *FromHTTP
+// request constructors (server.WithEndpointRoute), and its advertised URL
+// base, for resourceRequest. Both listeners use the same ServeMux.
 func listenerHandler(next http.Handler, route server.EndpointRoute, base string) http.Handler {
-	listener := publicListener{route: route, base: base}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	listener := publicListener{base: base}
+	return server.WithEndpointRoute(route, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), listenerKey{}, listener)))
-	})
+	}))
 }
 
 func receivingListener(r *http.Request) publicListener {
